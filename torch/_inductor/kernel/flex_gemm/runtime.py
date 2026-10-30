@@ -426,10 +426,10 @@ def gemm_epilogue(
     ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
     ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
     2-D row/col vectors are passed rank-1; QuACK shares a row across groups
-    and offsets a ``[total_m]`` column per group. bmm's per-batch ``[B, 1, N]``
-    rows and ``[B, M, 1]`` columns are passed as ``(B, N)`` / ``(B, M)``.
-    ``cu_seqlens_k`` instead segments
+    and offsets a ``[total_m]`` column per group. ``cu_seqlens_k`` instead segments
     the reduction of ``a[M, total_k] @ b[total_k, N]`` into ``out[E, M, N]``.
+    bmm's per-batch ``[B, 1, N]`` rows and ``[B, M, 1]`` columns are passed as
+    ``[B, N]`` / ``[B, M]``.
     """
     if cu_seqlens_k is not None and out.numel() == 0:
         return out
