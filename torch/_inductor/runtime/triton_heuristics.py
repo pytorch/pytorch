@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import builtins
 import contextlib
 import contextvars
@@ -242,8 +243,68 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     )
 
 
-def _resolve_dims(dims, cfg_kwargs, constants):
-    """Resolve a list of block/shape/stride dims to concrete ints."""
+# A template's host-side TMA descriptor (tma_descriptor() with HOST_SIDE_TMA)
+# may have shapes and strides that are dynamic sizes, i.e. integer expressions
+# over the kernel's integer args (ks0); the launcher evaluates them at launch.
+HOST_TMA_SYMBOLIC_DIMS = True
+
+_HOST_TMA_INT_ARG_TYPES = ("i32", "i64", "u32", "u64")
+_HOST_TMA_DIM_OPS = (ast.Add, ast.Sub, ast.Mult, ast.FloorDiv)
+
+
+def _host_tma_int_args(signature: dict[str, Any], constants: dict[str, Any]) -> set[str]:
+    """The kernel's integer args that are passed at launch."""
+    return {
+        name
+        for name, ty in signature.items()
+        if ty in _HOST_TMA_INT_ARG_TYPES and name not in constants
+    }
+
+
+def _launch_dim(expr: str, int_args: Container[str]) -> str | None:
+    """Launcher source for `expr` if it is integer arithmetic over `int_args`
+    (integer literals, those names, + - * //, unary -), else None."""
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return None
+
+    def is_int_expr(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id in int_args
+        if isinstance(node, ast.Constant):
+            return type(node.value) is int
+        if isinstance(node, ast.BinOp):
+            return (
+                isinstance(node.op, _HOST_TMA_DIM_OPS)
+                and is_int_expr(node.left)
+                and is_int_expr(node.right)
+            )
+        if isinstance(node, ast.UnaryOp):
+            return isinstance(node.op, ast.USub) and is_int_expr(node.operand)
+        return False
+
+    return ast.unparse(tree.body) if is_int_expr(tree.body) else None
+
+
+def _launch_dim_names(dims: list[int | str]) -> set[str]:
+    """Kernel args read by the launch-time dims among `dims`."""
+    return {
+        node.id
+        for d in dims
+        if isinstance(d, str)
+        for node in ast.walk(ast.parse(d, mode="eval"))
+        if isinstance(node, ast.Name)
+    }
+
+
+def _resolve_dims(dims, cfg_kwargs, constants, int_args=None):
+    """Resolve a list of block/shape/stride dims for a host-side TMA descriptor.
+
+    Dims resolve to ints where possible. With `int_args` (the kernel's integer
+    args passed at launch), a dim that is integer arithmetic over them, e.g. a
+    dynamic size `ks0`, resolves to launcher source (a str) instead.
+    """
     result = []
     for s in dims:
         if isinstance(s, int):
@@ -256,10 +317,21 @@ def _resolve_dims(dims, cfg_kwargs, constants):
             # Template descriptors render dims via texpr(), so a literal comes
             # through as a decimal string rather than an int.
             result.append(int(s))
+        elif (
+            isinstance(s, str)
+            and int_args is not None
+            and (code := _launch_dim(s, int_args)) is not None
+        ):
+            result.append(code)
         else:
             log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
             return None
     return result
+
+
+def _launcher_dims(dims) -> str:
+    """Launcher source for a resolved dim list; launch-time dims stay code."""
+    return "[" + ", ".join(str(d) for d in dims) + "]"
 
 
 @functools.lru_cache(None)
@@ -1435,18 +1507,23 @@ class CachingAutotuner(KernelInterface):
         host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
         if host_tma_args:
             all_constants = compile_meta["constants"]
+            # The launchers build exactly these descriptors, with these dims, so
+            # whether an arg is compiled as tensordesc<> is decided once, here.
+            resolved_descs: dict[str, dict[str, list[int | str]]] = {}
+            int_args = _host_tma_int_args(compile_meta["signature"], all_constants)
             for key in list(compile_meta["signature"]):
                 desc_info = host_tma_args.get(key)
                 if desc_info is None or not isinstance(desc_info, dict):
                     continue
+                desc_int_args = int_args if desc_info.get("launch_dims") else None
                 block_shape_vals = _resolve_dims(
                     desc_info["block_shape"], cfg_kwargs, all_constants
                 )
                 shape_vals = _resolve_dims(
-                    desc_info["shape"], cfg_kwargs, all_constants
+                    desc_info["shape"], cfg_kwargs, all_constants, desc_int_args
                 )
                 stride_vals = _resolve_dims(
-                    desc_info["strides"], cfg_kwargs, all_constants
+                    desc_info["strides"], cfg_kwargs, all_constants, desc_int_args
                 )
                 if (
                     block_shape_vals is None
@@ -1465,6 +1542,12 @@ class CachingAutotuner(KernelInterface):
                 compile_meta["signature"][key] = (
                     f"tensordesc<{dtype_str}{list(block_shape_vals)}>"
                 )
+                resolved_descs[key] = {
+                    "block_shape": block_shape_vals,
+                    "shape": shape_vals,
+                    "strides": stride_vals,
+                }
+            compile_meta["host_tma_descriptors"] = resolved_descs
 
         compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
 
@@ -2967,6 +3050,46 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
+    def _host_tma_descriptors(
+        self, call_args: list[str]
+    ) -> dict[str, dict[str, list[int | str]]]:
+        """The host-side TMA descriptors to build at launch, keyed by arg.
+
+        _create_compile_meta decided which args were compiled as tensordesc<> and
+        resolved their dims; the launchers reuse that decision. Compile results
+        cached before that was recorded resolve integer dims here, as before.
+        """
+        resolved = self.compile_meta.get("host_tma_descriptors")
+        if resolved is None:
+            resolved = {}
+            cfg_kwargs = self.config.kwargs
+            all_constants = self.compile_meta["constants"]
+            for name, desc_info in self.inductor_meta[
+                "host_tma_descriptor_args"
+            ].items():
+                if not isinstance(desc_info, dict):
+                    continue
+                dims = {
+                    k: _resolve_dims(desc_info[k], cfg_kwargs, all_constants)
+                    for k in ("block_shape", "shape", "strides")
+                }
+                if all(v is not None for v in dims.values()):
+                    resolved[name] = dims
+        descriptors = {}
+        for name, dims in resolved.items():
+            if name not in call_args:
+                continue
+            missing = _launch_dim_names(dims["shape"] + dims["strides"]) - set(
+                call_args
+            )
+            if missing:
+                raise RuntimeError(
+                    f"host-side TMA descriptor for {name} was compiled with dims "
+                    f"{dims} but the launcher does not receive {sorted(missing)}"
+                )
+            descriptors[name] = dims
+        return descriptors
+
     def _host_tma_pre_runner_lines(
         self, runner_args: list[str], call_args: list[str]
     ) -> tuple[list[str], list[str]]:
@@ -2981,18 +3104,10 @@ class CompileResult(Generic[_T]):
                 "host-side TMA requires a Triton with the stable TMA API "
                 "(triton.tools.tensor_descriptor.TensorDescriptor)"
             )
-        cfg_kwargs = self.config.kwargs
-        all_constants = self.compile_meta["constants"]
-        for inner_name, desc_info in host_tma_args.items():
-            if inner_name not in call_args or not isinstance(desc_info, dict):
-                continue
-            block_shape_vals = _resolve_dims(
-                desc_info["block_shape"], cfg_kwargs, all_constants
-            )
-            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
-            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
-            if block_shape_vals is None or shape_vals is None or stride_vals is None:
-                continue
+        for inner_name, dims in self._host_tma_descriptors(call_args).items():
+            block_shape_vals = dims["block_shape"]
+            shape_vals = dims["shape"]
+            stride_vals = dims["strides"]
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
             # _host_tma_aligned clones (warning once) only if misaligned.
@@ -3000,8 +3115,8 @@ class CompileResult(Generic[_T]):
                 f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
             )
             pre_runner_lines.append(
-                f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
-                f" {stride_vals}, {block_shape_vals})"
+                f"{desc_var} = TensorDescriptor({aligned_var}, {_launcher_dims(shape_vals)},"
+                f" {_launcher_dims(stride_vals)}, {block_shape_vals})"
             )
             runner_args = [desc_var if a == inner_name else a for a in runner_args]
         return pre_runner_lines, runner_args
@@ -3013,7 +3128,7 @@ class CompileResult(Generic[_T]):
         rebuilding a TensorDescriptor every call, emit a cached expander
         (expand_host_tma_descriptor) that returns the flat kernel params
         (CUtensorMap + shape + strides) and reuses the encoded CUtensorMap when
-        the input address is unchanged -- skipping the descriptor build and
+        the input address, shape and strides recur -- skipping the descriptor build and
         cuTensorMapEncodeTiled on the hot path. The expanded params are spliced
         into the runner call. Returns (pre_runner_lines, runner_args, scope).
         """
@@ -3030,8 +3145,6 @@ class CompileResult(Generic[_T]):
                 "host-side TMA requires a Triton with the stable TMA API "
                 "(triton.tools.tensor_descriptor.TensorDescriptor)"
             )
-        cfg_kwargs = self.config.kwargs
-        all_constants = self.compile_meta["constants"]
         meta = getattr(self.kernel, "tensordesc_meta", None)
         # triton keys tensordesc_meta by position among the compiled kernel's
         # tensordesc<> args, so index by name rather than by encounter order.
@@ -3039,19 +3152,13 @@ class CompileResult(Generic[_T]):
         # fall back to encounter order.
         desc_names = getattr(self.kernel, "tensordesc_arg_names", None)
         pos = 0
-        for inner_name, desc_info in host_tma_args.items():
-            if inner_name not in call_args or not isinstance(desc_info, dict):
-                continue
+        for inner_name, dims in self._host_tma_descriptors(call_args).items():
             if desc_names and inner_name not in desc_names:
                 # not lowered to a tensordesc<> param: pass the tensor through
                 continue
-            block_shape_vals = _resolve_dims(
-                desc_info["block_shape"], cfg_kwargs, all_constants
-            )
-            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
-            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
-            if block_shape_vals is None or shape_vals is None or stride_vals is None:
-                continue
+            block_shape_vals = dims["block_shape"]
+            shape_vals = dims["shape"]
+            stride_vals = dims["strides"]
             idx = desc_names.index(inner_name) if desc_names else pos
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
@@ -3060,8 +3167,9 @@ class CompileResult(Generic[_T]):
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
-                f"{aligned_var}, {aligned_var} is {inner_name}, {shape_vals}, "
-                f"{stride_vals}, {block_shape_vals}, _tma_meta[{idx}])"
+                f"{aligned_var}, {aligned_var} is {inner_name}, "
+                f"{_launcher_dims(shape_vals)}, {_launcher_dims(stride_vals)}, "
+                f"{block_shape_vals}, _tma_meta[{idx}])"
             )
             runner_args = [
                 f"*{desc_var}" if a == inner_name else a for a in runner_args

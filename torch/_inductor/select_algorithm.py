@@ -1287,6 +1287,9 @@ class TritonTemplateKernel(TritonKernel):
                 "strides": [
                     texpr(self.rename_indexing(node_stride[d])) for d in dim_order
                 ],
+                # The Python launchers can read a dynamic size (ks0) at launch;
+                # the C++ wrapper builds descriptors from integer dims only.
+                "launch_dims": not V.graph.cpp_wrapper,
             }
             prev = self.host_tma_descriptor_args.get(arg_name)
             if prev is not None and prev != desc:

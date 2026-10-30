@@ -2587,6 +2587,7 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
                 tensordesc_arg_names=["in_ptr0", "out_ptr0"],
             ),
         )
+        stub._host_tma_descriptors = lambda call_args: CompileResult._host_tma_descriptors(stub, call_args)
         call_args = ["in_ptr0", "out_ptr0"]
         lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(
             stub, list(call_args), call_args
@@ -2599,6 +2600,151 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
             if "expand_host_tma_descriptor(" in ln
         }
         self.assertEqual(meta_idx, {"in_ptr0": 0, "out_ptr0": 1})
+
+    def test_host_tma_resolve_launch_dims(self):
+        # Integer arithmetic over the kernel's integer args (a dynamic size such
+        # as ks0) resolves to launcher source; anything else does not resolve.
+        from torch._inductor.runtime.triton_heuristics import _resolve_dims
+
+        int_args = {"ks0", "ks1"}
+        self.assertEqual(_resolve_dims(["ks0", "64"], {}, {}, int_args), ["ks0", 64])
+        self.assertEqual(_resolve_dims(["2*ks0 + ks1"], {}, {}, int_args), ["2 * ks0 + ks1"])
+        self.assertEqual(_resolve_dims(["(ks0 // 2)", "-ks1"], {}, {}, int_args), ["ks0 // 2", "-ks1"])
+        self.assertEqual(_resolve_dims(["ks0"], {}, {"ks0": 8}, int_args), [8])
+        self.assertIsNone(_resolve_dims(["ks0"], {}, {}))
+        for bad in (
+            "ks2",  # not a kernel int arg
+            "in_ptr0",  # a tensor arg
+            "ks0 / 2",  # true division gives a float
+            "2ks0",  # not an expression
+            "ks0(ks1)",
+            "ks0.bit_length()",
+            "ks0 ** 2",
+            "ks0\nks1",
+            "__import__('os')",
+        ):
+            self.assertIsNone(_resolve_dims([bad], {}, {}, int_args), bad)
+
+    def test_host_tma_launchers_reuse_compile_decision(self):
+        # Both launchers build the descriptors _create_compile_meta resolved,
+        # with launch-time dims as code, and fail loudly rather than pass a raw
+        # tensor to a kernel compiled for a descriptor.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        dims = {"block_shape": [64, 64], "shape": ["ks0", 256], "strides": [256, 1]}
+        stub = SimpleNamespace(
+            inductor_meta={"host_tma_descriptor_args": {"in_ptr0": {}}},
+            config=SimpleNamespace(kwargs={}),
+            compile_meta={"constants": {}, "host_tma_descriptors": {"in_ptr0": dims}},
+            kernel=SimpleNamespace(tensordesc_meta=[{"elem_size": 2}], tensordesc_arg_names=["in_ptr0"]),
+        )
+        stub._host_tma_descriptors = lambda call_args: CompileResult._host_tma_descriptors(stub, call_args)
+        call_args = ["in_ptr0", "ks0"]
+        static_lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(stub, list(call_args), call_args)
+        (expand, ) = [ln for ln in static_lines if "expand_host_tma_descriptor(" in ln]
+        self.assertIn("[ks0, 256], [256, 1]", expand)
+        lines, _ = CompileResult._host_tma_pre_runner_lines(stub, list(call_args), call_args)
+        (build, ) = [ln for ln in lines if "TensorDescriptor(" in ln]
+        self.assertIn("[ks0, 256], [256, 1]", build)
+        with self.assertRaisesRegex(RuntimeError, "does not receive \\['ks0'\\]"):
+            CompileResult._host_tma_static_pre_runner_lines(stub, ["in_ptr0"], ["in_ptr0"])
+
+    def test_host_tma_descriptor_cache_keys_on_shape(self):
+        # A dynamic dim can change at the same address: a new shape re-encodes,
+        # a recent one is reused, and each position keeps a few entries.
+        from torch._inductor.runtime import static_triton_launcher
+
+        encoded = []
+
+        def make_tensordesc_arg(desc, meta):
+            encoded.append(desc)
+            return [desc]
+
+        tensor = torch.empty(1024, 256, device=self.device, dtype=torch.float16)
+        with mock.patch.object(
+            static_triton_launcher, "_tma_arg_helpers", lambda: (make_tensordesc_arg, lambda *a: a)
+        ):
+            expand = static_triton_launcher.make_host_tma_expander()
+            cache = {}
+
+            def run(m):
+                return expand(cache, 0, tensor, True, [m, 256], [256, 1], [64, 64], None)
+
+            first = run(706)
+            second = run(300)
+            self.assertEqual(second[0][1], [300, 256])
+            # Alternating between the two reuses both encodings.
+            self.assertIs(run(706), first)
+            self.assertIs(run(300), second)
+            self.assertEqual(len(encoded), 2)
+            # Past the per-position limit the least recently used one is evicted.
+            for m in range(1, static_triton_launcher._HOST_TMA_CACHE_ENTRIES):
+                run(m)
+            run(300)
+            self.assertEqual(len(encoded), 2 + static_triton_launcher._HOST_TMA_CACHE_ENTRIES - 1)
+            run(706)
+        self.assertEqual(len(encoded), 2 + static_triton_launcher._HOST_TMA_CACHE_ENTRIES)
+
+    @parametrize("static_launcher", (True, False))
+    def test_host_tma_template_dynamic_dim(self, static_launcher):
+        # A template's host-side TMA descriptor over an input with a dynamic dim
+        # is built by the launcher from the size it reads at launch: one compiled
+        # kernel serves two sizes, and the descriptor is not built in-kernel.
+        import torch._inductor.lowering as inductor_lowering
+        from torch._inductor.ir import FixedLayout
+        from torch._inductor.kernel.mm_common import mm_grid
+        from torch._inductor.select_algorithm import autotune_select_algorithm, TritonTemplate
+
+        template = TritonTemplate(
+            name="host_tma_dynamic_dim_neg",
+            grid=mm_grid,
+            source=r"""
+{{def_kernel("A")}}
+    M = {{size("A", 0)}}
+    N = {{size("A", 1)}}
+    {{tma_descriptor("desc_a", "A", [BLOCK_M, BLOCK_N])}}
+    pid = tl.program_id(0)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    offs_m = ((pid // num_pid_n) * BLOCK_M).to(tl.int32)
+    offs_n = ((pid % num_pid_n) * BLOCK_N).to(tl.int32)
+    a = desc_a.load([offs_m, offs_n])
+    idx_m = offs_m + tl.arange(0, BLOCK_M)[:, None]
+    idx_n = offs_n + tl.arange(0, BLOCK_N)[None, :]
+    mask = (idx_m < M) & (idx_n < N)
+    {{store_output(("idx_m", "idx_n"), "-a", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
+""",
+        )
+
+        def neg_override(a):
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            choices = []
+            template.maybe_append_choice(
+                choices, input_nodes=(a, ), layout=layout, num_stages=1, num_warps=4, BLOCK_M=64, BLOCK_N=64,
+                HOST_SIDE_TMA=True)
+            node, _ = autotune_select_algorithm("host_tma_dynamic_dim_neg", choices, [a], layout)
+            return node
+
+        with mock.patch.dict(inductor_lowering.lowerings), config.patch({
+                "max_autotune": True, "use_static_triton_launcher": static_launcher
+        }):
+            inductor_lowering._register_lowering(
+                torch.ops.aten.neg.default, neg_override, broadcast=False,
+                type_promotion_kind=inductor_lowering.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                convert_input_to_bool=False, lowering_dict=inductor_lowering.lowerings)
+            torch._dynamo.reset()
+            fn = torch.compile(torch.neg)
+            a = torch.randn(256, 128, device=self.device, dtype=torch.float16)
+            torch._dynamo.mark_dynamic(a, 0)
+            captured, result = self._host_tma_launcher_lines(fn, a)
+            torch.testing.assert_close(result, -a)
+            b = torch.randn(200, 128, device=self.device, dtype=torch.float16)
+            torch._dynamo.mark_dynamic(b, 0)
+            torch.testing.assert_close(fn(b), -b)
+        builds = [ln for lines, _ in captured for ln in lines if "TensorDescriptor(" in ln or "expand_host" in ln]
+        self.assertTrue(builds)
+        self.assertTrue(all("[ks0, 128], [128, 1], [64, 64]" in ln for ln in builds), builds)
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)
@@ -2635,8 +2781,9 @@ if GPU_TYPE == "cuda":
             unittest.expectedFailure(getattr(TritonHostSideTMATestCUDA, _name)),
         )
 
-    # Dynamic shapes are not yet supported for host-side TMA (the launcher cannot
-    # resolve symbolic block/shape dims). Tracked as a follow-up.
+    # Dynamic shapes are not yet supported for host-side TMA in pointwise and
+    # reduction kernels: only template descriptors (tma_descriptor()) take dims
+    # read at launch, and symbolic block dims never resolve. Tracked as a follow-up.
     TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda = unittest.expectedFailure(
         TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda
     )
