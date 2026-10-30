@@ -16,6 +16,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <utility>
@@ -158,23 +159,30 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         }
     }
 
+    struct ReleaseWait {
+        bool fenced = false;
+        cudaEvent_t host_wait = nullptr;
+    };
+
     // Orders `stream` after the work the handle's last stream had queued when
-    // its thread exited. A capturing stream cannot wait on work outside its
-    // capture, and its kernels run whenever the graph is replayed, so for one
-    // this returns the event for the host to wait on instead; otherwise it
-    // returns nullptr.
-    cudaEvent_t waitForRelease(Handle_t handle, int device, void* stream)
+    // its thread exited, if the handle came back with a fence. A capturing
+    // stream cannot wait on work outside its capture, and its kernels run
+    // whenever the graph is replayed, so for one this returns the event for
+    // the host to wait on instead.
+    ReleaseWait waitForRelease(Handle_t handle, int device, void* stream)
     {
         const auto it = release_fences.find(handle);
         if(it == release_fences.end() || !it->second.pending)
-            return nullptr;
+            return {};
         c10::cuda::CUDAGuard device_guard(static_cast<c10::DeviceIndex>(device));
         const auto raw_stream = static_cast<cudaStream_t>(stream);
-        const auto host_wait = streamIsCapturing(raw_stream) ? it->second.event : nullptr;
-        if(host_wait == nullptr)
+        ReleaseWait wait{true, nullptr};
+        if(streamIsCapturing(raw_stream))
+            wait.host_wait = it->second.event;
+        else
             C10_CUDA_CHECK(cudaStreamWaitEvent(raw_stream, it->second.event, 0));
         it->second.pending = false;
-        return host_wait;
+        return wait;
     }
 #endif
 
@@ -239,10 +247,10 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         // the next taker waits again rather than skipping the ordering.
         // C10_CUDA_CHECK clears a non-sticky error before throwing, so the
         // retry can succeed.
-        const auto host_wait = parent->waitForRelease(handle, device, stream);
+        const auto wait = parent->waitForRelease(handle, device, stream);
         my_stream_handles[key] = handle;
         parent->available_handles[device].pop_back();
-        if(host_wait != nullptr)
+        if(wait.host_wait != nullptr)
         {
             // That work may itself wait on a thread that has yet to take a
             // handle, so the host waits for it without the lock.
@@ -250,7 +258,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
             try {
                 // Relaxed mode lets the host wait while the capture is active.
                 c10::cuda::CUDAStreamCaptureModeGuard mode_guard(cudaStreamCaptureModeRelaxed);
-                C10_CUDA_CHECK(cudaEventSynchronize(host_wait));
+                C10_CUDA_CHECK(cudaEventSynchronize(wait.host_wait));
             } catch (...) {
                 guard.lock();
                 my_stream_handles.erase(key);
@@ -259,6 +267,8 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
                 throw;
             }
         }
+        if(wait.fenced)
+            fenced_takes.insert(key);
         }
         else if(create)
         {
@@ -280,6 +290,14 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         auto it = my_stream_handles.find(std::make_pair(device, stream));
         return it == my_stream_handles.end() ? nullptr : it->second;
     }
+
+    // Whether this thread took its handle for (device, stream) from the pool
+    // with a release fence, which ordered the stream after the work of the
+    // thread that returned it.
+    bool tookFenced(int device, void* stream) const
+    {
+        return fenced_takes.count(std::make_pair(device, stream)) > 0;
+    }
 #endif
 
     private:
@@ -289,6 +307,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     // Stores per-(device, stream) handles for ROCm, where hipblaslt
     // requires a unique handle per stream.
     std::map<std::pair<int, void*>, Handle_t> my_stream_handles;
+    std::set<std::pair<int, void*>> fenced_takes;
 #endif
 
     std::weak_ptr<DeviceThreadHandlePool> weak_parent;

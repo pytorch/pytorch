@@ -623,6 +623,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
 
       at::cuda::blas::detail::CublasLtWorkspace ltworkspace;
 
+      at::cuda::checkCublasLtHandleStream(
+          op_handle, at::cuda::getCurrentCUDAStream());
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),
             &alpha,
