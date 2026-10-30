@@ -1094,13 +1094,16 @@ print("RECOVERED")
             stop = threading.Event()
 
             def heartbeat():
-                while not stop.wait(0.001):
+                while not stop.is_set():
                     beats.append(time.perf_counter())
+                    time.sleep(0.001)
 
             thread = threading.Thread(target=heartbeat)
             thread.start()
             try:
-                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                # Long enough for 12+ heartbeats even where time.sleep rounds
+                # up to the 15.6 ms Windows timer tick (Python < 3.11).
+                torch.cuda._sleep(int(200 * get_cycles_per_ms()))
                 start = time.perf_counter()
                 copy_fn()
                 end = time.perf_counter()
@@ -1113,9 +1116,9 @@ print("RECOVERED")
             lambda: dst.untyped_storage().copy_(src.untyped_storage(), False)
         )
         self.assertEqual(dst, src.cpu())
-        # With the GIL held, the issue repro saw ~1 heartbeat during the wait;
-        # with the GIL released, Tensor.copy_ saw ~18. Require several
-        # heartbeats so a regression to holding the GIL fails the test.
+        # With the GIL held, ~1 heartbeat lands during the wait; with the GIL
+        # released, Tensor.copy_ gets 40 or more. Require several heartbeats
+        # so a regression to holding the GIL fails the test.
         self.assertGreaterEqual(storage_beats, 5)
 
     def test_copy_non_blocking_type_conversion(self):
@@ -1200,6 +1203,8 @@ print("RECOVERED")
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                if ROCM_VERSION >= (10, 3):
+                    archs.extend(["gfx1170", "gfx1171"])
                 archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
@@ -2986,7 +2991,10 @@ raise RuntimeError("device assert did not fire")
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"value cannot be safely converted without overflow: output\.numel\(\)",
+        ):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
