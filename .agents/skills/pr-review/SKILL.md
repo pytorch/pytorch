@@ -113,15 +113,13 @@ only the diff and commit log need to be fetched via git.
 
 ## Review Philosophy
 
-A single line of code can have deep cross-cutting implications: a missing device guard causes silent data corruption on multi-GPU, a missing `Composite` dispatch key breaks every out-of-tree backend, a manual dtype check instead of `TensorIterator` silently skips type promotion. **Treat every line as potentially load-bearing.**
-
 1. **Only report problems** — The review output must contain only issues, concerns, and actionable suggestions. Do NOT mention things that are done correctly, do NOT praise good decisions, do NOT explain why something is fine. If a section has no problems, omit it entirely. The reader's time is precious — every sentence must point to something that needs fixing or further discussion.
 2. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
 3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
 4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test patterns, and pattern adherence.
-5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
+5. **Block only on concrete failures** — Recommend **Request Changes** for a finding that causes wrong results, a crash or hang, a security or backward-compatibility break, or adds a public interface that would be hard to change after merge. A plausible path to silent wrong results or a crash blocks even if you could not reproduce it (say it is low confidence) and even if the code was already wrong in that case before the PR. Write "non-blocking" in every other finding, such as test gaps, naming, docs, or setups the project does not support, and keep those out of the Recommendation's justification. **Needs Discussion** is for a direction question you cannot settle from the code, not for a defect.
 6. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
-7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
+7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file should be treated as wrong unless there's a clear reason why the divergence is necessary.
 8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
 9. **No repetition** — Each observation appears in exactly one section of the review output.
 
