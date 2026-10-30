@@ -3012,10 +3012,10 @@ class cuda(cutlass):
     # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
     # autotuning and records the solutions; with autotune_tunableop_ladder it also
-    # tunes a range of sizes of each GEMM's dynamic dim, otherwise only the
-    # traced shape. "reuse" instead borrows the nearest recorded shape, benchmarks
-    # it against the default kernel, and records the winner. Run as separate
-    # passes: "tune" builds the results file, "reuse" consumes it.
+    # tunes a range of sizes of each GEMM's dynamic dim. "reuse" instead borrows
+    # the nearest recorded shape, benchmarks it against the default kernel, and
+    # records the winner. Run as separate passes: "tune" builds the results file,
+    # "reuse" consumes it.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
@@ -3028,10 +3028,10 @@ class cuda(cutlass):
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_TIMEOUT", "900")
     )
 
-    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim,
-    # or only the traced shape. The ladder is what gives runtime a chance of an
-    # exact hit on a size the compile never saw, and is also nearly all of the
-    # tuning cost.
+    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim.
+    # The ladder is what gives runtime a chance of an exact hit on a size the
+    # compile never saw, and is also nearly all of the tuning cost. With it off,
+    # tuning is limited to the traced shape of each GEMM.
     autotune_tunableop_ladder: bool = (
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_LADDER", "1") == "1"
     )

@@ -669,10 +669,10 @@ _TUNABLEOP_GEMM_CHOICES = frozenset(
 # for an expression dim the smallest symbol values already yield substantial GEMMs.
 _TUNABLEOP_MIN_DYN_DIM = 8
 
-# Largest single operand the ladder will materialize, in bytes. The dim ceiling
-# bounds the dynamic dim, not the problem size: a bmm with dynamic batch at dim
-# 16384 and K = N = 4096 fp16 is 512 GiB per operand. Largest-first order would
-# submit those first, and each fault can cost a cold worker restart.
+# Cap on a bucket's total footprint -- every operand plus the output, which the
+# worker allocates at once. The dim ceiling bounds the dynamic dim, not the
+# problem size: a bmm with dynamic batch at dim 16384 and K = N = 4096 fp16 is
+# 512 GiB in one operand alone. Each fault can cost a cold worker restart.
 _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 
 # Ceiling on the SYMBOL, not the dim. A declared range reports what a symbol MAY
@@ -702,8 +702,9 @@ def maybe_range_pretune(winner) -> None:
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
-        # Traced shape only; the normal autotune path still tunes each aten
-        # candidate at the shape it was traced at.
+        # No ladder entries, but the traced shape is still covered: autotune
+        # routes this GEMM's aten candidate through the worker (see
+        # ExternKernelCaller.benchmark), which tunes it at the traced shape.
         return
     if not isinstance(winner, sa.ExternKernelCaller):
         return
