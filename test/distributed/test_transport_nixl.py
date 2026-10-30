@@ -819,6 +819,22 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 2)
         self.assertFalse(first._transfers)
 
+    def test_remote_slice_ranges(self):
+        _, _, _, remote = self.registered_pair()
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual((part.address, part.length), (remote.address + 3, 2))
+        self.assertEqual(part.metadata, remote.metadata)
+        self.assertEqual(remote.slice(remote.length).length, 0)
+
+    def test_slice_unregistered_view(self):
+        first, _, source, _ = self.registered_pair()
+        view = source.to_view()
+        first.unregister_memory(source)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view.slice(1)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view[1:]
+
     def test_peer_validation(self):
         first, second, source, remote = self.registered_pair()
         with self.assertRaisesRegex(RuntimeError, "already connected"):

@@ -16,7 +16,12 @@ can use `read_async`, `write_async`, or `wait_all`. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 Ordinary reads and writes are not ordered on CUDA streams. The API does not
-provide tracing, batching, or remote slicing. Descriptor classes define explicit
+provide tracing or batching. Views and remote buffers support `slice(offset, length)`
+and step-1 `[a:b]` byte ranges. Like Python sequences, `[a:b]` counts negative
+bounds from the end and clamps out-of-range ones, while `slice` raises; a
+transfer of a clamped view copies fewer bytes. Non-slice keys raise `TypeError`
+and steps other than 1 raise `ValueError`. A remote slice does not
+restrict the peer's access to the rest of the registration. Descriptor classes define explicit
 `serialize()`/`deserialize()` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
@@ -33,6 +38,7 @@ types are rejected. Tensor contents and native handles are never serialized.
    :members:
 .. autoclass:: torch.distributed._transport.MutableMemoryView
 .. autoclass:: torch.distributed._transport.RemoteBuffer
+   :members:
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
@@ -82,7 +88,7 @@ NIXL/UCX build and hardware.
 `unregister_memory(memory)` deregisters a local allocation without closing the
 transport. Wait for local transfers first and coordinate with peers to stop remote
 access; the backend cannot detect incoming DMA. All handles sharing a registration,
-including previously created views and exported descriptors, become invalid.
+including previously created views, exported descriptors, and their slices, become invalid.
 Register again and exchange fresh descriptors before resuming transfers.
 
 NIXL transfers return Work objects that retain their request handles until
