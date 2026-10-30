@@ -52,8 +52,11 @@ def _import_object(qualified_name):
     Import ``module.name`` by importing the module and reading one attribute
     from it. The object must report the same qualified name, so names that
     reach an object through an alias (such as ``torch.os.system``) fail.
+    ``__main__`` modules are refused: importing one runs a script.
     """
     module_name, _, name = qualified_name.rpartition(".")
+    if "__main__" in module_name.split("."):
+        raise ImportError(f"{qualified_name} cannot be imported by name")
     obj = getattr(importlib.import_module(module_name), name)
     if (
         getattr(obj, "__module__", None) != module_name

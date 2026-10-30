@@ -721,7 +721,7 @@ def _import_flat_apply_func(name: str) -> Any:
     if name.startswith("torch."):
         try:
             func = torch.export.custom_ops._import_object(name)
-        except (ImportError, AttributeError, ValueError) as e:
+        except Exception as e:
             raise SerializeError(f"Could not import flat_apply function {name}") from e
     if not (
         func is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
@@ -737,19 +737,17 @@ def _import_flat_apply_func(name: str) -> Any:
 def _check_flat_apply_autograd_function(cls_name: object) -> None:
     """
     The custom autograd function helper gets its class by name and imports it
-    when the program runs. Check that the name imports an autograd function
-    and does not point into __main__, which is a different module in the
-    process that loads the program.
+    when the program runs. Check that the name imports an autograd function.
     """
     message = (
         f"Autograd function {cls_name} used by flat_apply cannot be imported "
         "by name, so the program could not run after loading"
     )
-    if not isinstance(cls_name, str) or cls_name.startswith("__main__."):
+    if not isinstance(cls_name, str):
         raise SerializeError(message)
     try:
         torch.export.custom_ops._import_custom_autograd_function(cls_name)
-    except (ImportError, AttributeError, TypeError, ValueError) as e:
+    except Exception as e:
         raise SerializeError(message) from e
 
 

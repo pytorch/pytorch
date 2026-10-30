@@ -2847,6 +2847,7 @@ class TestPredispatchSerialization(TestCase):
             (func_name, b'"torch.os.system"'),
             (func_name, b'"torch.builtins.exec"'),
             (func_name, b'"torch.does_not_exist.f"'),
+            (func_name, b'"torch.utils.model_dump.__main__.main"'),
             (cls_name, b'"os.system"'),
             (cls_name, b'"torch.os.system"'),
         ]:
