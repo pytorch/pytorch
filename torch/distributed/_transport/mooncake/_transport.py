@@ -97,7 +97,7 @@ class MooncakeTransport(Transport):
         )
         self._operation_lock = RLock()
         # Closing rejects new operations and is terminal.
-        # Registrations are released only by unregister or close, 
+        # Registrations are released only by unregister or close,
         # independent of Work completion
         self._closed = False
         self._closing = False
