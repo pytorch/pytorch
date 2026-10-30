@@ -2706,6 +2706,12 @@ class TritonKernelOverrides(TritonOverrides):
             return f"triton_helpers.aten_bessel_y1({x})"
         return _triton_bessel(1, "y", x)
 
+    @staticmethod
+    def erfcx(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_erfcx({x})"
+        return f"libdevice.erfcx({x})"
+
     @classmethod
     def constant(cls, value, dtype):
         # NOTE: Cannot use shape=[] as it's not supported by triton-rocm
