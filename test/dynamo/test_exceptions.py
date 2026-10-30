@@ -1684,6 +1684,19 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(t, {}), fn(t, {})
         )
 
+    def test_str_unbound_local_error(self):
+        def fn(t):
+            value = 1
+            del value
+            try:
+                _ = value  # noqa: F821
+            except UnboundLocalError as e:
+                raised = str(e)
+            return t.sin(), raised, str(UnboundLocalError("x"))
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
     def test_str_exception_subclass(self):
         class MyError(ValueError):
             def __str__(self):

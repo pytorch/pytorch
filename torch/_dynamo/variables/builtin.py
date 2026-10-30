@@ -1384,7 +1384,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                     return variables.NameErrorVariable(fn, args, kwargs)
                 elif fn is KeyError:
                     return variables.KeyErrorVariable(fn, args, kwargs)
-                elif fn.__str__ is not BaseException.__str__:
+                # AttributeError and NameError set tp_str to BaseException_str
+                # explicitly, so they have their own wrappers.
+                elif fn.__str__ not in (
+                    BaseException.__str__,
+                    AttributeError.__str__,
+                    NameError.__str__,
+                ):
                     return variables.UnmodeledStrExceptionVariable(fn, args, kwargs)
                 return variables.ExceptionVariable(fn, args, kwargs)
 
