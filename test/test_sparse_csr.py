@@ -2092,6 +2092,31 @@ class TestSparseCSR(TestCase):
         m2 = torch.randn(50, 25, device=device).to(dtype)
         _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="all_sparse")
 
+        # Preexisting issue: a CSC result whose number of specified elements (nnz) changes is broken,
+        # independently of beta. addmm_out_sparse_csr (CUDA and MKL) writes a CSC result through
+        # result.transpose(-2, -1), whose index and value tensors are aliases of the result's:
+        # they share storage, but not sizes. These ops change nnz on the view only:
+        #   CUDA spgemm: indices_to_32_bit_inplace and col_indices_and_values_resize_ (beta == 0),
+        #     C.resize_as_sparse_(res) (beta != 0);
+        #   MKL add_out_sparse_csr, via result.add_ in addmm_sparse_result: indices_to_mkl_compatible_inplace,
+        #     col_indices_and_values_resize_ (in mkl_result_copy_) and set_member_tensors.
+        # So the result keeps its old nnz and gets wrong values. Where the new compressed indices are
+        # also copied into it in place (copy_ after resize_as_sparse_, the crow backup in MKL), it is
+        # invalid as well: on CPU, to_dense segfaults.
+        # TODO: enable for CSC once this is fixed.
+        if layout == torch.sparse_csr:
+            # Test beta != 0 and sp(C) != sp(A @ B), where sp denotes a sparse pattern
+            # Here, m1 is lower-triangular, while m1 @ m2 is not
+            m1 = torch.randn(10, 10, device=device).to(dtype).tril()
+            m2 = torch.randn(10, 10, device=device).to(dtype)
+            _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
+
+            # Test beta != 0 and sp(C) == sp(A @ B), where sp denotes a sparse pattern
+            # Here, m1 is lower-triangular, so is m2, and so is (m1 @ m2)
+            m1 = torch.randn(10, 10, device=device).to(dtype).tril()
+            m2 = torch.randn(10, 10, device=device).to(dtype).tril()
+            _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
+
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
             def maybe_transpose(cond, m):

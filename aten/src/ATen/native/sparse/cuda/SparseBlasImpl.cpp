@@ -15,7 +15,9 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/add.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -621,6 +623,40 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
+  // If beta != 0, spgemm is correct only when
+  // the sparsity pattern of A @ B is that of C, i.e. sp(A @ B) = sp(C).
+  // Since sp(A @ B) is not known in advance, we need to materialize it
+  // in an external memory, and then deal with accumulation into C.
+  if (beta.toComplexDouble() != .0) {
+    const auto is_eq_idx = [](const Tensor& idx1, const Tensor& idx2) -> bool {
+      return idx1.eq(idx2).all().item<bool>();
+    };
+    // NOTE: beta == 0 implies that the result is overwritten, not accumulated into.
+    auto AB = at::zeros(C.sizes(), C.options());
+    spgemm(A, B, static_cast<Scalar>(0), alpha, AB);
+
+    // Handling accumulation into C.
+    // No add for reduced dtypes, so we try to deploy add on values.
+    // Of course, that only works when the sparsity patterns do match,
+    // which we check under the assumption that it is unlikely that
+    // sp(A @ B) == sp(C). This path introduces a host-device sync,
+    // but spgemm syncs anyway, since the result's shape is data-dependent.
+    // When sp(A @ B) != sp(C), then, alas, (A @ B) and C will need
+    // an upcast with reduced dtypes.
+    if (
+      (AB._nnz() == C._nnz())
+      && is_eq_idx(AB.crow_indices(), C.crow_indices())
+      && is_eq_idx(AB.col_indices(), C.col_indices())
+    ) {
+      AB.values().add_(C.values(), beta);
+      C.values().copy_(AB.values());
+    } else {
+      const auto add_dtype = at::isReducedFloatingType(C.scalar_type()) ? kFloat : C.scalar_type();
+      const auto res = at::add(AB.to(add_dtype), C.to(add_dtype), beta);
+      C.resize_as_sparse_(res).copy_(res);
+    }
+    return;
+  }
 
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
