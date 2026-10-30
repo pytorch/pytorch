@@ -213,11 +213,18 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__enter__")
+        fn = self.cm_obj.__enter__.__func__  # type: ignore[attr-defined]
+        # Guard the MRO source only for an object constructed during tracing;
+        # see UserDefinedObjectVariable.call_method.
+        if self.source is None and self.cls_source is not None:
+            fn_source = self.get_source_by_walking_mro(tx, "__enter__")
+            fn_vt = variables.UserFunctionVariable.create_with_source(fn, fn_source)
+        else:
+            fn_vt = variables.UserFunctionVariable(
+                fn, source=source and AttrSource(source, "__func__")
+            )
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
-                self.cm_obj.__enter__.__func__,
-                source=source and AttrSource(source, "__func__"),
-            ),
+            fn_vt,
             self,
             source=source,
         ).call_function(tx, [], {})
@@ -226,11 +233,18 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__exit__")
+        fn = self.cm_obj.__exit__.__func__  # type: ignore[attr-defined]
+        # Guard the MRO source only for an object constructed during tracing;
+        # see UserDefinedObjectVariable.call_method.
+        if self.source is None and self.cls_source is not None:
+            fn_source = self.get_source_by_walking_mro(tx, "__exit__")
+            fn_vt = variables.UserFunctionVariable.create_with_source(fn, fn_source)
+        else:
+            fn_vt = variables.UserFunctionVariable(
+                fn, source=source and AttrSource(source, "__func__")
+            )
         x = variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
-                self.cm_obj.__exit__.__func__,
-                source=source and AttrSource(source, "__func__"),
-            ),
+            fn_vt,
             self,
             source=source,
         ).call_function(tx, list(args), {})
