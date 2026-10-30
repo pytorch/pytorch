@@ -7,7 +7,7 @@ from torch import _prims
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
+from torch._prims_common import AcceleratorRngStateHelper, make_contiguous_strides_for
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -115,7 +115,7 @@ def register_philox_rand():
             raise throw_on_non_cuda(device)
 
         with torch.random.fork_rng(devices):
-            CUDARngStateHelper.set_torch_state_tensor(seed, offset)
+            AcceleratorRngStateHelper.set_torch_state_tensor(seed, offset)
             random_values = torch.rand(shape, device=device, dtype=dtype)
 
         return random_values, philox_rand_offset(shape)

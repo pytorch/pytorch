@@ -15,7 +15,7 @@ stable, and update generated-artifact compatibility deliberately if it changes.
 # dynamo/aot chain to fully initialize before the ``from .runtime_wrappers``
 # import below so a bare ``import torch`` artifact stays self-contained.
 import torch._dynamo  # noqa: F401
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import AcceleratorRngStateHelper
 
 # IDENTITY CONTRACT: these names MUST be plain re-exports that preserve the original
 # object identity -- never wrap, decorate, or alias them (e.g. functools.wraps, a thin
@@ -23,7 +23,7 @@ from torch._prims_common import CUDARngStateHelper
 # id() of these exact objects to recognize a global the codegen'd wrappers close over.
 # A wrapper would change id(), so the table lookup would silently miss and that global
 # would route to its internal AOTAutograd location instead of this stable surface.
-# The same contract covers ``CUDARngStateHelper`` (imported above for circular-import
+# The same contract covers ``AcceleratorRngStateHelper`` (imported above for circular-import
 # ordering): the table keys on id() of its ``get_torch_state_as_tuple`` /
 # ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
 from .functional_utils import gen_alias_from_base
@@ -39,5 +39,5 @@ __all__ = [
     "_unwrap_tensoralias",
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",
-    "CUDARngStateHelper",
+    "AcceleratorRngStateHelper",
 ]
