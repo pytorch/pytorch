@@ -164,7 +164,8 @@ jobs:
         timeout-minutes: 200
         shell: bash
         run: |
-          export PIP_CACHE_DIR="${RUNNER_TEMP}/pip-cache"
+          # HOME is / in the container, which pip and Triton cannot write to.
+          export HOME="${RUNNER_TEMP}"
           failed=()
           for wheel in wheels/*.whl; do
             # torch-<version>-<python tag>-<abi tag>-<platform>.whl
