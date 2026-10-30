@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
@@ -793,6 +793,25 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             r"\['0.in_proj.weight', '0.in_proj.bias', '0.out_proj.weight', '0.out_proj.bias'\]"
         )
         with self.assertRaisesRegex(RuntimeError, error_regex):
+            model(inp)
+
+    @skip_if_lt_x_gpu(1)
+    def test_invalid_init_with_cpu_offload(self):
+        default_pg = torch.distributed.distributed_c10d._get_default_group()
+        mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
+        inp = torch.randn((4, 8), device=device_type.type)
+        regex = "initialize the parameters before calling fully_shard"
+
+        with torch.device("meta"):
+            model = MLP(8)
+        fully_shard(model, mesh=mesh, offload_policy=CPUOffloadPolicy())
+        with self.assertRaisesRegex(RuntimeError, f"(?s)still on meta device.*{regex}"):
+            model(inp)
+
+        model = MLP(8)
+        fully_shard(model, mesh=mesh, offload_policy=CPUOffloadPolicy())
+        model.to(device_type)
+        with self.assertRaisesRegex(RuntimeError, f"materialized on CPU.*{regex}"):
             model(inp)
 
     @skip_if_lt_x_gpu(1)

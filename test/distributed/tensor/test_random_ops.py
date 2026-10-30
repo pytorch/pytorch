@@ -1152,6 +1152,18 @@ class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(1)
+    def test_random_op_on_accelerator_local_tensor_with_cpu_mesh_raises(self):
+        # e.g. module.to_empty(device=...) on CPU-mesh DTensor params keeps the mesh.
+        cpu_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        cpu_dtensor = DTensor.from_local(torch.empty(4, 4), cpu_mesh, [Replicate()])
+        dtensor = torch.empty_like(cpu_dtensor, device=self.device_type)
+        with self.assertRaisesRegex(
+            RuntimeError, f"local tensors on {self.device_type}"
+        ):
+            dtensor.normal_()
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
     def test_random_op_on_cpu_mesh_with_accelerator_tracker(self):
         # A CPU-mesh DTensor was never offloaded, so an existing accelerator
         # tracker must neither raise nor reset the CPU generator for it.

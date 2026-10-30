@@ -414,25 +414,29 @@ class OpDispatcher:
                 ):
                     raise AssertionError
 
+                local_device_type = first_local_arg.device.type
+                mesh_device_type = first_spec.mesh.device_type
+                if (
+                    not first_local_arg.is_meta
+                    and local_device_type != mesh_device_type
+                ):
+                    # e.g. CPU-offloaded local tensors on an accelerator mesh.
+                    raise RuntimeError(
+                        f"DTensor random op {op_call} does not support local tensors on "
+                        f"{local_device_type} when the DeviceMesh is on {mesh_device_type}, "
+                        "since RNG cannot be coordinated across ranks. Either run the op before "
+                        "moving the local tensors (e.g. before fully_shard with CPUOffloadPolicy), "
+                        "or run it on DTensor.to_local() after seeding each rank's "
+                        f"{local_device_type} generator so that shards get different values and "
+                        "replicas get the same values."
+                    )
+
                 if (
                     random._rng_tracker
+                    and random._tracker_handles_mesh(first_spec.mesh)
                     and not first_local_arg.is_meta
                     and random._rng_tracker.distribute_region_enabled
-                    # Meshes of other device types (e.g. a CPU side mesh) run locally.
-                    and first_spec.mesh.device_type == random._rng_tracker._device.type
                 ):
-                    tracker_device_type = random._rng_tracker._device.type
-                    if first_local_arg.device.type != tracker_device_type:
-                        # e.g. CPU-offloaded local tensors on an accelerator mesh.
-                        raise RuntimeError(
-                            f"DTensor random op {op_call} does not support local tensors on "
-                            f"{first_local_arg.device.type} when the DTensor RNG tracker is on "
-                            f"{tracker_device_type}, since RNG cannot be coordinated across ranks. "
-                            "Either run the op before offloading (e.g. before fully_shard with "
-                            "CPUOffloadPolicy), or run it on DTensor.to_local() after seeding each "
-                            "rank's CPU generator so that shards get different values and replicas "
-                            "get the same values."
-                        )
                     accelerator = torch.accelerator.current_accelerator()
                     if (
                         maybe_user_generator is not None
