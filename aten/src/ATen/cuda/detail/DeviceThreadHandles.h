@@ -16,6 +16,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <utility>
@@ -23,6 +24,14 @@
 #include <memory>
 
 #include <c10/util/Exception.h>
+
+#ifdef USE_ROCM
+#include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/util/FbcodeMaps.h>
+#endif
 
 namespace at::cuda { namespace {
 
@@ -79,6 +88,104 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     std::unordered_map<int, std::vector<Handle>> created_handles;
     std::unordered_map<int, std::vector<Handle_t>> available_handles;
 
+#ifdef USE_ROCM
+    // A stream-keyed handle cannot serve two streams at once, but an exiting
+    // thread returns its handles while work it queued may still be running.
+    // So a returned handle carries an event recorded on the stream it last
+    // ran on, and the stream that takes it next waits on that event (or the
+    // host does, if that stream is capturing). The handle goes back without
+    // one, unordered, if c10 does not own that last stream (see
+    // streamOutlivesThreads), if the stream was capturing, or if recording
+    // fails. Guarded by `mutex`.
+    struct ReleaseFence {
+        cudaEvent_t event = nullptr;
+        bool pending = false;
+    };
+    c10::FastMap<Handle_t, ReleaseFence> release_fences;
+
+    // A failed query counts as capturing, so that the caller waits on the host.
+    static bool streamIsCapturing(cudaStream_t stream)
+    {
+        cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+        if(cudaStreamIsCapturing(stream, &status) != cudaSuccess) {
+            (void)cudaGetLastError();
+            return true;
+        }
+        return status != cudaStreamCaptureStatusNone;
+    }
+
+    // c10 never destroys the default stream or its pool streams. The owner of
+    // any other stream may destroy it before the thread that used it exits,
+    // and HIP crashes on a destroyed stream, so only these are fenced.
+    static bool streamOutlivesThreads(cudaStream_t stream, int device)
+    {
+        return stream == nullptr ||
+            c10::cuda::detail::isStreamFromPool(stream, static_cast<c10::DeviceIndex>(device));
+    }
+
+    // Runs from the exiting thread's PoolWindow destructor, so it must not
+    // throw. A handle it cannot fence goes back unordered: silently if its
+    // stream may be gone, with a warning otherwise.
+    void recordRelease(Handle_t handle, int device, void* stream) noexcept
+    {
+        try {
+            const auto raw_stream = static_cast<cudaStream_t>(stream);
+            auto& fence = release_fences[handle];
+            fence.pending = false;
+            if(!streamOutlivesThreads(raw_stream, device))
+                return;
+            c10::cuda::CUDAGuard device_guard(static_cast<c10::DeviceIndex>(device));
+            cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+            auto status = cudaStreamIsCapturing(raw_stream, &capture);
+            if(status == cudaSuccess && capture != cudaStreamCaptureStatusNone)
+                return;
+            if(status == cudaSuccess && fence.event == nullptr) {
+                status = cudaEventCreateWithFlags(&fence.event, cudaEventDisableTiming);
+                if(status != cudaSuccess)
+                    fence.event = nullptr;
+            }
+            if(status == cudaSuccess)
+                status = cudaEventRecord(fence.event, raw_stream);
+            fence.pending = status == cudaSuccess;
+            if(!fence.pending) {
+                (void)cudaGetLastError();
+                TORCH_WARN_ONCE(
+                    "Could not fence a handle that an exiting thread released on stream ",
+                    raw_stream, ": ", cudaGetErrorString(status),
+                    ". The next stream to take it will not wait for that stream's work.");
+            }
+        } catch (...) {
+            // The thread is exiting; leave the handle unfenced rather than terminate.
+        }
+    }
+
+    struct ReleaseWait {
+        bool fenced = false;
+        cudaEvent_t host_wait = nullptr;
+    };
+
+    // Orders `stream` after the work the handle's last stream had queued when
+    // its thread exited, if the handle came back with a fence. A capturing
+    // stream cannot wait on work outside its capture, and its kernels run
+    // whenever the graph is replayed, so for one this returns the event for
+    // the host to wait on instead.
+    ReleaseWait waitForRelease(Handle_t handle, int device, void* stream)
+    {
+        const auto it = release_fences.find(handle);
+        if(it == release_fences.end() || !it->second.pending)
+            return {};
+        c10::cuda::CUDAGuard device_guard(static_cast<c10::DeviceIndex>(device));
+        const auto raw_stream = static_cast<cudaStream_t>(stream);
+        ReleaseWait wait{true, nullptr};
+        if(streamIsCapturing(raw_stream))
+            wait.host_wait = it->second.event;
+        else
+            C10_CUDA_CHECK(cudaStreamWaitEvent(raw_stream, it->second.event, 0));
+        it->second.pending = false;
+        return wait;
+    }
+#endif
+
     // PoolWindow lazily creates and caches the handles that a particular thread is using,
     // so in the common case handle access doesn't incur either handle creation or a mutex lock.
     class PoolWindow
@@ -131,12 +238,37 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         // or if not, create a new one.
         auto parent = weak_parent.lock();
         TORCH_CHECK(parent, "Cannot create handle during program termination");
-        std::lock_guard<std::mutex> guard(parent->mutex);
+        std::unique_lock<std::mutex> guard(parent->mutex);
 
         if(parent->available_handles[device].size() > 0)
         {
-        my_stream_handles[key] = parent->available_handles[device].back();
+        auto handle = parent->available_handles[device].back();
+        // A wait that throws leaves the handle in the pool, still fenced, so
+        // the next taker waits again rather than skipping the ordering.
+        // C10_CUDA_CHECK clears a non-sticky error before throwing, so the
+        // retry can succeed.
+        const auto wait = parent->waitForRelease(handle, device, stream);
+        my_stream_handles[key] = handle;
         parent->available_handles[device].pop_back();
+        if(wait.host_wait != nullptr)
+        {
+            // That work may itself wait on a thread that has yet to take a
+            // handle, so the host waits for it without the lock.
+            guard.unlock();
+            try {
+                // Relaxed mode lets the host wait while the capture is active.
+                c10::cuda::CUDAStreamCaptureModeGuard mode_guard(cudaStreamCaptureModeRelaxed);
+                C10_CUDA_CHECK(cudaEventSynchronize(wait.host_wait));
+            } catch (...) {
+                guard.lock();
+                my_stream_handles.erase(key);
+                parent->available_handles[device].push_back(handle);
+                parent->release_fences[handle].pending = true;
+                throw;
+            }
+        }
+        if(wait.fenced)
+            fenced_takes.insert(key);
         }
         else if(create)
         {
@@ -158,6 +290,14 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
         auto it = my_stream_handles.find(std::make_pair(device, stream));
         return it == my_stream_handles.end() ? nullptr : it->second;
     }
+
+    // Whether this thread took its handle for (device, stream) from the pool
+    // with a release fence, which ordered the stream after the work of the
+    // thread that returned it.
+    bool tookFenced(int device, void* stream) const
+    {
+        return fenced_takes.count(std::make_pair(device, stream)) > 0;
+    }
 #endif
 
     private:
@@ -167,6 +307,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     // Stores per-(device, stream) handles for ROCm, where hipblaslt
     // requires a unique handle per stream.
     std::map<std::pair<int, void*>, Handle_t> my_stream_handles;
+    std::set<std::pair<int, void*>> fenced_takes;
 #endif
 
     std::weak_ptr<DeviceThreadHandlePool> weak_parent;
@@ -193,8 +334,10 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
             }
 
             std::lock_guard<std::mutex> guard(parent->mutex);
-            for(auto& [key, handle] : my_stream_handles)
+            for(auto& [key, handle] : my_stream_handles) {
+                parent->recordRelease(handle, key.first, key.second);
                 parent->available_handles[key.first].push_back(handle);
+            }
         }
 #endif
     }

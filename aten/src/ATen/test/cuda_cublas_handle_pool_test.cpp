@@ -22,10 +22,14 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Sleep.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/env.h>
 #include <rocblas/rocblas.h>
 
 #include <array>
+#include <chrono>
 #include <exception>
+#include <future>
 #endif
 
 // Test concurrent access to getCurrentCUDABlasHandle and getCUDABlasLtWorkspace
@@ -478,10 +482,455 @@ TEST(CUDABlasHandlePoolTest, CaptureHandleKeepsPointerModePerStream) {
   graph.capture_end();
 }
 
+// An exiting thread returns its stream-keyed handles while work it queued may
+// still be running, and such a handle cannot serve two streams at once, so the
+// stream that takes it next must wait for that work.
+template <typename GetHandle>
+void expectHandleFromExitedThreadWaitsForItsStream(
+    GetHandle get_handle,
+    bool wrap_first = false) {
+  at::cuda::CUDAGuard device_guard(0);
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  decltype(get_handle()) returned = nullptr;
+  at::cuda::CUDAEvent owner_done;
+  std::thread owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    c10::cuda::CUDAStreamGuard stream_guard(
+        wrap_first ? c10::cuda::getStreamFromExternal(first.stream(), 0)
+                   : first);
+    returned = get_handle();
+    // Stands in for work still queued when the thread exits.
+    at::cuda::sleep(200'000'000);
+    owner_done.record(first);
+  });
+  owner.join();
+
+  decltype(get_handle()) reused = nullptr;
+  at::cuda::CUDAEvent after_reuse;
+  std::thread next_owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    c10::cuda::CUDAStreamGuard stream_guard(second);
+    reused = get_handle();
+    after_reuse.record(second);
+  });
+  next_owner.join();
+
+  // The pool hands out the handle returned last.
+  ASSERT_EQ(reused, returned);
+  // The reuse finishes only after the exited thread's work.
+  after_reuse.synchronize();
+  EXPECT_TRUE(owner_done.query());
+}
+
+// A hipBLASLt handle owns the synchronizer its split-K kernels spin on.
+TEST(CUDABlasHandlePoolTest, LtHandleFromExitedThreadWaitsForItsStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  expectHandleFromExitedThreadWaitsForItsStream(
+      [] { return at::cuda::getCurrentCUDABlasLtHandle(); });
+}
+
+// AOTInductor runs ATen ops on the stream it is given, wrapped by
+// getStreamFromExternal, so the pool must recognize its own streams by address.
+TEST(
+    CUDABlasHandlePoolTest,
+    LtHandleFromExitedThreadWaitsForItsWrappedPoolStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  expectHandleFromExitedThreadWaitsForItsStream(
+      [] { return at::cuda::getCurrentCUDABlasLtHandle(); },
+      /*wrap_first=*/true);
+}
+
+// A thread that first needs a handle mid-capture, like an autograd worker in
+// backward, takes one from the pool on a capturing stream. That stream cannot
+// wait on work outside its capture, and its kernels run whenever the graph is
+// replayed, so the host waits for the exited thread's work instead. The capture
+// begins directly because CUDAGraph::capture_begin() reserves a handle for the
+// capturing thread before capture starts.
+TEST(
+    CUDABlasHandlePoolTest,
+    LtHandleFromExitedThreadWaitsForItsStreamUnderCapture) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  at::cuda::CUDAGuard device_guard(0);
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  cublasLtHandle_t returned = nullptr;
+  at::cuda::CUDAEvent owner_done;
+  std::thread owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    c10::cuda::CUDAStreamGuard stream_guard(first);
+    returned = at::cuda::getCurrentCUDABlasLtHandle();
+    at::cuda::sleep(200'000'000);
+    owner_done.record(first);
+  });
+  owner.join();
+
+  ASSERT_EQ(
+      cudaStreamBeginCapture(second, cudaStreamCaptureModeGlobal), cudaSuccess);
+  cublasLtHandle_t reused = nullptr;
+  bool owner_done_at_reuse = false;
+  std::exception_ptr failure;
+  std::thread worker([&] {
+    try {
+      at::cuda::CUDAGuard guard(0);
+      c10::cuda::CUDAStreamGuard stream_guard(second);
+      reused = at::cuda::getCurrentCUDABlasLtHandle();
+      // Global capture mode forbids querying an event outside the capture.
+      c10::cuda::CUDAStreamCaptureModeGuard mode_guard(
+          cudaStreamCaptureModeRelaxed);
+      owner_done_at_reuse = owner_done.query();
+    } catch (...) {
+      failure = std::current_exception();
+    }
+  });
+  worker.join();
+  cudaGraph_t graph = nullptr;
+  const auto end_status = cudaStreamEndCapture(second, &graph);
+  if (graph != nullptr) {
+    (void)cudaGraphDestroy(graph);
+  }
+
+  if (failure) {
+    std::rethrow_exception(failure);
+  }
+  EXPECT_EQ(end_status, cudaSuccess) << cudaGetErrorString(end_status);
+  ASSERT_EQ(reused, returned);
+  EXPECT_TRUE(owner_done_at_reuse);
+}
+
+// The host waits for the exited thread's work without holding the pool lock,
+// since that work may wait on a thread that has yet to take a handle. Here it
+// waits for a value written only once another thread has taken one. Which of
+// the two threads takes the exited thread's handle is a race, so the test
+// retries until the waiting thread does.
+TEST(CUDABlasHandlePoolTest, LtHandleHostWaitLetsOtherThreadsTakeHandles) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  at::cuda::CUDAGuard device_guard(0);
+  int can_wait = 0;
+  ASSERT_EQ(
+      hipDeviceGetAttribute(
+          &can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0),
+      hipSuccess);
+  if (can_wait == 0) {
+    GTEST_SKIP() << "requires hipStreamWaitValue64";
+  }
+  void* gate = nullptr;
+  ASSERT_EQ(
+      hipExtMallocWithFlags(&gate, sizeof(uint64_t), hipMallocSignalMemory),
+      hipSuccess);
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  const auto third = c10::cuda::getStreamFromPool();
+  const auto opener = c10::cuda::getStreamFromPool();
+  constexpr uint64_t kAttempts = 5;
+  // No stream may still be waiting on the gate when it is freed.
+  auto free_gate = c10::make_scope_exit([&] {
+    (void)hipStreamWriteValue64(opener, gate, kAttempts, 0);
+    (void)hipStreamSynchronize(first);
+    (void)hipFree(gate);
+  });
+  ASSERT_EQ(hipStreamWriteValue64(first, gate, 0, 0), hipSuccess);
+  // Attempt k gates the exited thread's work on the value k.
+  for (uint64_t attempt = 1; attempt <= kAttempts; ++attempt) {
+    // Creating a handle fails while a stream is capturing, so the other thread
+    // takes a spare, which the pool hands out after the exited thread's handle.
+    at::cuda::ensureCublasLtHandlesAvailable(2);
+    cublasLtHandle_t returned = nullptr;
+    std::thread owner([&] {
+      at::cuda::CUDAGuard guard(0);
+      c10::cuda::CUDAStreamGuard stream_guard(first);
+      returned = at::cuda::getCurrentCUDABlasLtHandle();
+      EXPECT_EQ(
+          hipStreamWaitValue64(first, gate, attempt, hipStreamWaitValueGte),
+          hipSuccess);
+    });
+    owner.join();
+
+    ASSERT_EQ(
+        cudaStreamBeginCapture(second, cudaStreamCaptureModeRelaxed),
+        cudaSuccess);
+    std::atomic<bool> reserving{false};
+    cublasLtHandle_t reused = nullptr;
+    std::exception_ptr failure;
+    std::thread waiter([&] {
+      reserving = true;
+      try {
+        at::cuda::CUDAGuard guard(0);
+        c10::cuda::CUDAStreamGuard stream_guard(second);
+        reused = at::cuda::getCurrentCUDABlasLtHandle();
+      } catch (...) {
+        failure = std::current_exception();
+      }
+    });
+    while (!reserving) {
+      std::this_thread::yield();
+    }
+    auto other = std::async(std::launch::async, [&] {
+      at::cuda::CUDAGuard guard(0);
+      c10::cuda::CUDAStreamGuard stream_guard(third);
+      return at::cuda::getCurrentCUDABlasLtHandle();
+    });
+    const bool other_took_handle =
+        other.wait_for(std::chrono::seconds(30)) == std::future_status::ready;
+    // Lets the exited thread's work finish either way.
+    EXPECT_EQ(hipStreamWriteValue64(opener, gate, attempt, 0), hipSuccess);
+    waiter.join();
+    first.synchronize();
+    cudaGraph_t graph = nullptr;
+    const auto end_status = cudaStreamEndCapture(second, &graph);
+    if (graph != nullptr) {
+      (void)cudaGraphDestroy(graph);
+    }
+    (void)other.get();
+
+    if (failure) {
+      std::rethrow_exception(failure);
+    }
+    EXPECT_EQ(end_status, cudaSuccess) << cudaGetErrorString(end_status);
+    if (reused == returned) {
+      EXPECT_TRUE(other_took_handle);
+      return;
+    }
+  }
+  FAIL() << "the other thread took the exited thread's handle first in all "
+         << kAttempts << " attempts";
+}
+
+// The owner of an external stream may destroy it before the thread that used
+// it exits, and HIP crashes on a destroyed stream, so the pool must leave that
+// stream alone when the thread returns its handle.
+TEST(CUDABlasHandlePoolTest, LtHandleReturnSkipsDestroyedExternalStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  cublasLtHandle_t returned = nullptr;
+  std::thread owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    cudaStream_t external = nullptr;
+    ASSERT_EQ(
+        cudaStreamCreateWithFlags(&external, cudaStreamNonBlocking),
+        cudaSuccess);
+    {
+      c10::cuda::CUDAStreamGuard stream_guard(
+          c10::cuda::getStreamFromExternal(external, 0));
+      returned = at::cuda::getCurrentCUDABlasLtHandle();
+    }
+    EXPECT_EQ(cudaStreamDestroy(external), cudaSuccess);
+  });
+  owner.join();
+
+  cublasLtHandle_t reused = nullptr;
+  std::thread next_owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    c10::cuda::CUDAStreamGuard stream_guard(c10::cuda::getStreamFromPool());
+    reused = at::cuda::getCurrentCUDABlasLtHandle();
+  });
+  next_owner.join();
+  // The handle still goes back to the pool.
+  EXPECT_EQ(reused, returned);
+}
+
+// A public rocBLAS handle keeps the workspace bound at its creation.
+TEST(CUDABlasHandlePoolTest, PublicHandleFromExitedThreadWaitsForItsStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+    GTEST_SKIP() << "requires eager workspaces";
+  }
+  expectHandleFromExitedThreadWaitsForItsStream(
+      [] { return at::cuda::getCurrentCUDABlasHandle(); });
+}
+
+// With the check in fence mode, which main() turns on, a launch on a stream
+// other than the one the handle last used waits for that stream's queued work.
+TEST(CUDABlasHandlePoolTest, LtHandleStreamCheckOrdersCrossStreamLaunch) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  at::cuda::CUDAGuard device_guard(0);
+  // The check never dereferences the handle, so any distinct pointer works.
+  int key = 0;
+  const auto handle = reinterpret_cast<cublasLtHandle_t>(&key);
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  at::cuda::CUDAEvent first_done;
+  {
+    c10::cuda::CUDAStreamGuard stream_guard(first);
+    at::cuda::checkCublasLtHandleStream(handle, first);
+    at::cuda::sleep(200'000'000);
+    first_done.record(first);
+  }
+
+  at::cuda::CUDAEvent after_launch;
+  {
+    c10::cuda::CUDAStreamGuard stream_guard(second);
+    at::cuda::checkCublasLtHandleStream(handle, second);
+    after_launch.record(second);
+  }
+
+  // The launch finishes only after the work queued before it.
+  after_launch.synchronize();
+  EXPECT_TRUE(first_done.query());
+}
+
+// The same when the handle last ran on another device: from a pool stream to
+// the other device's default stream, then between the two devices' default
+// streams, which are both the null stream.
+TEST(CUDABlasHandlePoolTest, LtHandleStreamCheckOrdersCrossDeviceLaunch) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  if (at::cuda::device_count() < 2) {
+    GTEST_SKIP() << "requires two GPUs";
+  }
+  int key = 0;
+  const auto handle = reinterpret_cast<cublasLtHandle_t>(&key);
+  const auto pool_stream =
+      c10::cuda::getStreamFromPool(/*isHighPriority=*/false, 0);
+  const auto default0 = c10::cuda::getDefaultCUDAStream(0);
+  const auto default1 = c10::cuda::getDefaultCUDAStream(1);
+  // A stream's first launch can take longer than the sleeps below, so the
+  // default streams launch here first.
+  for (const auto& stream : {default0, default1}) {
+    at::cuda::CUDAEvent ready;
+    ready.record(stream);
+    ready.synchronize();
+  }
+  const auto expect_ordered = [&](c10::cuda::CUDAStream last,
+                                  c10::cuda::CUDAStream next) {
+    at::cuda::CUDAEvent last_done;
+    {
+      c10::cuda::CUDAStreamGuard stream_guard(last);
+      at::cuda::sleep(200'000'000);
+      last_done.record(last);
+    }
+    c10::cuda::CUDAStreamGuard stream_guard(next);
+    at::cuda::checkCublasLtHandleStream(handle, next);
+    at::cuda::CUDAEvent after_launch;
+    after_launch.record(next);
+    after_launch.synchronize();
+    EXPECT_TRUE(last_done.query())
+        << "launch on device " << static_cast<int>(next.device_index());
+  };
+  {
+    c10::cuda::CUDAStreamGuard stream_guard(pool_stream);
+    at::cuda::checkCublasLtHandleStream(handle, pool_stream);
+  }
+
+  expect_ordered(pool_stream, default1);
+  expect_ordered(default1, default0);
+}
+
+// An SM carveout launch runs on a stream other than the current one, which the
+// pool holds the handle for: the carveout stream waits for the current one
+// before the launch, and the current one waits for it after. So the check
+// tracks the current stream, and orders the launch stream itself.
+TEST(CUDABlasHandlePoolTest, LtHandleStreamCheckOrdersCarveoutLaunch) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  at::cuda::CUDAGuard device_guard(0);
+  int key = 0;
+  const auto handle = reinterpret_cast<cublasLtHandle_t>(&key);
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  const auto carveout = c10::cuda::getStreamFromPool();
+  at::cuda::CUDAEvent first_done;
+  {
+    c10::cuda::CUDAStreamGuard stream_guard(first);
+    at::cuda::checkCublasLtHandleStream(handle, carveout);
+    // Stands in for the work of `first`, which waits for the launch.
+    at::cuda::sleep(200'000'000);
+    first_done.record(first);
+  }
+
+  at::cuda::CUDAEvent after_launch;
+  {
+    c10::cuda::CUDAStreamGuard stream_guard(second);
+    at::cuda::checkCublasLtHandleStream(handle, carveout);
+    after_launch.record(carveout);
+  }
+
+  after_launch.synchronize();
+  EXPECT_TRUE(first_done.query());
+}
+
+// The pool cannot fence a handle whose stream was capturing when its thread
+// exited, so the check orders the next owner's launch itself, here after work
+// queued on that stream once the capture ended.
+TEST(CUDABlasHandlePoolTest, LtHandleStreamCheckOrdersUnfencedHandover) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  at::cuda::CUDAGuard device_guard(0);
+  const auto first = c10::cuda::getStreamFromPool();
+  const auto second = c10::cuda::getStreamFromPool();
+  cublasLtHandle_t returned = nullptr;
+  std::promise<void> launched;
+  std::promise<void> capturing;
+  std::thread owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    c10::cuda::CUDAStreamGuard stream_guard(first);
+    returned = at::cuda::getCurrentCUDABlasLtHandle();
+    at::cuda::checkCublasLtHandleStream(returned, first);
+    launched.set_value();
+    capturing.get_future().wait();
+  });
+  launched.get_future().wait();
+  const auto begin_status =
+      cudaStreamBeginCapture(first, cudaStreamCaptureModeRelaxed);
+  capturing.set_value();
+  owner.join();
+  cudaGraph_t graph = nullptr;
+  const auto end_status = begin_status == cudaSuccess
+      ? cudaStreamEndCapture(first, &graph)
+      : begin_status;
+  if (graph != nullptr) {
+    (void)cudaGraphDestroy(graph);
+  }
+  ASSERT_EQ(end_status, cudaSuccess) << cudaGetErrorString(end_status);
+  at::cuda::CUDAEvent first_done;
+  {
+    c10::cuda::CUDAStreamGuard stream_guard(first);
+    // Stands in for the captured launches, replayed on that stream.
+    at::cuda::sleep(200'000'000);
+    first_done.record(first);
+  }
+
+  cublasLtHandle_t reused = nullptr;
+  at::cuda::CUDAEvent after_launch;
+  std::thread next_owner([&] {
+    at::cuda::CUDAGuard guard(0);
+    c10::cuda::CUDAStreamGuard stream_guard(second);
+    reused = at::cuda::getCurrentCUDABlasLtHandle();
+    at::cuda::checkCublasLtHandleStream(reused, second);
+    after_launch.record(second);
+  });
+  next_owner.join();
+
+  ASSERT_EQ(reused, returned);
+  after_launch.synchronize();
+  EXPECT_TRUE(first_done.query());
+}
+
 #endif // USE_ROCM
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
+#ifdef USE_ROCM
+  // The hipBLASLt stream check reads its mode once, at the first launch, so
+  // fence mode for its tests is set before any test runs.
+  c10::utils::set_env("TORCH_HIPBLASLT_CHECK_HANDLE_STREAMS", "fence");
+#endif
   // Every TEST() below already guards on at::cuda::is_available() and returns
   // early when there's no GPU. init() below is not: it unconditionally touches
   // the CUDA driver (DeviceCachingAllocator's ctor calls cudaGetDeviceProperties),
