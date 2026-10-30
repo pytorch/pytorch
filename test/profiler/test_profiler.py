@@ -204,7 +204,7 @@ class TestProfilerCUDA(TestCase):
                 """
 import os
 import torch
-from torch.profiler import ProfilerActivity, profile
+from torch.profiler import DeviceType, ProfilerActivity, profile
 
 def add_one(in_: torch.Tensor):
     return in_ + 1
@@ -226,7 +226,7 @@ with profile(activities=[ProfilerActivity.CPU]):
 with profile(activities=[ProfilerActivity.CUDA]) as prof:
     add_one_graphed(zeros)
     torch.cuda.synchronize()
-if not any(e.device_type == torch.autograd.DeviceType.CUDA for e in prof.events()):
+if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
     raise AssertionError("Expected device events from the graphed callable")
 """,
             ],
@@ -244,8 +244,7 @@ if not any(e.device_type == torch.autograd.DeviceType.CUDA for e in prof.events(
         script = """
 import json
 import torch
-from torch.autograd import DeviceType
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import DeviceType, profile, ProfilerActivity
 
 x = torch.ones(64, 64, device="cuda")
 
