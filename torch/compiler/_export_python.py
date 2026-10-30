@@ -57,6 +57,11 @@ def export_python(
         y = step(model, x)  # first run: captures and writes artifacts/step.py
         y = step(model, x)  # served from artifacts/step.py, here or in a new process
 
+    Capture in a fresh process: a frame that something else in the process already
+    compiles or serves when the capture reaches it (a function another loaded artifact
+    serves, or one compiled with :func:`torch.compile`) is not compiled into the
+    artifact, which then runs that frame uncompiled.
+
     The artifact is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
     loading the artifact imports the module the function was captured from.

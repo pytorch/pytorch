@@ -158,6 +158,10 @@ class TestExportPython(TestCase):
         with no_compilation():
             self.assertEqual(run(x), expected)
             self.assertEqual(self.module.decorated_outer(x), expected)
+        # The first artifact served inner during the second capture, which therefore
+        # did not compile it: the second artifact is standalone, inner left to Python.
+        with open(os.path.join(self.dir, "decorated", "outer.py")) as f:
+            self.assertIn('SERVING_MODE = "standalone"', f.read())
         _in_a_fresh_process(
             self,
             """
