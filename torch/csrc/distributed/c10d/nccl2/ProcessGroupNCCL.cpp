@@ -59,10 +59,10 @@ void checkSameDtype(
 struct LiveComm {
   std::shared_timed_mutex mutex;
   std::atomic<bool> live{true};
-  ncclComm_t comm;
+  ncclComm_t comm{};
   // How long unlistComm() waits for a dump. Read at publish, as reading the
   // env var can throw and unlistComm() runs in the destructor.
-  std::chrono::milliseconds unlistTimeout;
+  std::chrono::milliseconds unlistTimeout{};
   // Group name; guarded by liveCommsMutex().
   std::string name;
 };
@@ -377,17 +377,19 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
-  // Before the watchdog starts: it can abort the communicator, and a throw
-  // here must not leave a joinable thread behind.
+  // Publish before the watchdog starts, as it can abort the communicator.
   publishComm();
 
+  // Start the watchdog last: nothing may throw once it runs, or the joinable
+  // thread would terminate the process when destroyed or reassigned.
   try {
+    attachMemoryHook();
     if (!blocking_wait_ && !shutdown_) {
       timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
     }
-    attachMemoryHook();
   } catch (...) {
-    // init_state_ stays uninitialized, so no teardown path would retire it.
+    // Undo the hook attach and publishComm()'s registrations.
+    detachMemoryHook();
     retireComm();
     throw;
   }
@@ -902,7 +904,10 @@ dumpNcclComms() {
   {
     std::lock_guard<std::mutex> lock(liveCommsMutex());
     for (const auto& [_, entry] : liveComms()) {
-      entries.emplace_back(entry, entry->name);
+      // Directly constructed backends may have no group name; keep them apart.
+      entries.emplace_back(
+          entry,
+          entry->name.empty() ? c10::str('#', entry.get()) : entry->name);
     }
   }
   std::unordered_map<std::string, std::unordered_map<std::string, std::string>>

@@ -32,19 +32,10 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CommDump.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
-
-#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-namespace c10d::nccl2 {
-// Defined in nccl2/ProcessGroupNCCL.cpp; declared here to avoid including the
-// nccl2 backend header.
-TORCH_API std::
-    unordered_map<std::string, std::unordered_map<std::string, std::string>>
-    dumpNcclComms();
-} // namespace c10d::nccl2
-#endif
 
 namespace c10d {
 

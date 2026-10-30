@@ -43,6 +43,7 @@
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Batch.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CommDump.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
@@ -77,14 +78,6 @@ TORCH_API void waitForNcclChildComm(
     std::chrono::milliseconds timeout,
     std::string_view operation,
     const std::function<void()>& before_parent_abort = {});
-
-#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-// ncclCommDump of every live (not aborted, revoked or destroyed) communicator,
-// keyed by group name. Merged into the nccl_comm_state of the NCCL dumps.
-TORCH_API std::
-    unordered_map<std::string, std::unordered_map<std::string, std::string>>
-    dumpNcclComms();
-#endif
 
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
