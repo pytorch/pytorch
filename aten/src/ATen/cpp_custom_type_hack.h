@@ -49,6 +49,7 @@
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 
 #include <ATen/TracerMode.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
