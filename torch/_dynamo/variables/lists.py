@@ -176,10 +176,8 @@ class BaseListVariable(VariableTracker):
     def debug_repr_helper(self, prefix: str, suffix: str) -> str:
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
-        return self.python_type()(
-            [x.as_python_constant(guard=guard) for x in self.items]
-        )
+    def as_python_constant(self) -> Any:
+        return self.python_type()([x.as_python_constant() for x in self.items])
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         return VariableTracker.build(tx, self.debug_repr())
@@ -926,7 +924,7 @@ class RangeVariable(BaseListVariable):
         )
         return result
 
-    def as_python_constant(self, *, guard: bool = True) -> range:
+    def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
 
     def getitem_const(
@@ -1689,7 +1687,7 @@ class DequeVariable(BaseListVariable):
             f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
-    def as_python_constant(self, *, guard: bool = True) -> collections.deque[Any]:
+    def as_python_constant(self) -> collections.deque[Any]:
         return self.python_type()(
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
@@ -2114,7 +2112,7 @@ class ByteArrayVariable(VariableTracker):
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
 
-    def as_python_constant(self, *, guard: bool = True) -> bytearray:
+    def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
 
     def as_proxy(self) -> bytearray:
@@ -2729,7 +2727,7 @@ class SliceVariable(VariableTracker):
     def python_type(self) -> type:
         return slice
 
-    def as_python_constant(self, *, guard: bool = True) -> slice:
+    def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
 
     def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
@@ -2873,7 +2871,7 @@ class BaseListIteratorVariable(IteratorVariable):
     def python_type(self) -> type:
         return type(iter([]))
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         if self.index > 0:
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
@@ -2938,7 +2936,7 @@ class TupleIteratorVariable(BaseListIteratorVariable):
     def python_type(self) -> type:
         return type(iter(()))
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         if self.index > 0:
             raise NotImplementedError
         return iter(tuple(x.as_python_constant() for x in self.items))
@@ -3126,7 +3124,7 @@ class ListReverseIteratorVariable(IteratorVariable):
     def python_type(self) -> type:
         return type(reversed([]))
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         raise NotImplementedError
 
     def call_obj_hasattr(

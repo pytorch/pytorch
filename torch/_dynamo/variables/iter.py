@@ -92,7 +92,7 @@ class ItertoolsVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def get_real_python_backed_value(self) -> Any:

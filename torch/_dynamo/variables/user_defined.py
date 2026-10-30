@@ -423,7 +423,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return ConstantVariable.create(NotImplemented)
         return ConstantVariable.create(NotImplemented)
 
-    def as_python_constant(self, *, guard: bool = True) -> type[object]:
+    def as_python_constant(self) -> type[object]:
         return self.value
 
     def as_proxy(self) -> object:
@@ -2124,13 +2124,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
+    def is_python_constant(self) -> bool:
         # The container base infers constness from the elements without probing
         # as_python_constant(), so it would report a user subclass as a constant
         # that as_python_constant() below refuses to build.
-        return VariableTracker.is_python_constant(self, guard=guard)
+        return VariableTracker.is_python_constant(self)
 
-    def as_python_constant(self, *, guard: bool = True) -> object:
+    def as_python_constant(self) -> object:
         from ..utils import is_pybind11_enum_member
 
         if isinstance(
@@ -4634,7 +4634,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         tx = InstructionTranslator.current_tx()
         return self.tp_getattro_impl(tx, field_name)
 
-    def as_python_constant(self, *, guard: bool = True) -> object:
+    def as_python_constant(self) -> object:
         from dataclasses import fields
 
         import torch.utils._pytree as pytree
@@ -4934,7 +4934,7 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
         else:
             raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def as_proxy(self) -> Any:
@@ -5187,15 +5187,12 @@ class DefaultDictVariable(ConstDictVariable):
             ),
         )
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
             return False
         return super().is_python_constant()
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         is_constant, factory = self.default_factory.try_as_python_constant()
         if not is_constant:
             raise AsPythonConstantNotImplementedError(
@@ -5826,7 +5823,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def get_construct_fn(self) -> Callable[..., Any]:
         return self.tuple_cls._make  # type: ignore[attr-defined]
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
 
@@ -5874,7 +5871,7 @@ class StructSequenceVariable(UserDefinedTupleVariable):
     def get_construct_fn(self) -> Callable[..., Any]:
         return self.tuple_cls
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
         return self.tuple_cls(items)
 

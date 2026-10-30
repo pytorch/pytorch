@@ -3790,7 +3790,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
         )
         return var
 
-    def as_python_constant(self, *, guard: bool = True) -> type:
+    def as_python_constant(self) -> type:
         return self.value
 
 
