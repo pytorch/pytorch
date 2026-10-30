@@ -181,7 +181,7 @@ def seed_all() -> None:
     _lazy_call(cb)
 
 
-def get_rng_offset(device: _device_t = None) -> int:
+def get_rng_offset(device: Device = None, /) -> int:
     r"""Return the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
     on the specified device.
 
@@ -205,7 +205,7 @@ def get_rng_offset(device: _device_t = None) -> int:
     return default_generator.get_offset()
 
 
-def set_rng_offset(offset: int, device: _device_t = None) -> None:
+def set_rng_offset(offset: int, device: Device = None, /) -> None:
     r"""Set the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
     on the specified device.
 
@@ -221,7 +221,7 @@ def set_rng_offset(offset: int, device: _device_t = None) -> None:
         On accelerators that support lazy initialization, the state is deferred
         until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
-    device_index = _get_device_index(device) if device is not None else None
+    device_index = _get_optional_device_index(device)
 
     def cb() -> None:
         idx = (
