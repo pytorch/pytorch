@@ -1155,6 +1155,9 @@ The :attr:`src` tensor must be :ref:`broadcastable <broadcasting-semantics>`
 with the :attr:`self` tensor. It may be of a different data type or reside on a
 different device.
 
+See :ref:`cuda-device-to-host-copies` for guidance on repeated CUDA-to-CPU
+transfers and reusing CPU buffers.
+
 Args:
     src (Tensor): the source tensor to copy from
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
@@ -1278,6 +1281,9 @@ Returns a copy of this object in CPU memory.
 
 If this object is already in CPU memory,
 then no copy is performed and the original object is returned.
+
+See :ref:`cuda-device-to-host-copies` for guidance on repeated CUDA-to-CPU
+transfers and reusing CPU buffers.
 
 Args:
     {memory_format}
@@ -2362,7 +2368,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to add to,
             should have dtype either `torch.int64` or `torch.int32`
     source (Tensor): the tensor containing values to add
 
@@ -5122,6 +5128,9 @@ to(*args, **kwargs) -> Tensor
 Performs Tensor dtype and/or device conversion. A :class:`torch.dtype` and :class:`torch.device` are
 inferred from the arguments of ``self.to(*args, **kwargs)``.
 
+See :ref:`cuda-device-to-host-copies` for guidance on repeated CUDA-to-CPU
+transfers and reusing CPU buffers.
+
 .. note::
 
     If the ``self`` Tensor already
@@ -6127,6 +6136,17 @@ If any of the above conditions are not met, an error is thrown.
 
     This overload is not supported by TorchScript, and using it in a Torchscript
     program will cause undefined behavior.
+
+.. warning::
+
+    Viewing a tensor as ``torch.bool`` reinterprets its bytes without
+    converting them. A ``torch.bool`` tensor must only contain the byte values
+    ``0`` (``False``) and ``1`` (``True``). If any byte of the viewed data has
+    another value, the behavior of operations on the returned tensor is
+    undefined: depending on the operation, device and memory layout, such bytes
+    may be preserved as-is or normalized to ``1``, and eager mode and
+    :func:`torch.compile` may give different results. To convert values to
+    booleans, use :meth:`~Tensor.bool` (or ``self != 0``) instead.
 
 
 Args:
