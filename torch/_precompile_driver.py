@@ -4,9 +4,10 @@ Nothing here is imported or run by torch at runtime, and the generated artifacts
 import this module. Instead torch._precompile emits these function bodies VERBATIM (via
 inspect.getsource, on the to_python_code / emit path only) into the self-contained
 python_code string, after the calling-convention metadata and the compiled/captured
-graph. Authoring the driver as real code -- instead of a hand-written string literal --
-lets pyrefly / ruff / IDEs type-check and navigate the load-bearing driver logic that
-would otherwise be invisible inside a string (and drops the wall of ``# noqa: F821``).
+graph (``_import_custom_op_modules`` goes before them, as section 0). Authoring the
+driver as real code -- instead of a hand-written string literal -- lets pyrefly / ruff
+/ IDEs type-check and navigate the load-bearing driver logic that would otherwise be
+invisible inside a string (and drops the wall of ``# noqa: F821``).
 
 Keeping python_code self-contained and version-frozen (its behavior is hashed via
 code_hash, invariant 7) still holds: the artifact carries the driver TEXT, it does not
@@ -45,8 +46,20 @@ if TYPE_CHECKING:
     _FRAMES: str = ""
     _BACKENDS: str = ""
     _ENTRY_BINDING: str = ""
+    # An installed artifact carries the pickled Dynamo package and its backend
+    # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
+    _PACKAGE: str = ""
+    # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
+    _ALLOW_SERVE_TIME_COMPILES: bool = False
+    BACKEND: str = ""
+    FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
+    # Section 0 of an artifact that calls custom ops.
+    CUSTOM_OP_MODULES: tuple[str, ...] = ()
+    CUSTOM_OPS: tuple[tuple[str, str], ...] = ()
+    CUSTOM_OP_KERNELS: dict[str, tuple[str, ...]] = {}
+    CUSTOM_OP_OVERRIDE_MODULES: dict[str, dict[str, str]] = {}
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -66,6 +79,81 @@ if TYPE_CHECKING:
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
+
+
+def _import_custom_op_modules():
+    """Import the modules registering the custom ops the graphs call, then check
+    that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
+    registered, and that every module in CUSTOM_OP_OVERRIDE_MODULES imported and
+    still registers the active kernel it did at capture. Emitted as section 0 and
+    called at exec time."""
+    import importlib
+    import os
+    import re
+    import sys
+    import warnings
+
+    import torch
+
+    import_errors = {}
+    # A module imported from inside another finished first, so the order alone
+    # would import an override nested in the module it overrides before that one.
+    owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
+    for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
+        try:
+            importlib.import_module(module)
+        # Not just ImportError: e.g. importing torch.distributed.device_mesh before
+        # torch.distributed.tensor raises ValueError.
+        except Exception as e:
+            import_errors[module] = e
+    missing = []
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+    for name, overload in CUSTOM_OPS:
+        qualname = f"{name}.{overload}" if overload else name
+        try:
+            torch._C._dispatch_find_schema_or_throw(name, overload)
+        except RuntimeError:
+            missing.append(qualname)
+            continue
+        for key in CUSTOM_OP_KERNELS.get(qualname, ()):
+            if not has_kernel(qualname, key):
+                missing.append(f"{qualname} ({key} kernel)")
+    # Another module's kernel under the same key would pass the check above, so
+    # the active kernel must be registered from the overriding module's file.
+    overridden = []
+    real = os.path.realpath
+    override_errors = set()
+    for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
+        dump = torch._C._dispatch_dump(qualname)
+        for key, module in owners.items():
+            pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
+            active = re.search(pattern, dump, re.MULTILINE)
+            path = getattr(sys.modules.get(module), "__file__", None)
+            if module in import_errors:
+                override_errors.add(module)
+            elif not (active and path and real(active[1]) == real(path)):
+                overridden.append(f"{qualname} ({key} kernel of {module})")
+    if missing or override_errors or overridden:
+        # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
+        from torch._precompile import PrecompileError as _PrecompileError
+
+        errors = [import_errors[m] for m in sorted(override_errors)]
+        raise _PrecompileError(
+            f"this artifact calls custom ops or kernels not registered here: "
+            f"{missing or 'none'}. Modules whose kernels overrode another kernel "
+            f"for the same key at capture that failed to import: "
+            f"{sorted(override_errors) or 'none'}. Overriding kernels it ran at "
+            f"capture that another kernel replaced: {overridden or 'none'}. "
+            "Import the modules registering them, and register no other kernel "
+            "over theirs, before loading it. Modules that failed to import: "
+            f"{sorted(import_errors) or 'none'}."
+        ) from next(iter(errors or import_errors.values()), None)
+    for module, e in import_errors.items():
+        warnings.warn(
+            f"importing custom op module {module!r} raised {e!r}; none of its "
+            "kernels overrode another for the same key, and the ops this artifact "
+            "calls and their kernel keys are registered anyway, so it loads"
+        )
 
 
 def _extract_param_buffers(mods):
@@ -414,7 +502,9 @@ def _build_multigraph_forward():
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
     calls it captured, and anything else is a coverage gap the caller has to
-    hear about.
+    hear about. The exception is a frame Dynamo gave up on during the capture
+    (eager_fallback): the capture ran its other calls eagerly, so a miss of it
+    runs eagerly here too, with a warning once per frame.
     """
     import base64
     import hashlib
@@ -461,6 +551,8 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
+    # After the version checks: a torch without it fails them cleanly first.
+    from torch._dynamo.eval_frame import _warn_eager_fallback_miss
 
     def _import(module_name):
         if module_name == "__main__":
@@ -510,8 +602,8 @@ def _build_multigraph_forward():
     # Only names Dynamo minted while tracing are bound into it (every backend id
     # of the artifact, plus that module's import aliases and builtins key),
     # never the artifact's own, so nothing here shadows a user global. A module
-    # is opened only for a frame with variants; a record with none is dead and
-    # never imports its module.
+    # is opened only for a frame the driver serves; a dead record never imports
+    # its module.
     scopes = {}
 
     def _scope(frame):
@@ -536,13 +628,24 @@ def _build_multigraph_forward():
                 f"{list(target.co_freevars)!r}, which a self-contained artifact "
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
+        if frame["trivial"] and frame["resume_names"]:
+            # Dynamo compiled nothing of this continuation, so it ran as plain
+            # Python during capture; rebuild it as one.
+            # Its module is opened for the globals the bytecode reads.
+            scope = _scope(frame)
+
+            def _plain(closure):
+                return types.FunctionType(target, scope, target.co_name, None, closure)
+
+            if target.co_freevars:
+                return _plain
+            return _plain(None)
         if not frame["variants"]:
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
-            # _serving_mode sends a capture that reaches such a frame to
-            # installed serving, so in a standalone artifact the record is dead
-            # unless it is the entry; a dead continuation must still bind its
-            # resume names, so its refusal is deferred to a call.
+            # A continuation must still bind its resume names, so its refusal
+            # is deferred to a call that reaches it. An unnamed trivial record
+            # lands here too and binds nothing, because no frame names it.
             if frame["bypassed"]:
                 cause = (
                     "was BYPASSED during capture (its guards could not be "
@@ -572,6 +675,8 @@ def _build_multigraph_forward():
         # from f_locals and every guard on it misses.
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
+        # Dynamo gave up on the frame during capture: a miss runs eagerly.
+        eager_fallback = frame["eager_fallback"]
 
         def _function(code, closure):
             f = types.FunctionType(code, scope, target.co_name, defaults, closure)
@@ -631,6 +736,9 @@ def _build_multigraph_forward():
                 for manager, variant in bound:
                     if manager.check(f_locals):
                         return variant(*args, **kwargs)
+            if eager_fallback:
+                _warn_eager_fallback_miss(target)
+                return _function(target, closure)(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call ({len(variants)} captured). Either a guard on the call's "
@@ -673,7 +781,8 @@ def _build_multigraph_forward():
     opened = set()
     for _frame in frames:
         module = _frame["python_module"]
-        if _frame["variants"]:
+        # The frames _make_dispatcher opens a scope for.
+        if _frame["variants"] or (_frame["trivial"] and _frame["resume_names"]):
             opened.add(module)
         for _name in _frame["resume_names"] if module in opened else ():
             existing = vars(_import(module)).get(_name)
@@ -700,10 +809,143 @@ def _build_multigraph_forward():
         # under its parent's module, except under config.nested_graph_breaks
         # (default False), where an inlined frame's continuation is recorded
         # under the inlined function's module while the root frame's bytecode
-        # does the LOAD_GLOBAL. A dead record whose module no live frame opened
-        # has no frame left to name it, so it binds nothing.
+        # does the LOAD_GLOBAL. A dead record whose module no served frame
+        # opened has no frame left to name it, so it binds nothing.
         scope = scopes.get(_frame["python_module"])
         if scope is not None:
             for _name in _frame["resume_names"]:
                 _seed(scope, _name, dispatcher)
     return entry
+
+
+def _build_installed_forward():
+    """Install a multi-graph artifact onto the live code objects; return ``forward``.
+
+    A graph break inside a function the entry calls (a child module's forward,
+    say) compiles that function as its own frame, entered by an ordinary call
+    the standalone dispatcher never sees. Serving those frames takes Dynamo's
+    own frame evaluator: this installs the captured package's guarded entries
+    onto the live code objects of the captured modules, the way a warm
+    torch.compile cache load does, and calls the entry through it. The entry's
+    callback is a _RefuseRecompileCallback bound at load, which
+    _callback_from_stance keeps even under stances that would compile, so, as
+    for a standalone artifact, a call no captured variant covers raises instead
+    of compiling, or runs eagerly for a frame the capture ran eagerly (its
+    code is in the callback's eager_codes). load(allow_serve_time_compiles=True)
+    flips the artifact's _ALLOW_SERVE_TIME_COMPILES = False to True to keep the
+    ordinary compiling callback instead.
+    """
+    import base64
+    import importlib
+    import operator
+    import pickle
+    import sys as _sys
+
+    import torch
+    from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
+    from torch._dynamo.eval_frame import (
+        _RecompileRefusedError,
+        _RefuseRecompileCallback,
+        OptimizeContext,
+    )
+    from torch._dynamo.package import _lookup_code, CompilePackage
+    from torch._precompile import PrecompileError as _PrecompileError
+
+    if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]} and cannot "
+            f"load on {_sys.version_info[0]}.{_sys.version_info[1]}: it carries "
+            f"serialized code objects. Regenerate the artifact under the serving "
+            f"Python."
+        )
+    if TORCH_VERSION != torch.__version__:
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {TORCH_VERSION} and "
+            f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
+            f"state. Regenerate the artifact under the serving torch."
+        )
+    package_state = pickle.loads(base64.b64decode(_PACKAGE))
+    dynamo = package_state["dynamo"]
+    module_name = dynamo.codes[0].python_module
+    if module_name == "__main__":
+        raise _PrecompileError(
+            "precompile: this artifact was captured from a function defined in the "
+            "capturing script's __main__ module, which no other process can import. "
+            "Regenerate the artifact from a function defined in an importable module."
+        )
+    try:
+        fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
+    except (ImportError, AttributeError) as _e:
+        raise _PrecompileError(
+            f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
+            f"which is not importable here ({_e})."
+        ) from _e
+    try:
+        # CompilePackage refuses a module whose captured source has changed.
+        package = CompilePackage(fn, dynamo)
+        if torch._dynamo.config.compiled_autograd:
+            # OptimizeContext would compile backward graphs through a fresh,
+            # non-refusing callback.
+            raise _PrecompileError(
+                "precompile: an installed artifact cannot load with "
+                "torch._dynamo.config.compiled_autograd enabled: backward graphs "
+                "would compile outside the artifact. Disable it before load()."
+            )
+        # The codes install() puts entries on; the entry's is innermost_fn's.
+        entries = package._codes.items()
+        targets = [_lookup_code(e) if e.code_source else c for c, e in entries]
+        live = [c.co_name for c in targets if _debug_get_cache_entry_list(c)]
+        if live:
+            raise _PrecompileError(
+                f"precompile: frames this artifact installs onto ({', '.join(live)}) "
+                f"already have live Dynamo cache entries in this process (the capture "
+                f"that produced this artifact, or a torch.compile of them), which "
+                f"would still serve any call the installed entries miss: load this "
+                f"artifact in a fresh process."
+            )
+        # A serve-time compile is not part of the artifact: record it nowhere.
+        # caching_precompile would make optimize(package=None) create its own
+        # package, which context(fn) fills from the on-disk Dynamo cache.
+        with torch._dynamo.config.patch(caching_precompile=False):
+            context = torch._dynamo.optimize(
+                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
+            )
+            if not isinstance(context, OptimizeContext):
+                raise _PrecompileError(
+                    "precompile: an installed artifact serves through Dynamo, which "
+                    "is disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
+                    "enable_dynamo killswitch)."
+                )
+            # The refusal is this callable's own callback, not the process-global
+            # stance, so other threads' compiles are unaffected. It must be bound
+            # before context(fn), which captures the callback when it wraps.
+            if not _ALLOW_SERVE_TIME_COMPILES:
+                flagged = [e.eager_fallback and not e.bypassed for _, e in entries]
+                eager = [t for t, f in zip(targets, flagged) if f]
+                context.callback = _RefuseRecompileCallback(context.callback, eager)
+            compiled = context(fn)
+        package.install(package_state["backends"])
+    except _PrecompileError:
+        raise
+    except Exception as _e:
+        raise _PrecompileError(
+            f"precompile: this installed artifact could not be installed onto "
+            f"{module_name}.{FN_NAME} ({type(_e).__name__}: {_e}). If that source "
+            f"changed since capture, regenerate the artifact against it."
+        ) from _e
+
+    def forward(*args, **kwargs):
+        try:
+            return compiled(*args, **kwargs)
+        except _RecompileRefusedError as _e:
+            raise _PrecompileError(
+                f"precompile: no captured variant matches this call. Either a "
+                f"guard on the call's arguments or on a module global the graph "
+                f"baked in no longer holds (restore that environment), or this "
+                f"call shape was never captured: the artifact serves only what "
+                f"capture exercised, so add an example covering it and "
+                f"recapture. Dynamo reported: {_e}"
+            ) from None
+
+    return forward

@@ -60,7 +60,13 @@
 // the rank that never issued it -- the usual culprit of a hang -- sees nothing.
 // So, like stock ProcessGroupNCCL, the first abort hook to fire in a process
 // also broadcasts a dump signal through the group's global store, and one
-// thread per process polls that store and dumps when any rank signaled.
+// thread per process polls that store every TORCH_FR_COORD_CHECK_MILSEC and
+// dumps when any rank signaled since the first attach() or the last rearm().
+// The signal is a counter of the hook's own; stock's exception_dump key is left
+// alone (see kDumpSignalKey). Giving peers time to dump before the process
+// exits is up to the backend: nccl2's abortProcess, which runs only when error
+// handling tears the process down, waits TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC
+// before ::abort().
 
 #pragma once
 
@@ -106,11 +112,10 @@ class TORCH_API FlightRecorderHook
   // Detach from the process group. Idempotent.
   void remove();
 
-  // Holds back a backend about to terminate the process after a failure until
-  // its peers had time to act on the dump signal this process broadcast. No-op
-  // if it broadcast none. Stock ProcessGroupNCCL waits the same way before
-  // tearing down.
-  static void waitForPeerDumps();
+  // Lets this process dump and broadcast the dump signal again, for a backend
+  // that survives a failure: called once its communicator is reconfigured.
+  // Signals sent before this are ignored by this process's poller.
+  static void rearm();
 
  private:
   // The backend serving one device type of the group. A group can mix
@@ -182,6 +187,8 @@ class TORCH_API FlightRecorderHook
   // The store every rank of the job shares, i.e. the group's store without
   // its prefix; null if the group has none. Carries the dump signal.
   c10::intrusive_ptr<Store> global_store_;
+  // Whether attach() took a reference on the dump signal poller.
+  bool polls_dump_signal_{false};
 
   // Sequencing and the op_id -> in-flight-op map. The mutex guards against
   // concurrent collectives from multiple threads (the hooks fire on the issuing

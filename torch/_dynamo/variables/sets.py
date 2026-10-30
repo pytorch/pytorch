@@ -20,6 +20,7 @@ import operator
 import types
 from collections.abc import Iterable, Iterator
 from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -41,6 +42,7 @@ from ..utils import (
 from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
+from .object_protocol import repr_guard
 
 
 if TYPE_CHECKING:
@@ -52,11 +54,16 @@ if TYPE_CHECKING:
 # see steps outlined for ConstDictVariable
 
 
-def pyanyset_check(obj: VariableTracker) -> bool:
+def pyanyset_check(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
     return issubclass(obj.python_type(), (set, frozenset))
 
 
-def pyset_check(obj: VariableTracker) -> bool:
+def pyanyset_checkexact(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L28-L29
+    return obj.python_type() in (set, frozenset)
+
+
+def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
     # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L36-L38
     return issubclass(obj.python_type(), set)
 
@@ -69,14 +76,7 @@ def set_copy(obj: VariableTracker) -> VariableTracker:
     for exact frozenset (`frozenset_copy`).  Use this for binary-op scratch
     storage so mutations don't bleed into the input.
     """
-    base = obj._base_vt if isinstance(obj, variables.UserDefinedSetVariable) else obj
-    if base is None:
-        raise AssertionError("_base_vt must not be None")
-    return base.clone(
-        items=base.items.copy(),  # type: ignore[missing-attribute]
-        mutation_type=ValueMutationNew(),
-        source=None,
-    )
+    return obj._new_set(obj.items.keys())  # type: ignore[missing-attribute]
 
 
 class BaseSetVariable(VariableTracker):
@@ -100,6 +100,19 @@ class BaseSetVariable(VariableTracker):
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
+        name = self.python_type_name()
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, f"{name}(...)")
+            if not self.items:
+                return VariableTracker.build(tx, f"{name}()")
+            items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
+        if self.python_type() is set:
+            return VariableTracker.build(tx, f"{{{items}}}")
+        return VariableTracker.build(tx, f"{name}({{{items}}})")
 
     def __init__(
         self,
@@ -482,7 +495,8 @@ class BaseSetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        return self_.call_method(tx, "intersection", [other_], {})
+        # set.__and__ uses the internal helper, bypassing a subclass override.
+        return BaseSetVariable.intersection(self_, tx, [other_], {})
 
     def nb_xor_impl(
         self,
@@ -496,7 +510,8 @@ class BaseSetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
-        return self_.call_method(tx, "symmetric_difference", [other_], {})
+        # set.__xor__ uses the internal helper, bypassing a subclass override.
+        return BaseSetVariable.symmetric_difference(self_, tx, [other_], {})
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
@@ -580,16 +595,6 @@ class SetVariable(BaseSetVariable):
 
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
-        if not self.items:
-            return VariableTracker.build(tx, f"{self.python_type_name()}()")
-        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
-        return VariableTracker.build(tx, "{" + items + "}")
-
-    def repr_recursive_sentinel(self) -> str:
-        return f"{self.python_type_name()}(...)"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
@@ -696,7 +701,8 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not self.sq_contains_impl(tx, args[0]).as_python_constant():
+        # Explicit unbound dispatch
+        if not BaseSetVariable.sq_contains_impl(self, tx, args[0]).as_python_constant():
             raise_observed_exception(KeyError, tx, args=[args[0]])
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
@@ -712,7 +718,7 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.sq_contains_impl(tx, args[0]).as_python_constant():
+        if BaseSetVariable.sq_contains_impl(self, tx, args[0]).as_python_constant():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             # sq_contains validated/normalized args[0]; a set key was coerced
@@ -781,7 +787,8 @@ class SetVariable(BaseSetVariable):
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
 
-        self.call_method(tx, "intersection_update", [other], {})
+        # set.__iand__ uses the internal helper, bypassing a subclass override.
+        SetVariable.intersection_update(self, tx, [other], {})
         return self
 
     def nb_inplace_xor_impl(
@@ -791,7 +798,8 @@ class SetVariable(BaseSetVariable):
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
 
-        self.call_method(tx, "symmetric_difference_update", [other], {})
+        # set.__ixor__ uses the internal helper, bypassing a subclass override.
+        SetVariable.symmetric_difference_update(self, tx, [other], {})
         return self
 
     tp_methods = {
@@ -1158,16 +1166,6 @@ class FrozensetVariable(BaseSetVariable):
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
-        if not self.items:
-            return VariableTracker.build(tx, f"{self.python_type_name()}()")
-        items = ", ".join(tracked_repr(tx, item.vt) for item in self.set_items)
-        return VariableTracker.build(tx, f"{self.python_type_name()}({{{items}}})")
-
-    def repr_recursive_sentinel(self) -> str:
-        return f"{self.python_type_name()}(...)"
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -1301,7 +1299,10 @@ class DictKeySetVariable(BaseSetVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # dictview_repr in Objects/dictobject.c: the type name around a list repr.
-        items = ", ".join(tracked_repr(tx, k.vt) for k in self.items)
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "...")
+            items = ", ".join(tracked_repr(tx, k.vt) for k in self.items)
         return VariableTracker.build(tx, f"dict_keys([{items}])")
 
     def is_hashable(self) -> bool:

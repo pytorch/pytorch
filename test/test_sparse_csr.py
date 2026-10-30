@@ -6,8 +6,10 @@ import io
 import itertools
 import operator
 import random
+import types
 import unittest
 from contextlib import redirect_stderr
+from unittest.mock import patch
 
 import torch
 from torch.testing import FileCheck, make_tensor
@@ -1615,6 +1617,10 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
+                batched = self.genSparseCSRTensor((batch_size, m, k), nnz, dtype=dtype,
+                                                  device=device, index_dtype=index_dtype)
+                self.assertEqual(torch.baddbmm(c, batched, b), torch.baddbmm(c, batched.to_dense(), b))
+
     @onlyAccelerator
     @skipCUDAIfNoSparseGeneric
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1649,6 +1655,10 @@ class TestSparseCSR(TestCase):
                 b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+                batched = self.genSparseCSRTensor((batch_size, m, k), nnz, dtype=dtype,
+                                                  device=device, index_dtype=index_dtype)
+                self.assertEqual(torch.bmm(batched, b), torch.bmm(batched.to_dense(), b))
 
     def run_test_block_addmm_addmv(self,
                                    addmv_addmm,
@@ -3792,7 +3802,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, "on the same GPU device"):
             bsr_dense_mm(lhs, rhs.cpu())
         if torch.accelerator.device_count() > 1:
-            with self.assertRaisesRegex(ValueError, "on the same accelerator"):
+            with self.assertRaisesRegex(ValueError, "on the same GPU device"):
                 device_type = device.split(":")[0]
                 bsr_dense_mm(lhs.to(f"{device_type}:0"), rhs.to(f"{device_type}:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
@@ -4306,7 +4316,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_tune(self, op, device, dtype, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, _int_bsr_dense_addmm
-        from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm, tune__int_bsr_dense_addmm, get_meta)
+        from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm,
+                                                   tune__int_bsr_dense_addmm, get_meta, _get_device_name)
 
         if out_dtype == "unspecified":
             out_dtype = None
@@ -4346,7 +4357,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             def get_current_meta():
                 version = (0, version_dtype, sparsity)
                 meta_key = (M, K, N, *blocksize, False, True, True)
-                return get_meta(op, meta_key, version=version, exact=True)
+                # The tuner keys on the inputs' device; read it back the same way.
+                return get_meta(op, meta_key, _get_device_name(device), version=version, exact=True)
         else:
             raise NotImplementedError(op)
 
@@ -4372,11 +4384,11 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         def get_meta(M, K, N, sparsity=None):
             return bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha, dtype=dtype, sparsity=sparsity,
-                                        _version="test_triton_bsr_dense_addmm_meta")
+                                        _version="test_triton_bsr_dense_addmm_meta", device=device)
 
         def update_meta(M, K, N, value, sparsity=0.5):
             key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
-            bsr_dense_addmm_meta_update("bsr_dense_addmm", _get_device_name(),
+            bsr_dense_addmm_meta_update("bsr_dense_addmm", _get_device_name(device),
                                         ("test_triton_bsr_dense_addmm_meta", dtype, sparsity),
                                         key, value)
 
@@ -4446,6 +4458,114 @@ class TestSparseCSRGeneric(TestCase):
 
 instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
+
+
+class TestSparseTritonMetaDeviceName(TestCase):
+    """_get_device_name supplies the device component of the key under which
+    _operation_device_version_data stores tuned Triton parameters. It sits on the
+    miss path of an optimization lookup, so it must never raise, and it must key on
+    the device the inputs are on so that a lookup finds what a tuning run stored."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _device_module(self, **attrs):
+        # privateuseone stands in for an accelerator that is neither cuda nor xpu.
+        # Patching the attribute avoids torch.utils.rename_privateuse1_backend,
+        # which is process-global and can only be called once.
+        return patch.object(
+            torch, "privateuseone", types.SimpleNamespace(**attrs), create=True
+        )
+
+    def test_device_module_without_get_device_name_is_unnamed(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with self._device_module(is_available=lambda: True):
+            self.assertEqual(_get_device_name("privateuseone"), "")
+        # torch.cpu, torch.mps and torch.mtia are in the same position today.
+        self.assertEqual(_get_device_name("cpu"), "")
+
+    def test_no_cuda_or_xpu_is_unnamed(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with patch.object(torch.cuda, "is_available", lambda: False), patch.object(
+            torch.xpu, "is_available", lambda: False
+        ):
+            self.assertEqual(_get_device_name(), "")
+
+    def test_explicit_device_is_used_instead_of_the_default(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with self._device_module(get_device_name=lambda device: f"Fake {device}"):
+            self.assertEqual(_get_device_name("privateuseone"), "Fake privateuseone")
+            self.assertEqual(
+                _get_device_name(torch.device("privateuseone")), "Fake privateuseone"
+            )
+            self.assertNotEqual(_get_device_name(), "Fake privateuseone")
+
+    def test_tuned_parameters_are_found_through_the_input_device(self):
+        # Round trip: what update() stores under a device's name must be found
+        # again by a lookup that only knows the input tensor's device. Needs no
+        # accelerator, and no second one.
+        from torch.sparse._triton_ops import bsr_dense_addmm_meta
+        from torch.sparse._triton_ops_meta import _operation_device_version_data, update
+
+        device_name = "Fake privateuseone"
+        version = ("test_tuned_parameters_are_found_through_the_input_device",
+                   torch.float16, 0.5)
+        key = (256, 256, 256, 16, 16, True, False, True)
+        tuned = dict(GROUP_SIZE_ROW=2, SPLIT_N=8, num_stages=3, num_warps=5)
+
+        def get_meta(**kwargs):
+            f = io.StringIO()
+            with redirect_stderr(f):
+                return bsr_dense_addmm_meta(256, 256, 256, 16, 16, 0, 1, dtype=torch.float16,
+                                            sparsity=0.5, _version=version[0], **kwargs)
+
+        update("bsr_dense_addmm", device_name, version, key, tuple(tuned[k] for k in sorted(tuned)))
+        try:
+            with self._device_module(get_device_name=lambda device: device_name):
+                self.assertEqual(get_meta(device="privateuseone"), tuned)
+            # Without the device the caller-less default names the key instead, and
+            # that is never this one, so the entry must not be found.
+            self.assertNotEqual(get_meta(), tuned)
+        finally:
+            del _operation_device_version_data["bsr_dense_addmm", device_name, version]
+
+    def test_the_input_device_reaches_the_tuning_key(self):
+        # The device= arguments at these two call sites are the whole mechanism:
+        # without them the key comes from the caller-less default and a tuning run
+        # on any other device becomes unfindable. Nothing else in the suite
+        # exercises them, and no hardware configuration can -- the key is a device
+        # name and what differs here is the device type. The lookups are
+        # intercepted, so this needs no Triton and launches no kernel.
+        from torch.sparse import _triton_ops
+
+        class StopAtLookup(Exception):
+            pass
+
+        seen = []
+
+        def intercept(*args, device=None, **kwargs):
+            seen.append(device)
+            raise StopAtLookup
+
+        f = io.StringIO()
+        with redirect_stderr(f):
+            dense = torch.zeros(32, 16)
+            blocked = torch.zeros(32, 32)
+            blocked[:16, :16] = 1
+            bsr = blocked.to_sparse_bsr((16, 16))
+
+        with patch.object(_triton_ops, "scatter_mm_meta", intercept):
+            with self.assertRaises(StopAtLookup):
+                _triton_ops.bsr_scatter_mm_indices_data(bsr, dense)
+
+        with patch.object(_triton_ops, "bsr_dense_addmm_meta", intercept):
+            with self.assertRaises(StopAtLookup):
+                _triton_ops.bsr_dense_addmm(dense.clone(), bsr, dense)
+
+        self.assertEqual(seen, [bsr.device, bsr.device])
+
 
 instantiate_device_type_tests(TestSparseCSR, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())

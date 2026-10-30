@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
@@ -1179,6 +1180,67 @@ main()
         finally:
             handle.remove()
         self.assertEqual(param.grad, active * 2)
+
+    @parametrize("container", ["tensor", "dict", "object"])
+    def test_inputs_aliasing_nested_graph_break(self, container):
+        observed = []
+        input_lists = []
+
+        class SavedTensor:
+            pass
+
+        def get_tensor(payload):
+            if container == "tensor":
+                return payload
+            if container == "dict":
+                return payload["tensor"]
+            return payload.tensor
+
+        @torch._dynamo.disable
+        def record_payload(payload):
+            observed.append(get_tensor(payload))
+
+        def backward_helper(payload, grad):
+            record_payload(payload)
+            return 2 * grad * get_tensor(payload)
+
+        class MySquare(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.square()
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                if container == "tensor":
+                    payload = x
+                elif container == "dict":
+                    payload = {"tensor": x}
+                else:
+                    payload = SavedTensor()
+                    payload.tensor = x
+                return backward_helper(payload, grad)
+
+        def compile_backward(gm):
+            opt_fn = make_compiler_fn(fullgraph=False)(gm)
+
+            def invoke(inputs, *args):
+                input_lists.append(inputs)
+                return opt_fn(inputs, *args)
+
+            return invoke
+
+        with compiled_autograd._enable(compile_backward):
+            for i in range(2):
+                x = (torch.arange(4.0) + i).requires_grad_()
+                (grad,) = torch.autograd.grad(MySquare.apply(x).sum(), x)
+                self.assertEqual(grad, 2 * x)
+                self.assertEqual(len(observed), i + 1)
+                self.assertIs(observed[-1], x)
+
+        self.assertEqual(input_lists, [[], []])
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
         logging.getLogger().setLevel(logging.WARNING)
@@ -3192,6 +3254,32 @@ main()
             with compiled_autograd._enable(make_compiler_fn(fullgraph=False)):
                 b = MyFunc.apply(a)
                 b.sum().backward()
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_chained_cudnn_lstm(self):
+        # https://github.com/pytorch/pytorch/issues/198652
+        # _cudnn_rnn_backward has no meta kernel, so it only traces through the fake
+        # tensor fallback that runs the real kernel, which rejects SymInt arguments.
+        # Compiled autograd feeds the first node its SymInt hidden_size as a dynamic
+        # size, so that node graph breaks; the second one is lowered as an inductor
+        # fallback, which hands the kernel a contiguous copy of the transposed saved
+        # output. miopen_rnn_backward takes a plain int, so on ROCm both nodes lower.
+        def fn():
+            enc = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            dec = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            x = torch.randn(2, 4, 8, device="cuda")
+            target = torch.randn(2, 4, 8, device="cuda")
+            loss = nn.functional.mse_loss(dec(enc(x)[0])[0], target)
+            loss.backward()
+            yield from (p.grad for p in enc.parameters())
+            yield from (p.grad for p in dec.parameters())
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[1, 1] if TEST_WITH_ROCM else [1, 2],
+            compiler_fn=make_compiler_fn(fullgraph=False, dynamic=False),
+        )
 
     @requires_cuda_and_triton
     def test_cudagraphs_cpu_division(self):
@@ -5548,7 +5636,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
-        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error

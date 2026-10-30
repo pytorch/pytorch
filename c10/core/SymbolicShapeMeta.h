@@ -47,13 +47,21 @@ class C10_API SymbolicShapeMeta {
 
   void refresh_contiguous() {
     // Non-const, don't need to hold mutables_ lock
-    available_.fetch_and(numel_avail);
+    available_.fetch_and(
+        ~(is_contiguous_avail | is_channels_last_contiguous_avail |
+          is_channels_last_3d_contiguous_avail | is_channels_last_avail |
+          is_channels_last_3d_avail | is_non_overlapping_and_dense_avail));
     is_contiguous_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_contiguous_ = false;
     is_channels_last_ = false;
     is_channels_last_3d_ = false;
     is_non_overlapping_and_dense_ = false;
+  }
+
+  void refresh_materialized() {
+    available_.fetch_and(
+        ~(sizes_materialized_avail | strides_materialized_avail));
   }
 
   int64_t dim() const {

@@ -10,8 +10,10 @@
 import json
 import os
 import pickle
+import struct
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import timedelta
@@ -1139,6 +1141,301 @@ for backend_name, device_type in FR_HOOK_BACKENDS:
     globals()[f"{backend_name.capitalize()}FlightRecorderHookTest"] = (
         _make_fr_hook_test_class(backend_name, device_type)
     )
+
+
+_DUMP_SIGNAL_KEY = "fr_hook_dump_signal"
+
+
+class _SignalStore(dist.Store):
+    """Store wrapper that counts dump signal polls and can fail them.
+
+    The poller reads the signal with add(key, 0), so waiting on the count
+    is how a test knows the poller has seen a value, without sleeping.
+    """
+
+    def __init__(self, store):
+        super().__init__()
+        self._store = store
+        self._cv = threading.Condition()
+        self.polls = 0
+        self.fail = False
+        self.poll_threads = []
+
+    def set(self, key, value):
+        self._store.set(key, value)
+
+    def get(self, key):
+        return self._store.get(key)
+
+    def check(self, keys):
+        return self._store.check(keys)
+
+    def add(self, key, value):
+        if key != _DUMP_SIGNAL_KEY:
+            return self._store.add(key, value)
+        if value != 0:
+            if self.fail:
+                raise RuntimeError("injected store failure")
+            return self._store.add(key, value)
+        try:
+            if self.fail:
+                raise RuntimeError("injected store failure")
+            return self._store.add(key, value)
+        finally:
+            with self._cv:
+                self.polls += 1
+                self.poll_threads.append(threading.get_ident())
+                self._cv.notify_all()
+
+    def wait_polls(self, count, timeout=60.0):
+        with self._cv:
+            if not self._cv.wait_for(lambda: self.polls >= count, timeout):
+                raise AssertionError(f"poller made {self.polls} < {count} polls")
+
+    def settle(self):
+        # A poll that started before the caller's last store write may still
+        # read the old value. The second poll after it read the new value and
+        # acted on it before the third returns.
+        self.wait_polls(self.polls + 3)
+
+
+class _AbortableBackend(dist.BackendBase):
+    def __init__(self, rank, size):
+        super().__init__(rank, size)
+        self._options = dist.BackendBase.Options(
+            "fr_signal", timeout=timedelta(seconds=60)
+        )
+        self.abort_hooks = {}
+
+    @property
+    def supports_abort_hooks(self):
+        return True
+
+    @property
+    def options(self):
+        return self._options
+
+    def getBackendName(self):
+        return "fr_signal"
+
+    def register_abort_hook(self, hook_id, hook):
+        self.abort_hooks[hook_id] = hook
+
+    def unregister_abort_hook(self, hook_id):
+        del self.abort_hooks[hook_id]
+
+    def fire_abort_hooks(self):
+        for hook in list(self.abort_hooks.values()):
+            hook()
+
+
+class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
+    """Cross-rank dump signal: the abort hook broadcasts through the store and
+    every attached process dumps on it. Backend-agnostic: a Python backend
+    stands in for the backend running abort hooks."""
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        os.environ["TORCH_FR_COORD_CHECK_MILSEC"] = "10"
+        self.tempdir = tempfile.TemporaryDirectory()
+        os.environ["TORCH_FR_DUMP_TEMP_FILE"] = os.path.join(
+            self.tempdir.name, "trace_"
+        )
+        self._spawn_processes()
+
+    def tearDown(self):
+        os.environ.pop("TORCH_FR_DUMP_TEMP_FILE", None)
+        os.environ.pop("TORCH_FR_COORD_CHECK_MILSEC", None)
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _dump_file_name(self):
+        return os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+
+    def _dumped(self):
+        return os.path.exists(self._dump_file_name())
+
+    def _attach(self, store, name="signal"):
+        backend = _AbortableBackend(self.rank, self.world_size)
+        pg = dist.ProcessGroup(store, self.rank, self.world_size)
+        pg._register_backend(
+            torch.device("cpu"), dist.ProcessGroup.BackendType.CUSTOM, backend
+        )
+        pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        pg._set_group_name(name)
+        pg._set_group_desc(name)
+        hook = FlightRecorderHook.attach(pg, list(range(self.world_size)))
+        return backend, hook
+
+    @staticmethod
+    def _signals(store):
+        return int(store.get(_DUMP_SIGNAL_KEY))
+
+    def test_abort_broadcasts_signal_and_dumps(self):
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(store)
+        backend.fire_abort_hooks()
+        self.assertTrue(self._dumped())
+        self.assertEqual(self._signals(store), 1)
+        # Stock ProcessGroupNCCL terminates the process on its own key.
+        self.assertFalse(store.check(["exception_dump"]))
+        # One broadcast per arming, however many failures follow.
+        backend.fire_abort_hooks()
+        self.assertEqual(self._signals(store), 1)
+        hook.remove()
+
+    def test_signal_goes_through_prefix_store(self):
+        # Groups get a PrefixStore; the signal must use the store under it,
+        # which every group shares.
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(dist.PrefixStore("pg/", store))
+        # The baseline read at attach() polled the unprefixed key.
+        self.assertGreater(store.polls, 0)
+        backend.fire_abort_hooks()
+        self.assertEqual(self._signals(store), 1)
+        hook.remove()
+
+    def test_failed_broadcast_is_retried(self):
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(store)
+        store.fail = True
+        backend.fire_abort_hooks()
+        self.assertTrue(self._dumped())
+        self.assertEqual(self._signals(store), 0)
+        store.fail = False
+        backend.fire_abort_hooks()
+        self.assertEqual(self._signals(store), 1)
+        hook.remove()
+
+    def test_peer_signalled_failure_is_not_signalled_again(self):
+        # A rank that dumped on a peer's signal and then detects the failure
+        # itself must not signal it again: peers that already rearmed would
+        # dump it twice.
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(store)
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
+        backend.fire_abort_hooks()
+        self.assertEqual(self._signals(store), 1)
+        hook.remove()
+
+    def test_peer_signal_dumps_every_rank(self):
+        file_store = dist.FileStore(self.file_name, self.world_size)
+        store = _SignalStore(file_store)
+        backend, hook = self._attach(store)
+        # attach() takes the baseline before returning, so a signal sent once
+        # every rank attached reaches every rank.
+        file_store.set(f"attached{self.rank}", b"1")
+        if self.rank == 0:
+            file_store.wait([f"attached{r}" for r in range(self.world_size)])
+            backend.fire_abort_hooks()
+            self.assertTrue(self._dumped())
+            file_store.set("fired", b"1")
+        else:
+            file_store.wait(["fired"])
+            store.settle()
+            self.assertTrue(self._dumped())
+        hook.remove()
+
+    def test_signal_before_attach_is_ignored(self):
+        # torchelastic reuses its store across restarts, so a signal from an
+        # earlier attempt, ours or stock's, must not make the next one dump.
+        store = _SignalStore(dist.HashStore())
+        store.add(_DUMP_SIGNAL_KEY, 3)
+        store.set("exception_dump", struct.pack("i", 1))
+        _, hook = self._attach(store)
+        store.settle()
+        self.assertFalse(self._dumped())
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
+        hook.remove()
+
+    def test_poller_survives_store_errors(self):
+        store = _SignalStore(dist.HashStore())
+        _, hook = self._attach(store)
+        store.fail = True
+        store.wait_polls(store.polls + 2)
+        store._store.add(_DUMP_SIGNAL_KEY, 1)
+        store.fail = False
+        store.settle()
+        self.assertTrue(self._dumped())
+        hook.remove()
+
+    def test_poller_shared_until_last_hook_removed(self):
+        # One poller per process. attach() takes the baseline on the calling
+        # thread only when it starts the poller, which shows whether it did.
+        store = _SignalStore(dist.HashStore())
+        main = threading.get_ident()
+
+        def attach_started_poller(name):
+            before = store.poll_threads.count(main)
+            _, hook = self._attach(store, name)
+            return hook, store.poll_threads.count(main) > before
+
+        first, started = attach_started_poller("first")
+        self.assertTrue(started)
+        second, started = attach_started_poller("second")
+        self.assertFalse(started)
+        first.remove()
+        third, started = attach_started_poller("third")
+        self.assertFalse(started)
+        # Still polling for the remaining hooks.
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
+        second.remove()
+        third.remove()
+        fourth, started = attach_started_poller("fourth")
+        self.assertTrue(started)
+        fourth.remove()
+
+    def test_rearm(self):
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(store)
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
+        os.remove(self._dump_file_name())
+
+        # One dump per arming.
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertFalse(self._dumped())
+
+        # rearm() ignores signals sent before it, and dumps on the next one.
+        FlightRecorderHook.rearm()
+        store.settle()
+        self.assertFalse(self._dumped())
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
+
+        # The abort hook broadcasts again too.
+        FlightRecorderHook.rearm()
+        signals = self._signals(store)
+        backend.fire_abort_hooks()
+        self.assertEqual(self._signals(store), signals + 1)
+        hook.remove()
+
+    def test_dump_on_timeout_off(self):
+        os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "0"
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(store)
+        self.assertEqual(store.polls, 0)
+        backend.fire_abort_hooks()
+        self.assertFalse(self._dumped())
+        self.assertFalse(store.check([_DUMP_SIGNAL_KEY]))
+        hook.remove()
 
 
 class FlightRecorderHookGlooTest(MultiProcessTestCase):

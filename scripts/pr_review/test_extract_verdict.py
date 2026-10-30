@@ -21,6 +21,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("extract_verdict.py")
@@ -31,20 +32,26 @@ sys.path.insert(0, str(SCRIPT.parent))
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
 from extract_verdict import (
     _is_repo_path,  # noqa: E402
+    _XREF,
     analysis_view,
     build,
     check_charset,
     check_no_encoded_blob,
     downgrade,
     failure,
+    is_neutral_prose,
     MAX_DROPPED_TRACKED,
+    MAX_MESSAGE,
     MAX_PATH,
     MAX_SUMMARY,
     neutralize,
+    neutralize_message,
     neutralize_path,
     parse_diff,
+    published_findings,
     Rejected,
     sanitize_findings,
+    TRUNCATED,
 )
 
 
@@ -406,9 +413,9 @@ class TestRoundTwoRegressions(unittest.TestCase):
             build(ok_payload(findings=[]), parse_diff(DIFF))
 
     def test_a_clean_verdict_carrying_a_major_finding_is_refused(self):
-        # The suppression direction, and the one an injection wants: publish
-        # acts on `verdict`, so a clean verdict would move the PR to the
-        # terminal label while the artifact records a major problem nothing
+        # The suppression direction, and the one an injection wants: Dr. CI
+        # acts on the recorded `verdict`, so a clean verdict would mark the PR
+        # ready for review while the artifact records a major problem nothing
         # downstream reads.
         with self.assertRaises(Rejected):
             build(ok_payload(verdict="ready_for_human_review"), parse_diff(DIFF))
@@ -1274,6 +1281,81 @@ class TestTruncationNeverLeavesADanglingEscape(unittest.TestCase):
         self.assertEqual(trailing % 2, 0, f"ends on a lone backslash: {out[-6:]!r}")
 
 
+class TestAnOverflowingMessageEndsInAMarker(unittest.TestCase):
+    def test_a_message_within_the_cap_is_unchanged(self):
+        # Prose: `"x" * MAX_MESSAGE` is a blob that build() would drop.
+        text = ("word " * MAX_MESSAGE)[: MAX_MESSAGE - 1] + "s"
+        self.assertEqual(neutralize_message(text), text)
+
+    def test_a_cut_message_ends_in_the_marker_and_stays_publishable(self):
+        # Escaping grows `&` to `&amp;` and `[` to `\[`, so every offset of
+        # these lands the cut inside an entity or an escape pair somewhere.
+        for unit in ("&", "[", "<", "#1 ", "word "):
+            for pad in range(6):
+                text = "a" * pad + unit * (MAX_MESSAGE // len(unit) + 1)
+                out = neutralize_message(text)
+                self.assertTrue(out.endswith(TRUNCATED), repr(out[-12:]))
+                self.assertLessEqual(len(out), MAX_MESSAGE)
+                self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_the_marker_does_not_complete_a_url(self):
+        # Cut so the kept text ends in `www`; `www...` would be a live URL.
+        out = neutralize_message("& " * 248 + "abcd www text")
+        self.assertTrue(out.endswith("www" + TRUNCATED), repr(out[-12:]))
+        self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_the_cut_does_not_split_an_allowed_digest(self):
+        out = neutralize_message("& " * 228 + "abc " + "ab12cd34" * 16 + " is wrong.")
+        self.assertTrue(out.endswith("abc" + TRUNCATED), repr(out[-12:]))
+        self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_an_overlong_message_that_shrinks_when_neutralized_is_still_marked(self):
+        # Over MAX_MESSAGE on the way in, far under it once links are peeled.
+        out = neutralize_message("[x](y) " * 215)
+        self.assertTrue(out.endswith(TRUNCATED), repr(out[-12:]))
+        self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_a_single_token_with_no_publishable_prefix_comes_back_empty(self):
+        self.assertEqual(neutralize_message("&" * 274 + "ab12cd34" * 16 + ".bad"), "")
+
+    def test_a_blob_the_cut_did_not_cause_is_dropped_not_trimmed_away(self):
+        # neutralize() deletes the backslash, joining a 120-character blob.
+        blob = "A" * 60 + "\\" + "A" * 60
+        message = "word " * 50 + blob + " tail" * 300
+        kept, dropped, _ = sanitize_findings(
+            [
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "major",
+                    "message": message,
+                }
+            ],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], "failed_publish_check")
+
+    def test_a_digest_cut_by_the_input_slice_is_truncated_not_dropped(self):
+        message = "x " * 687 + "ab12cd34" * 16 + " is wrong."
+        kept, dropped, _ = sanitize_findings(
+            [
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "major",
+                    "message": message,
+                }
+            ],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(dropped, [])
+        self.assertTrue(kept[0]["message"].endswith("x" + TRUNCATED))
+
+    def test_a_message_that_neutralizes_to_nothing_gets_no_marker(self):
+        self.assertEqual(neutralize_message("\\" * (MAX_MESSAGE + 1)), "")
+
+
 class TestDowngradeKeepsTheOriginalReason(unittest.TestCase):
     def test_a_sanitizer_rejection_survives_a_later_step_failure(self):
         original = failure("sanitizer_rejected", "a specific refusal")
@@ -1340,6 +1422,46 @@ class TestTheAnalysisViewIsLinear(unittest.TestCase):
         half = base64.b64encode(bytes(range(256)) * 4).decode()[:70]
         with self.assertRaises(Rejected):
             check_no_encoded_blob(f"{half}&lt;i&gt;&lt;/i&gt;{half}", "t")
+
+
+class TestChainedCrossReferencesAreAllDefused(unittest.TestCase):
+    def test_every_link_in_a_chain_is_defused(self):
+        out = neutralize("pytorch/pytorch#199409/test-infra#8972 and a/b#1/c#2/d#3")
+        self.assertEqual(
+            out,
+            "pytorch/pytorch\\# 199409/test-infra\\# 8972 and a/b\\# 1/c\\# 2/d\\# 3",
+        )
+        self.assertIsNone(_XREF.search(out))
+
+
+class TestPathTrailingNewline(unittest.TestCase):
+    def test_a_trailing_newline_is_not_a_repo_path(self):
+        self.assertFalse(_is_repo_path("torch/x.py\n"))
+
+
+class TestBuildHoldsItsOutputToThePublishCheck(unittest.TestCase):
+    """The publish job re-checks with these predicates; build fails the same way."""
+
+    TOUCHED = {"src/app.py": {11, 12, 13, 14}, "README.md": {1, 2}}
+
+    def test_a_summary_failing_the_check_rejects_the_review(self):
+        with mock.patch("extract_verdict.is_neutral_prose", return_value=False):
+            with self.assertRaisesRegex(Rejected, "publish-side check"):
+                build(ok_payload(), self.TOUCHED)
+
+    def test_a_finding_failing_the_check_is_a_reported_drop(self):
+        with mock.patch("extract_verdict.is_publishable_finding", return_value=False):
+            kept, dropped, total = sanitize_findings(
+                ok_payload()["findings"], self.TOUCHED
+            )
+        self.assertEqual(kept, [])
+        self.assertEqual(total, 1)
+        self.assertEqual(dropped[0]["reason"], "failed_publish_check")
+
+    def test_ordinary_output_passes_the_check(self):
+        result = build(ok_payload(), self.TOUCHED)
+        self.assertEqual(published_findings(result), result["findings"])
+        self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
 
 
 if __name__ == "__main__":
