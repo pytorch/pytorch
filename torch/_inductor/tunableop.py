@@ -612,6 +612,12 @@ def maybe_range_pretune(winner) -> None:
         return
     if not isinstance(winner, sa.ExternKernelCaller):
         return
+    # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
+    # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
+    # worker would spend the whole per-GEMM budget on and record nothing for.
+    layout_device = getattr(winner.layout, "device", None)
+    if layout_device is None or layout_device.type != "cuda":
+        return
     # Match on the underlying ExternKernelChoice name. ExternKernelCaller
     # always sets self.choice (and its own name from it). Compared by string
     # so a double import of the kernel modules cannot break the match. Covers
@@ -719,21 +725,8 @@ def maybe_range_pretune(winner) -> None:
 
     try:
         sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
-        try:
-            scope = (torch.cuda.current_device(), resolve_filename(0))
-        except Exception:
-            scope = (None, "")
-        memo_key: Any = (
-            (winner.name, tuple(sigs), scope)
-            if all(x is not None for x in sigs)
-            else None
-        )
     except Exception:
-        memo_key = None
-    if memo_key is not None:
-        if memo_key in _pretuned_gemms.seen:
-            return
-        _pretuned_gemms.seen.add(memo_key)
+        sigs = [None]
 
     def _declared(expr: Any) -> tuple[int | None, int | None]:
         """(lower, upper) from ShapeEnv, each None when unbounded or symbolic."""
@@ -765,6 +758,25 @@ def maybe_range_pretune(winner) -> None:
     sym_ceiling = max(_TUNABLEOP_MAX_DYN_SYM, sym_hint)
     sym_hi = sym_ceiling if sym_hi is None else min(sym_hi, sym_ceiling)
     if sym_hi < 2:
+        return
+
+    def _memo_key() -> Any:
+        """Identifies a ladder already recorded in this process.
+
+        Rebuilt at the check and again at the record: submit() resolves and
+        pins the results file, so its name is only known after one succeeds.
+        The bounds are part of the key because a larger hint or a narrower
+        declared range produces a different ladder for the same operands.
+        """
+        if not all(x is not None for x in sigs):
+            return None
+        scope = (
+            (layout_device.type, layout_device.index),
+            torch.cuda.tunable.get_filename(),
+        )
+        return (winner.name, tuple(sigs), scope, sym_hint, sym_lo, sym_hi)
+
+    if (key := _memo_key()) is not None and key in _pretuned_gemms.seen:
         return
 
     def _eval_at(expr: Any, sym_val: int) -> int:
@@ -960,7 +972,8 @@ def maybe_range_pretune(winner) -> None:
 
     # One job per bucket so a fault costs a single size, but one budget for the
     # whole GEMM so compile time does not scale with the bucket count.
-    deadline = time.monotonic() + config.cuda.aten_tunableop_timeout
+    recorded = False
+    deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -968,7 +981,7 @@ def maybe_range_pretune(winner) -> None:
                 "TunableOp range pre-tune for %s exhausted its %.0fs budget after "
                 "%d/%d sizes; skipping the rest.",
                 winner.name,
-                config.cuda.aten_tunableop_timeout,
+                config.cuda.autotune_tunableop_timeout,
                 i,
                 len(bmreqs),
             )
@@ -998,7 +1011,9 @@ def maybe_range_pretune(winner) -> None:
                 time.monotonic() - bucket_start,
                 outcome.status,
             )
-        if outcome.status != "ok":
+        if outcome.status == "ok":
+            recorded = True
+        else:
             # Solutions found before the fault are already flushed to the
             # results file, and the worker restarts on the next submission.
             log.warning(
@@ -1008,3 +1023,6 @@ def maybe_range_pretune(winner) -> None:
                 i + 1,
                 len(bmreqs),
             )
+
+    if recorded and (key := _memo_key()) is not None:
+        _pretuned_gemms.seen.add(key)

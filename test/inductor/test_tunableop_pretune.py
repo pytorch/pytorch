@@ -28,7 +28,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-DEVICE = torch.device("cpu")
+DEVICE = torch.device("cuda")
+CPU_DEVICE = torch.device("cpu")
 DTYPE = torch.float16
 
 
@@ -418,6 +419,49 @@ class TestTunableOpPretune(TestCase):
             self.assertTrue(first)
             second = _run(self._mm_winner("mm", s), sym=s)
             self.assertEqual(second, [])
+        finally:
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_cpu_winner_is_skipped(self):
+        # The worker is a CUDA process: a CPU winner's bmreq would spend the
+        # whole per-GEMM budget there and record nothing.
+        s = sympy.Symbol("s_cpu", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.layout = ir.FixedLayout(
+            CPU_DEVICE, DTYPE, [s, 512], _contiguous_strides([s, 512])
+        )
+        self.assertEqual(_run(winner, sym=s), [])
+
+    def test_a_failed_run_is_retried(self):
+        # Recording the memo key before the submissions made one fault
+        # permanent for the process; a GEMM that tuned nothing must retry.
+        tunableop._pretuned_gemms.cache_clear()
+        try:
+            s = sympy.Symbol("s_retry", positive=True, integer=True)
+            with _ladder(s) as submitted:
+                with mock.patch(
+                    "torch._inductor.tunableop.submit",
+                    side_effect=lambda job, timeout=None: mock.Mock(
+                        status="error", time=None
+                    ),
+                ):
+                    tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+                self.assertEqual(submitted, [])
+                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+                self.assertTrue(submitted, "a failed GEMM must stay retryable")
+        finally:
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_memo_distinguishes_declared_range(self):
+        # A narrower declared range builds a different ladder for the same
+        # operands, so the second compile must not be skipped.
+        tunableop._pretuned_gemms.cache_clear()
+        try:
+            s = sympy.Symbol("s_range", positive=True, integer=True)
+            first = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
+            self.assertTrue(first)
+            second = _run(self._mm_winner("mm", s), sym=s, declared=(2, 4096))
+            self.assertTrue(second, "a different declared range is a new ladder")
         finally:
             tunableop._pretuned_gemms.cache_clear()
 
