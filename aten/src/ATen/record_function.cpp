@@ -134,6 +134,11 @@ class CacheEntry {
   StepCallbacks getActiveCallbacks();
   std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
 
+  // Whether any callback could run for this scope, without sampling.
+  bool hasCallbacks() const {
+    return !callbacks_.empty();
+  }
+
   // Full rebuild. (E.g. during registration)
   void update(const std::vector<RecordFunctionCallback>& callbacks);
 
@@ -183,6 +188,7 @@ class LocalCallbackManager {
   StepCallbacks getActiveCallbacks(const RecordScope scope);
   std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(
       const RecordScope scope);
+  bool hasCallbacks(const RecordScope scope);
 
   void setTLS(const RecordFunctionTLS& tls);
   void seed(uint32_t seed);
@@ -437,6 +443,11 @@ std::optional<StepCallbacks> LocalCallbackManager::
       .getActiveCallbacksUnlessEmpty();
 }
 
+bool LocalCallbackManager::hasCallbacks(const RecordScope scope) {
+  rebuildActiveCallbacksIfNeeded();
+  return active_callbacks_[static_cast<size_t>(scope)].hasCallbacks();
+}
+
 void LocalCallbackManager::setTLS(const RecordFunctionTLS& tls) {
   registered_callbacks_ = tls;
   updateCallbackSourceCount();
@@ -667,6 +678,10 @@ std::atomic<int64_t> num_callback_sources{0};
 
 std::optional<StepCallbacks> getStepCallbacksUnlessEmptySlow(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacksUnlessEmpty(scope);
+}
+
+bool hasCallbacksForScopeSlow(RecordScope scope) {
+  return LocalCallbackManager::get().hasCallbacks(scope);
 }
 } // namespace detail
 
