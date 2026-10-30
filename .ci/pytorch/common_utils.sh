@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -306,36 +306,10 @@ function install_torchrec_and_fbgemm() {
   fi
 }
 
-function clone_pytorch_xla() {
-  if [[ ! -d ./xla ]]; then
-    git clone --recursive --quiet https://github.com/pytorch/xla.git
-    pushd xla
-    # pin the xla hash so that we don't get broken by changes to xla
-    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
-    git submodule sync
-    git submodule update --init --recursive
-    popd
-  fi
-}
-
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
-}
-
-function install_torchcomms() {
-  local commit
-  commit=$(get_pinned_commit torchcomms)
-  export USE_GLOO=1
-  export USE_NCCLX=0
-  export USE_TRANSPORT=0
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    export USE_NCCL=1
-  else
-    export USE_NCCL=0
-  fi
-  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
 function install_nccl4py() {

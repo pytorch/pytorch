@@ -13,7 +13,8 @@ struct angle_functor {
   }
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(isnan(x) ? x : x < 0 ? M_PI_F : 0.0);
+    const bool neg = ::metal::signbit(static_cast<opmath_t<T>>(x));
+    return T(isnan(x) ? x : neg ? M_PI_F : 0.0);
   }
   template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
   inline float operator()(const T x) {
