@@ -1377,11 +1377,16 @@ class CppWrapperGpu(CppWrapperCpu):
 
     @cache_on_self
     def write_cutedsl_prelude_once(self) -> None:
-        from .cutedsl.user_kernel_aot import CPP_CUDA_ERROR_CHECK, CPP_HEADERS
+        from .cutedsl.user_kernel_aot import (
+            CPP_CUDA_ERROR_CHECK,
+            CPP_HEADERS,
+            CPP_INTEGER_ARG,
+        )
 
         for header in CPP_HEADERS:
             self.include_extra_header(header)
         self.header.splice(CPP_CUDA_ERROR_CHECK)
+        self.header.splice(CPP_INTEGER_ARG)
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         # Pure AOTI receives the stream as a function parameter. JIT and
@@ -2152,7 +2157,6 @@ static inline void ensure_triton_kernel_compiles_started() {{
     def define_user_defined_cutedsl_kernel(
         self,
         kernel: Any,
-        arg_names: tuple[str, ...],
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
     ) -> str:
@@ -2160,7 +2164,9 @@ static inline void ensure_triton_kernel_compiles_started() {{
         C++ launcher; returns the launcher's name. The counterpart of the
         DeferredTritonCallWrapper a user Triton kernel gets: export_to_c compiles the
         host function ahead of time into a header (spliced into the wrapper) and an
-        object (linked into the model .so by AotCodeCompiler).
+        object (linked into the model .so by AotCodeCompiler), for the parameter specs
+        that runtime_args (tensor layouts, scalar annotations) and constant_args give
+        (see cutedsl_param_specs).
 
         Constants are compiled into the object: an AOTI package keeps the values it
         was exported with; under torch.compile, Dynamo guards the constants a call
@@ -2242,17 +2248,21 @@ static inline void ensure_triton_kernel_compiles_started() {{
         kernel_name: str,
         kernel: Any,
         runtime_args: dict[str, Any],
-        constant_args: dict[str, Any],
         device: torch.device,
     ) -> None:
+        from cutlass.base_dsl.typing import Boolean, Integer
+
         exported = self._cutedsl_call_wrappers[kernel_name].exported
         param_ctypes = {name: ctype for ctype, name in exported.abi.params}
+        numeric_params = kernel_host_fn_info(kernel).numeric_params
         call_args = []
         tensors: list[str] = []
         tensor_dtypes: list[Any] = []
         for name, value in runtime_args.items():
             # The launcher takes a uint64_t scalar unsigned (see CuteDSLCallWrapper).
             uint64 = param_ctypes.get(name) == "uint64_t"
+            if isinstance(value, (int, float)):
+                value = cutedsl_static_scalar(kernel, name, value)
             if isinstance(value, IRNode):
                 tensor = self.create_tmp_raii_handle_var_if_needed(
                     value.codegen_reference()
@@ -2271,22 +2281,23 @@ static inline void ensure_triton_kernel_compiles_started() {{
             elif isinstance(value, float):
                 call_args.append(self.generate_float_value(value))
             elif isinstance(value, int) and uint64:
-                if not 0 <= value < 2**64:
-                    raise ValueError(
-                        f"CuTeDSL kernel {kernel.name}: {value} for {name!r} does "
-                        "not fit in uint64_t"
-                    )
                 call_args.append(f"{value}ULL")
             elif isinstance(value, int):
                 call_args.append(cexpr(sympy.Integer(value)))
             else:
                 expr = self.codegen_cpp_sizevar(value)
-                if uint64 and not V.graph.sizevars.statically_known_geq(value, 0):
+                if issubclass(numeric_params[name], Boolean):
+                    # The truthiness of a value of any C++ type, as the DSL converts
+                    # a Python value for a Boolean.
+                    expr = f"static_cast<bool>({expr})"
+                elif issubclass(numeric_params[name], Integer):
+                    # Converted as its C++ type requires (see CPP_INTEGER_ARG).
                     msg = cpp_string_literal(
                         f"CuTeDSL kernel {kernel.name}: scalar {name} does not fit "
-                        "in uint64_t"
+                        f"in {param_ctypes[name]}"
                     )
-                    self.writeline(f"AOTI_RUNTIME_CHECK(({expr}) >= 0, {msg});")
+                    target = "uint64_t" if uint64 else "int64_t"
+                    expr = f"cutedsl_integer_arg<{target}>({expr}, {msg})"
                 call_args.append(expr)
         current_stream_idx = V.graph.scheduler.current_stream_idx
         if (
@@ -2400,15 +2411,44 @@ def cutedsl_param_specs(
                     "cutlass Numeric type (e.g. cutlass.Int32) or cutlass.Constexpr"
                 )
             value = runtime_args[name]
-            hint = (
-                value
-                if isinstance(value, (int, float))
-                else sizevars.optimization_hint(value)
-            )
+            if isinstance(value, (int, float)):
+                hint = cutedsl_static_scalar(kernel, name, value)
+            elif isinstance(value, sympy.Expr):
+                hint = sizevars.optimization_hint(value)
+            else:  # a symbolic bool, which optimization_hint does not take
+                hint = True
             specs.append(ScalarParamSpec(name, info.numeric_params[name], hint))
         else:
             specs.append(ConstantParamSpec(name, constant_args[name]))
     return specs, check_align
+
+
+def cutedsl_static_scalar(kernel: Any, name: str, value: int | float) -> Any:
+    """A static value for scalar parameter ``name`` of a user CuTeDSL kernel, converted
+    as the DSL converts a Python value when the kernel is called: its truthiness for a
+    Boolean, truncated toward zero for another integer type. A value the integer type
+    cannot hold is refused (eager wraps it, and raises for NaN and infinity)."""
+    from cutlass.base_dsl.typing import Boolean, Integer
+
+    from .cutedsl.user_kernel_aot import scalar_ctype
+
+    annotation = kernel_host_fn_info(kernel).numeric_params[name]
+    if issubclass(annotation, Boolean):
+        return bool(value)
+    if not issubclass(annotation, Integer):
+        return value
+    half = 2 ** (annotation.width - 1)
+    lo, hi = (-half, half) if annotation.signed else (0, 2 * half)
+    try:
+        converted = int(value)
+    except (OverflowError, ValueError):  # infinity or NaN
+        converted = None
+    if converted is None or not lo <= converted < hi:
+        raise ValueError(
+            f"CuTeDSL kernel {kernel.name}: {value} for {name!r} does not fit in "
+            f"{scalar_ctype(annotation)}"
+        )
+    return converted
 
 
 def kernel_host_fn_info(kernel: Any) -> Any:

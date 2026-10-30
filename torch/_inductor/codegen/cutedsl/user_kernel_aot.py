@@ -39,6 +39,7 @@ from torch.utils._ordered_set import OrderedSet
 __all__ = [
     "CPP_CUDA_ERROR_CHECK",
     "CPP_HEADERS",
+    "CPP_INTEGER_ARG",
     "ConstantParamSpec",
     "CuteDSLExportedKernel",
     "CuteDSLExportError",
@@ -479,23 +480,31 @@ def _dsl_function_closure(host_fn: Callable[..., Any]) -> list[str]:
     return parts
 
 
-def _stable_repr(value: object) -> str:
+def _stable_repr(value: object, inside: frozenset[int] = frozenset()) -> str:
     """repr() made independent of the process, so that the kernel prefix is the same
     in every process for equal constants: objects that constant_key compares by
     content (see user_kernel_hop._object_state) by type and contents, set items
     sorted, and object addresses removed from any other repr. A constant whose own
-    repr differs between processes in another way still changes the prefix."""
+    repr differs between processes in another way still changes the prefix.
+
+    A value inside itself (``inside`` holds the ids of the values being walked) is
+    refused: constant_key does not walk a frozenset, so a cycle through one gets
+    here."""
     from torch._higher_order_ops.user_kernel_hop import _object_state
 
     if value is None or isinstance(value, (bool, int, float, str, bytes, torch.dtype)):
         return repr(value)
+    if id(value) in inside:
+        what = type(value).__name__
+        raise TypeError(f"a constant kernel argument of type {what} refers to itself")
+    rec = functools.partial(_stable_repr, inside=inside | {id(value)})
     if isinstance(value, (tuple, list)):
-        return f"{type(value).__name__}({', '.join(_stable_repr(v) for v in value)})"
+        return f"{type(value).__name__}({', '.join(rec(v) for v in value)})"
     if isinstance(value, (set, frozenset)):
-        items = sorted(_stable_repr(v) for v in value)
+        items = sorted(rec(v) for v in value)
         return f"{type(value).__name__}({', '.join(items)})"
     if isinstance(value, dict):
-        items = sorted((_stable_repr(k), _stable_repr(v)) for k, v in value.items())
+        items = sorted((rec(k), rec(v)) for k, v in value.items())
         return "dict(" + ", ".join(f"{k}: {v}" for k, v in items) + ")"
     if isinstance(value, Enum):
         return f"{type(value).__module__}.{type(value).__qualname__}.{value.name}"
@@ -508,7 +517,7 @@ def _stable_repr(value: object) -> str:
     name = f"{type(value).__module__}.{type(value).__qualname__}"
     state = _object_state(value)
     if state is not None:
-        return f"{name}({_stable_repr(state)})"
+        return f"{name}({rec(state)})"
     return f"{name}:{_OBJECT_ADDRESS.sub('', repr(value))}"
 
 
@@ -791,8 +800,8 @@ def _cpp_str(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-# Standard headers the declarations and launches below use.
-CPP_HEADERS = ("cstdint", "exception", "iostream", "mutex", "string")
+# Standard headers the declarations, launches and CPP_INTEGER_ARG use.
+CPP_HEADERS = ("cstdint", "exception", "iostream", "mutex", "string", "type_traits")
 
 # Defined once per wrapper, before the first export_to_c header (whose own definition
 # is #ifndef-guarded). Those headers print and carry on when a CUDA call fails; this
@@ -808,6 +817,29 @@ CPP_CUDA_ERROR_CHECK = r"""
             cudaGetErrorName(cutedsl_err_) + ": " +                        \
             cudaGetErrorString(cutedsl_err_));                             \
   } while (0)
+""".strip()
+
+# Defined once per wrapper. The C++ wrapper passes a symbolic value for an integer
+# parameter through it, so that the C++ type of the expression picks the conversion,
+# as it picks the dtype of a symbolic graph output (scalar_to_tensor_handle). A value
+# the launcher's int64_t or uint64_t parameter cannot hold (a negative one for
+# uint64_t; a floating one out of range, or NaN, whose conversion is undefined) is
+# refused; a floating one is truncated toward zero, as the DSL converts a float.
+CPP_INTEGER_ARG = r"""
+namespace {
+template <typename To, typename From>
+To cutedsl_integer_arg(From value, const char* msg) {
+  if constexpr (std::is_floating_point_v<From>) {
+    AOTI_RUNTIME_CHECK(
+        std::is_signed_v<To> ? value >= -0x1p63 && value < 0x1p63
+                             : value > -1.0 && value < 0x1p64,
+        msg);
+  } else if constexpr (std::is_unsigned_v<To> && std::is_signed_v<From>) {
+    AOTI_RUNTIME_CHECK(value >= 0, msg);
+  }
+  return static_cast<To>(value);
+}
+}  // namespace
 """.strip()
 
 
