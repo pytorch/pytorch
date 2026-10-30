@@ -417,10 +417,8 @@ def compute_ufunc_cpu_dtype_body(
     if UfuncKey.CPUVector in inner_loops:
         vec_loop = inner_loops[UfuncKey.CPUVector]
 
-    # NB: We DON'T use translate here, because translate is
-    # incapable of CSE'ing the scalar accesses in case it is also
-    # used by Vectorized; also, the unpacking here is very simple
-    # and only affects Scalar; everything else is implicitly captured
+    # NB: We DON'T use translate here, because the unpacking here is
+    # very simple and only affects Scalar; everything else is implicitly captured
     # by the lambda
 
     # Setup scalar in scope

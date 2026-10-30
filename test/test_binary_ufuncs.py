@@ -2013,31 +2013,48 @@ class TestBinaryUfuncsDevice(TestCase):
                     for x, y, z in zip(a_.tolist(), b_.tolist(), c_.tolist()):
                         self.assertEqual(x ^ y, z)
 
-    @dtypes(torch.float, torch.float16, torch.bfloat16)
+    @dtypes(torch.float)
     def test_add_with_tail(self, device, dtype):
         # test tensor where there is a tail which is not a multiple
-        # of GPU warp size or CPU vector size
+        # of GPU warp size
         for tail_size in [1, 63, 67, 130]:
             size = 4096 + tail_size
-            a = torch.randn(size, device=device, dtype=torch.float)
-            b = torch.randn(size, device=device, dtype=torch.float)
-            
-            # Fractional alpha to ensure we test opmath_t precision
-            alpha = 0.3
-            
-            a_dtype = a.to(dtype)
-            b_dtype = b.to(dtype)
-            
-            # The reference is computed in float32 and then cast back to dtype
-            # This verifies the single-rounding semantics of the ufunc kernel
-            c_ref = (a_dtype.float() + alpha * b_dtype.float()).to(dtype)
-            c = torch.add(a_dtype, b_dtype, alpha=alpha)
-            self.assertEqual(c, c_ref, exact_dtype=True)
+            a = torch.randn(size, device=device, dtype=dtype)
+            b = torch.randn(size, device=device, dtype=dtype)
+            c = a + b
+            for x, y, z in zip(a.tolist(), b.tolist(), c.tolist()):
+                self.assertEqual(x + y, z)
 
-            # Test sub
-            c_sub_ref = (a_dtype.float() - alpha * b_dtype.float()).to(dtype)
-            c_sub = torch.sub(a_dtype, b_dtype, alpha=alpha)
-            self.assertEqual(c_sub, c_sub_ref, exact_dtype=True)
+    @dtypes(torch.bfloat16, torch.float16, torch.complex32)
+    def test_add_sub_reduced_precision_alpha(self, device, dtype):
+        g = complex(0.052978515625, 0.052978515625) if dtype.is_complex else 0.052978515625
+        p = complex(-0.53125, -0.53125) if dtype.is_complex else -0.53125
+        alpha = 0.1
+
+        for n in [1, 31, 32, 33, 4096 + 67]:
+            x = torch.full((n,), g, device=device, dtype=dtype)
+            y = torch.full((n,), p, device=device, dtype=dtype)
+
+            x_comp = x.cfloat() if dtype.is_complex else x.float()
+            y_comp = y.cfloat() if dtype.is_complex else y.float()
+
+            ref_add = (x_comp + alpha * y_comp).to(dtype)
+            ref_sub = (x_comp - alpha * y_comp).to(dtype)
+
+            out_add = torch.add(x, y, alpha=alpha)
+            out_sub = torch.sub(x, y, alpha=alpha)
+
+            self.assertEqual(out_add, ref_add, atol=0, rtol=0, exact_dtype=True)
+            self.assertEqual(out_sub, ref_sub, atol=0, rtol=0, exact_dtype=True)
+
+            x_nc = torch.full((n * 2,), g, device=device, dtype=dtype)[::2]
+            y_nc = torch.full((n * 2,), p, device=device, dtype=dtype)[::2]
+
+            out_add_nc = torch.add(x_nc, y_nc, alpha=alpha)
+            out_sub_nc = torch.sub(x_nc, y_nc, alpha=alpha)
+
+            self.assertEqual(out_add_nc, ref_add, atol=0, rtol=0, exact_dtype=True)
+            self.assertEqual(out_sub_nc, ref_sub, atol=0, rtol=0, exact_dtype=True)
 
     # Tests that device tensors on different devices cannot be used in the same
     # binary operation, and that device "scalars" cannot be used in the same

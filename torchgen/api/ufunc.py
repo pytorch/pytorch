@@ -13,7 +13,6 @@ from torchgen.api.types import (
     CType,
     NamedCType,
     scalarT,
-    opmath_t,
 )
 from torchgen.model import (
     Argument,
@@ -57,7 +56,7 @@ def dispatchstub_type(t: Type, *, binds: ArgName) -> NamedCType | None:
 
 def opmath_type(scalar_t: BaseCppType) -> BaseCppType:
     if scalar_t == api_types.scalar_t:
-        return opmath_t
+        return api_types.opmath_t
     raise NotImplementedError
 
 
@@ -94,14 +93,16 @@ def ufunctor_apply_type(
 
 # The actual ufunc template function the user writes.  Everything here
 # is done in the computation type.  compute_t is opmath_t in CUDA and scalar_t
-# in CPU
+# in CPU.  Scalar arguments are always opmath_t (every ufunc's CPUVector
+# overload must follow this contract: take a scalar opmath_t, not
+# Vectorized<scalar_t>, for each Scalar argument).
 def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
     r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
         return r
 
     if t == BaseType(BaseTy.Scalar):
-        return NamedCType(binds, BaseCType(opmath_t))
+        return NamedCType(binds, BaseCType(api_types.opmath_t))
     elif t == BaseType(BaseTy.Tensor):
         return NamedCType(binds, compute_t)
     else:
