@@ -21,7 +21,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -1224,7 +1223,7 @@ class TestForeachDevice(TestCase):
             ),
         )
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.float64)
     def test_foreach_norm_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets:
@@ -1260,7 +1259,7 @@ class TestForeachDevice(TestCase):
                 ]
                 self.assertEqual(expect, actual)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
     def test_foreach_max_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets
@@ -1824,7 +1823,6 @@ class TestForeachDevice(TestCase):
         self.assertEqual(self_tensor, ref_out)
 
     @onlyAccelerator
-    @skipXPU
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_foreach_copy_barebones_unsigned(self, device, dtype):
         # The fused kernel doesn't instantiate these, so they take the slow path.
@@ -1836,7 +1834,7 @@ class TestForeachDevice(TestCase):
             torch._foreach_copy_(dst, src)
             self.assertEqual(dst, ref)
 
-    @onlyCUDA
+    @onlyAccelerator
     @parametrize("op_name", ["add", "sub"])
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     def test_binary_op_list_inplace_with_multi_dtypes(self, device, dtype, op_name):
