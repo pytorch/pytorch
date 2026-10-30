@@ -16,7 +16,10 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._prims_common import compute_required_storage_length
+from torch._prims_common import (
+    compute_required_storage_length,
+    is_non_overlapping_and_dense_or_false,
+)
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -37,9 +40,12 @@ def has_lazy_neg_bit(t: object) -> bool:
 
 
 def resolve_neg_preserving_strides(t: Tensor) -> Tensor:
-    # resolve_neg() returns a dense copy. Keep t's strides, as Inductor's
-    # clone_preserve_strides() does, so that gen_alias_from_base() can rebuild
-    # outputs aliasing the copy on the user's tensor.
+    # The copy keeps t's strides, so that gen_alias_from_base() can rebuild
+    # outputs aliasing it on the user's tensor. resolve_neg() already does for a
+    # non-overlapping and dense t; otherwise copy the span t covers, as
+    # Inductor's clone_preserve_strides() does.
+    if is_non_overlapping_and_dense_or_false(t):
+        return t.resolve_neg()
     needed = compute_required_storage_length(t.size(), t.stride(), 0)
     buffer = torch.as_strided(t, (needed,), (1,)).resolve_neg()
     return torch.as_strided(buffer, t.size(), t.stride())

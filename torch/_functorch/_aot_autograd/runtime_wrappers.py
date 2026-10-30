@@ -559,9 +559,11 @@ class _FirstInvocationContext:
 #
 # The runtime wrapper therefore hands the compiled graph resolved copies of
 # these inputs, and the backend compiles against resolved example inputs. The
-# copies keep the inputs' strides (resolve_neg_preserving_strides), so the
-# output alias replay can rebuild a graph output that views a copy on the
-# user's tensor even when it falls back to the output's strides and offset.
+# copies keep the inputs' strides (resolve_neg_preserving_strides) and start at
+# storage offset 0, so a graph output that views a copy maps onto the user's
+# tensor by shifting its storage offset by the input's. The output alias replay
+# relies on this when it falls back to the output's strides and offset, and the
+# mutation epilogue when it applies a metadata mutation.
 # The mutation epilogue and output alias replay keep using the user's original
 # tensors, which are captured before the call. A data mutation the graph
 # performs in place lands on the copy, so it is copied back after the call.
@@ -835,10 +837,12 @@ class _RuntimeForwardEpilogue:
                     updated_inpt = updated_inpt.alias
                 # We need to grab the size/stride/storage_offset from the compiled forward,
                 # and use that to mutate the metadata of the input
+                storage_offset = updated_inpt.storage_offset()
+                if meta.is_neg:
+                    # See Note [Resolving lazy negative inputs at the backend boundary]
+                    storage_offset += original_inpt.storage_offset()
                 original_inpt.as_strided_(
-                    updated_inpt.size(),
-                    updated_inpt.stride(),
-                    updated_inpt.storage_offset(),
+                    updated_inpt.size(), updated_inpt.stride(), storage_offset
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
@@ -1249,8 +1253,12 @@ def _create_runtime_wrapper(
                         buf.writeline(f"{u} = _unwrap_tensoralias({ui})")
                     else:
                         buf.writeline(f"{u} = {ui}")
+                    offset = f"{u}.storage_offset()"
+                    if meta.is_neg:
+                        # See Note [Resolving lazy negative inputs at the backend boundary]
+                        offset = f"{oi}.storage_offset() + {offset}"
                     buf.writeline(
-                        f"{oi}.as_strided_({u}.size(), {u}.stride(), {u}.storage_offset())"
+                        f"{oi}.as_strided_({u}.size(), {u}.stride(), {offset})"
                     )
                 else:
                     if meta.mutates_data and meta.mutates_metadata:

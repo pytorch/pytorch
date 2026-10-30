@@ -745,6 +745,43 @@ class TestAOTAutograd(_TestAOTAutogradBase):
             self.assertEqual(outs[0].stride(), outs_ref[0].stride())
             self.assertEqual(outs[0].data_ptr(), outs_ref[0].data_ptr())
 
+    def test_neg_view_input_metadata_mutation(self):
+        # The resolved copy starts at storage offset 0, so applying a metadata
+        # mutation to the user's tensor has to shift it back by the input's.
+        cases = [
+            (
+                lambda x: x.unsqueeze_(0) + 1,
+                lambda: torch.arange(10.0),
+                (slice(2, None),),
+            ),
+            (
+                lambda x: x.transpose_(0, 1) * 3,
+                lambda: torch.arange(24.0).view(4, 6),
+                (slice(1, None), slice(2, None)),
+            ),
+            # The epilogue applies a data and metadata mutation from a fresh
+            # graph output, which only matches at offset 0 (plain inputs too).
+            (
+                lambda x: x.unsqueeze_(0).mul_(2) + 1,
+                lambda: torch.arange(10.0),
+                (slice(8),),
+            ),
+        ]
+        for f, make_base, index in cases:
+            base_ref = make_base()
+            x_ref = base_ref[index]._neg_view()
+            out_ref = f(x_ref)
+
+            base = make_base()
+            x = base[index]._neg_view()
+            out = aot_function(f, self._no_neg_input_compiler)(x)
+            self.assertEqual(out, out_ref)
+            self.assertEqual(base, base_ref)
+            self.assertEqual(x, x_ref)
+            self.assertTrue(x.is_neg())
+            self.assertEqual(x.stride(), x_ref.stride())
+            self.assertEqual(x.storage_offset(), x_ref.storage_offset())
+
     def test_neg_view_input_mutated_in_training_graph(self):
         # x doesn't require grad, so its mutation stays in the training graph
         # and the resolved copy is copied back to the user's tensor.
