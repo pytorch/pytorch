@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import operator
 from collections.abc import Iterable
-from typing import Any, Literal, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -25,7 +25,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import _RICHCOMPARE_OPS, SourceLocation, ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
-        # Return pre-allocated sentinels for None/True/False when there are
+        # Return pre-allocated singleton constants when there are
         # no extra kwargs (source, etc.) that would differentiate the instance.
         if not kwargs:
             match value:
@@ -84,6 +84,8 @@ class ConstantVariable(VariableTracker):
                     return CONSTANT_VARIABLE_TRUE
                 case False:
                     return CONSTANT_VARIABLE_FALSE
+            if value is NotImplemented:
+                return CONSTANT_VARIABLE_NOT_IMPLEMENTED
 
         source = kwargs.get("source")
 
@@ -114,7 +116,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_base_literal(value):
             raise AssertionError(
@@ -230,7 +232,19 @@ class ConstantVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
-        return hash(self.value), False
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        from .user_defined import _CONSTANT_BASE_TYPES
+
+        if isinstance(self.value, torch.device) and _coor_enabled():
+            # Drop the index so an explicit cuda:N lands in the same bucket as a
+            # rank-relative CurrentDeviceVariable; see its hash_impl.
+            return hash(torch.device(self.value.type)), False
+
+        value_type = cast(Any, type(self.value))
+        mro = value_type.__mro__
+        base = next((c for c in mro if c in _CONSTANT_BASE_TYPES), value_type)
+        return base.__hash__(self.value), False
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
@@ -328,10 +342,11 @@ class ConstantVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
         from .tensor import SymNodeVariable
 
         if name == "format" and istype(self.value, str):
-            return variables.BuiltinVariable(str.format).call_function(
+            return SourcelessBuilder.create_internal_builtin(str.format).call_function(
                 tx,
                 [self, *args],
                 kwargs,
@@ -350,6 +365,8 @@ class ConstantVariable(VariableTracker):
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -371,13 +388,13 @@ class ConstantVariable(VariableTracker):
             try:
                 result = method(*const_args, **const_kwargs)
             except Exception as e:
-                raise_observed_exception(type(e), tx)
+                raise_observed_exception(type(e), tx, args=list(e.args))
             # str.split/rsplit/splitlines return a fresh caller-owned list;
             # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
             if name in ("split", "rsplit", "splitlines"):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
-        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
+        elif istype(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -389,6 +406,7 @@ class ConstantVariable(VariableTracker):
                     )
             if (
                 hasattr(operator, name)
+                and name not in _RICHCOMPARE_OPS
                 and len(args) == 1
                 and args[0].is_python_constant()
             ):
@@ -483,13 +501,28 @@ class ConstantVariable(VariableTracker):
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
-        if self.value is None or self.value is True or self.value is False:
+        if (
+            self.value is None
+            or self.value is True
+            or self.value is False
+            or self.value is NotImplemented
+        ):
             return id(self.value)
         # Sourceful constants resolve via source like any other sourceful VT.
         # Sourceless non-singleton constants (e.g. literal 42 in compiled code)
         # get FakeIdVariable — CPython interning of small ints/strings is an
         # implementation detail users shouldn't rely on.
         return super().get_id(tx)
+
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
+        if (
+            self is CONSTANT_VARIABLE_NONE
+            or self is CONSTANT_VARIABLE_TRUE
+            or self is CONSTANT_VARIABLE_FALSE
+            or self is CONSTANT_VARIABLE_NOT_IMPLEMENTED
+        ):
+            return ConstantVariable.create(self.value, source_location=source_location)
+        return super().with_source_location(source_location)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -525,7 +558,10 @@ class ConstantVariable(VariableTracker):
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
         # float defines nb_int (truncates toward zero via PyLong_FromDouble).
-        return ConstantVariable.create(int(self.value))
+        try:
+            return ConstantVariable.create(int(self.value))
+        except (OverflowError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def nb_float_impl(
         self,
@@ -534,7 +570,10 @@ class ConstantVariable(VariableTracker):
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
         # bool inherits nb_float from int via slot inheritance.
-        return ConstantVariable.create(float(self.value))
+        try:
+            return ConstantVariable.create(float(self.value))
+        except (OverflowError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def _nb_binary_impl(
         self,
@@ -899,6 +938,7 @@ class ConstantVariable(VariableTracker):
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
+CONSTANT_VARIABLE_NOT_IMPLEMENTED = ConstantVariable(NotImplemented)
 
 
 class FakeValueKind(enum.Enum):
@@ -931,6 +971,12 @@ class FakeIdVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.kind = kind
+
+    @staticmethod
+    def _create(value: int, kind: FakeValueKind = FakeValueKind.ID) -> FakeIdVariable:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create_internal_fake_id(value, kind)
 
     def as_python_constant(self) -> int:
         return self.value
@@ -1010,7 +1056,7 @@ class FakeIdVariable(VariableTracker):
             result = op(lhs, rhs)
         except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return FakeIdVariable(result)
+        return self._create(result)
 
     def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
         return self._nb_binary_impl(tx, other, operator.add, reverse)
@@ -1043,22 +1089,22 @@ class FakeIdVariable(VariableTracker):
         return self._nb_binary_impl(tx, other, operator.rshift, reverse)
 
     def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(-self.value)
+        return self._create(-self.value)
 
     def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(+self.value)
+        return self._create(+self.value)
 
     def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(abs(self.value))
+        return self._create(abs(self.value))
 
     def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(~self.value)
+        return self._create(~self.value)
 
     def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(int(self.value), kind=self.kind)
+        return self._create(int(self.value), kind=self.kind)
 
     def nb_index_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(self.value, kind=self.kind)
+        return self._create(self.value, kind=self.kind)
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

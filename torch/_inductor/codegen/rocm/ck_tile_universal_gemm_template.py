@@ -21,6 +21,12 @@ from ...utils import IndentedBuffer
 
 log = logging.getLogger(__name__)
 
+# Dtypes for which universal GEMM instances are generated. Every entry must have
+# a ck_dtype_to_size entry and a _CK_DTYPE_ALIASES entry on CKTileTemplate.
+GEMM_DTYPES = (
+    CKTileTemplate._TORCH_DTYPE_TO_CK[torch.float16],
+    CKTileTemplate._TORCH_DTYPE_TO_CK[torch.bfloat16],
+)
 
 _CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 _STRUCT_ANCHOR = "struct UniversalGemmPipelineProblem"
@@ -187,6 +193,8 @@ def ops():
     """
     import itertools
 
+    gemm_dtypes = [(d,) * 3 for d in GEMM_DTYPES]
+
     compute_v3_instances = [
         CKTileGemmOperation(
             layout_a=layout_a,
@@ -215,7 +223,7 @@ def ops():
             ("Row", "Row", "Row"),
             ("Row", "Col", "Row"),
         ]
-        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
         for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
@@ -253,7 +261,7 @@ def ops():
             ("Row", "Row", "Row"),
             ("Row", "Col", "Row"),
         ]
-        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
         for (tile_m, tile_n, tile_k) in [
             (256, 256, 32)
         ]  # half the tile size since it has double buffering
@@ -293,7 +301,7 @@ def ops():
             ("Row", "Row", "Row"),
             ("Row", "Col", "Row"),
         ]
-        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
         for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]

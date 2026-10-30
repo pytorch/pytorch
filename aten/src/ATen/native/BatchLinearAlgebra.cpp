@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -10,7 +9,6 @@
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cpu/zmath.h>
 
 #include <c10/util/irange.h>
 
@@ -602,16 +600,14 @@ TORCH_META_FUNC(_linalg_solve_ex)(const Tensor& A,
   TORCH_CHECK(left || !vector_case, "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. In this case linalg.solve is equivalent to B / A.squeeze(-1)");
   auto result_shape = vector_case ? IntArrayRef(B_broad_shape.data(), B_broad_shape.size() - 1)
                                   : B_broad_shape;
-  // row major for mps implementation
-  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/A.device().type() != at::kMPS? left : false);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/left);
 
   set_output_strided(0, result_shape, result_strides, B.options());
 
   auto shape = A.sizes();
   auto ndim = shape.size();
 
-  // LU, row major for mps
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/A.device().type() != at::kMPS? true : false);
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f_contig=*/true);
   set_output_strided(1, shape, LU_strides, A.options());
 
   // pivots
@@ -2866,6 +2862,11 @@ void linalg_eig_make_complex_eigenvectors(const Tensor& complex_vectors, const T
 DEFINE_DISPATCH(linalg_eig_stub);
 
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
+  // The MPS impl only operates on complex inputs
+  if (input.is_mps() && input.scalar_type() == c10::kFloat) {
+    return linalg_eig_out_info(input.to(toComplexType(input.scalar_type())), values, vectors, infos, compute_eigenvectors);
+  }
+
   auto options = input.options();
 
   // These internal asserts make explicit the assumptions in the implementation
@@ -3422,6 +3423,8 @@ static void linalg_lstsq_out_info(
   if (driver != "gels") {
     TORCH_INTERNAL_ASSERT(rank.sizes().equals(input_batch_shape));
     TORCH_INTERNAL_ASSERT(rank.is_contiguous());
+  } else {
+    at::native::resize_output(rank, {0});
   }
 
   // if 'singular_values' is empty we might resize it
@@ -3435,18 +3438,37 @@ static void linalg_lstsq_out_info(
   if (driver == "gelsd" || driver == "gelss") {
     TORCH_INTERNAL_ASSERT(singular_values.sizes().equals(singular_values_shape));
     TORCH_INTERNAL_ASSERT(singular_values.is_contiguous());
+  } else {
+    at::native::resize_output(singular_values, {0});
   }
 
   // 'input' is modified in-place so we need a column-major copy
   auto input_working_copy = copyBatchedColumnMajor(input);
 
-  // now the actual call that computes the result in-place (apply_lstsq)
-  lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
+  // Degenerate shapes are handled here rather than by the backends, whose LAPACK quick returns
+  // disagree: gels zeroes B (so the residuals read as zero), gelsy reports rank 0 when there are
+  // no right-hand sides, and gelsd/gelss access B even then.
+  if (std::min(m, n) == 0) {
+    // No singular values: the solution is zero, and B is left in place as the residual.
+    if (driver != "gels") {
+      rank.zero_();
+    }
+    infos.zero_();
+  } else if (solution.size(-1) == 0) {
+    // rank and singular values depend only on A, so solve against a single zero column.
+    auto rhs_shape = solution.sizes().vec();
+    rhs_shape.back() = 1;
+    auto rhs = at::zeros(rhs_shape, solution.options());
+    lstsq_stub(input.device().type(), input_working_copy, rhs, rank, singular_values, infos, rcond, driver);
+  } else {
+    // now the actual call that computes the result in-place (apply_lstsq)
+    lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
+  }
 
   // residuals are available only if m > n and drivers other than gelsy used
-  if (m > n && driver != "gelsy") {
+  bool compute_residuals = m > n && driver != "gelsy";
+  if (compute_residuals) {
     // if the driver is gelss or gelsd then the residuals are available only if rank == n
-    bool compute_residuals = true;
     if (driver == "gelss" || driver == "gelsd") {
       if (input.dim() == 2) {
         compute_residuals = (rank.item().toInt() == n);
@@ -3469,6 +3491,10 @@ static void linalg_lstsq_out_info(
       }
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
+  }
+  if (!compute_residuals) {
+    // an out= residuals tensor must come back empty, as it does from the functional variant
+    at::native::resize_output(residuals, {0});
   }
   auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
   // manually restride original
@@ -4021,7 +4047,7 @@ Tensor linalg_vander_symint(
     const Tensor& x,
     std::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
-  TORCH_CHECK(t == ScalarType::Float ||
+  TORCH_CHECK_NOT_IMPLEMENTED(t == ScalarType::Float ||
               t == ScalarType::Double ||
               t == ScalarType::ComplexFloat ||
               t == ScalarType::ComplexDouble ||

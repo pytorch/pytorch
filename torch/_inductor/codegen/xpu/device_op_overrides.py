@@ -9,6 +9,9 @@ from ..common import (
 
 
 class XPUDeviceOpOverrides(DeviceOpOverrides):
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        return True
+
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _xpu_getCurrentRawStream as {name}"
 
@@ -62,6 +65,9 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_device_ptr(self) -> str:
         return "void *"
+
+    def aten_device_type(self) -> str:
+        return "at::kXPU"
 
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None

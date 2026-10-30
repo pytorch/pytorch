@@ -1,5 +1,6 @@
 from inspect import getattr_static
-from typing import Any, TYPE_CHECKING, TypeGuard
+from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
@@ -34,13 +35,15 @@ class SDPAParamsVariable(VariableTracker):
     def create(
         tx: "InstructionTranslatorBase", value: Any, source: Source
     ) -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
         params = [
             VariableTracker.build(tx, getattr(value, p), AttrSource(source, p))
             for p in PARAM_NAMES
         ]
-        return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})
+        return SourcelessBuilder.create_internal_torch_function(
+            SDPAParams
+        ).call_function(tx, params, {})
 
     def __init__(
         self, proxy: Proxy, param_vars: list[VariableTracker], **kwargs: Any
@@ -99,5 +102,5 @@ class SDPAParamsVariable(VariableTracker):
             return wrap_fx_proxy(tx=tx, proxy=proxy)
 
     @staticmethod
-    def is_sdpa_params(value: Any) -> TypeGuard["SDPAParams"]:
+    def is_sdpa_params(value: object) -> TypeIs[type[SDPAParams]]:
         return value is SDPAParams

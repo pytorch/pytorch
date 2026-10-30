@@ -5,6 +5,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_torch/generated_enum_converters.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -441,7 +442,7 @@ void OSSProxyExecutor::get_input_info_from_serialized(
     // Doing a linear lookup in the schema to find the index
     // of a static argument. Should be fine performance wise
     // because we usually only have small amount of arguments.
-    for (size_t index = 0; index < schema_args.size(); index++) {
+    for (const auto index : c10::irange(schema_args.size())) {
       auto& schema_arg = schema_args[index];
       if (schema_arg.name() == name) {
         prefill_stack_with_static_arguments(
@@ -760,6 +761,17 @@ void OSSProxyExecutor::call_function(
     int length = dynamic_arg.length;
 
     if (length == 0) {
+      // An empty (Sym)IntList contributes no runtime ints, so the switch below
+      // never writes its slot and the op would see the default None and abort
+      // in toIntList()/toSymIntList(). An empty list is what the caller meant
+      // -- an empty size/stride is exactly a 0-d tensor. A genuinely-None
+      // optional list does not reach here: the as_none branch above registers a
+      // zero-length ListIntType only for a bare List[SymInt], which an Optional
+      // never is.
+      if (dynamic_arg_type == DynamicArgType::ListIntType &&
+          stack[arg_index].isNone()) {
+        stack[arg_index] = c10::List<int64_t>{};
+      }
       continue;
     }
 
@@ -778,7 +790,7 @@ void OSSProxyExecutor::call_function(
       case DynamicArgType::ListTensorType: {
         std::vector<at::Tensor> tensor_list;
         tensor_list.reserve(length);
-        for (int j = 0; j < length; j++) {
+        for ([[maybe_unused]] const auto _ : c10::irange(length)) {
           at::Tensor* tensor =
               tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
           tensor_list.push_back(*tensor);
@@ -809,7 +821,7 @@ void OSSProxyExecutor::call_function(
       case DynamicArgType::ListIntType: {
         std::vector<int64_t> vals;
         vals.reserve(length);
-        for (int j = 0; j < length; j++) {
+        for ([[maybe_unused]] const auto _ : c10::irange(length)) {
           vals.push_back(flatten_int_args[int_id++]);
         }
         stack[arg_index] = std::move(vals);

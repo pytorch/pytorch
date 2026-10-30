@@ -6,6 +6,8 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Synchronized.h>
+#include <c10/util/irange.h>
+#include <c10/util/string_view.h>
 #include <nlohmann/json.hpp>
 
 namespace torch::nativert::detail {
@@ -47,7 +49,7 @@ class PytreeNodeRegistry {
                std::vector<c10::IValue>& ivalues) {
               const auto& tuple = nested.toTupleRef().elements();
               TORCH_CHECK(tuple.size() == spec.children().size());
-              for (size_t i = 0; i < tuple.size(); i++) {
+              for (const auto i : c10::irange(tuple.size())) {
                 itreeFlatten(tuple[i], spec.children(i), ivalues);
               }
             },
@@ -61,7 +63,7 @@ class PytreeNodeRegistry {
                const ITreeSpec& spec) {
               const auto& tuple = nested.toTupleRef().elements();
               TORCH_CHECK(tuple.size() == spec.children().size());
-              for (size_t i = 0; i < tuple.size(); i++) {
+              for (const auto i : c10::irange(tuple.size())) {
                 ivalueApply(fn, tuple[i], spec.children(i));
               }
             }});
@@ -84,7 +86,7 @@ class PytreeNodeRegistry {
                const ITreeSpec& spec,
                std::vector<c10::IValue>& ivalues) {
               auto list = nested.toListRef();
-              for (size_t i = 0; i < list.size(); i++) {
+              for (const auto i : c10::irange(list.size())) {
                 itreeFlatten(list[i], spec.children(i), ivalues);
               }
             },
@@ -102,7 +104,7 @@ class PytreeNodeRegistry {
                const c10::IValue& nested,
                const ITreeSpec& spec) {
               auto list = nested.toListRef();
-              for (size_t i = 0; i < list.size(); i++) {
+              for (const auto i : c10::irange(list.size())) {
                 ivalueApply(fn, list[i], spec.children(i));
               }
             }});
@@ -316,27 +318,36 @@ class PytreeNodeRegistry {
             }});
   }
   bool hasNodeDef(std::string_view typeName) const {
-    return registry_.contains(std::string{typeName});
+    return registry_.contains(typeName);
   }
   const NodeDef& getNodeDef(std::string_view typeName) const {
-    return registry_.at(std::string{typeName});
+    auto it = registry_.find(typeName);
+    TORCH_CHECK_INDEX(
+        it != registry_.end(), "Unknown pytree node type: ", typeName);
+    return it->second;
   }
   void registerNode(std::string_view typeName, NodeDef nodeDef) {
-    TORCH_CHECK(!hasNodeDef(typeName));
-    registry_.emplace(typeName, nodeDef);
+    auto [_, inserted] =
+        registry_.try_emplace(std::string(typeName), std::move(nodeDef));
+    TORCH_CHECK(inserted);
   }
 
   void registerOrReplaceNode(std::string_view typeName, NodeDef nodeDef) {
-    auto it = registry_.find(std::string{typeName});
+    auto it = registry_.find(typeName);
     if (it != registry_.end()) {
-      it->second = nodeDef;
+      it->second = std::move(nodeDef);
     } else {
-      registry_.emplace(typeName, nodeDef);
+      registry_.emplace(typeName, std::move(nodeDef));
     }
   }
 
  private:
-  std::unordered_map<std::string, NodeDef> registry_;
+  std::unordered_map<
+      std::string,
+      NodeDef,
+      c10::TransparentStringHash,
+      std::equal_to<>>
+      registry_;
 };
 
 c10::Synchronized<PytreeNodeRegistry>& getPytreeNodeRegistry() {
@@ -379,7 +390,8 @@ ITreeSpec makeITreeSpec(
     offset += children.back().numIValues();
   }
 
-  return ITreeSpec(name, context, std::move(children), nodeDefCache);
+  return ITreeSpec(
+      name, std::move(context), std::move(children), std::move(nodeDefCache));
 }
 
 } // namespace
@@ -417,7 +429,7 @@ c10::IValue itreeUnflatten(
   if (spec.isIValue()) {
     return std::move(ivalues[0]);
   }
-  auto unflattenFn = spec.nodeDefCache().unflattenFn;
+  const auto& unflattenFn = spec.nodeDefCache().unflattenFn;
   if (spec.allIValues()) {
     return unflattenFn(std::move(ivalues), spec.context());
   }
@@ -463,7 +475,7 @@ std::vector<c10::IValue> itreeFlattenFromArgs(
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
   TORCH_CHECK(specArgs.children().size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     itreeFlatten(args[i], specArgs.children(i), ivalues);
   }
 
@@ -491,7 +503,7 @@ void ivalueApplyFromArgs(
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
   TORCH_CHECK(specArgs.children().size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     ivalueApply(fn, args[i], specArgs.children(i));
   }
 
@@ -589,7 +601,7 @@ ITreeSpec::ITreeSpec(
     : uniformName_(uniformName),
       context_(std::move(context)),
       children_(std::move(children)),
-      nodeDefCache_(nodeDefCache),
+      nodeDefCache_(std::move(nodeDefCache)),
       numIValues_(0),
       value_(nullptr),
       isUsed_(false) {

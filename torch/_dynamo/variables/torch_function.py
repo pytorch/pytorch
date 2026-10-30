@@ -58,7 +58,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
-from .functions import UserMethodVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -195,22 +195,22 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
             return ConstantVariable.create(None)
 
-        TorchInGraphFunctionVariable(
+        SourcelessBuilder.create_internal_torch_function(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
         return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslatorBase", *args: Any) -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
-        TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
-            tx, [], {}
-        )
+        SourcelessBuilder.create_internal_torch_function(
+            torch._C._pop_torch_function_stack
+        ).call_function(tx, [], {})
         return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
@@ -380,6 +380,8 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
     @classmethod
     def register_device_context_insertion(cls, tx: "InstructionTranslatorBase") -> None:
+        from .builder import VariableBuilder
+
         stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             return
@@ -387,8 +389,8 @@ class TorchFunctionModeStackVariable(VariableTracker):
             cls.offset += 1
             stack.insert(
                 0,
-                TorchFunctionModeVariable(
-                    None, source=TorchFunctionModeStackSource(-cls.offset)
+                VariableBuilder.create_internal_torch_function_mode_stack_entry(
+                    TorchFunctionModeStackSource(-cls.offset)
                 ),
             )
 
@@ -545,21 +547,31 @@ def dispatch_torch_function(
     fn: VariableTracker,
     args: Iterable[Any],
     kwargs: dict[str, Any],
+    relevant_args: Iterable[VariableTracker] | None = None,
 ) -> Any:
-    """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
+    """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args
 
-    all_args = _get_all_args(args, kwargs)
-    overloaded_args = _get_overloaded_args(
-        [arg for arg in all_args if has_torch_function(arg)],
-        _get_subclass_type,
-    )
+    ``relevant_args`` restricts the overload search to an explicit set of
+    values, matching ``torch.overrides.handle_torch_function``.
+    """
+
+    tf_state = tx.symbolic_torch_function_state
+    overloaded_args: list[Any]
+    if tf_state.torch_function_subclass_enabled:
+        all_args = (
+            _get_all_args(args, kwargs) if relevant_args is None else relevant_args
+        )
+        overloaded_args = _get_overloaded_args(
+            [arg for arg in all_args if has_torch_function(arg)],
+            _get_subclass_type,
+        )
+    else:
+        overloaded_args = []
 
     types = TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args])
 
-    if tx.symbolic_torch_function_state.in_torch_function_mode():
-        res = tx.symbolic_torch_function_state.call_torch_function_mode(
-            tx, fn, types, args, kwargs
-        )
+    if tf_state.torch_function_mode_enabled and tf_state.in_torch_function_mode():
+        res = tf_state.call_torch_function_mode(tx, fn, types, args, kwargs)
         if not res.is_constant_match(NotImplemented):
             return res
 
@@ -697,7 +709,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 attr_source = AttrSource(cls_source, name)
                 if isinstance(attr, types.FunctionType):
                     install_guard(attr_source.make_guard(GuardBuilder.CLOSURE_MATCH))
-                    return UserMethodVariable(attr, self)
+                    return UserMethodVariable(
+                        UserFunctionVariable(attr, source=attr_source), self
+                    )
 
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
@@ -709,7 +723,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
                 elif isinstance(attr, classmethod):
                     return UserMethodVariable(
-                        attr.__func__, self.class_type_var(tx), source=attr_source
+                        UserFunctionVariable(
+                            attr.__func__,
+                            source=attr_source and AttrSource(attr_source, "__func__"),
+                        ),
+                        self.class_type_var(tx),
+                        source=attr_source,
                     )
 
                 elif attr_is_overridden:

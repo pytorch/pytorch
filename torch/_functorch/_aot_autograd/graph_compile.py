@@ -42,12 +42,15 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
+from torch.fx.experimental.symbolic_shapes import (
+    fx_placeholder_vals,
+    statically_known_true,
+)
 from torch.fx.graph_module import GraphModule
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.types import py_sym_types
+from torch.types import IntLikeType, py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
@@ -58,10 +61,12 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, PlainAOTOutput
+from .codegen import aggregate_runtime_wrapper_sources
+from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
+    _should_disable_saved_tensors_hooks,
     AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -89,8 +94,13 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
-from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
+from .subclass_utils import (
+    compute_inner_input_info_from_subclass_meta,
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+)
 from .utils import (
+    _get_inner_meta,
+    _is_primal,
     contain_metadata_mutation_ops,
     get_default_generator,
     make_boxed_func,
@@ -315,18 +325,6 @@ def aot_stage2_export(
     return compiled_fn, aot_state.fw_metadata
 
 
-def _get_inner_meta(
-    maybe_subclass_meta: SubclassMeta | None,
-    fw_metadata: ViewAndMutationMeta,
-) -> ViewAndMutationMeta:
-    """
-    Util to get view and mutation metadata.
-    """
-    return (
-        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
-    )
-
-
 def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
     """
     Util to apply tensorify_python_scalars.
@@ -354,21 +352,22 @@ def aot_stage2_compile(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
-    if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
-        return aot_stage2_autograd(
-            aot_state,
-            aot_graph_capture,
-            partition_fn,
-            fw_compiler,
-            bw_compiler,
-        )
-    else:
-        return aot_stage2_inference(
-            aot_state,
-            aot_graph_capture,
-            partition_fn,
-            inference_compiler,
-        )
+    with aggregate_runtime_wrapper_sources():
+        if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
+            return aot_stage2_autograd(
+                aot_state,
+                aot_graph_capture,
+                partition_fn,
+                fw_compiler,
+                bw_compiler,
+            )
+        else:
+            return aot_stage2_inference(
+                aot_state,
+                aot_graph_capture,
+                partition_fn,
+                inference_compiler,
+            )
 
 
 def _log_inference_graph(
@@ -1981,11 +1980,36 @@ def _partition_joint_graph_into_fw_bw(
         # pyrefly: ignore [bad-assignment]
         fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
+    # The joint trace clones data-mutated grad inputs so backward sees their
+    # pre-mutation values. When the mutation is replayed by the runtime epilogue,
+    # the input placeholder is not a valid saved activation because it will be
+    # mutated after the AOT forward returns.
+    primals = [
+        node
+        for node in fx_g.graph.nodes
+        if _is_primal(node)
+        and not isinstance(node.meta.get("desc"), ForwardTokenAOTInput)
+    ]
+    # Subclass components do not carry the outer tensor's requires_grad, so
+    # take the info from the outer metadata expanded onto the inner inputs.
+    inner_input_info = compute_inner_input_info_from_subclass_meta(
+        fw_metadata, inner_meta
+    )
+    for node, info in zip(primals, inner_input_info):
+        if (
+            info.requires_grad
+            and info.mutates_data
+            and info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+        ):
+            node.meta["aot_runtime_epilogue_input_mutation"] = True
+
+    # fx_g's primals are the unwrapped inputs, whose static positions are in
+    # inner_meta.
     fw_module, bw_module = partition_fn(
         fx_g,
         joint_inputs,
         num_fwd_outputs=num_inner_fwd_outputs,
-        static_lifetime_input_indices=fw_metadata.static_input_indices,
+        static_lifetime_input_indices=inner_meta.static_input_indices,
     )
 
     rng_states = [
@@ -2012,6 +2036,7 @@ def _maybe_unlift_partitioned_effect_tokens(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    inner_meta: ViewAndMutationMeta,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     num_inner_fwd_outputs: int,
@@ -2022,7 +2047,9 @@ def _maybe_unlift_partitioned_effect_tokens(
     if config.unlift_effect_tokens and (
         num_tokens > 0 or fw_metadata.num_backward_tokens > 0
     ):
-        unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
+        unlift_tokens(
+            fw_module, fw_metadata, aot_config, bw_module, inner_meta=inner_meta
+        )
         num_inner_fwd_outputs -= num_tokens
         if isinstance(joint_inputs, tuple):
             joint_inputs = (
@@ -2269,19 +2296,23 @@ def _aot_stage2a_partition(
                     fw_module,
                     bw_module,
                     joint_inputs,
+                    inner_meta,
                     fw_metadata,
                     aot_config,
                     num_inner_fwd_outputs,
                 )
             )
 
+            fw_metadata.disable_saved_tensors_hooks = (
+                _should_disable_saved_tensors_hooks()
+            )
             maybe_inline_graph_saved_tensors_hooks(
                 fw_module,
                 bw_module,
                 num_inner_fwd_outputs,
                 inner_meta,
                 aot_config,
-                fw_metadata.static_input_indices,
+                inner_meta.static_input_indices,
             )
             num_fw_outs_saved_for_bw, num_symints_saved_for_bw = (
                 _categorize_saved_tensors_for_backward(
@@ -2320,7 +2351,7 @@ def _aot_stage2b_fw_compile(
     # pyrefly: ignore [implicit-any]
     fw_compiler: Callable,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
         adjusted_flat_args,
@@ -2337,7 +2368,7 @@ def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
-    fwd_output_strides: list[tuple[int, ...] | None] | None,
+    fwd_output_strides: list[tuple[IntLikeType, ...] | None] | None,
     num_symints_saved_for_bw: int,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
@@ -2375,47 +2406,40 @@ def _aot_stage2b_bw_compile(
                 if forward_saved_for_backwards_strides is None:
                     continue
 
-                real_stride = None
+                inductor_stride = None
                 # Per all_args calling convention
                 j = i - num_symints_saved_for_bw
                 if 0 <= j < len(forward_saved_for_backwards_strides):
-                    real_stride = forward_saved_for_backwards_strides[j]
-                if real_stride is None:
+                    inductor_stride = forward_saved_for_backwards_strides[j]
+                if inductor_stride is None:
                     continue
 
-                # Comparing ph_arg.stride() with real_stride directly may
-                # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using suppress_guards and guard_or_true to avoid that.
-
-                stride_different = False
-                fake_mode = detect_fake_mode()
-                suppress_ctx = (
-                    fake_mode.shape_env.suppress_guards()
-                    if fake_mode is not None and fake_mode.shape_env is not None
-                    else nullcontext()
+                # Inductor can choose a different layout for a saved activation
+                # than the backward graph's placeholder has. This comparison must
+                # not specialize ph_arg's dynamic dims, which is why it is
+                # proof-only: statically_known_true consults the shape env's
+                # replacements and value ranges, and uses hints only to
+                # disprove, so it installs no guard and an incidental match at
+                # the current sizes is not mistaken for equality. A stride
+                # inductor genuinely specialized still compares equal, while
+                # s1 vs align(s1) correctly does not. inductor_stride may be
+                # symbolic, see set_tracing_context_output_strides.
+                stride_different = any(
+                    not statically_known_true(ph_stride == inductor_stride[k])
+                    for k, ph_stride in enumerate(ph_arg.stride())
                 )
 
-                # Inductor can choose different strides for activations than
-                # what backward graph has. if we can't statically tell that
-                # strides are the same, we assume they are not.
-                with suppress_ctx:
-                    for k in range(len(ph_arg.stride())):
-                        # real_stride can't be symbolic.
-
-                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
-                            stride_different = True
-                            break
-
                 if stride_different:
-                    # Note that here we use the stride of the real tensor to
-                    # restride a FakeTensor. This does not cause trouble
-                    # for dynamic shape since this code path only get
-                    # executed if layout optimization is enabled. And we
-                    # disable layout optimization for dynamic shape right
-                    # now.
+                    # Note that here we use the stride inductor chose to restride
+                    # a FakeTensor. Under dynamic shapes that stride can be
+                    # symbolic, since config.pad_dynamic_shapes lets inductor pad
+                    # a symbolically-shaped buffer. It has to stay symbolic here:
+                    # resolving it against the current hint bakes that constant
+                    # into the backward graph and breaks every later call whose
+                    # dynamic size differs.
                     #
-                    # A solution that decide stride order based on real
-                    # tensor's stride and then apply that stride order to
+                    # A solution that decide stride order based on inductor's
+                    # stride and then apply that stride order to
                     # the FakeTensor does not work smoothly since some
                     # tensor's layout is not 'dense'. E.g. mixnet_l has a
                     # tensor with size [8, 64, 112, 112] and strides
@@ -2425,7 +2449,7 @@ def _aot_stage2b_bw_compile(
 
                     ph_size = ph_arg.size()
 
-                    placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
+                    placeholder_list[i] = ph_arg.as_strided(ph_size, inductor_stride)
             compiled_bw_func = None
             if (
                 num_symints_saved_for_bw > 0
@@ -2778,7 +2802,7 @@ def _aot_stage2b_compile_forward_or_inference(
     is_inference: bool,
     num_fw_outs_saved_for_bw: int | None = None,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     """
     Compile the forward or inference graph. Returns:
     - the output strides of the forward graph

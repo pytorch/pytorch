@@ -1,0 +1,95 @@
+diff --git a/test/cpython/v3_13/test_copy.py b/test/cpython/v3_13/test_copy.py
+index 3dec64cc9a24141d606fe9a0c0e1b9b7f63ed807..26353d405a9fde1ce39a9627ba012b275dcc463c 100644
+--- a/test/cpython/v3_13/test_copy.py
++++ b/test/cpython/v3_13/test_copy.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_copy.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the copy module."""
+ 
+ import copy
+@@ -13,7 +67,7 @@ order_comparisons = le, lt, ge, gt
+ equality_comparisons = eq, ne
+ comparisons = order_comparisons + equality_comparisons
+ 
+-class TestCopy(unittest.TestCase):
++class TestCopy(CPythonTestCase):
+ 
+     # Attempt full line coverage of copy.py from top to bottom
+ 
+@@ -899,7 +953,7 @@ class TestCopy(unittest.TestCase):
+         g.b()
+ 
+ 
+-class TestReplace(unittest.TestCase):
++class TestReplace(CPythonTestCase):
+ 
+     def test_unsupported(self):
+         self.assertRaises(TypeError, copy.replace, 1)
+@@ -972,7 +1026,7 @@ class TestReplace(unittest.TestCase):
+             copy.replace(c, x=1, error=2)
+ 
+ 
+-class MiscTestCase(unittest.TestCase):
++class MiscTestCase(CPythonTestCase):
+     def test__all__(self):
+         support.check__all__(self, copy, not_exported={"dispatch_table", "error"})
+ 
+@@ -980,4 +1034,4 @@ def global_foo(x, y): return x+y
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
