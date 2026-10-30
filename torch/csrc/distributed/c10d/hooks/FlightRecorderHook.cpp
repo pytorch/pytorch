@@ -228,6 +228,9 @@ std::condition_variable broadcast_done;
 // Never erased: one entry per backend ever rearmed.
 std::unordered_map<const Backend*, uint64_t> backend_armed;
 uint64_t all_armed = 0;
+// rearm()'s wait for in-flight broadcasts, TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC
+// as parsed by the last attach(); see there.
+std::atomic<int> rearm_wait_ms{15 * 1000};
 
 // Whether `backend` was rearmed after `generation`.
 bool rearmedSince(const Backend* backend, uint64_t generation) {
@@ -393,10 +396,16 @@ void broadcastDumpSignal(
 // runs with the GIL held, and a poller mid-dump may be waiting on it for a
 // stack trace.
 struct DumpSignalPoller {
-  DumpSignalPoller(c10::intrusive_ptr<Store> store, std::string backend)
-      : store(std::move(store)), backend(std::move(backend)) {}
+  DumpSignalPoller(
+      c10::intrusive_ptr<Store> store,
+      std::string backend,
+      std::chrono::milliseconds interval)
+      : store(std::move(store)),
+        backend(std::move(backend)),
+        interval(interval) {}
   const c10::intrusive_ptr<Store> store;
   const std::string backend;
+  const std::chrono::milliseconds interval;
   std::mutex mutex;
   std::condition_variable cv;
   bool stop = false;
@@ -447,8 +456,6 @@ void takeBaseline(DumpSignalPoller& state, uint64_t generation) {
 
 void pollDumpSignal(std::shared_ptr<DumpSignalPoller> state) {
   c10::setThreadName("pt_fr_dump_sig");
-  const std::chrono::milliseconds interval{
-      std::max(getCvarInt(TORCH_FR_COORD_CHECK_MILSEC, 1000), 1)};
   bool failing = false;
   while (true) {
     try {
@@ -488,7 +495,8 @@ void pollDumpSignal(std::shared_ptr<DumpSignalPoller> state) {
       }
     }
     std::unique_lock<std::mutex> lock(state->mutex);
-    if (state->cv.wait_for(lock, interval, [&] { return state->stop; })) {
+    if (state->cv.wait_for(
+            lock, state->interval, [&] { return state->stop; })) {
       return;
     }
   }
@@ -496,7 +504,8 @@ void pollDumpSignal(std::shared_ptr<DumpSignalPoller> state) {
 
 void startDumpSignalPoller(
     c10::intrusive_ptr<Store> store,
-    std::string backend) {
+    std::string backend,
+    std::chrono::milliseconds interval) {
   std::shared_ptr<DumpSignalPoller> state;
   {
     std::lock_guard<std::mutex> lock(poller_mutex);
@@ -505,7 +514,7 @@ void startDumpSignalPoller(
       return;
     }
     poller = state = std::make_shared<DumpSignalPoller>(
-        std::move(store), std::move(backend));
+        std::move(store), std::move(backend), interval);
     poller_refs = 1;
   }
   // Only this hook's remove() can drop the count to zero, so the poller
@@ -546,6 +555,12 @@ void stopDumpSignalPoller() {
 std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     c10::intrusive_ptr<ProcessGroup> pg,
     std::vector<uint64_t> global_ranks) {
+  // Parsed here, on the caller's thread, so a malformed value fails attach()
+  // as it fails a stock group's constructor, rather than terminating the
+  // poller thread or throwing out of rearm() during a reconfigure.
+  const std::chrono::milliseconds poll_interval{
+      std::max(getCvarInt(TORCH_FR_COORD_CHECK_MILSEC, 1000), 1)};
+  rearm_wait_ms = getCvarInt(TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000);
   auto hook = std::shared_ptr<FlightRecorderHook>(
       new FlightRecorderHook(std::move(pg), std::move(global_ranks)));
   // Registration is deferred out of the constructor (shared_from_this is
@@ -589,7 +604,8 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
   }
   if (dumpOnTimeout() && hook->global_store_ &&
       hook->default_target_.recorder != nullptr) {
-    startDumpSignalPoller(hook->global_store_, hook->default_target_.name);
+    startDumpSignalPoller(
+        hook->global_store_, hook->default_target_.name, poll_interval);
     hook->polls_dump_signal_ = true;
   }
   return hook;
@@ -996,8 +1012,7 @@ void FlightRecorderHook::rearm(const Backend* backend) {
     // would read as a new signal. Bounded: the add() can queue behind another
     // thread's get() or wait() on the same store client, which may have no
     // timeout, and the caller may hold backend locks.
-    const std::chrono::milliseconds bound{
-        getCvarInt(TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000)};
+    const std::chrono::milliseconds bound{rearm_wait_ms.load()};
     if (!broadcast_done.wait_for(
             lock, bound, [] { return broadcasts_in_flight == 0; })) {
       LOG(WARNING) << "FlightRecorderHook: dump signal broadcast still in "

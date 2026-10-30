@@ -17,6 +17,7 @@ import threading
 import time
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -1572,6 +1573,17 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
         self.assertFalse(self._dumped())
         self.assertFalse(store.check([_DUMP_SIGNAL_KEY]))
         hook.remove()
+
+    def test_malformed_env_fails_attach(self):
+        # Parsed by attach() on the caller's thread, so a bad value raises there
+        # instead of terminating the poller thread or failing a later rearm().
+        for var in (
+            "TORCH_FR_COORD_CHECK_MILSEC",
+            "TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC",
+        ):
+            with self.subTest(var=var), mock.patch.dict(os.environ, {var: "x"}):
+                with self.assertRaisesRegex(RuntimeError, var):
+                    self._attach(_SignalStore(dist.HashStore()))
 
 
 class FlightRecorderHookGlooTest(MultiProcessTestCase):

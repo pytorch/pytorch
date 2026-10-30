@@ -123,6 +123,7 @@ class TORCH_API FlightRecorderHook
   // ignored: they report the failure already handled. rearm() rearms every
   // backend. Waits up to TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC for a broadcast
   // this process has in flight, and reads the store: call without the GIL.
+  // The next dump overwrites the previous trace file.
   static void rearm(const Backend& backend);
   static void rearm();
 
@@ -170,8 +171,8 @@ class TORCH_API FlightRecorderHook
   void retireCompleted(uint64_t completion_key, std::optional<float> duration);
   // The backend's own measurement, or nullopt if it cannot time collectives.
   std::optional<float> workDuration(const Work& work);
-  // Dumps the trace to disk, at most once per process. Deliberately takes no
-  // hook lock; see the definition.
+  // Dumps the trace to disk, at most once per arming (see rearm()).
+  // Deliberately takes no hook lock; see the definition.
   void onAbort();
   // Null: every backend.
   static void rearm(const Backend* backend);

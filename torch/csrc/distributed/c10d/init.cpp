@@ -5559,7 +5559,7 @@ failure it survived. Backends that reconfigure (nccl2) call it themselves;
 dump signals sent before the call are ignored. With a backend, only that
 backend's abort hooks are rearmed: a backend that failed earlier and was not
 rearmed since keeps reporting the failure already handled. Without one, every
-backend is.)");
+backend is. The next dump overwrites the previous trace file.)");
 
   py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
       module,
