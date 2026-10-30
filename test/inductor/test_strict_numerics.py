@@ -353,6 +353,39 @@ class StrictNumericsCompileTest(TestCase):
                         reenable_op_overrides(enable_op_symbols="sum.dim_IntList")
                     torch._dynamo.reset()
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("lambd", (-0.5, 0.0, 0.3, float("inf"), float("nan")))
+    def test_softshrink_backward_threshold(self, device, dtype, numerics, lambd):
+        x = _min_max_specials(dtype, device)
+        grad = x.flip(0)
+
+        def fn(grad, x):
+            return torch.ops.aten.softshrink_backward.default(grad, x, lambd)
+
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+            grad, x
+        )
+        self.assertEqual(
+            actual.view(_BIT_VIEW[dtype]), fn(grad, x).view(_BIT_VIEW[dtype])
+        )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_softshrink_backward_overflow(self, device, dtype):
+        x = torch.ones(4, device=device, dtype=dtype)
+        lambd = torch.finfo(dtype).max * 2
+
+        def fn(x):
+            return torch.ops.aten.softshrink_backward.default(x, x, lambd)
+
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            fn(x)
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        with self.assertRaisesRegex(Exception, "overflow"):
+            compiled(x)
+
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("op_name", ("i0", "i1"))
@@ -2112,6 +2145,7 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "nn_functional_softshrink",
         "mvlgamma_mvlgamma_p_1",
         "mvlgamma_mvlgamma_p_3",
         "mvlgamma_mvlgamma_p_5",
