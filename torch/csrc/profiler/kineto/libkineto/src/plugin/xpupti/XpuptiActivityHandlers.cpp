@@ -17,6 +17,7 @@
 #include "output_json.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
@@ -66,6 +67,20 @@ void XpuptiActivityProfilerSession::checkTimestampOrder(
     err_msg += " Queue: " + std::to_string(act2->resourceId());
     errors_.push_back(err_msg);
   }
+}
+
+inline uint64_t XpuptiActivityProfilerSession::toKinetoTime(
+    uint64_t ptiTimestamp) const {
+  // 0 is PTI's "not collected"; keep it recognizable.
+  if (!ptiClockIsMonotonicRaw_ || ptiTimestamp == 0) {
+    return ptiTimestamp;
+  }
+  // system_clock and MONOTONIC_RAW tick at slightly different rates while NTP
+  // slews the former; processTrace() measures that rate over the session.
+  const int64_t dt = static_cast<int64_t>(ptiTimestamp) - clockAtStart_.pti;
+  return static_cast<uint64_t>(
+      clockAtStart_.sys + dt +
+      std::llround(static_cast<double>(dt) * clockRateError_));
 }
 
 inline bool XpuptiActivityProfilerSession::outOfRange(
@@ -238,8 +253,8 @@ void XpuptiActivityProfilerSession::handleRuntimeKernelMemcpyMemsetActivities(
 
   auto& trace_activity = traceBuffer_.activities.back();
 
-  trace_activity->startTime = activity->_start_timestamp;
-  trace_activity->endTime = activity->_end_timestamp;
+  trace_activity->startTime = toKinetoTime(activity->_start_timestamp);
+  trace_activity->endTime = toKinetoTime(activity->_end_timestamp);
   trace_activity->threadId = activity->_thread_id;
   const auto role = ac2gFlowRole(activityType);
   if (role != Ac2gFlowRole::None) {
@@ -291,24 +306,24 @@ void XpuptiActivityProfilerSession::handleRuntimeKernelMemcpyMemsetActivities(
     addTimestampMetadata(
         trace_activity.get(),
         "appended",
-        activity->_append_timestamp,
-        activity->_start_timestamp);
+        toKinetoTime(activity->_append_timestamp),
+        trace_activity->startTime);
     addTimestampMetadata(
         trace_activity.get(),
         "submitted",
-        activity->_submit_timestamp,
-        activity->_start_timestamp);
+        toKinetoTime(activity->_submit_timestamp),
+        trace_activity->startTime);
     if constexpr (handleKernelActivities) {
       addTimestampMetadata(
           trace_activity.get(),
           "sycl_task_begin",
-          activity->_sycl_task_begin_timestamp,
-          activity->_start_timestamp);
+          toKinetoTime(activity->_sycl_task_begin_timestamp),
+          trace_activity->startTime);
       addTimestampMetadata(
           trace_activity.get(),
           "sycl_enqk_begin",
-          activity->_sycl_enqk_begin_timestamp,
-          activity->_start_timestamp);
+          toKinetoTime(activity->_sycl_enqk_begin_timestamp),
+          trace_activity->startTime);
     }
     trace_activity->addMetadata(XpuFields::kDevice, trace_activity->deviceId());
     trace_activity->addMetadataQuoted(
@@ -423,8 +438,8 @@ void XpuptiActivityProfilerSession::handleCommunicationActivity(
       traceBuffer_.span, ActivityType::COLLECTIVE_COMM, record_name);
   auto& comms_activity = *(traceBuffer_.activities.back());
 
-  comms_activity.startTime = activity_record._start_timestamp;
-  comms_activity.endTime = activity_record._end_timestamp;
+  comms_activity.startTime = toKinetoTime(activity_record._start_timestamp);
+  comms_activity.endTime = toKinetoTime(activity_record._end_timestamp);
   comms_activity.device = activity_record._process_id;
   comms_activity.resource = activity_record._thread_id;
   comms_activity.threadId = activity_record._thread_id;
@@ -514,8 +529,10 @@ void XpuptiActivityProfilerSession::handleSynchronizationActivity(
       traceBuffer_.span, ActivityType::XPU_SYNC, record_name);
   auto& synchronization_activity = *(traceBuffer_.activities.back());
 
-  synchronization_activity.startTime = activity_record._start_timestamp;
-  synchronization_activity.endTime = activity_record._end_timestamp;
+  synchronization_activity.startTime =
+      toKinetoTime(activity_record._start_timestamp);
+  synchronization_activity.endTime =
+      toKinetoTime(activity_record._end_timestamp);
   synchronization_activity.device = -1;
   synchronization_activity.resource = activity_record._thread_id;
   synchronization_activity.threadId = activity_record._thread_id;
@@ -563,8 +580,10 @@ void XpuptiActivityProfilerSession::handleOverheadActivity(
       ActivityType::OVERHEAD,
       overheadKindString(activity->_overhead_kind));
   auto& overhead_activity = traceBuffer_.activities.back();
-  overhead_activity->startTime = activity->_overhead_start_timestamp_ns;
-  overhead_activity->endTime = activity->_overhead_end_timestamp_ns;
+  overhead_activity->startTime =
+      toKinetoTime(activity->_overhead_start_timestamp_ns);
+  overhead_activity->endTime =
+      toKinetoTime(activity->_overhead_end_timestamp_ns);
   overhead_activity->device = -1;
   overhead_activity->resource = activity->_overhead_thread_id;
   overhead_activity->threadId = activity->_overhead_thread_id;
