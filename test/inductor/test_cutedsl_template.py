@@ -1,4 +1,9 @@
 # Owner(s): ["module: inductor"]
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -9,7 +14,6 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import MockGraphHandler
-
 
 try:
     import cutlass
@@ -66,6 +70,45 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 
     {{kernel_name}}_jit(cute_a, cute_b, cute_c, cuda.CUstream(stream))
     return {{get_output()}}
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    hw_info=None,
+):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode():
+        a = torch.empty_strided(
+            tuple(precompile_shapes["input_a"]),
+            tuple(precompile_strides["input_a"]),
+            dtype=getattr(torch, precompile_dtypes["input_a"]),
+            device="cpu",
+        )
+        b = torch.empty_strided(
+            tuple(precompile_shapes["input_b"]),
+            tuple(precompile_strides["input_b"]),
+            dtype=getattr(torch, precompile_dtypes["input_b"]),
+            device="cpu",
+        )
+        out = torch.empty_strided(
+            tuple(precompile_shapes["output"]),
+            tuple(precompile_strides["output"]),
+            dtype=getattr(torch, precompile_dtypes["output"]),
+            device="cpu",
+        )
+        cute.compile(
+            {{kernel_name}}_jit,
+            from_dlpack(a),
+            from_dlpack(b),
+            from_dlpack(out),
+            cute.runtime.make_fake_stream(),
+            options="--enable-tvm-ffi",
+        )
 """
 
 
@@ -247,6 +290,7 @@ def {{kernel_name}}_kernel():
                 input_nodes=[a, b],
                 layout=a.get_layout(),
                 THREADS_PER_BLOCK=256,
+                AOT_ARG_NAMES=("mA", "mB", "mC"),
             )
 
             if error or not choices:
@@ -281,6 +325,105 @@ def {{kernel_name}}_kernel():
             # Verify correctness
             expected = x + y
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
+    def test_cutedsl_add_aoti_package(self):
+        from torch._inductor.codecache import WritableTempFile
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
+        from torch._inductor.package import load_package
+
+        template_name = f"test_add_aoti_{id(self)}"
+        self.addCleanup(CuteDSLTemplate.all_templates.pop, template_name, None)
+        template = CuteDSLTemplate(
+            name=template_name,
+            source=CUTEDSL_ADD_TEMPLATE,
+        )
+        default_add_lowering = lowerings[torch.ops.aten.add.Tensor]
+        selected = []
+
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+            error = template.maybe_append_choice(
+                choices,
+                input_nodes=[a, b],
+                layout=a.get_layout(),
+                THREADS_PER_BLOCK=256,
+                AOT_ARG_NAMES=("mA", "mB", "mC"),
+            )
+            if error or not choices:
+                return default_add_lowering(a, b)
+            selected.append(True)
+            return choices[0].output_node()
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        x = torch.randn(128, 4, device="cuda")
+        y = torch.randn(128, 4, device="cuda")
+        exported = torch.export.export(Model(), (x, y), strict=False)
+        for package_cpp_only in (False, True):
+            with (
+                self.subTest(package_cpp_only=package_cpp_only),
+                patch.dict(
+                    lowerings,
+                    {torch.ops.aten.add.Tensor: cutedsl_add_lowering},
+                ),
+                WritableTempFile(suffix=".pt2") as package_file,
+                tempfile.TemporaryDirectory() as relocated_dir,
+            ):
+                package_path = torch._inductor.aoti_compile_and_package(
+                    exported,
+                    package_path=package_file.name,
+                    inductor_configs={
+                        "aot_inductor.package_cpp_only": package_cpp_only,
+                    },
+                )
+                relocated_path = os.path.join(relocated_dir, "model.pt2")
+                shutil.copy2(package_path, relocated_path)
+                actual = load_package(relocated_path)(x, y)
+                torch.testing.assert_close(actual, x + y)
+
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        """
+import importlib.abc
+import sys
+
+import torch
+from torch._inductor.package import load_package
+
+class BlockCuteDSL(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if (
+            fullname == "cutlass"
+            or fullname.startswith("cutlass.")
+            or fullname == "nvidia.cutlass"
+            or fullname.startswith("nvidia.cutlass.")
+        ):
+            raise ImportError("CuteDSL must not be imported by an AOTI package")
+        return None
+
+sys.meta_path.insert(0, BlockCuteDSL())
+assert "cutlass" not in sys.modules
+torch.manual_seed(1234)
+x = torch.randn(128, 4, device="cuda")
+y = torch.randn(128, 4, device="cuda")
+actual = load_package(sys.argv[1])(x, y)
+torch.testing.assert_close(actual, x + y)
+""",
+                        relocated_path,
+                    ],
+                    check=True,
+                )
+        self.assertTrue(selected, "AOTI test fell back instead of selecting CuteDSL")
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(

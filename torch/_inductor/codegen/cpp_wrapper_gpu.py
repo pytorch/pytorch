@@ -1720,6 +1720,9 @@ class CppWrapperGpu(CppWrapperCpu):
             for kernel in self._triton_call_wrappers.values():
                 self.prefix.writeline("\n")
                 kernel.generate(self)
+            for kernel in self.deferred_aot_call_wrappers.values():
+                self.prefix.writeline("\n")
+                kernel.generate(self)
 
             # Generate parallel kernel compilation initialization function.
             # JIT-only since AOTI has no Python dependency.

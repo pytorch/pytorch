@@ -3086,11 +3086,12 @@ class CppBuilder:
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
         lflags = " ".join(self._build_option.get_ldflags())
+        passthrough = " ".join(self._build_option.get_passthrough_args())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options({self._target_name} PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {lflags} {passthrough})
 
             # Add libraries
             target_link_libraries({self._target_name} PRIVATE {libs})

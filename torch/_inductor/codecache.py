@@ -3503,7 +3503,12 @@ end
             }.get("rocm" if torch.version.hip else device_type, CUDACodeCache)
 
             gpu_codecache = cache_cls()
-            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+            gpu_kernels_o = list(graph.wrapper_code.aot_kernel_objects)
+            gpu_kernels_o.extend(
+                path
+                for path in gpu_codecache.aot_kernels_o
+                if path not in graph.wrapper_code.aot_kernel_objects
+            )
             # clear the list of aot kernels after each linking
             gpu_codecache.aot_kernels_o.clear()
 
@@ -3637,11 +3642,22 @@ end
                             )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
+            aot_link_flags = (
+                *graph.wrapper_code.aot_link_options,
+                *(
+                    f"-l:{library}"
+                    for library in graph.wrapper_code.aot_link_libraries
+                ),
+            )
             so_build_options = CppTorchDeviceOptions(
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
+                extra_flags=(
+                    *graph.wrapper_code.external_kernel_libs,
+                    *aot_link_flags,
+                ),
             )
 
             if gpu_kernels_o and device_type == "xpu":
