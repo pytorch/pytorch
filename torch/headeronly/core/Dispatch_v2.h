@@ -42,7 +42,8 @@
       torch::headeronly::ScalarType::Float8_e5m2fnuz, \
       torch::headeronly::ScalarType::Float8_e4m3fn,   \
       torch::headeronly::ScalarType::Float8_e4m3fnuz, \
-      torch::headeronly::ScalarType::Float8_e8m0fnu
+      torch::headeronly::ScalarType::Float8_e8m0fnu,  \
+      torch::headeronly::ScalarType::Float8_e5m3fnu
 
 #define AT_INTEGRAL_TYPES                                                      \
   torch::headeronly::ScalarType::Byte, torch::headeronly::ScalarType::Char,    \
@@ -89,7 +90,8 @@
       torch::headeronly::ScalarType::Float8_e4m3fn,                            \
       torch::headeronly::ScalarType::Float8_e5m2fnuz,                          \
       torch::headeronly::ScalarType::Float8_e4m3fnuz,                          \
-      torch::headeronly::ScalarType::Float8_e8m0fnu
+      torch::headeronly::ScalarType::Float8_e8m0fnu,                           \
+      torch::headeronly::ScalarType::Float8_e5m3fnu
 
 // Calls BODY(T, ScalarTypeToCPPTypeT<T>) for each ScalarType T in the variadic
 // list. Additional type lists can be appended after a comma. No trailing comma.
