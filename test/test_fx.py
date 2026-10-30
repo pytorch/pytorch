@@ -84,7 +84,6 @@ from torch.testing._internal.common_utils import (
     IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -381,6 +380,31 @@ class TestFX(JitTestCase):
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
+    def test_codegen_with_invalid_keyword_arguments(self):
+        for name in ("from", "not-an-identifier"):
+            with self.subTest(name=name):
+                graph = torch.fx.Graph()
+                result = graph.call_function(dict, kwargs={name: 1})
+                graph.output(result)
+                gm = GraphModule(torch.nn.Module(), graph)
+
+                self.assertEqual(gm(), {name: 1})
+                self.assertIn(f"**{{{name!r}: 1}}", gm.code)
+
+    def test_boxed_codegen_with_invalid_keyword_argument(self):
+        def boxed_call(values, **kwargs):
+            return values[0] + kwargs["from"]
+
+        graph = torch.fx.Graph()
+        value = graph.placeholder("value")
+        result = graph.call_function(boxed_call, ([value],), {"from": 2})
+        result.meta["boxed_arg_indices"] = (0,)
+        graph.output(result)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(gm(1), 3)
+        self.assertIn("**{'from': 2}", gm.code)
+
     def test_tuple_return_annotation_for_schemas(self):
 
         # Target an op that returns multiple tensors (e.g., var_mean)
@@ -662,7 +686,7 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_via_decorator", m.code)
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_wrapped_via_decorator_and_transformed(self):
         self.assertEqual(wrapped_via_decorator(0), 1)
@@ -674,13 +698,13 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_via_decorator", m.code)
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
         transformed = torch.fx.Transformer(m).transform()
         self.assertIn("wrapped_via_decorator", transformed.code)
         self.assertEqual(transformed(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_wrap_with_submodule(self):
         class M(torch.nn.Module):
@@ -710,6 +734,18 @@ class TestFX(JitTestCase):
         retraced = symbolic_trace(m)
         self.assertIn("wrapped_via_decorator", retraced.code)
         self.assertEqual(retraced(0), 1)
+
+    def test_wrapped_trace_while_already_patched(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        with torch.fx._symbolic_trace._Patcher() as patcher:
+            torch.fx._symbolic_trace._patch_wrapped_functions(patcher)
+            m = symbolic_trace(to_trace)
+
+        targets = [n.target for n in m.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [real_wrapped_via_decorator])
+        self.assertEqual(m(0), 1)
 
     def test_wrap_decorated_function(self):
         def to_trace(y):
@@ -3790,7 +3826,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertIn("wrapped_via_decorator", traced.code)
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_ast_rewriter_wrapped_via_decorator_and_transformed(self):
         self.assertEqual(wrapped_via_decorator(0), 1)
@@ -3805,13 +3841,13 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertIn("wrapped_via_decorator", traced.code)
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
         transformed = torch.fx.Transformer(traced).transform()
         self.assertIn("wrapped_via_decorator", transformed.code)
         self.assertEqual(transformed(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_ast_rewriter_wrap_with_submodule(self):
         class M(torch.nn.Module):
@@ -6091,9 +6127,6 @@ class TestVisionTracing(JitTestCase):
             )
             kwargs = dict(num_classes=50)
             model_test = cls.generate_test_fn(k, x, kwargs)
-            model_test = unittest.skipIf(
-                TEST_WITH_ROCM, "Skipped on ROCm"
-            )(model_test)
             setattr(cls, test_name, model_test)
 
     @classmethod

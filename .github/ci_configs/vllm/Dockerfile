@@ -37,7 +37,7 @@ EOF
 
 # Install uv for faster pip installs
 RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv==0.8.4
+    python3 -m pip install uv==0.13.4
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
@@ -67,7 +67,7 @@ RUN if command -v apt-get >/dev/null; then \
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv==0.8.4
+    python3 -m pip install uv==0.13.4
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
@@ -241,7 +241,7 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv==0.8.4
+    python3 -m pip install uv==0.13.4
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
