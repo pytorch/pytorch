@@ -1602,6 +1602,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             ".agents/skills/pr-review/review-checklist.md",
             ".agents/skills/pr-review/bc-guidelines.md",
             ".agents/skills/pr-review/ci-runner-naming.md",
+            ".agents/skills/pr-review/ci-dependencies.md",
         }
         # THE EXACT SET, both ways. A file MISSING means a change there moves
         # the review's behaviour without moving the hash that identifies it; an
