@@ -16,8 +16,6 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/DeviceUtils.cuh>
-#include <ATen/ceil_div.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -30,7 +28,6 @@
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/logsumexp.h>
-#include <ATen/ops/sort.h>
 #include <ATen/ops/tensor.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
@@ -38,7 +35,6 @@
 
 #include <type_traits>
 #include <numeric>
-#include <optional>
 
 namespace at::native {
 
@@ -609,102 +605,6 @@ ctc_loss_zero_padded_gradients(
   }
 
 
-constexpr int ctc_loss_deterministic_threads = 128;
-
-template <typename target_t>
-__global__ void
-C10_LAUNCH_BOUNDS_2(ctc_loss_deterministic_threads, 1)
-ctc_loss_group_labels_kernel(
-    int64_t* labels, const target_t* targets, const int64_t* target_lengths,
-    const int64_t* target_offsets, int64_t target_stride, int64_t max_target_length,
-    int64_t batch_size, int64_t num_labels) {
-  for (int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-       index < batch_size * max_target_length;
-       index += static_cast<int64_t>(blockDim.x) * gridDim.x) {
-    int64_t b = index / max_target_length;
-    int64_t s = index % max_target_length;
-    labels[index] = s < target_lengths[b]
-        ? targets[target_offsets[b] + s * target_stride]
-        : num_labels;
-  }
-}
-
-__global__ void
-C10_LAUNCH_BOUNDS_2(ctc_loss_deterministic_threads, 1)
-ctc_loss_group_offsets_kernel(
-    const int64_t* labels, int64_t* offsets,
-    int64_t max_target_length, int64_t groups, int64_t batch_size, int64_t num_labels, bool dense) {
-  for (int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-       index < batch_size * groups;
-       index += static_cast<int64_t>(blockDim.x) * gridDim.x) {
-    int64_t b = index / groups;
-    int64_t g = index % groups;
-    int64_t label = dense ? g : labels[b * max_target_length + g];
-    if (label == num_labels || (!dense && g > 0 && label == labels[b * max_target_length + g - 1])) {
-      offsets[2 * index] = offsets[2 * index + 1] = 0;
-      continue;
-    }
-    // Dense groups are indexed by label; sparse groups use its first sorted occurrence.
-    for (int boundary = 0; boundary < 2; ++boundary) {
-      int64_t low = 0;
-      int64_t high = max_target_length;
-      while (low < high) {
-        int64_t mid = low + (high - low) / 2;
-        if (labels[b * max_target_length + mid] < label + boundary) {
-          low = mid + 1;
-        } else {
-          high = mid;
-        }
-      }
-      offsets[2 * index + boundary] = low;
-    }
-  }
-}
-
-template <typename scalar_t>
-__global__ void
-C10_LAUNCH_BOUNDS_2(ctc_loss_deterministic_threads, 1)
-ctc_loss_collect_deterministic_kernel(
-    scalar_t* grad, const scalar_t* log_probs, const scalar_t* grad_out,
-    const scalar_t* nll, const scalar_t* alpha, const scalar_t* beta,
-    const int64_t* labels, const int64_t* positions, const int64_t* offsets,
-    const int64_t* input_lengths, int64_t time, int64_t groups, int64_t max_target_length,
-    int64_t batch_size, int64_t lp_t_stride, int64_t lp_b_stride, int64_t lp_c_stride,
-    int64_t gr_t_stride, int64_t gr_b_stride, int64_t gr_c_stride, int64_t grad_out_stride,
-    int64_t alpha_b_stride, int64_t alpha_t_stride, int64_t alpha_s_stride,
-    int64_t beta_b_stride, int64_t beta_t_stride, int64_t beta_s_stride, bool zero_infinity) {
-  int lane = threadIdx.x % warpSize;
-  for (int64_t index = static_cast<int64_t>(blockIdx.x) * (blockDim.x / warpSize) + threadIdx.x / warpSize;
-       index < batch_size * time * groups;
-       index += static_cast<int64_t>(gridDim.x) * (blockDim.x / warpSize)) {
-    int64_t g = index % groups;
-    int64_t t = index / groups % time;
-    int64_t b = index / (groups * time);
-    int64_t start = offsets[2 * (b * groups + g)];
-    int64_t end = offsets[2 * (b * groups + g) + 1];
-    if (start == end || t >= input_lengths[b] || (zero_infinity && nll[b] == INFINITY)) {
-      continue;
-    }
-    int64_t c = labels[b * max_target_length + start];
-    scalar_t lp = log_probs[t * lp_t_stride + b * lp_b_stride + c * lp_c_stride];
-    scalar_t sum = 0;
-    for (int64_t i = start + lane; i < end; i += warpSize) {
-      int64_t s = 2 * positions[b * max_target_length + i] + 1;
-      sum += std::exp(alpha[b * alpha_b_stride + t * alpha_t_stride + s * alpha_s_stride]
-          + beta[b * beta_b_stride + t * beta_t_stride + s * beta_s_stride] + nll[b] - lp);
-    }
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-      scalar_t value = WARP_SHFL_DOWN(sum, offset);
-      if (lane < offset) {
-        sum += value;
-      }
-    }
-    if (lane == 0) {
-      grad[t * gr_t_stride + b * gr_b_stride + c * gr_c_stride] -= sum * grad_out[b * grad_out_stride];
-    }
-  }
-}
-
 // The backward. It essentially computes eq 16 by using the above kernels.
 // We don't do a lot of checking as we envision this to be called only when backpropagating through a (well-checked) forward.
 template<typename scalar_t, ScalarType target_scalar_type>
@@ -782,7 +682,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   // Note that for OK problems target length <= input length, so we
   // only consider input length.
   bool is_large = (2*log_probs.size(0)+(24*batch_size)/10+(2*num_labels)/10) > 450;
-  if (is_large) { // large alphabet, large batch
+  if (is_large && !globalContext().deterministicAlgorithms()) { // large alphabet, large batch
     // this computes the probs, minuend in (16)
     at::exp_out(grad, log_probs);
     // now we compute the subtrahend for the blanks. It is a straightforward reduction because we know that
@@ -805,73 +705,35 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       grad = at::where(neg_log_likelihood.view({1, batch_size, 1}) == Scalar(INFINITY), at::zeros({}, grad.options()), grad);
     }
 
-    if (globalContext().deterministicAlgorithms()) {
-      if (max_target_length > 0) {
-        constexpr int threads = ctc_loss_deterministic_threads;
-        int64_t max_blocks = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
-        auto blocks = [max_blocks](int64_t outputs, int64_t outputs_per_block) {
-          return std::min(at::ceil_div(outputs, outputs_per_block), max_blocks);
-        };
-        bool dense = num_labels <= max_target_length;
-        int64_t groups = std::min(num_labels, max_target_length);
-        auto labels = at::empty({batch_size, max_target_length}, targets.options().dtype(kLong));
-        ctc_loss_group_labels_kernel<target_t><<<blocks(labels.numel(), threads), threads, 0, stream>>>(
-            labels.mutable_data_ptr<int64_t>(), targets.const_data_ptr<target_t>(),
-            target_lengths_t.const_data_ptr<int64_t>(), tg_batch_offsets.const_data_ptr<int64_t>(),
-            tg_target_stride, max_target_length, batch_size, num_labels);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-        // Stable sorting fixes the reduction order of repeated nonblank labels.
-        auto [sorted_labels, positions] = at::sort(labels, std::optional<bool>(true), 1);
-        auto offsets = at::empty({batch_size, groups, 2}, labels.options());
-        ctc_loss_group_offsets_kernel<<<blocks(batch_size * groups, threads), threads, 0, stream>>>(
-            sorted_labels.const_data_ptr<int64_t>(), offsets.mutable_data_ptr<int64_t>(),
-            max_target_length, groups, batch_size, num_labels, dense);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-        int warps_per_block = threads / at::cuda::warp_size();
-        int64_t outputs = batch_size * log_probs.size(0) * groups;
-        ctc_loss_collect_deterministic_kernel<scalar_t><<<blocks(outputs, warps_per_block), threads, 0, stream>>>(
-            grad.mutable_data_ptr<scalar_t>(), log_probs.const_data_ptr<scalar_t>(),
-            grad_out.const_data_ptr<scalar_t>(), neg_log_likelihood.const_data_ptr<scalar_t>(),
-            log_alpha.const_data_ptr<scalar_t>(), log_beta.const_data_ptr<scalar_t>(),
-            sorted_labels.const_data_ptr<int64_t>(), positions.const_data_ptr<int64_t>(),
-            offsets.const_data_ptr<int64_t>(), input_lengths_t.const_data_ptr<int64_t>(),
-            log_probs.size(0), groups, max_target_length, batch_size,
-            log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
-            grad.stride(0), grad.stride(1), grad.stride(2), grad_out.stride(0),
-            log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
-            log_beta.stride(0), log_beta.stride(1), log_beta.stride(2), zero_infinity);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    } else {
-      // For the non-blank characters, we use a kernel to compute the subtrahend.
-      // Again we might configure block and grid in a better way.
-      int threads_target = max_threads;
-      while (threads_target / 2 >= max_target_length && threads_target > 1) {
-        threads_target /= 2;
-      }
-      int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
-      dim3 block(threads_target, threads_batch);
-      dim3 grid(
-          std::max<int>(
-              (max_target_length + threads_target - 1) / threads_target, 1),
-          (batch_size + threads_batch - 1) / threads_batch,
-          1);
-      ctc_loss_backward_collect_nonblank_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-        (grad.mutable_data_ptr<scalar_t>(),
-         grad_out.const_data_ptr<scalar_t>(), grad_out.stride(0),
-         log_alpha.const_data_ptr<scalar_t>(), log_beta.const_data_ptr<scalar_t>(),
-         log_probs.const_data_ptr<scalar_t>(), input_lengths_t.template const_data_ptr<int64_t>(),
-         targets.const_data_ptr<target_t>(), target_lengths_t.template const_data_ptr<int64_t>(),
-         neg_log_likelihood.const_data_ptr<scalar_t>(),
-         grad.stride(0), grad.stride(1), grad.stride(2),
-         log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
-         log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
-         log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-         tg_batch_offsets.template const_data_ptr<int64_t>(), tg_target_stride,
-         batch_size, zero_infinity);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    // For the non-blank characters, we use a kernel to compute the subtrahend.
+    // Again we might configure block and grid in a better way.
+    int threads_target = max_threads;
+    while (threads_target / 2 >= max_target_length && threads_target > 1) {
+      threads_target /= 2;
     }
-  } else { // small problem, use naive algorithm
+    int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
+    dim3 block(threads_target, threads_batch);
+    dim3 grid(
+        std::max<int>(
+            (max_target_length + threads_target - 1) / threads_target, 1),
+        (batch_size + threads_batch - 1) / threads_batch,
+        1);
+    ctc_loss_backward_collect_nonblank_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
+      (grad.mutable_data_ptr<scalar_t>(),
+       grad_out.const_data_ptr<scalar_t>(), grad_out.stride(0),
+       log_alpha.const_data_ptr<scalar_t>(), log_beta.const_data_ptr<scalar_t>(),
+       log_probs.const_data_ptr<scalar_t>(), input_lengths_t.template const_data_ptr<int64_t>(),
+       targets.const_data_ptr<target_t>(), target_lengths_t.template const_data_ptr<int64_t>(),
+       neg_log_likelihood.const_data_ptr<scalar_t>(),
+       grad.stride(0), grad.stride(1), grad.stride(2),
+       log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
+       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
+       log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
+       tg_batch_offsets.template const_data_ptr<int64_t>(), tg_target_stride,
+       batch_size, zero_infinity);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else { // Small problem or deterministic mode: use the naive algorithm.
+    // Reuse the collect kernel to avoid atomic accumulation.
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
     while (threads_input / 2 >= log_probs.size(0) && threads_input > 1) {
