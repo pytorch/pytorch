@@ -5232,10 +5232,10 @@ if HAS_CUDA_AND_TRITON:
             # The CPU constant is folded into a CUDA constant, so nothing runs
             # on the CPU and the graph is still captured.
             def f(x):
-                return x + torch.tensor([1.0, 2.0]).to(x.device)
+                return x + torch.arange(16.0).view(4, 4).to(x.device)
 
             compiled = torch.compile(f, mode="reduce-overhead")
-            x = torch.randn(2, device="cuda")
+            x = torch.randn(4, 4, device="cuda")
             self.assertEqual(self.run_twc(compiled, x), f(x))
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 

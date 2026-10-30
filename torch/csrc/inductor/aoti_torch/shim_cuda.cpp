@@ -122,6 +122,13 @@ AOTITorchError aoti_torch_create_cuda_mem_pool(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     // MemPool needs an initialized caching allocator on the current device.
     at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    // Split so hipify keeps the name, which ROCm's allocator reports too.
+    TORCH_CHECK(
+        c10::cuda::CUDACachingAllocator::name() !=
+            "c"
+            "udaMallocAsync",
+        "CUDA graph capture isn't supported with "
+        "PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync");
     at::cuda::CUDAGuard device_guard(
         static_cast<c10::DeviceIndex>(device_index));
     *ret_pool = reinterpret_cast<CUDAMemPoolHandle>(new at::cuda::MemPool());
@@ -133,12 +140,8 @@ AOTITorchError aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool) {
     auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
     if (mem_pool != nullptr) {
       // ~MemPool would throw, and so abort, while this thread captures.
-      cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
-      C10_CUDA_CHECK(cudaStreamIsCapturing(
-          c10::cuda::getCurrentCUDAStream(mem_pool->device()).stream(),
-          &status));
       TORCH_CHECK(
-          status == cudaStreamCaptureStatusNone,
+          !c10::cuda::getCurrentCUDAStream(mem_pool->device()).is_capturing(),
           "Can't delete a CUDA memory pool while the current stream on its "
           "device is capturing");
     }
@@ -174,13 +177,12 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
             capture_mode == cudaStreamCaptureModeRelaxed,
         "Invalid CUDA graph capture mode ",
         capture_mode);
-    // Split so hipify keeps the name, which ROCm's allocator reports too.
+#ifdef USE_ROCM
     TORCH_CHECK(
-        c10::cuda::CUDACachingAllocator::name() !=
-            "c"
-            "udaMallocAsync",
-        "CUDA graph capture isn't supported with "
-        "PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync");
+        false,
+        "CUDA graph capture isn't supported on ROCm yet, see "
+        "https://github.com/ROCm/rocm-systems/issues/12677");
+#endif // USE_ROCM
     auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
     // On another device, the allocator would quietly route the capture to a
     // new pool on that device.

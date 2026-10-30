@@ -102,13 +102,14 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     set_cwd,
-    skipIfRocm,
+    skipIfCachingAllocatorDisabled,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
     TEST_XPU,
+    xfailIfROCm,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
@@ -915,9 +916,12 @@ class AOTInductorTestsTemplate:
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
 
+    @skipIfCachingAllocatorDisabled
     def test_failed_inactive_constant_folding_keeps_active_constants(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
+        if torch.cuda.get_allocator_backend() != "native":
+            raise unittest.SkipTest("needs a memory fraction cap")
 
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -937,7 +941,7 @@ class AOTInductorTestsTemplate:
             }
         ):
             so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
-        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
         expected = model(x)
         self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
         params = dict(model.named_parameters())
@@ -948,19 +952,24 @@ class AOTInductorTestsTemplate:
         }
         runner.update_constant_buffer(new_weights, True, False)
 
-        # Leave too little memory for the 32 MB folded constant.
+        # Leave too little memory for the 32 MB folded constant. The fold
+        # allocates from a fresh pool, so it can't reuse cached blocks, which
+        # the cap doesn't cover.
         original_fraction = torch.cuda.get_per_process_memory_fraction()
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         total = torch.cuda.get_device_properties(self.device).total_memory
         fraction = (torch.cuda.memory_reserved() + (8 << 20)) / total
+        ooms = torch.cuda.memory_stats()["num_ooms"]
+        pool = torch.cuda.MemPool()
         torch.cuda.set_per_process_memory_fraction(fraction)
         try:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError), torch.cuda.use_mem_pool(pool):
                 runner.run_const_fold(True)
         finally:
             torch.cuda.empty_cache()
             torch.cuda.set_per_process_memory_fraction(original_fraction)
+        self.assertGreater(torch.cuda.memory_stats()["num_ooms"], ooms)
         self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
 
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
@@ -10561,15 +10570,16 @@ class AOTInductorTestsTemplate:
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
-    @skipIfRocm
+    @xfailIfROCm
     def test_aot_cudagraphs_accepts_capturable_model(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
         class CpuConstant(torch.nn.Module):
             def forward(self, x):
-                # Folded into a CUDA constant at compile time.
-                return x + torch.tensor([1.0, 2.0, 3.0, 4.0]).to(x.device)
+                # Folded into a CUDA constant at compile time. Larger than
+                # the constants Inductor inlines as literals.
+                return x + torch.arange(16.0).view(4, 4).to(x.device)
 
         @torch.compiler.nested_compile_region
         def scale(x):
@@ -10583,12 +10593,30 @@ class AOTInductorTestsTemplate:
             def forward(self, x, y):
                 return x + 1
 
+        class Attention(torch.nn.Module):
+            def forward(self, q):
+                # Tagged random for its dropout, which is 0 here.
+                return torch.nn.functional.scaled_dot_product_attention(q, q, q)
+
+        class StreamsAttribute(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.streams = torch.nn.ModuleList([torch.nn.Linear(4, 4)])
+
+            def forward(self, x):
+                return self.streams[0](x)
+
         x = torch.randn(4, 4, device=self.device)
+        q = torch.randn(1, 2, 16, 64, device=self.device)
         for model, inputs in (
             (torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU()), (x,)),
             (CpuConstant(), (x,)),
             (NestedRegion(), (x,)),
             (UnusedInput(), (x, torch.randn(3, device=self.device))),
+            (StreamsAttribute().to(self.device), (x,)),
+            # Different attention backends.
+            (Attention(), (q,)),
+            (Attention(), (q.bfloat16(),)),
         ):
             with self.subTest(type(model).__name__):
                 self.check_model(
@@ -10616,7 +10644,7 @@ class AOTInductorTestsTemplate:
                 inductor_configs={"aot_inductor.cudagraphs": True},
             )
 
-    @skipIfRocm
+    @xfailIfROCm
     def test_aot_cudagraphs_rejects_uncapturable_models(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10665,6 +10693,26 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return x + torch.rand_like(x)
 
+        class AttentionDropout(torch.nn.Module):
+            def forward(self, x):
+                q = x.view(1, 1, 4, 4)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, q, q, dropout_p=0.5
+                )
+
+        class SideStream(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.record_event().wait()
+                return y * 2
+
+        class Effectful(torch.nn.Module):
+            def forward(self, x):
+                # Checks for errors with an effectful op.
+                return torch.linalg.inv(x)
+
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
                 return torch._higher_order_ops.while_loop(
@@ -10684,6 +10732,9 @@ class AOTInductorTestsTemplate:
             (SyncsStream(), "incompatible op streams.synchronize_stream", {}),
             (SyncsDevice(), "incompatible op streams.synchronize_device", {}),
             (Random(), r"it uses random numbers \(prims.inductor_seeds", {}),
+            (AttentionDropout(), "it uses random numbers", {}),
+            (SideStream(), "it uses a side stream", {}),
+            (Effectful(), "_linalg_check_errors.* has side effects", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
         ):
             with (
@@ -10696,16 +10747,30 @@ class AOTInductorTestsTemplate:
                     inductor_configs={"aot_inductor.cudagraphs": True, **configs},
                 )
 
+        class MutatesOut(torch.nn.Module):
+            def forward(self, x, out):
+                torch.add(x, 1, out=out)
+                return out * 2
+
         class UnusedInput(torch.nn.Module):
             def forward(self, x, unused):
                 return x.relu()
 
         x = torch.randn(4, 4, device=self.device)
+        # The write-back copy_, out's only user, has no stack trace.
+        with self.assertRaisesRegex(
+            Exception, r"mutated inputs \(1 instances\)\. Found from"
+        ):
+            AOTIRunnerUtil.compile(
+                MutatesOut(),
+                (x, torch.randn(4, 4, device=self.device)),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
         devices = ["cpu"]
         if torch.cuda.device_count() >= 2:
             devices.append(f"{GPU_TYPE}:1")
         for device in devices:
-            msg = f"CUDA graph: input arg1_1 is on {device}"
+            msg = f"CUDA graph: input 1 is on {device}"
             with (
                 self.subTest("UnusedInput", device=device),
                 self.assertRaisesRegex(Exception, msg),
@@ -10716,7 +10781,7 @@ class AOTInductorTestsTemplate:
                     inductor_configs={"aot_inductor.cudagraphs": True},
                 )
 
-    @skipIfRocm
+    @xfailIfROCm
     def test_aot_cudagraphs_checks_subgraphs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10748,7 +10813,7 @@ class AOTInductorTestsTemplate:
                         inductor_configs={"aot_inductor.cudagraphs": True},
                     )
 
-    @skipIfRocm
+    @xfailIfROCm
     @requires_multigpu()
     def test_aot_cudagraphs_rejects_multi_device_model(self):
         if self.device != "cuda":
