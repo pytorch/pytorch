@@ -38,7 +38,6 @@ import re
 import sys
 import time
 import types
-import typing
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
@@ -226,7 +225,7 @@ from .base import (
     VariableTrackerMeta,
 )
 from .builtin import BuiltinVariable
-from .constant import ConstantVariable
+from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 from .ctx_manager import (
     AutocastModeVariable,
     CudagraphOverrideVariable,
@@ -244,6 +243,7 @@ from .descriptors import (
     MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
+    WrapperDescriptorVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -252,6 +252,7 @@ from .dicts import (
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
+from .exception import FrameSummaryVariable
 from .functions import (
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
@@ -266,6 +267,7 @@ from .functions import (
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
+    BaseHOPVariable,
     LocalMapWrappedHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
@@ -338,6 +340,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
+    AllowInGraphKind,
     DispatchKeySetVariable,
     FuncTorchInterpreterVariable,
     TorchCtxManagerClassVariable,
@@ -927,6 +930,77 @@ def _is_dim_dynamic_from_source_dynamism(
 
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
+
+    @staticmethod
+    def create_internal_user_function(
+        value: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
+        source: Source | None = None,
+        **options: Any,
+    ) -> UserFunctionVariable:
+        """Wrap a caller-selected function without applying trace-rule overrides."""
+        return UserFunctionVariable(value, source=source, **options)
+
+    @staticmethod
+    def create_internal_base_hop(
+        value: HigherOrderOperator,
+        source: Source | None = None,
+        **kwargs: Any,
+    ) -> BaseHOPVariable:
+        """Create the BaseHOP fallback selected by the HOP factory."""
+        from torch._higher_order_ops import BaseHOP
+
+        if not isinstance(value, BaseHOP):
+            raise AssertionError(f"Expected BaseHOP, got {type(value)}")
+        return BaseHOPVariable(value, source, **kwargs)
+
+    @staticmethod
+    def create_internal_method_descriptor(
+        descriptor: types.MethodDescriptorType,
+        owner: VariableTracker,
+        source: Source | None = None,
+    ) -> MethodDescriptorVariable:
+        """Create a method descriptor with its already-built owner VT."""
+        if not isinstance(descriptor, types.MethodDescriptorType):
+            raise AssertionError(f"Expected method descriptor, got {type(descriptor)}")
+        if not isinstance(owner, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker owner, got {type(owner)}")
+        return MethodDescriptorVariable(descriptor, owner=owner, source=source)
+
+    @staticmethod
+    def create_internal_wrapper_descriptor(
+        descriptor: types.WrapperDescriptorType,
+        owner: VariableTracker,
+        source: Source | None = None,
+    ) -> WrapperDescriptorVariable:
+        """Create a wrapper descriptor with its already-built owner VT."""
+        if not isinstance(descriptor, types.WrapperDescriptorType):
+            raise AssertionError(f"Expected wrapper descriptor, got {type(descriptor)}")
+        if not isinstance(owner, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker owner, got {type(owner)}")
+        return WrapperDescriptorVariable(descriptor, owner=owner, source=source)
+
+    @staticmethod
+    def create_internal_wrapper_user_function(
+        wrapper_obj: Any,
+        attr_to_trace: str,
+        source: Source | None = None,
+    ) -> WrapperUserFunctionVariable:
+        """Create a wrapper function without applying trace-rule overrides."""
+        if not (
+            is_function_or_wrapper(wrapper_obj)
+            or is_lru_cache_wrapped_function(wrapper_obj)
+        ):
+            raise AssertionError(
+                f"Expected function or wrapper, got {type(wrapper_obj)}"
+            )
+        return WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, source=source)
+
+    @staticmethod
+    def create_internal_torch_function_mode_stack_entry(
+        source: Source,
+    ) -> TorchFunctionModeVariable:
+        """Create the synthetic default-device mode-stack entry."""
+        return TorchFunctionModeVariable(None, source=source)
 
     def __init__(
         self,
@@ -2097,21 +2171,25 @@ class VariableBuilder:
             result = RandomVariable(value, source=self.source)
             self.tx.output.side_effects.track_mutable(value, result)
             return result
+        elif isinstance(value, replay_record.DummyModule):
+            # Replay substitutes recorded modules with DummyModule instances.
+            # Preserve their historical unguarded, immutable treatment: a
+            # MODULE_MATCH guard requires an actual module.
+            return PythonModuleVariable(
+                value,  # type: ignore[arg-type]
+                source=self.source,
+            )
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
-        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
+        elif isinstance(value, types.ModuleType):
             from torch.utils import _config_module
 
             if isinstance(value, _config_module.ConfigModule):
                 self.install_guards(GuardBuilder.MODULE_MATCH)
                 return UserDefinedObjectVariable(value, source=self.source)
             self.install_guards(GuardBuilder.MODULE_MATCH)
-            result = PythonModuleVariable(
-                # type: ignore[arg-type]
-                value,
-                source=self.source,
-            )
+            result = PythonModuleVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
         elif (
@@ -5547,6 +5625,48 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
+    @staticmethod
+    def create_internal_user_function(
+        value: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
+    ) -> UserFunctionVariable:
+        """Wrap a caller-selected function without applying trace-rule overrides."""
+        return UserFunctionVariable(value)
+
+    @staticmethod
+    def create_internal_builtin(value: Callable[..., Any]) -> BuiltinVariable:
+        r"""Wrap compiler-selected callables as exact BuiltinVariables.
+
+        Includes exception types; no generic reclassification is applied.
+        """
+        return BuiltinVariable(value)
+
+    @staticmethod
+    def create_internal_fake_id(
+        value: int, kind: FakeValueKind = FakeValueKind.ID
+    ) -> FakeIdVariable:
+        return FakeIdVariable(value, kind=kind)
+
+    @staticmethod
+    def create_internal_frame_summary(value: Any) -> FrameSummaryVariable:
+        return FrameSummaryVariable(value)
+
+    @staticmethod
+    def create_internal_itertools(value: Any) -> ItertoolsVariable:
+        return ItertoolsVariable(value)
+
+    @staticmethod
+    def create_internal_torch_ctx_manager(
+        value: Any,
+    ) -> TorchCtxManagerClassVariable:
+        """Wrap a compiler-selected context manager without trace-rule overrides."""
+        return TorchCtxManagerClassVariable(value)
+
+    @staticmethod
+    def create_internal_torch_function(
+        value: Callable[..., Any], kind: AllowInGraphKind | None = None
+    ) -> TorchInGraphFunctionVariable:
+        return TorchInGraphFunctionVariable(value, kind=kind)
+
     @overload
     @staticmethod
     def create(
@@ -5613,6 +5733,14 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
+        elif is_typing(value) or isinstance(value, types.GenericAlias):
+            return TypingVariable(value)
+        elif callable(value) and trace_rules.is_numpy(value):
+            return NumpyVariable(value)
+        elif trace_rules.is_numpy_dtype(value):
+            return NumpyDTypeVariable(value)
+        elif trace_rules.is_numpy_type_info(value):
+            return ConstantLikeVariable(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
@@ -5737,17 +5865,6 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(
-            value,
-            (
-                types.GenericAlias,
-                types.UnionType,
-                # `typing.Union[...]` evaluates to a `typing._UnionGenericAlias`
-                # on Python <= 3.13, not a `types.UnionType`
-                typing._UnionGenericAlias,  # type: ignore[attr-defined]
-            ),
-        ):
-            return TypingVariable(value)
         elif is_namedtuple(value):
             output = [
                 SourcelessBuilder.create(tx, getattr(value, name))
@@ -5883,6 +6000,9 @@ class SourcelessBuilder:
             lambda tx, value: FuncTorchInterpreterVariable(
                 value, mutation_type=ValueMutationNew()
             )
+        )
+        handlers[torch._C._functorch.CInterpreter] = (
+            lambda tx, value: UserDefinedObjectVariable(value)
         )
 
         handlers[torch.distributions.constraints._Real] = (
