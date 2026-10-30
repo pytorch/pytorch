@@ -25,6 +25,7 @@ This is a core part of Dynamo's tracing system, translating torch operations int
 traceable graph nodes while preserving correct semantics and handling edge cases.
 """
 
+import cmath
 import enum
 import functools
 import inspect
@@ -1345,6 +1346,58 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             converted = [pyfloat_as_double(tx, arg) for arg in args]
             return self.call_function(tx, converted, {})
+
+        @register(math.isclose, cmath.isclose)
+        def handle_isclose(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            if not any(
+                isinstance(arg, UserDefinedObjectVariable)
+                and not issubclass(arg.python_type(), complex)
+                for arg in (*args, *kwargs.values())
+            ):
+                return None
+
+            # Validate argument binding without running user conversion hooks.
+            try:
+                self.value(*([0.0] * len(args)), **dict.fromkeys(kwargs, 0.0))
+            except TypeError as exc:
+                raise_type_error(tx, str(exc))
+
+            bound = dict(zip(("a", "b"), args))
+            bound.update(kwargs)
+            for name in ("a", "b", "rel_tol", "abs_tol"):
+                if name not in bound:
+                    continue
+                arg = bound[name]
+                if self.value is cmath.isclose and name in ("a", "b"):
+                    if issubclass(arg.python_type(), complex):
+                        continue
+                    result = (
+                        arg._maybe_call_special(tx, "__complex__", [])
+                        if isinstance(arg, UserDefinedObjectVariable)
+                        else None
+                    )
+                    if result is not None:
+                        if not issubclass(result.python_type(), complex):
+                            raise_type_error(
+                                tx,
+                                "__complex__ returned non-complex "
+                                f"(type {result.python_type_name()})",
+                            )
+                        if result.python_type() is not complex:
+                            # Strict subclass returns also require a deprecation warning.
+                            return None
+                        bound[name] = specialize_symnode(result)
+                        continue
+                bound[name] = specialize_symnode(pyfloat_as_double(tx, arg))
+
+            return self.call_function(tx, [], bound)
 
         @register(math.radians)
         def handle_radians(

@@ -2152,6 +2152,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return pynumber_float(tx, arg)
 
+    def call_complex(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if len(args) == 1 and not kwargs and isinstance(args[0], SymNodeVariable):
+            return self.call_function(tx, [specialize_symnode(args[0])], {})
+        return None
+
     def call_bin(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:

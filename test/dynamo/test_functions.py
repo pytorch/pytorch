@@ -19,6 +19,7 @@ import types
 import typing
 import unittest
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import Any, Generic, TypeVar
 from typing_extensions import NamedTuple
 from unittest.mock import patch
@@ -3951,6 +3952,143 @@ partial_fn = functools.partial(fn, scale=2)
         torch.testing.assert_close(output_tensors, expected_tensors)
         if cnt2.frame_count != 1:
             raise AssertionError(f"Expected frame_count 1, got {cnt2.frame_count}")
+
+    @parametrize("fn", (math.isclose, cmath.isclose))
+    @parametrize("local", (False, True))
+    def test_isclose_fractions(self, fn, local):
+        def func(x, a, b):
+            if local:
+                a, b = Fraction(100000001, 10**8), Fraction(1)
+            return (
+                x + 1,
+                fn(a, b, rel_tol=1e-8),
+                fn(a=a, b=b, rel_tol=1e-9),
+                fn(a, 1.0, abs_tol=Fraction(1, 10**6)),
+            )
+
+        x = torch.ones(2)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        for a, b in ((100000001, 100000000), (100000100, 100000000)):
+            if not local:
+                a, b = Fraction(a, 10**8), Fraction(b, 10**8)
+            self.assertEqual(opt(x, a, b), func(x, a, b))
+
+    @parametrize("fn", (math.isclose, cmath.isclose))
+    def test_isclose_numeric_conversion(self, fn):
+        class Number:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value
+
+        def func(x, value):
+            return x + 1, fn(Number(value), 1.0, rel_tol=Number(1e-8))
+
+        x = torch.ones(2)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        for value in (1.0, 2.0, math.inf, math.nan):
+            self.assertEqual(opt(x, value), func(x, value))
+
+    def test_cmath_isclose_complex_conversion(self):
+        class Number:
+            def __complex__(self):
+                return 1 + 2j
+
+            def __float__(self):
+                raise AssertionError("__float__ must not be called")
+
+        def func(x):
+            return x + 1, cmath.isclose(Number(), 1 + 2j)
+
+        x = torch.ones(2)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    def test_cmath_isclose_invalid_complex(self):
+        class Number:
+            def __complex__(self):
+                return 1.0
+
+        def func(x):
+            try:
+                cmath.isclose(Number(), 1.0)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.ones(2)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("fn", (math.isclose, cmath.isclose))
+    @parametrize(
+        "case",
+        ("missing", "extra", "duplicate", "keyword", "bad_float", "raised", "negative"),
+    )
+    def test_isclose_errors(self, fn, case):
+        class Number:
+            def __float__(self):
+                if case == "bad_float":
+                    return 1
+                if case == "raised":
+                    raise OverflowError("conversion failed")
+                if case == "negative":
+                    return -1.0
+                raise AssertionError("__float__ must not be called")
+
+        def func(x):
+            try:
+                if case == "missing":
+                    fn(Number())
+                elif case == "extra":
+                    fn(Number(), 1.0, 0.0)
+                elif case == "duplicate":
+                    fn(Number(), 1.0, a=1.0)
+                elif case == "keyword":
+                    fn(Number(), 1.0, unknown=1.0)
+                elif case == "negative":
+                    fn(1.0, 1.0, abs_tol=Number())
+                else:
+                    fn(Number(), 1.0)
+            except (TypeError, ValueError, OverflowError) as exc:
+                return x + 1, type(exc), str(exc)
+            return x - 1, "no exception"
+
+        x = torch.ones(2)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("fn", (math.isclose, cmath.isclose))
+    def test_isclose_conversion_order(self, fn):
+        class Number:
+            def __float__(self):
+                self.converted = True
+                return 1.0
+
+        def func(x, obj):
+            try:
+                fn("not a number", obj)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.ones(2)
+        eager_obj, opt_obj = Number(), Number()
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x, opt_obj), func(x, eager_obj))
+        self.assertFalse(hasattr(eager_obj, "converted"))
+        self.assertFalse(hasattr(opt_obj, "converted"))
+
+    @parametrize("values", ((1.5, 2.5), (2, 3)))
+    def test_complex_symbolic_real(self, values):
+        def func(x, value):
+            return x + 1, complex(value)
+
+        x = torch.ones(2)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        for value in values:
+            self.assertEqual(opt(x, value), func(x, value))
 
     @parametrize(
         "name",
