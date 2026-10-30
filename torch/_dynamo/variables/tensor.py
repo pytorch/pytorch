@@ -3467,6 +3467,18 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_invert_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        if self.python_type() is not int:
+            return super().nb_invert_impl(tx)
+        return SymNodeVariable.create(
+            tx,
+            operator.neg(self.as_proxy()) - 1,
+            sym_num=None,
+        )
+
     def nb_power_impl(
         self,
         tx: "InstructionTranslatorBase",
