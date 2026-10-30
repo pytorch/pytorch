@@ -3768,7 +3768,7 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
-    torch._check(
+    torch._check_not_implemented(
         self.dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16],
         lambda: f"adaptive_avg_pool2d_backward not implemented for '{self.dtype}'",
     )

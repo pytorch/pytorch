@@ -7021,11 +7021,11 @@ for dtype in (torch.int32, torch.int64):
 
         x = torch.ones(1, 1, 5, 5, device=self.device, dtype=dtype)
         grad_output = torch.ones(1, 1, 3, 3, device=self.device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             fn(grad_output, x)
-        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             fn(grad_output.to("meta"), x.to("meta"))
-        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, fullgraph=True)(grad_output, x)
 
     @skip_if_mps  # MPS does not support float8 tensors.
@@ -7036,11 +7036,11 @@ for dtype in (torch.int32, torch.int64):
 
         x = torch.ones(1, 1, 5, 5, device=self.device).to(dtype)
         grad_output = torch.ones(1, 1, 3, 3, device=self.device).to(dtype)
-        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             fn(grad_output, x)
-        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             fn(grad_output.to("meta"), x.to("meta"))
-        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, fullgraph=True)(grad_output, x)
 
     @parametrize(
@@ -7085,13 +7085,22 @@ for dtype in (torch.int32, torch.int64):
 
     @skipCPUIf(True, "CPU eager does not support empty spatial dimensions")
     @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
-    @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0), (0, 2, 3, 4)])
+    @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0)])
     def test_adaptive_avg_pool2d_backward_empty_input(self, input_size):
         def fn(grad_output, x):
             return aten._adaptive_avg_pool2d_backward(grad_output, x)
 
         x = torch.empty(input_size, device=self.device)
         grad_output = torch.empty(input_size[0], 2, 2, 3, device=self.device)
+        self.common(fn, (grad_output, x), check_lowp=False)
+
+    @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
+    def test_adaptive_avg_pool2d_backward_empty_batch(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.empty(0, 2, 3, 4, device=self.device)
+        grad_output = torch.empty(0, 2, 2, 3, device=self.device)
         self.common(fn, (grad_output, x), check_lowp=False)
 
     @xfail_if_mps  # float64 is not supported on MPS
