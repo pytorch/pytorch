@@ -49,12 +49,14 @@ from torch._prims_common import (
 from torch._refs import (
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
+    xlogy as decomp_xlogy,
 )
 from torch._refs.nn.functional import (
     _aten_hardtanh as decomp_hardtanh,
     gelu as decomp_gelu,
     softplus as decomp_softplus,
 )
+from torch._refs.special import xlog1py as decomp_xlog1py
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -137,6 +139,8 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
 decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = [
+    aten.xlogy,
+    aten.special_xlog1py,
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -792,6 +796,30 @@ def hardsigmoid(self: torch.Tensor) -> torch.Tensor:
     if is_strict_cuda_triton(self.device):
         return torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
     return decomp_hardsigmoid(self)
+
+
+def _strict_xlogy_nan(result, a, b):
+    if not is_strict_cuda_triton(result.device):
+        return result
+    if result.dtype in (torch.float16, torch.bfloat16):
+        # Eager narrows every NaN result on device, producing the all-ones payload.
+        bits = (result.view(torch.int16) | -1) & 0x7FFF
+        return torch.where(torch.isnan(result), bits.view(result.dtype), result)
+    if result.dtype == torch.float32 and isinstance(a, float) and math.isnan(a):
+        bits = torch.full((), 0x7FFFFFFF, dtype=torch.int32, device=result.device)
+        # A scalar NaN product executes in eager; the compiler can fold its payload.
+        return torch.where(torch.isnan(b), result, bits.view(result.dtype))
+    return result
+
+
+@register_decomposition(aten.xlogy)
+def xlogy(a, b):
+    return _strict_xlogy_nan(decomp_xlogy(a, b), a, b)
+
+
+@register_decomposition(aten.special_xlog1py)
+def special_xlog1py(a, b):
+    return _strict_xlogy_nan(decomp_xlog1py(a, b), a, b)
 
 
 @register_decomposition([aten.round.decimals])

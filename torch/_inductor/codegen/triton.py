@@ -2457,7 +2457,7 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
-        if config.eager_numerics.use_pytorch_libdevice:
+        if config.eager_numerics.use_pytorch_libdevice or utils.is_strict_cuda_triton():
             # Strict numerics should use the backend math library entry point.
             # On ROCm this maps to OCML and avoids Triton's generic log lowering.
             return f"libdevice.log({x})"

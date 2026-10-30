@@ -242,6 +242,47 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_xlogy_scalar_log(self, device, dtype, numerics):
+        x = torch.linspace(-10, 10, 1024, dtype=dtype, device=device)
+
+        def fn(x):
+            return torch.xlogy(x, 2.7296853065490723)
+
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("scalar", (False, True))
+    def test_copysign_storage_bits(self, device, dtype, numerics, scalar):
+        x = _exhaustive_16bit(dtype, device)
+        y = -float("nan") if scalar else x.flip(0)
+        actual = torch.compile(
+            torch.copysign, fullgraph=True, options={"numerics": numerics}
+        )(x, y)
+        self.assertEqual(
+            actual.view(torch.int16), torch.copysign(x, y).view(torch.int16)
+        )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("left", (False, True))
+    def test_scalar_nan_product(self, device, dtype, numerics, left):
+        x = torch.tensor(
+            [[0.0, -0.0, 1.0], [float("inf"), -float("inf"), float("nan")]],
+            dtype=dtype,
+            device=device,
+        ).t()
+
+        def fn(x):
+            result = float("nan") * x if left else x * float("nan")
+            return result.t().view(-1)
+
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(x).view(_BIT_VIEW[dtype]))
+
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
@@ -1860,11 +1901,8 @@ BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 # (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
-        ("xlogy", "float32"),
         ("special_ndtr", "bfloat16"),
         ("special_ndtr", "float16"),
-        ("copysign", "bfloat16"),
-        ("copysign", "float16"),
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
@@ -1922,9 +1960,6 @@ BACKWARD_XFAIL = frozenset(
         ("sinc", "float16"),
         ("special_ndtr", "bfloat16"),
         ("special_ndtr", "float16"),
-        ("__rpow__", "bfloat16"),
-        ("__rpow__", "float16"),
-        ("__rpow__", "float32"),
         ("float_power", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
@@ -1950,10 +1985,6 @@ BACKWARD_XFAIL = frozenset(
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
-        ("special_xlog1py", "bfloat16"),
-        ("special_xlog1py", "float16"),
-        ("xlogy", "bfloat16"),
-        ("xlogy", "float16"),
     }
 )
 
@@ -1967,6 +1998,10 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "__rpow__",
+        "copysign",
+        "special_xlog1py",
+        "xlogy",
         "double",
         "float_power",
         "__rmod__",
