@@ -266,6 +266,10 @@ class ConstDictVariable(VariableTracker):
             self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
+        # Guards on a sourced dict are installed lazily. Materializing it bakes
+        # its keys into the trace, e.g. an empty input dict is vacuously a
+        # python constant, so guard on them here.
+        self.install_dict_keys_match_guard()
         return {
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
@@ -1524,7 +1528,9 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         return not self.items
 
     def install_dict_keys_match_guard(self) -> None:
-        pass
+        # Truth and view length need a guard without specializing hook IDs.
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
     def install_dict_order_guard(
         self,

@@ -1282,6 +1282,29 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_left_running_at_exit_cuda(self):
+        # With GPU tracing still on at exit, BLAS libraries' static destructors
+        # make traced runtime calls after the main thread's thread_locals are
+        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
+        # per-thread tracer state faults instead of passing silently.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
+p.start()
+x = torch.randn(64, 64, device="cuda")
+(x @ x).sum().item()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MALLOC_PERTURB_": "165"},
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
