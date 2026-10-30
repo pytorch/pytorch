@@ -164,11 +164,26 @@ bool isFabricSupported() {
 
 // Fabric handles on ROCm are UALink. Three things must hold: the GPU exposes
 // UALink, the accelerator has been provisioned to a ready state, and the loaded
-// runtime implements the export/import path. Only the first is queryable as a
-// device attribute, and the second is dynamic state checked at export time, so
-// probe the whole cycle instead. This also covers a build made against newer
-// headers than the runtime it ends up loading.
+// runtime implements the export/import path. The device attribute answers the
+// first, and rules out systems without UALink before anything is allocated.
+// The second is dynamic state checked at export time, so the rest is probed by
+// running the whole cycle. This also covers a build made against newer headers
+// than the runtime it ends up loading.
 bool isFabricSupported(c10::DeviceIndex dev) {
+  int fabric_supported = 0;
+  if (hipDeviceGetAttribute(
+          &fabric_supported,
+          hipDeviceAttributeHandleTypeFabricSupported,
+          static_cast<int>(dev)) != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  if (!fabric_supported) {
+    LOG(INFO)
+        << "FABRIC handles are not supported, falling back to fd handle exchange\n";
+    return false;
+  }
+
   // hipMemImportFromShareableHandle imports onto the current device.
   CUDAGuard guard(dev);
 
