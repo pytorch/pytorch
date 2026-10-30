@@ -758,7 +758,6 @@ class TestPoolingNNDevice(NNTestCase):
         expected = torch.full_like(sample, 1 / (width // output_width))
         self.assertEqual(sample, expected)
 
-    @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
         inp = torch.ones(0, 10, dtype=dtype, device=device)
@@ -811,7 +810,6 @@ class TestPoolingNNDevice(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
-    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
@@ -2346,7 +2344,6 @@ torch.{device_type}.synchronize()
                         fn(x, 6, stride=2, padding=0)
 
     @onlyAccelerator
-    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(
             self,

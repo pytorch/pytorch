@@ -8006,19 +8006,48 @@ class TestMPS(TestCaseMPS):
         helper((0, 2, 2), (4, 4), False)
         helper((0, 4, 4), (3, 3), False)
 
-    @parametrize("pool", [F.adaptive_avg_pool2d, F.adaptive_max_pool2d], name_fn=lambda f: f.__name__)
-    def test_adaptive_pool2d_large_sizes(self, pool):
+    @parametrize("pool,output_size", [
+        (F.adaptive_avg_pool2d, (2, 49999)),
+        (F.adaptive_max_pool2d, (2, 49999)),
+        (F.adaptive_avg_pool3d, (1, 2, 49999)),
+    ], name_fn=lambda pool, output_size: pool.__name__)
+    def test_adaptive_pool_large_sizes(self, pool, output_size):
         # (in + 1) * (out + 1) overflows int32, which selects the 64-bit index kernels
         cpu_x = torch.randn(1, 2, 3, 50000, requires_grad=True)
         x = cpu_x.detach().to('mps').requires_grad_()
-        out = pool(x, (2, 49999))
-        out_cpu = pool(cpu_x, (2, 49999))
+        out = pool(x, output_size)
+        out_cpu = pool(cpu_x, output_size)
         self.assertEqual(out, out_cpu)
 
         cpu_grad = torch.randn(out_cpu.shape)
         out.backward(cpu_grad.to('mps'))
         out_cpu.backward(cpu_grad)
         self.assertEqual(x.grad, cpu_x.grad)
+
+    def test_adaptive_avg_pool3d_channels_last(self):
+        # Output layout must match CPU and the meta kernel, or torch.compile fallbacks fail stride asserts
+        cpu_x = torch.randn(2, 4, 6, 10, 10).to(memory_format=torch.channels_last_3d)
+        x = cpu_x.to('mps')
+        out = torch.ops.aten._adaptive_avg_pool3d(x, (3, 7, 9))
+        out_cpu = torch.ops.aten._adaptive_avg_pool3d(cpu_x, (3, 7, 9))
+        self.assertEqual(out, out_cpu)
+        self.assertEqual(out.stride(), out_cpu.stride())
+
+        cpu_grad = torch.randn(out_cpu.shape)
+        grad_input = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad.to('mps'), x)
+        grad_input_cpu = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad, cpu_x)
+        self.assertEqual(grad_input, grad_input_cpu)
+        self.assertEqual(grad_input.stride(), grad_input_cpu.stride())
+
+    def test_adaptive_avg_pool_backward_errors(self):
+        x = torch.randn(2, 3, 4, 5, 6, device='mps')
+        grad = torch.randn(2, 3, 2, 2, 2, device='mps')
+        with self.assertRaisesRegex(RuntimeError, "Expected dtype"):
+            torch.ops.aten.adaptive_avg_pool3d_backward(grad, x, grad_input=torch.empty(0, device='mps', dtype=torch.bfloat16))
+        with self.assertRaisesRegex(RuntimeError, "Expected 4D or 5D tensor"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad.view(6, 8), x.view(6, 120))
+        with self.assertRaisesRegex(RuntimeError, "Expected 3D or 4D tensor"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad.view(6, 8), x.view(6, 120))
 
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
@@ -14640,6 +14669,8 @@ class TestConsistency(TestCaseMPS):
         'acosh', 'asinh', 'asin',
         'masked.std',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
+        # CPU accumulates in half precision, so MPS is closer to the float32 result
+        'nn.functional.adaptive_avg_pool3d',
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
