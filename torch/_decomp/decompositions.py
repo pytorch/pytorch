@@ -5302,32 +5302,40 @@ def binary_cross_entropy_with_logits(
 def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
-    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+    tensor1_larger = tensor1.ndim >= tensor2.ndim
+    t2 = tensor2 if tensor1_larger else tensor1
+    # Mirror native's `tensor1_larger ? tensor1 : tensor2.mT()` on metadata.
+    # Avoid emitting dead `aten.transpose` node when tracing this decomposition.
+    if tensor1_larger:
+        t1_shape = tensor1.shape
+        t1_stride = tensor1.stride()
+    else:
+        shape, stride = tensor2.shape, tensor2.stride()
+        t1_shape = (*shape[:-2], shape[-1], shape[-2])
+        t1_stride = (*stride[:-2], stride[-1], stride[-2])
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if not (t1.ndim >= 3 and t2.ndim <= 2):
+    if not (len(t1_shape) >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(sym_numel(t1) == 0):
+    if guard_or_false(reduce(operator.mul, t1_shape, 1) == 0):
         return True
 
-    t1_shape = t1.shape
-    t1_stride = t1.stride()
+    from torch._subclasses.fake_impls import _compute_stride
 
-    # Check the contiguous, we can skip the dim with size of 1
-    # as aten: https://github.com/pytorch/pytorch/blob/e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
-    expected_stride = [1]
-    for size in reversed(t1_shape[1:]):
-        expected_stride.append(size * expected_stride[-1])
-    return all(
-        guard_or_false(size == 1) or guard_or_false(left == right)
-        for left, right, size in zip(
-            t1_stride, list(reversed(expected_stride)), t1_shape
+    folded_shape = (reduce(operator.mul, t1_shape[:-1], 1), t1_shape[-1])
+    return (
+        _compute_stride(
+            t1_shape,
+            t1_stride,
+            folded_shape,
+            size_oblivious=True,
         )
+        is not None
     )
 
 
@@ -5924,8 +5932,6 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Tensor | None = None,
     scale: float | None = None,
 ) -> tuple[Tensor, Tensor]:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
@@ -5942,8 +5948,6 @@ def scaled_dot_product_flash_attention_for_cpu(
         lambda: "q, k, v should have the same head size",
     )
 
-    # For these 4D CPU inputs, the current math implementation returns a
-    # contiguous (and therefore dense) output of shape (N, H, L, E).
     output, attn = aten._scaled_dot_product_attention_math.default(
         query,
         key,
@@ -5955,7 +5959,6 @@ def scaled_dot_product_flash_attention_for_cpu(
         scale=scale,
         enable_gqa=query.size(1) != key.size(1),
     )
-
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
     # * flash_attention.
@@ -5979,27 +5982,11 @@ def scaled_dot_product_flash_attention_for_cpu(
     # Really the invariant you want to maintain is:
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
-
-    # Native/meta allocate empty_like(query), so match the query's physical
-    # dim order, e.g. (L, N, H, E) for MHA and (N, L, H, E) for BERT-style inputs.
-    output_has_same_layout_as_input = all(
-        statically_known_true(actual == expected)
-        for actual, expected in zip(output.stride(), query.stride())
+    output = (
+        output.permute(2, 0, 1, 3)
+        .contiguous(memory_format=torch.contiguous_format)
+        .permute(1, 2, 0, 3)
     )
-
-    # TODO: Preserve exact native output strides for singleton/empty dimensions.
-    # The contiguous clone below can normalize these strides; additional handling
-    # and regression tests are needed.
-    if not output_has_same_layout_as_input:
-        physical_order, _ = utils.compute_elementwise_output_logical_to_physical_perm(
-            query
-        )
-        inverse_order = utils.invert_perm(physical_order)
-        output = (
-            output.permute(physical_order)
-            .clone(memory_format=torch.contiguous_format)
-            .permute(inverse_order)
-        )
     return output, attn
 
 

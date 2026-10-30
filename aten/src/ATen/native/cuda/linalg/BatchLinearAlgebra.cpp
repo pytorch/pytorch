@@ -56,7 +56,7 @@ struct MagmaInitializer {
 namespace at::native {
 
 void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots);
-void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info);
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool upper);
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
@@ -423,7 +423,7 @@ void ldl_factor_kernel(
        {
 #ifndef USE_ROCM
          if (hermitian && LD.is_complex()) {
-           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info);
+           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper);
          }
 #endif
          ldl_factor_cusolver(
@@ -438,10 +438,9 @@ void ldl_factor_kernel(
 #ifndef USE_ROCM
     // cuSOLVER has no Hermitian LDL for complex inputs, so the custom kernel takes them.
     // For real inputs, where hermitian=true is sytrf too, the custom kernel is faster, yet
-    // they are still dispatched to cuSOLVER: the custom kernel does not always flag an
-    // exactly zero row/col in info (see the TODO in ldl_diagonal_panel_fused_kernel).
+    // they are still dispatched to cuSOLVER.
       if (hermitian && LD.is_complex()) {
-        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info);
+        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper);
       }
 #endif
     // Otherwise use cusolver if available and magma otherwise.
