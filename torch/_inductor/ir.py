@@ -11591,6 +11591,19 @@ class Switch(ExternKernel):
                 ]
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
+                    # A branch that returns one of its operands unchanged -- e.g.
+                    # an identity-like body such as `t + 0.0` or `t * 1.0` that
+                    # Inductor folds back to the input -- leaves the branch output
+                    # aliasing that operand's storage. torch.cond/torch.switch
+                    # produce fresh outputs in eager, so a later op that reuses the
+                    # output buffer in place would clobber the caller's input. Copy
+                    # such outputs so each one gets its own storage.
+                    subgraph.graph.graph_outputs = [
+                        ExternKernel.copy_input(output)
+                        if output.is_input_buffer()
+                        else output
+                        for output in subgraph.graph.graph_outputs
+                    ]
                     # Force subgraph outputs to the expected strides from
                     # FakeTensor metadata. Branches share the merged strides
                     # unless those carry an unbacked symbol (mismatched inner
