@@ -105,6 +105,14 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
+  // Makes getDuration() measure from where first's duration starts.
+  void setDurationStart(const WorkNCCL& first);
+  // Keeps the works' input tensors alive until this work is waited on, without
+  // taking them from the works.
+  void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq);
@@ -112,7 +120,7 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  void recordStart(const char* coll_name);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -124,6 +132,7 @@ class WorkNCCL : public c10d::Work {
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
     void append(InputTensorShelf& other);
+    void appendCopy(InputTensorShelf& other);
     void clear();
 
     std::mutex mutex;
@@ -138,7 +147,8 @@ class WorkNCCL : public c10d::Work {
     WorkStatus status() const;
     std::exception_ptr exception() const;
     // reason says why a TIMEDOUT or ERROR work failed; it ends up in the
-    // work's exception.
+    // work's exception. The first TIMEDOUT or ERROR transition also logs the
+    // work_nccl_exception C10dLogger record, unless the comm was aborted.
     bool setTerminalStatus(WorkStatus status, std::string_view reason = {});
     std::string describe() const;
     WorkStatus checkStatus(
@@ -157,8 +167,8 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
-    // Set by recordStart(), whose callers pass string literals.
-    std::string_view opType;
+    // Set by recordStart(); must point to static storage.
+    const char* opType{""};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;

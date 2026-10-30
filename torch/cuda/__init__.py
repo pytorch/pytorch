@@ -41,7 +41,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
 try:
@@ -1632,14 +1632,15 @@ def _get_amdsmi_temperature(device: Device = None) -> int:
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
+    # AMD SMI reports socket power in watts; power_draw() is documented in mW.
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return socket_power * 1000
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return socket_power * 1000
         else:
             return 0
 
@@ -2194,6 +2195,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "execute_on_streams",
     "Stream",
     "StreamContext",
     "GreenContext",
@@ -2267,6 +2269,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
     "temperature",
     "power_draw",

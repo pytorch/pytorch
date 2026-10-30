@@ -161,6 +161,18 @@ class CUDAAllocator : public DeviceAllocator {
   // registration, or inductor cudagraph_trees warmup).
   virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
   virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
+  // Whether the current stream on `device` is inside a CUDA graph capture.
+  // The native allocator answers from the capture count kept by
+  // markCaptureBegin/markCaptureEnd and only queries the driver while a
+  // capture is active on that device, so eager callers pay no driver call.
+  // Allocators that do not track captures fall back to the driver query.
+  // The default stream's handle is nullptr, which the driver resolves
+  // against the current device, so `device` is selected for the query.
+  virtual bool isCaptureContext(c10::DeviceIndex device) {
+    c10::DeviceGuard guard(c10::Device(c10::DeviceType::CUDA, device));
+    return c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        CaptureStatus::None;
+  }
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -305,6 +317,23 @@ class CUDAAllocator : public DeviceAllocator {
   virtual CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
+  // See DeviceCachingAllocator::restore_expandable_segment.
+  virtual void restoreExpandableSegment(
+      c10::DeviceIndex device,
+      cudaStream_t stream,
+      MempoolId_t mempool_id,
+      bool is_small,
+      size_t address,
+      size_t reserve_size,
+      size_t segment_size,
+      Expandable_Segments_Handle_Type handle_type,
+      const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not support restoreExpandableSegment. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual DataPtr allocateWithAddress(size_t size, void* addr) {
     TORCH_CHECK(
         false,
@@ -422,6 +451,28 @@ inline DataPtr allocateWithAddress(size_t size, void* addr) {
   return get()->allocateWithAddress(size, addr);
 }
 
+inline void restoreExpandableSegment(
+    c10::DeviceIndex device,
+    cudaStream_t stream,
+    MempoolId_t mempool_id,
+    bool is_small,
+    size_t address,
+    size_t reserve_size,
+    size_t segment_size,
+    Expandable_Segments_Handle_Type handle_type,
+    const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+  get()->restoreExpandableSegment(
+      device,
+      stream,
+      mempool_id,
+      is_small,
+      address,
+      reserve_size,
+      segment_size,
+      handle_type,
+      mapped_ranges);
+}
+
 // CUDAGraph interactions
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
@@ -440,6 +491,10 @@ inline void markCaptureBegin(c10::DeviceIndex device) {
 
 inline void markCaptureEnd(c10::DeviceIndex device) {
   get()->markCaptureEnd(device);
+}
+
+inline bool isCaptureContext(c10::DeviceIndex device) {
+  return get()->isCaptureContext(device);
 }
 
 inline void recordHistory(
