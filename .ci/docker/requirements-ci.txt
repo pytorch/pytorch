@@ -436,6 +436,11 @@ cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64"
 #Description: required for Cuspy, the experimental in-process CUPTI activity collector (torch.profiler._cuspy). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
 #test that import: test_profiler.py
 
+nccl4py==0.5.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.15"
+#Description: NVIDIA's NCCL Python bindings, used by the nccl4py c10d backend and NCCLCollConfig (0.5+). Wheels exist only for Linux x86_64/aarch64 CPython up to 3.14. About 10 MB of wheels with cuda-core, so it goes in every Linux image (the CPU and ROCm distributed jobs installed it at test time before): the backend and NCCLCollConfig tests skip without CUDA or on ROCm, and test_config_dict is device-agnostic.
+#Pinned versions: 0.5.0
+#test that import: distributed/test_c10d_nccl4py.py distributed/test_c10d_nccl2.py distributed/test_collective_config.py
+
 setuptools-git-versioning==2.1.0
 # scikit-build (non-core) is consumed by the FBGEMM / torchrec builds noted
 # below, not by PyTorch itself; PyTorch uses scikit-build-core. Keep both
