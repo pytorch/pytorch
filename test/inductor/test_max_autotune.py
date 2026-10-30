@@ -2581,6 +2581,8 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "test_configs.max_mm_configs": 4,
             "max_autotune_gemm_backends": "TRITON",
+            # The cache counts and keys below assume unpadded inputs.
+            "shape_padding": False,
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
