@@ -191,7 +191,7 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 #ifdef __aarch64__
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -219,7 +219,7 @@ static inline void embedding_neon_kernel(
   output4 = vmlaq_f32(output4, w_4, scale);
 }
 
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -606,7 +606,7 @@ void fbgemm_spmdm_report_error_(
     const OffsetType* offsets,
     const IndexType* indices) {
   for (const auto m : c10::irange(output_size)) {
-    for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
+    for (const auto i : c10::irange(offsets[m], offsets[m + 1])) {
       TORCH_CHECK(i < index_size);
       IndexType idx = indices[i];
       TORCH_CHECK(

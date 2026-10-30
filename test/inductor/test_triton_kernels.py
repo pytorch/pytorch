@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import unittest
+from typing import NamedTuple
 from unittest import mock
 
 import torch
@@ -18,6 +19,7 @@ import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     maybe_unpack_host_tma_descriptor,
@@ -33,6 +35,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import (
     fresh_cache,
     run_and_get_code,
+    run_and_get_kernels,
     triton_version_uses_attrs_dict,
 )
 from torch._library import capture_triton
@@ -46,6 +49,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_GPU_AND_TRITON,
     HAS_XPU_AND_TRITON,
     requires_block_ptr,
     TRITON_HAS_CPU,
@@ -60,6 +64,12 @@ from torch.utils._triton import (
     has_triton_package,
     has_triton_tensor_descriptor_host_tma,
 )
+
+
+# Module-level NamedTuple for CPU unit tests of #192288 (no GPU/triton needed).
+class ModuleLevelStrides(NamedTuple):
+    batch: int
+    token: int
 
 
 requires_cuda_tma = unittest.skipIf(
@@ -138,6 +148,27 @@ if HAS_GPU:
                 bitwidth=x.dtype.primitive_bitwidth, signed=True
             )
             return x.to(idtype, bitcast=True)
+
+    # Module-level NamedTuple + kernel for #192288 (avoid local classes so FX
+    # graph cache can pickle the cache key).
+    class MatrixStrides(NamedTuple):
+        batch: int
+        token: int
+
+    @triton.jit
+    def copy_first_row_namedtuple_kernel(
+        x_ptr,
+        out_ptr,
+        N: tl.constexpr,
+        X_STRIDES: tl.constexpr,
+        BLOCK: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK)
+        values = tl.load(
+            x_ptr + 0 * X_STRIDES.batch + offsets * X_STRIDES.token,
+            mask=offsets < N,
+        )
+        tl.store(out_ptr + offsets, values, mask=offsets < N)
 
     # Kernel with dunder name for name-mangling regression test (issue #170398).
     @triton.jit
@@ -247,6 +278,340 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return f"launchKernel({kernel_name}" in code
         return f"{kernel_name}.run(" in code
 
+    def test_codegen_namedtuple_defs_for_triton_meta(self):
+        # NamedTuple constexpr values stringify as TypeName(...); the generated
+        # Triton module must define those types so triton_meta={...!r} can eval.
+        # See https://github.com/pytorch/pytorch/issues/192288
+        import pickle
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        class LocalStrides(NamedTuple):
+            batch: int
+            token: int
+
+        class Nested(NamedTuple):
+            outer: int
+            strides: LocalStrides
+
+        strides = _sanitize_for_repr(LocalStrides(batch=8, token=1))
+        strides_type = namedtuple_type("LocalStrides", ("batch", "token"))
+        strides_alias = strides_type.__qualname__
+        defs = codegen_namedtuple_defs({"X_STRIDES": strides})
+        self.assertIn(
+            "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type",
+            defs,
+        )
+        self.assertIn(
+            f"{strides_alias} = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            defs,
+        )
+        # Never import the user's defining module (remote cache / non-importable).
+        self.assertNotIn("import LocalStrides", defs)
+        self.assertNotIn("collections.namedtuple", defs)
+
+        # Round-trip: defs + repr(value) must eval without the original type.
+        ns: dict = {}
+        exec(defs, ns)
+        reconstructed = eval(repr(strides), ns)
+        self.assertEqual(reconstructed.batch, 8)
+        self.assertEqual(reconstructed.token, 1)
+        self.assertEqual(reconstructed[0], 8)
+        self.assertIsInstance(reconstructed, tuple)
+
+        # Reconstructed instances must pickle (compile-worker return path).
+        pickled = pickle.loads(pickle.dumps(reconstructed))
+        self.assertEqual(pickled.batch, 8)
+        self.assertEqual(pickled.token, 1)
+        self.assertIs(
+            type(pickled),
+            namedtuple_type("LocalStrides", ("batch", "token")),
+        )
+
+        nested = _sanitize_for_repr(Nested(outer=2, strides=strides))
+        nested_defs = codegen_namedtuple_defs({"X": nested})
+        self.assertIn(
+            f"{strides_alias} = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            nested_defs,
+        )
+        self.assertIn(
+            f"{type(nested).__qualname__} = namedtuple_type('Nested', ('outer', 'strides'))",
+            nested_defs,
+        )
+        exec(nested_defs, ns)
+        self.assertEqual(eval(repr(nested), ns), nested)
+
+        # Plain tuples need no defs (already self-contained under ``repr``).
+        self.assertEqual(codegen_namedtuple_defs({"t": (8, 1)}), "")
+
+        # Same __name__ + same fields: emit once (structurally interchangeable).
+        import collections
+
+        DupA = collections.namedtuple("DupStrides", ["batch", "token"])
+        DupB = collections.namedtuple("DupStrides", ["batch", "token"])
+        dup_defs = codegen_namedtuple_defs(
+            {
+                "a": DupA(batch=1, token=2),
+                "b": DupB(batch=3, token=4),
+            }
+        )
+        self.assertEqual(dup_defs.count(" = namedtuple_type"), 1)
+
+        # Same __name__ + different fields: use distinct structural aliases.
+        Conflict = collections.namedtuple("DupStrides", ["token", "batch"])
+        values = _sanitize_for_repr(
+            {"a": DupA(batch=1, token=2), "b": Conflict(token=3, batch=4)}
+        )
+        conflict_defs = codegen_namedtuple_defs(values)
+        self.assertEqual(conflict_defs.count(" = namedtuple_type"), 2)
+        exec(conflict_defs, ns)
+        rebuilt = eval(repr(values), ns)
+        self.assertEqual(rebuilt["a"].batch, 1)
+        self.assertEqual(rebuilt["b"].batch, 4)
+
+        # Module-level NamedTuple also uses namedtuple_type (never user import).
+        module_defs = codegen_namedtuple_defs(
+            {"X_STRIDES": ModuleLevelStrides(batch=8, token=1)}
+        )
+        self.assertIn(
+            " = namedtuple_type('ModuleLevelStrides', ('batch', 'token'))",
+            module_defs,
+        )
+        self.assertNotIn("import ModuleLevelStrides", module_defs)
+
+    def test_add_namedtuple_types_to_launcher_scope(self):
+        # Heuristics inlines constexprs via repr; Nested field types must be bound.
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        class LocalStrides(NamedTuple):
+            batch: int
+            token: int
+
+        class Nested(NamedTuple):
+            outer: int
+            strides: LocalStrides
+
+        strides = LocalStrides(batch=8, token=1)
+        scope: dict = {}
+        _add_namedtuple_types_to_scope({"X": Nested(outer=2, strides=strides)}, scope)
+        sanitized = _sanitize_for_repr(Nested(outer=2, strides=strides))
+        self.assertIs(scope[type(sanitized).__qualname__], type(sanitized))
+        self.assertIs(
+            scope[type(sanitized.strides).__qualname__], type(sanitized.strides)
+        )
+        self.assertEqual(eval(repr(sanitized), scope).strides.batch, 8)
+
+    def test_namedtuple_constexpr_collisions_and_nested_values(self):
+        import collections
+        import dataclasses
+        import sys
+        import types
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            get_importable_constexpr_types,
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        first = collections.namedtuple("Strides", ("x", "y"), module="module_a")
+        second = collections.namedtuple("Strides", ("x", "z"), module="module_b")
+        module = types.ModuleType("_inductor_namedtuple_collision_test")
+        config_type = dataclasses.make_dataclass("Strides", [("nested", object)])
+        config_type.__module__ = module.__name__
+        module.Strides = config_type
+        values = {
+            "first": first(1, 2),
+            "second": second(3, 4),
+            "config": config_type(first(5, 6)),
+            "mapping": {second(7, 8): first(9, 10)},
+        }
+        reserved = (
+            "tl",
+            "triton",
+            "torch",
+            "DeviceProperties",
+            "TensorDescriptor",
+            "bin",
+            "runner",
+            "namedtuple_type",
+            "math",
+        )
+        for name in reserved:
+            values[name] = collections.namedtuple(name, ("x",))(11)
+        values = _sanitize_for_repr(values)
+        self.assertIs(_sanitize_for_repr(values), values)
+        with mock.patch.dict(sys.modules, {module.__name__: module}):
+            defs = codegen_namedtuple_defs(values)
+            for launcher in (False, True):
+                with self.subTest(launcher=launcher):
+                    sentinels = {name: object() for name in reserved}
+                    scope = dict(sentinels)
+                    if launcher:
+                        _add_namedtuple_types_to_scope(values, scope)
+                    else:
+                        exec(defs, scope)
+                    # The helper import intentionally binds namedtuple_type.
+                    for name in reserved:
+                        if name != "namedtuple_type" or launcher:
+                            self.assertIs(scope[name], sentinels[name])
+                    imports = get_importable_constexpr_types(values.values())
+                    self.assertEqual(len(imports), 1)
+                    exec(f"from {module.__name__} import Strides", scope)
+                    rebuilt = eval(repr(values), scope)
+                    self.assertEqual(rebuilt["first"].y, 2)
+                    self.assertEqual(rebuilt["second"].z, 4)
+                    self.assertEqual(rebuilt["config"].nested.y, 6)
+                    key = next(iter(rebuilt["mapping"]))
+                    self.assertEqual(key.z, 8)
+                    self.assertEqual(rebuilt["mapping"][key].y, 10)
+
+    @parametrize(
+        "container",
+        ["dataclass", "attrs", "pydantic", "mapping_key", "set", "frozenset"],
+    )
+    @parametrize("launcher", [False, True])
+    def test_namedtuple_constexpr_repr_containers(self, container, launcher):
+        import collections
+
+        from triton_constexpr_configs import (
+            UserDefinedAttrsLikeConfig,
+            UserDefinedPydanticLikeConfig,
+            UserDefinedTritonKernelNestedConfig,
+        )
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import sanitize_constexpr_for_repr
+
+        strides = ModuleLevelStrides(8, 1)
+        hidden = collections.namedtuple("HiddenStrides", ("unused",))(9)
+        values = {
+            "dataclass": UserDefinedTritonKernelNestedConfig(strides),
+            "attrs": UserDefinedAttrsLikeConfig(strides, hidden),
+            "pydantic": UserDefinedPydanticLikeConfig(strides, hidden),
+            "mapping_key": collections.OrderedDict([(strides, 3)]),
+            "set": {strides},
+            "frozenset": frozenset({strides}),
+        }
+        expected_type = namedtuple_type("ModuleLevelStrides", ("batch", "token"))
+        prepared_strides = sanitize_constexpr_for_repr(strides)
+        raw = values[container]
+        prepared = sanitize_constexpr_for_repr(raw)
+        scope = {}
+        if launcher:
+            _add_namedtuple_types_to_scope(raw, scope)
+        else:
+            defs = codegen_namedtuple_defs({"X": prepared})
+            self.assertEqual(defs.count(" = namedtuple_type"), 1)
+            exec(defs, scope)
+        self.assertIs(scope[expected_type.__qualname__], expected_type)
+        self.assertEqual(eval(repr(prepared_strides), scope), strides)
+        # Only repr-visible children need bindings. Hidden fields must not
+        # introduce unrelated NamedTuple definitions.
+        self.assertNotIn("HiddenStrides", scope)
+        self.assertNotIn(
+            namedtuple_type("HiddenStrides", ("unused",)).__qualname__, scope
+        )
+
+    def test_namedtuple_constexpr_reserved_alias_import(self):
+        import dataclasses
+        import sys
+        import types
+
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.utils import get_importable_constexpr_types
+
+        pair_type = namedtuple_type("Strides", ("x",))
+        module = types.ModuleType("_inductor_namedtuple_alias_test")
+        config_type = dataclasses.make_dataclass(
+            pair_type.__qualname__, [("nested", object)]
+        )
+        config_type.__module__ = module.__name__
+        setattr(module, pair_type.__qualname__, config_type)
+        # This import would replace the alias emitted for the NamedTuple.
+        with mock.patch.dict(sys.modules, {module.__name__: module}):
+            with self.assertRaisesRegex(ImportError, "reserved by generated Triton"):
+                get_importable_constexpr_types([pair_type(5), config_type(3)])
+
+    def test_namedtuple_constexpr_legacy_source_and_pickle(self):
+        import pickle
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        # Previously cached source still calls the original two-argument API.
+        scope = {}
+        exec(
+            "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type\n"
+            "Legacy = namedtuple_type('Legacy', ('x',))\n"
+            "value = Legacy(x=3)\n",
+            scope,
+        )
+        value = scope["value"]
+        sanitized = _sanitize_for_repr(value)
+        self.assertEqual(type(sanitized).__name__, "Legacy")
+        self.assertEqual(repr(sanitized), repr(value))
+        self.assertEqual(repr(_sanitize_for_repr(sanitized)), repr(value))
+        defs = codegen_namedtuple_defs({"x": value})
+        self.assertEqual(defs, codegen_namedtuple_defs({"x": sanitized}))
+        launcher_scope = {}
+        _add_namedtuple_types_to_scope(value, launcher_scope)
+        self.assertEqual(eval(repr(value), launcher_scope).x, 3)
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            rebuilt = pickle.loads(pickle.dumps(value, protocol=protocol))
+            self.assertIs(type(rebuilt), type(value))
+            self.assertEqual(repr(rebuilt), repr(value))
+
+    def test_namedtuple_constexpr_preserves_device_metadata(self):
+        from torch._inductor.codegen.wrapper import (
+            _sanitize_for_repr,
+            codegen_namedtuple_defs,
+        )
+        from torch._inductor.runtime.hints import DeviceProperties
+        from torch._inductor.utils import sanitize_constexpr_for_repr
+
+        device = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=1, cc=80, warp_size=32
+        )
+
+        class Strides(NamedTuple):
+            x: int
+
+        for constants in ({}, {"strides": Strides(3)}):
+            with self.subTest(constants=constants):
+                meta = {"device": device, "constants": constants}
+                meta["constants"] = sanitize_constexpr_for_repr(meta["constants"])
+                sanitized = _sanitize_for_repr(meta)
+                self.assertIs(sanitized["device"], device)
+                self.assertIs(type(sanitized["device"]), DeviceProperties)
+                self.assertEqual(sanitized["device"].warp_size_or_default, 32)
+                self.assertEqual(repr(sanitized["device"]), repr(device))
+                scope = {"DeviceProperties": DeviceProperties}
+                exec(codegen_namedtuple_defs(sanitized["constants"]), scope)
+                rebuilt = eval(repr(sanitized), scope)
+                self.assertIs(type(rebuilt["device"]), DeviceProperties)
+                self.assertEqual(rebuilt["device"].warp_size_or_default, 32)
+
     def _run_and_get_triton_compile_options(self, fn, *args):
         # TestCase already gives each test a fresh compile cache. This patch
         # only keeps compilation in-process while the triton.compile mock is
@@ -315,11 +680,53 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
 
+    @requires_gpu
+    @parametrize("cfg", ["normal", "cpp_wrapper"])
+    def test_triton_kernel_namedtuple_constexpr(self, cfg):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192288
+        # NamedTuple tl.constexpr args must compile under torch.compile(fullgraph=True).
+        # Keep MatrixStrides / kernel at module scope (see above) so FX graph
+        # cache pickling works.
+        config_kwargs = {"cpp_wrapper": cfg == "cpp_wrapper"}
+
+        def copy_first_row(x):
+            out = torch.empty_like(x[0])
+            copy_first_row_namedtuple_kernel[(1,)](
+                x,
+                out,
+                N=x.shape[1],
+                X_STRIDES=MatrixStrides(
+                    batch=x.stride(0),
+                    token=x.stride(1),
+                ),
+                BLOCK=16,
+            )
+            return out
+
+        x = torch.arange(16, device=GPU_TYPE).reshape(2, 8)
+        expected = x[0].clone()
+        eager = copy_first_row(x)
+        self.assertEqual(eager, expected)
+
+        with inductor_config.patch(**config_kwargs):
+            compiled = torch.compile(copy_first_row, fullgraph=True)
+            compiled_result, (code,) = run_and_get_code(compiled, x)
+            self.assertEqual(compiled_result, expected)
+            kernel_name = "copy_first_row_namedtuple_kernel_0"
+            self.assertTrue(self._kernel_launched_in_code(kernel_name, code))
+            # Python wrapper embeds triton_meta via !r (also present under
+            # cpp_wrapper in the Python compile path). Reconstruct via the
+            # pickle-safe helper, never via a user-module import.
+            self.assertIn(" = namedtuple_type('MatrixStrides',", code)
+            self.assertNotIn("import MatrixStrides", code)
+
     @inductor_config.patch(strict_signed_zero=True)
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_dim_max_min_reuse_argreduce_value(self):
         dtypes = [torch.float32, torch.float16]
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        if get_interface_for_device(GPU_TYPE).is_dtype_supported(
+            torch.bfloat16, including_emulation=False
+        ):
             dtypes.append(torch.bfloat16)
 
         for op, indexed_helper, value_helper, selected_value in (
@@ -881,7 +1288,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(output_code.count('float("nan")'), 0)
             self.assertEqual(output_code.count("float('nan')"), 0)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self):
         def fn(x):
             a = x * x
@@ -902,7 +1309,7 @@ def forward(self, x_1, output_1):
         actual = torch.compile(fn, fullgraph=True)(special)
         torch.testing.assert_close(actual, expected, equal_nan=True)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @common_utils.parametrize("per_subkernel", [False, True])
     def test_combo_fp_self_sub_rewrite(self, per_subkernel):
         def fn(a, b):
@@ -929,7 +1336,7 @@ def forward(self, x_1, output_1):
         self.assertIn("tl.where", code)
         self.assertNotIn("'enable_fp_fusion': False", code)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_duplicate_mse_loss_operands_are_zero(self):
         torch.manual_seed(0)
         x = torch.randn(10000, device=GPU_TYPE)
@@ -1822,7 +2229,7 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("bind", ["slice", "set_"])
     def test_triton_kernel_mutated_no_base_arg(self, bind):
         # The other test's views are built inside the graph, so they always have a
-        # _base. A mutated arg reaches _clone_mutated_arg's base=None fallback when
+        # _base. A mutated arg reaches clone_mutated_arg's base=None fallback when
         # it is a graph input instead: a placeholder is rebuilt from metadata, which
         # drops whatever _base the caller's tensor had. Tensor.set_() gets there too,
         # but only from the caller -- inside a compiled region it graph breaks.
@@ -1856,11 +2263,13 @@ def forward(self, x_1, output_1):
         expected[..., : n_cols // 2] = 1.0
         self.assertEqual(f(make_arg()), expected)
 
-        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops import user_kernel_hop
         from torch._prims_common import is_non_overlapping_and_dense_or_false
 
         with mock.patch.object(
-            tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+            user_kernel_hop,
+            "clone_mutated_arg",
+            wraps=user_kernel_hop.clone_mutated_arg,
         ) as clone_mock:
             self.assertEqual(torch.compile(f, fullgraph=True)(make_arg()), expected)
         # A dense arg, or one at offset 0, would take a different branch and leave
@@ -1907,7 +2316,7 @@ def forward(self, x_1, output_1):
                 base[i : i + 1, ::gap] = row
             return base
 
-        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops import user_kernel_hop
 
         with torch.inference_mode():
             expected = make_base()
@@ -1915,7 +2324,9 @@ def forward(self, x_1, output_1):
                 if i != skipped_row:
                     expected[i, ::gap] = 1.0
             with mock.patch.object(
-                tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+                user_kernel_hop,
+                "clone_mutated_arg",
+                wraps=user_kernel_hop.clone_mutated_arg,
             ) as clone_mock:
                 self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
         # Numerics are the contract; this pins the mechanism, so a change that stops
@@ -2344,9 +2755,8 @@ def forward(self, x_1, output_1):
 
         n = 8
         eager_out = f(n)
-        compiled_out, (triton_code,) = run_and_get_code(
-            torch.compile(f, fullgraph=True), n
-        )
+        compiled_out, kernels = run_and_get_kernels(torch.compile(f, fullgraph=True), n)
+        triton_code = "\n".join(kernels)
 
         # Verify the generated code has proper imports
         self.assertIn("from triton.language.core import dtype as dtype", triton_code)
@@ -2467,7 +2877,7 @@ def forward(self, x_1, output_1):
         x = torch.randn(4, device=GPU_TYPE)
         y = torch.randn(4, device=GPU_TYPE)
         args_list = [(x, y, torch.float32, tl.float32)]
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        if GPU_TYPE == "xpu" or torch.cuda.is_bf16_supported(including_emulation=False):
             args_list.append((x, y, torch.bfloat16, tl.bfloat16))
 
         for args in args_list:
@@ -2967,6 +3377,57 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
 
+    @requires_gpu
+    def test_clone_of_offset_view_passed_to_triton_kernel_is_kept(self):
+        # A user kernel may need an aligned base, e.g. for a device-side TMA
+        # descriptor, so a clone it receives is not erased as a no-op.
+        @triton.jit
+        def copy_kernel(in_ptr, out_ptr, BLOCK_SIZE: "tl.constexpr"):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            tl.store(out_ptr + offsets, tl.load(in_ptr + offsets))
+
+        def f(x):
+            y = x.clone()
+            out = torch.empty_like(y)
+            copy_kernel[(1,)](y, out, BLOCK_SIZE=64)
+            return out
+
+        x = torch.arange(65, dtype=torch.float32, device=GPU_TYPE)[1:].view(4, 16)
+        graphs = []
+        with inductor_config.patch(
+            post_grad_custom_post_pass=lambda graph: graphs.append(str(graph)),
+            force_disable_caches=True,
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x)
+        self.assertRegex("".join(graphs), r"in_ptr: %clone\b")
+
+    @requires_cuda_tma
+    @requires_gpu
+    def test_tma_descriptor_clone_with_pointer_and_view(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        @triton.jit
+        def add_pointer_and_descriptor(
+            in_ptr, in_desc, out_ptr, BLOCK_SIZE: "tl.constexpr"
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(in_ptr + offsets) + in_desc.load([0])
+            tl.store(out_ptr + offsets, values)
+
+        def f(x):
+            y = x.clone()
+            out = torch.empty_like(y)
+            desc = create_tensor_descriptor_shim(y.view(-1), [64], new_api=True)
+            add_pointer_and_descriptor[(1,)](y, desc, out, BLOCK_SIZE=64)
+            return out
+
+        x = torch.arange(65, dtype=torch.float32, device=GPU_TYPE)[1:].view(4, 16)
+        expected = x + x
+        self.assertEqual(f(x), expected)
+        with inductor_config.patch(force_disable_caches=True):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), expected)
+
     @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -3180,6 +3641,46 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
+
+    @requires_cuda_tma
+    @requires_gpu
+    def test_tma_descriptor_on_realigning_clone(self):
+        # Cloning an input whose base is not 16-byte aligned gives a TMA descriptor
+        # an aligned base; Inductor must not remove the clone as a no-op.
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        def f(a, b):
+            BLOCK_SIZE_X = 16
+            BLOCK_SIZE_Y = 32
+            a, b = a.clone(), b.clone()
+            out = torch.zeros_like(a)
+            x_size, y_size = out.size()
+            desc_a, desc_b, desc_out = (
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE_X, BLOCK_SIZE_Y], new_api=True
+                )
+                for t in (a, b, out)
+            )
+            grid = (
+                triton.cdiv(x_size, BLOCK_SIZE_X),
+                triton.cdiv(y_size, BLOCK_SIZE_Y),
+            )
+            add_kernel_with_tma_2d_new_api[grid](
+                desc_a,
+                desc_b,
+                desc_out,
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+            return out
+
+        a, b = (
+            torch.randn(25 * 16 + 1, device=GPU_TYPE)[1:].view(25, 16) for _ in range(2)
+        )
+        self.assertNotEqual(a.data_ptr() % 16, 0)
+        compiled_out = torch.compile(f, fullgraph=True, backend="inductor")(a, b)
+        self.assertEqual(compiled_out, a + b)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -4020,7 +4521,8 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_with_docstring(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_docstring(self, quotes, cpp_wrapper):
         kernel = (
             kernel_with_docstring_single_quotes
             if quotes == "single"
@@ -4036,12 +4538,18 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            # Only a wrapper that consumes string kernels carries the escaped block.
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    def test_kernel_with_backslash_in_docstring(self):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_backslash_in_docstring(self, cpp_wrapper):
         # https://github.com/pytorch/pytorch/issues/183420
         # Backslash escapes in the kernel source text must be doubled before
         # the source is spliced into the generated triple-quoted wrapper,
@@ -4055,8 +4563,12 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @skipIfXpu(
@@ -4065,7 +4577,8 @@ def forward(self, arg0_1, arg1_1):
     )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_inline_asm(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_inline_asm(self, quotes, cpp_wrapper):
         if torch.version.cuda:
             kernel = (
                 kernel_inline_asm_single_quotes
@@ -4090,8 +4603,12 @@ def forward(self, arg0_1, arg1_1):
 
         inp = torch.randn(345, device=GPU_TYPE)
         actual = fn(inp)
-        expected = torch.compile(fn, fullgraph=True)(inp)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, inp)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
@@ -5121,6 +5638,13 @@ class MutationTests(torch._inductor.test_case.TestCase):
             tkw.unregister_kernel_access_op(custom_store)
             analyze_kernel_access.reset()
             get_tma_stores.reset()
+
+    def test_clone_preserve_strides_still_importable(self):
+        # Dispatch modes outside torch import it from triton_kernel_wrap.
+        from torch._higher_order_ops.triton_kernel_wrap import clone_preserve_strides
+        from torch._prims_common import clone_preserve_strides as expected
+
+        self.assertIs(clone_preserve_strides, expected)
 
     def test_register_kernel_access_op_rejects_ignore_with_indexes(self):
         from torch._higher_order_ops import triton_kernel_wrap as tkw
@@ -6190,7 +6714,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_wrap_triton_triton_interpret_eager(self):
         script = """
 import os
@@ -6200,6 +6724,7 @@ import torch
 import triton
 import triton.language as tl
 from torch.library import wrap_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 @triton.jit
@@ -6208,7 +6733,7 @@ def add_kernel(
     in_ptr1,
     out_ptr,
     n_elements,
-    BLOCK_SIZE: "tl.constexpr",
+    BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     block_start = pid * BLOCK_SIZE
@@ -6227,7 +6752,7 @@ def autotuned_add_kernel(
     in_ptr1,
     out_ptr,
     n_elements,
-    BLOCK_SIZE: "tl.constexpr",
+    BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     block_start = pid * BLOCK_SIZE
@@ -6261,7 +6786,7 @@ def autotuned_add(x, y):
     return output
 
 
-x = torch.randn(1024, device="cuda")
+x = torch.randn(1024, device=GPU_TYPE)
 torch.testing.assert_close(add(x, x), x + x)
 torch.testing.assert_close(autotuned_add(x, x), x + x)
 
@@ -6706,6 +7231,57 @@ else:
             f(x, increment)
 
         self.assertEqual(y + increment, x)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_reset_to_zero_restore_value_with_prune_configs_by(
+        self, backend
+    ):
+        def noop_prune(configs, named_args, **kwargs):
+            return configs
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
+            ],
+            key=[],
+            reset_to_zero=["acc_ptr"],
+            restore_value=["counter_ptr"],
+            prune_configs_by={"early_config_prune": noop_prune},
+        )
+        @triton.jit
+        def accumulate_kernel(
+            in_ptr0,
+            acc_ptr,  # accumulated into, so reset to zero before every config
+            counter_ptr,  # updated in place, so restored after every config
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.atomic_add(acc_ptr + offsets, x, mask=mask)
+            counter = tl.load(counter_ptr + offsets, mask=mask)
+            tl.store(counter_ptr + offsets, counter + 1, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, counter):
+            acc = torch.zeros_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            accumulate_kernel[grid](x, acc, counter, n_elements=n_elements)
+            return acc
+
+        x = torch.rand(4, device=GPU_TYPE)
+        counter = torch.zeros(4, device=GPU_TYPE)
+
+        # The autotuner rebuilt after pruning must keep reset_to_zero and
+        # restore_value, or every benchmarking run leaks into acc and counter.
+        self.assertEqual(f(x, counter), x)
+        self.assertEqual(counter, torch.ones_like(counter))
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -7219,7 +7795,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_relu_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7236,16 +7812,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_sigmoid_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7262,14 +7840,16 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             return out.sigmoid()
 
         a = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_with_unused_buffer(self):
         @triton.jit
         def kernel_unused_tensor(
@@ -7286,17 +7866,17 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
 
         def fn(a):
             out = torch.empty_like(a)
-            unused = torch.empty(a.numel(), device="cuda")
+            unused = torch.empty(a.numel(), device=GPU_TYPE)
             kernel_unused_tensor[(1,)](a, out, unused, a.numel(), BLOCK_SIZE=16)
             return out.relu()
 
-        a = torch.randn(10, device="cuda")
+        a = torch.randn(10, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a))
         self.check_code(code[0], num_kernels=1, num_allocs=2, num_deallocs=2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_with_ordering_constraints(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7317,14 +7897,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             c = add(c, b)
             return c.relu()
 
-        a = torch.randn(10, device="cuda")
-        b = torch.randn(10, device="cuda")
+        a = torch.randn(10, device=GPU_TYPE)
+        b = torch.randn(10, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_cache(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7345,14 +7925,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             c = add(c, b).relu()
             return c
 
-        a = torch.randn(10, device="cuda")
-        b = torch.randn(10, device="cuda")
+        a = torch.randn(10, device=GPU_TYPE)
+        b = torch.randn(10, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_custom_kernel_with_linebreaks(self):
         # we do AST manipulation / string manipulation of the kernel source code
         # so we wanna make sure to correctly handle edge cases with tricky line breaks
@@ -7382,14 +7962,16 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             return out.sigmoid()
 
         a = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_read_write_tensors(self):
         # cannot epilogue-fuse this one because the kernel reads from `out_ptr` before writing to it
         @triton.jit
@@ -7408,16 +7990,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         _, code = run_and_get_code(torch.compile(fn), a, b)
         # no fusion, so 2 kernels: add_kernel, relu
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_multiple_stores(self):
         # cannot epilogue-fuse this one because the kernel stores twice (once directly and once indirectly via another triton func)
         """
@@ -7444,16 +8028,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel_with_custom_store[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         _, code = run_and_get_code(torch.compile(fn), a, b)
         # no fusion, so 2 kernels: add_kernel, relu
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_non_empty_outputs(self):
         # cannot epilogue-fuse this one because the kernel writes to buffer initialized with non-UB values
         @triton.jit
@@ -7471,9 +8057,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
@@ -7481,7 +8069,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # no fusion, so 3 kernels: ones, add_kernel, relu
         self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_concat_outputs(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7493,16 +8081,22 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             tl.store(out_ptr + offs, x + y, mask=mask)
 
         def fn(a, b):
-            out_first_half = torch.empty(int(len(a) / 2), dtype=a.dtype, device="cuda")
-            out_second_half = torch.empty(int(len(a) / 2), dtype=a.dtype, device="cuda")
+            out_first_half = torch.empty(
+                int(len(a) / 2), dtype=a.dtype, device=GPU_TYPE
+            )
+            out_second_half = torch.empty(
+                int(len(a) / 2), dtype=a.dtype, device=GPU_TYPE
+            )
             out = torch.concat((out_first_half, out_second_half))
             grid = (triton.cdiv(a.numel(), 1024),)
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
@@ -7510,7 +8104,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # no fusion, so 3 kernels: concat, add_kernel, relu
         self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_multiple_reads_on_mutated_tensor(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7527,9 +8121,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu(), out.sigmoid()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
@@ -7537,10 +8133,10 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # two kernels: user defined `add_kernel`, and the generated one for both sigmoid and relu
         self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_atomic_store(self):
         # on ROCm we skip this because `tl.atomic_xchg` fails to compile in ROCm
-        if torch.version.cuda is None:
+        if torch.version.hip:
             return
 
         @triton.jit
@@ -7558,16 +8154,18 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.relu()
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_indexing_var_usage(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7583,18 +8181,20 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             grid = (triton.cdiv(a.numel(), 1024),)
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             # this arange causes the final kernel to require indexing expressions not available in the user kernel
-            return out.relu() + torch.arange(out.shape[0], device="cuda")
+            return out.relu() + torch.arange(out.shape[0], device=GPU_TYPE)
 
-        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device=GPU_TYPE)
         b = torch.tensor(
-            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            dtype=torch.float32,
+            device=GPU_TYPE,
         )
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_non_unary_epilogue(self):
         @triton.jit
         def add_kernel(a_ptr, b_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
@@ -7612,15 +8212,15 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[GRID](a, b, out, a.numel(), 1)
             return out + c
 
-        a = torch.randn(10, dtype=torch.float32, device="cuda")
-        b = torch.randn(10, dtype=torch.float32, device="cuda")
-        c = torch.randn(10, dtype=torch.float32, device="cuda")
+        a = torch.randn(10, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(10, dtype=torch.float32, device=GPU_TYPE)
+        c = torch.randn(10, dtype=torch.float32, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_fusion_cast_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7637,14 +8237,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.to(torch.float16)
 
-        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
-        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        a = torch.randn(8, 16, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(8, 16, dtype=torch.float32, device=GPU_TYPE)
 
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_no_fusion_for_out_of_place_epilogue(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -7661,14 +8261,14 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
             return out.T.contiguous().relu()
 
-        a = torch.randn(32, 32, device="cuda")
-        b = torch.randn(32, 32, device="cuda")
+        a = torch.randn(32, 32, device=GPU_TYPE)
+        b = torch.randn(32, 32, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
-if HAS_CUDA_AND_TRITON:
+if HAS_GPU_AND_TRITON:
 
     @triton.jit
     def custom_store(ptr, val, mask):

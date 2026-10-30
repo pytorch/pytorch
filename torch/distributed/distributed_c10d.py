@@ -51,16 +51,24 @@ from torch._C._distributed_c10d import (
     GatherOptions,
     get_debug_level,
     HealthCheckHook,
+    HookOpName,  # noqa: F401
     NanCheckHook,
+    PostHookArgs,  # noqa: F401
     PrefixStore,
+    PreHookArgs,  # noqa: F401
     ProcessGroup,
+    PutOptions,  # noqa: F401
     ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    SignalOptions,  # noqa: F401
     Store,
+    WaitSignalOptions,  # noqa: F401
     Window,
+    WindowAccessType,  # noqa: F401
+    WindowAttr,  # noqa: F401
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
@@ -643,6 +651,11 @@ class Backend(str):  # noqa: SLOT000
                 break
 
         if backend_entrypoint is None:
+            # Fake is built in; register it where entry points are unavailable (e.g. Buck).
+            if normalized_name == Backend.FAKE:
+                from torch.distributed._backends.fake import _register_fake_backend
+
+                _register_fake_backend()
             return
 
         try:
@@ -859,6 +872,7 @@ def _create_nccl2_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -887,6 +901,7 @@ def _create_nccl_lazy_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -1544,7 +1559,12 @@ class _WorldMeta(type):
 
 
 class group(metaclass=_WorldMeta):
-    """Group class. Placeholder."""
+    """
+    Namespace for the default process group.
+
+    ``group.WORLD`` is the default :class:`ProcessGroup` created by
+    :func:`init_process_group`, or ``None`` before initialization.
+    """
 
 
 class GroupMember(metaclass=_WorldMeta):
@@ -2708,7 +2728,7 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == Backend.FAKE:
-                from torch.testing._internal.distributed.fake_pg import FakeStore
+                from torch.distributed._backends.fake import FakeStore
 
                 store = FakeStore()
             else:
@@ -3118,6 +3138,7 @@ def _new_process_group_helper(
                 # pyrefly: ignore [bad-argument-type]
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
+                dist_backend_opts.group_desc = group_desc
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
                 dist_backend_opts.process_group = pg
                 dist_backend_opts.split_from = split_from
@@ -3240,6 +3261,51 @@ def _release_nvshmem_team_pool(group_name: str) -> None:
         release(group_name)
 
 
+def _release_nvshmem_team_pool_after_abort(group_name: str) -> None:
+    # The release synchronizes the device, which raises on a sticky CUDA error.
+    try:
+        _release_nvshmem_team_pool(group_name)
+    except Exception:
+        logger.warning(
+            "Failed to release NVSHMEM team pool of group %s after abort",
+            group_name,
+            exc_info=True,
+        )
+
+
+def _finalize_torchcomm(comm, *, best_effort: bool) -> None:
+    try:
+        comm.finalize()
+    except Exception:
+        if not best_effort:
+            raise
+        logger.warning(
+            "Failed to finalize TorchComms communicator after abort", exc_info=True
+        )
+
+
+def _finalize_torchcomms(pg: ProcessGroup, *, best_effort: bool = False) -> None:
+    if not _TORCHCOMM_AVAILABLE:
+        return
+    # A single comm may be shared across multiple device types (e.g. a
+    # gloo group reports both 'cuda' and 'cpu' device types backed by the
+    # same _BackendWrapper). Deduplicate by comm identity so we finalize
+    # each comm exactly once; finalize() is not idempotent and raises
+    # "already finalized" on a second call.
+    finalized_comm_ids: set[int] = set()
+    for device_type in pg._device_types:
+        backend = pg._get_backend(device_type)
+        if isinstance(backend, _BackendWrapper):
+            comm = backend.get_comm()
+            if id(comm) not in finalized_comm_ids:
+                _finalize_torchcomm(comm, best_effort=best_effort)
+                finalized_comm_ids.add(id(comm))
+    if finalized_comm_ids:
+        _world.comms[:] = [
+            comm for comm in _world.comms if id(comm) not in finalized_comm_ids
+        ]
+
+
 def destroy_process_group(
     group: ProcessGroup | _NonGroupMember | None = None,
 ) -> None:
@@ -3312,24 +3378,7 @@ def destroy_process_group(
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        if _TORCHCOMM_AVAILABLE:
-            # A single comm may be shared across multiple device types (e.g. a
-            # gloo group reports both 'cuda' and 'cpu' device types backed by the
-            # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once — finalize() is not idempotent and raises
-            # "already finalized" on a second call.
-            finalized_comm_ids: set[int] = set()
-            for device_type in pg._device_types:
-                backend = pg._get_backend(device_type)
-                if isinstance(backend, _BackendWrapper):
-                    comm = backend.get_comm()
-                    if id(comm) not in finalized_comm_ids:
-                        comm.finalize()
-                        finalized_comm_ids.add(id(comm))
-            if finalized_comm_ids:
-                _world.comms[:] = [
-                    comm for comm in _world.comms if id(comm) not in finalized_comm_ids
-                ]
+        _finalize_torchcomms(pg)
         _release_nvshmem_team_pool(_world.pg_names[pg])
         pg.shutdown()
         del _world.pg_map[pg]
@@ -3413,6 +3462,15 @@ def _abort_process_group(
             ):
                 pg_to_abort.abort()
 
+        # Only after the aborts: an aborted TorchComms comm finalizes without
+        # its collective destroy, and the NVSHMEM release synchronizes the
+        # device, which would wait on hung NCCL kernels before the abort.
+        for comm in _world.comms:
+            _finalize_torchcomm(comm, best_effort=True)
+        _world.comms.clear()
+        for pg_name in _world.pg_names.values():
+            _release_nvshmem_team_pool_after_abort(pg_name)
+
         _update_default_pg(None)
         _world.pg_map.clear()
         _world.pg_names.clear()
@@ -3435,6 +3493,9 @@ def _abort_process_group(
         _world.group_count = 0
     else:
         pg.abort()
+        # As for WORLD above, only after the abort.
+        _finalize_torchcomms(pg, best_effort=True)
+        _release_nvshmem_team_pool_after_abort(_world.pg_names[pg])
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -6231,6 +6292,9 @@ def reduce_scatter_single(
             (ii) a stack of the output tensors along the primary dimension.
             For definition of "concatenation", see ``torch.cat()``.
             For definition of "stack", see ``torch.stack()``.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
@@ -7256,9 +7320,9 @@ def new_group(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams. For other available options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
-            (bool, optional): perform a group-local barrier at the end of the process group creation.
-            This is different in that non-member ranks don't need to call into API and don't
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+        use_local_synchronization (bool, optional): perform a group-local barrier
+            at the end of the process group creation. This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
