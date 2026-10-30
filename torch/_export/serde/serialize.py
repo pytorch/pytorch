@@ -714,8 +714,8 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 def _import_torch_object(name: str) -> Any:
     """
     Import the object that a qualified name under torch refers to, or return
-    None. Only torch names are resolved so that loading a program never
-    imports modules outside of torch.
+    None. Only torch names are resolved so that load itself never imports
+    modules outside of torch.
     """
     if not name.startswith("torch."):
         return None
@@ -3206,7 +3206,7 @@ class GraphModuleDeserializer(metaclass=Final):
         }
         spec_nodes = []
         for suffix, spec in specs.items():
-            attr_name = base_name = f"{serialized_node.name or 'flat_apply'}_{suffix}"
+            attr_name = base_name = f"{serialized_node.name}_{suffix}"
             i = 0
             while hasattr(self.module, attr_name):
                 i += 1

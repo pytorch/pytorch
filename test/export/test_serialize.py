@@ -2749,7 +2749,7 @@ class TestPredispatchSerialization(TestCase):
             self.assertEqual(expected, loaded_ep.module()(*inp))
             torch.export.save(loaded_ep, io.BytesIO())
 
-            # A new process has not imported the modules that flat_apply uses.
+            # Load and run in a new process, where only torch is imported.
             script = (
                 "import torch;"
                 f"ep = torch.export.load(r'{path}');"
