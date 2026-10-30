@@ -1,5 +1,6 @@
 """``torch.compiler.export_python``: a decorator whose compile cache is a file you own."""
 
+import contextlib
 import functools
 import logging
 import os
@@ -52,7 +53,10 @@ def export_python(
     ``path`` is also the artifact to edit: each compiled graph's Inductor code is in
     its ``GRAPH_SOURCES`` section, and that text is what runs. An edited file is
     served without its cache (built for the captured text), and its edited graphs
-    compile the kernels their text defines. A process serves one version of a
+    compile the kernels their text defines. With the inductor backend the capture
+    tunes every Triton kernel at compile time, so a graph's code carries a
+    ``KERNEL_CONFIGS`` table of the config each kernel launches with: editing a row
+    changes that kernel's launch config. A process serves one version of a
     capture: rerun in a new process to pick up an edit, since loading the edited
     file where an earlier version of it is loaded raises::
 
@@ -131,13 +135,24 @@ class _ExportedPython:
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
-        with capture(
-            self._fn,
-            artifact_path=self._path,
-            cache_path=self._cache_path,
-            tracer=self._tracer,
-            backend=self._backend,
-        ) as cap:
+        with contextlib.ExitStack() as stack:
+            if self._backend == "inductor":
+                from torch._inductor import config as inductor_config
+
+                # Tuning at compile time writes each graph's KERNEL_CONFIGS table:
+                # the config every kernel tuned to and launches with.
+                stack.enter_context(
+                    inductor_config.patch({"triton.autotune_at_compile_time": True})
+                )
+            cap = stack.enter_context(
+                capture(
+                    self._fn,
+                    artifact_path=self._path,
+                    cache_path=self._cache_path,
+                    tracer=self._tracer,
+                    backend=self._backend,
+                )
+            )
             result = cap(*args, **kwargs)
         # The capture's live compile holds the names its artifact binds on load.
         cast(_DynamoCapture, cap)._release_live_compile()
