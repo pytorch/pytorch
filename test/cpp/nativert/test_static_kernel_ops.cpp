@@ -621,5 +621,9 @@ return (%cloned)
   int64_t length = 3;
   std::vector<c10::IValue> args{self, dim, start, length};
   testStaticKernelEquality(graph, args, true);
+
+  auto x = at::tensor({1, 2, 3, 4, 5, 6, 7, 8, 9}).reshape({3, 3});
+  std::vector<c10::IValue> args_neg{x, int64_t{-1}, int64_t{-1}, int64_t{1}};
+  testStaticKernelEquality(graph, args_neg, true);
 }
 } // namespace torch::nativert

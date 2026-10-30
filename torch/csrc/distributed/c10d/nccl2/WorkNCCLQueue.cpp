@@ -2,9 +2,26 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <algorithm>
+
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 namespace c10d::nccl2 {
+
+// Called with the queue locked, so OnCompletion hook reports keep the order in
+// which works were popped across concurrent garbageCollect() callers. Within
+// one pass, works from different streams are reported in issue order. The
+// in-place sort also orders the callers' notifyCompletion() loop.
+void WorkNCCLQueue::reportOnCompletion(
+    std::vector<std::shared_ptr<WorkNCCL::State>>& completed) {
+  std::sort(
+      completed.begin(), completed.end(), [](const auto& a, const auto& b) {
+        return a->completionKey < b->completionKey;
+      });
+  for (const auto& state : completed) {
+    state->reportOnCompletion();
+  }
+}
 
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
     std::vector<std::shared_ptr<WorkNCCL::State>>& completed) {
@@ -61,7 +78,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
     status = garbageCollectLocked(completed);
-    notifying_ += completed.size();
+    reportOnCompletion(completed);
   }
   // Reported with no queue lock held on purpose: a completion hook may take a
   // lock of its own (c10d::FlightRecorderHook takes the recorder's, which a
@@ -71,16 +88,12 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
   for (const auto& state : completed) {
     state->notifyCompletion();
   }
-  if (!completed.empty()) {
-    std::lock_guard<std::mutex> lock(work_queues_mutex_);
-    notifying_ -= completed.size();
-  }
   return status;
 }
 
 bool WorkNCCLQueue::idle() {
   std::lock_guard<std::mutex> lock(work_queues_mutex_);
-  return stream_work_queues_.empty() && notifying_ == 0;
+  return stream_work_queues_.empty();
 }
 
 WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
@@ -103,6 +116,8 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
       break;
     }
   }
+
+  reportOnCompletion(completed);
 
   // Clear all work queues and input tensors.
   //

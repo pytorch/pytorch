@@ -108,6 +108,11 @@ void WorkNCCL::InputTensorShelf::append(InputTensorShelf& other) {
   other.tensors.clear();
 }
 
+void WorkNCCL::InputTensorShelf::appendCopy(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(tensors.end(), other.tensors.begin(), other.tensors.end());
+}
+
 void WorkNCCL::InputTensorShelf::clear() {
   std::lock_guard<std::mutex> lock(mutex);
   tensors.clear();
@@ -218,37 +223,87 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
   return true;
 }
 
+std::optional<float> WorkNCCL::State::measureDuration() {
+  if (!timingEnabled) {
+    return std::nullopt;
+  }
+  try {
+    // cudaEventElapsedTime on two events that have already been observed to
+    // complete: no synchronization, and no NCCL call, so it is legal on the
+    // watchdog thread. Stock ProcessGroupNCCL's watchdog calls getDuration()
+    // from its own completion hook for the same reason.
+    return getDuration();
+  } catch (const std::exception& e) {
+    TC_LOG(WARNING, comm) << "Cannot measure collective duration: " << e.what();
+  }
+  return std::nullopt;
+}
+
+std::shared_ptr<::c10d::WorkInfo> WorkNCCL::State::makeWorkInfo() {
+  // Unlike stock ProcessGroupNCCL, which throws here, a duration that cannot be
+  // measured (e.g. the work was issued before timing was enabled) reports 0.
+  return std::make_shared<::c10d::WorkInfo>(
+      opType,
+      seq,
+      workStartTime,
+      std::chrono::steady_clock::now(),
+      std::chrono::duration<float, std::milli>(measureDuration().value_or(0)));
+}
+
+void WorkNCCL::State::reportOnCompletion() {
+  if (!comm->hasOnCompletionHook()) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(hookReportMutex);
+    if (hookReport == HookReport::HOLD) {
+      hookReport = HookReport::HELD_COMPLETED;
+    }
+    if (hookReport != HookReport::REPORT) {
+      return;
+    }
+    hookReport = HookReport::DONE;
+  }
+  comm->enqueueOnCompletion(makeWorkInfo());
+}
+
+void WorkNCCL::holdOnCompletionReport() {
+  std::lock_guard<std::mutex> lock(state_->hookReportMutex);
+  state_->hookReport = State::HookReport::HOLD;
+}
+
+void WorkNCCL::releaseOnCompletionReportAsCoalesced() {
+  using HookReport = State::HookReport;
+  {
+    std::lock_guard<std::mutex> lock(state_->hookReportMutex);
+    if (state_->hookReport != HookReport::HOLD &&
+        state_->hookReport != HookReport::HELD_COMPLETED) {
+      return;
+    }
+    state_->opType = ::c10d::OpType::COALESCED;
+    // retrieveOpType() too, like stock ProcessGroupNCCL's coalesced work.
+    opType_ = ::c10d::OpType::COALESCED;
+    if (state_->hookReport == HookReport::HOLD) {
+      state_->hookReport = HookReport::REPORT;
+      return;
+    }
+    state_->hookReport = HookReport::DONE;
+  }
+  // Completed while held: report now, from this thread.
+  if (state_->comm->hasOnCompletionHook()) {
+    state_->comm->enqueueOnCompletion(state_->makeWorkInfo());
+  }
+}
+
 void WorkNCCL::State::notifyCompletion() {
   // Called once per work, by the queue that popped it as COMPLETED, and only
   // for success -- a timed-out or failed work reports nothing, because a
   // consumer that read that as "finished" would lose the very fact a
   // post-mortem needs.
-  const bool onCompletionHook = comm->hasOnCompletionHook();
-  if (!onCompletionHook && !comm->hasCompletionHooks()) {
+  if (!comm->hasCompletionHooks()) {
     return;
   }
-  std::optional<float> duration;
-  if (timingEnabled) {
-    try {
-      // cudaEventElapsedTime on two events that have already been observed to
-      // complete: no synchronization, and no NCCL call, so it is legal on the
-      // watchdog thread. Stock ProcessGroupNCCL's watchdog calls getDuration()
-      // from its own completion hook for the same reason.
-      duration = getDuration();
-    } catch (const std::exception& e) {
-      TC_LOG(WARNING, comm)
-          << "Cannot measure collective duration: " << e.what();
-    }
-  }
-  if (onCompletionHook) {
-    comm->enqueueOnCompletion(std::make_shared<::c10d::WorkInfo>(
-        opType,
-        seq,
-        workStartTime,
-        std::chrono::steady_clock::now(),
-        std::chrono::duration<float, std::milli>(duration.value_or(0))));
-  }
-  comm->runCompletionHooks(completionKey, duration);
+  comm->runCompletionHooks(completionKey, measureDuration());
 }
 
 WorkNCCL::WorkStatus WorkNCCL::status() const {
@@ -272,18 +327,39 @@ std::chrono::milliseconds WorkNCCL::getTimeout() const {
   return state_->timeout;
 }
 
+void WorkNCCL::setDurationStart(const WorkNCCL& first) {
+  std::scoped_lock lock(state_->durationMutex, first.state_->durationMutex);
+  state_->durationStartEvents = first.state_->durationStartEvents;
+}
+
 void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
   if (!children.empty()) {
-    std::lock_guard<std::mutex> lock(state_->durationMutex);
-    state_->durationStartEvents = children.front()->state_->events;
+    setDurationStart(*children.front());
   }
   for (const auto& child : children) {
     inputTensors_->append(*child->inputTensors_);
   }
 }
 
-void WorkNCCL::setSequenceNumber(uint64_t seq) {
+void WorkNCCL::retainInputs(
+    const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    inputTensors_->appendCopy(*work->inputTensors_);
+  }
+}
+
+void WorkNCCL::waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    if (work->state_->stream == state_->stream) {
+      continue;
+    }
+    work->state_->events->end->block(state_->stream);
+  }
+}
+
+void WorkNCCL::setSequenceNumber(uint64_t seq, bool is_p2p) {
   state_->seq = seq;
+  state_->isP2P = is_p2p;
 }
 
 void WorkNCCL::setOwnedEphemeralTimeout(std::chrono::milliseconds timeout) {
@@ -388,7 +464,10 @@ void WorkNCCL::synchronizeInternal() {
       state_->comm->getSize(),
       "wait",
       state_->comm->getRank(),
-      state_->seq);
+      state_->seq,
+      std::vector<at::Tensor>{},
+      std::vector<at::Tensor>{},
+      state_->isP2P);
 
   // Make the current stream wait for the end event recorded on the work's
   // stream, ordering subsequent current-stream ops after this collective.

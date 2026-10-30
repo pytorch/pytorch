@@ -104,16 +104,28 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
-  // Per-process-group collective counter of the op this work tracks; set by
-  // the backend's createWork().
-  void setSequenceNumber(uint64_t seq);
+  // Makes getDuration() measure from where first's duration starts.
+  void setDurationStart(const WorkNCCL& first);
+  // Keeps the works' input tensors alive until this work is waited on, without
+  // taking them from the works.
+  void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Per-process-group counter of the op this work tracks: the collective
+  // counter, or the p2p counter when `is_p2p`. Set by the backend.
+  void setSequenceNumber(uint64_t seq, bool is_p2p = false);
   void setOwnedEphemeralTimeout(std::chrono::milliseconds timeout);
   void setHostBlocking(bool host_blocking);
+  // OnCompletion hook: a coalesced op reports once, as OpType::COALESCED, like
+  // stock ProcessGroupNCCL. Its works hold their report from enqueue; the op's
+  // representative then releases its own as COALESCED (reporting now if it
+  // already completed) and the others never report.
+  void holdOnCompletionReport();
+  void releaseOnCompletionReportAsCoalesced();
 
  protected:
-  void recordStart(
-      std::string_view coll_name,
-      ::c10d::OpType op_type = ::c10d::OpType::UNKNOWN);
+  void recordStart(std::string_view coll_name, ::c10d::OpType op_type);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -125,6 +137,7 @@ class WorkNCCL : public c10d::Work {
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
     void append(InputTensorShelf& other);
+    void appendCopy(InputTensorShelf& other);
     void clear();
 
     std::mutex mutex;
@@ -141,8 +154,13 @@ class WorkNCCL : public c10d::Work {
     bool setTerminalStatus(WorkStatus status);
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    // Queues this completed work's OnCompletion hook report; called with the
+    // work queue locked, in issue order per stream.
+    void reportOnCompletion();
     void notifyCompletion();
     float getDuration();
+    std::optional<float> measureDuration();
+    std::shared_ptr<::c10d::WorkInfo> makeWorkInfo();
 
     ProcessGroupNCCL* comm;
     int64_t reconfigureUuid;
@@ -155,7 +173,11 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
+    bool isP2P{false};
     ::c10d::OpType opType{::c10d::OpType::UNKNOWN};
+    enum class HookReport : uint8_t { REPORT, HOLD, HELD_COMPLETED, DONE };
+    std::mutex hookReportMutex;
+    HookReport hookReport{HookReport::REPORT};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
@@ -193,7 +215,8 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
   WorkNCCL::WorkStatus finalize();
-  // No work is queued and every popped work has been notified.
+  // No work is queued. A popped work has already queued its OnCompletion hook
+  // report.
   bool idle();
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
@@ -204,12 +227,12 @@ class WorkNCCLQueue {
   // their completion out after dropping work_queues_mutex_.
   WorkNCCL::WorkStatus garbageCollectLocked(
       std::vector<std::shared_ptr<WorkNCCL::State>>& completed);
+  static void reportOnCompletion(
+      std::vector<std::shared_ptr<WorkNCCL::State>>& completed);
   std::unordered_map<cudaStream_t, std::queue<WorkNCCL::TrackedWork>>
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
       completedInputTensors_;
-  // Works popped by garbageCollect() whose notifyCompletion() has not returned.
-  size_t notifying_{0};
   std::mutex work_queues_mutex_;
 };
 

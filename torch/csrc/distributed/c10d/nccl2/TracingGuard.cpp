@@ -69,7 +69,8 @@ void TracingGuard::initializeTracingCommon(
     int collective_rank,
     uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
-    const std::vector<at::Tensor>& output_tensor_list) {
+    const std::vector<at::Tensor>& output_tensor_list,
+    bool is_p2p) {
   auto numel = [](const at::Tensor& t) { return t.numel(); };
   std::vector<int64_t> in_split_sizes = c10::fmap(input_tensor_list, numel);
   std::vector<int64_t> out_split_sizes = c10::fmap(output_tensor_list, numel);
@@ -86,16 +87,14 @@ void TracingGuard::initializeTracingCommon(
       out_split_sizes);
   // Where the profiler reads the sequence number from to build its cross-rank
   // "Comms Id" (torch/csrc/profiler/util.cpp); it stays at -1 unless set here.
-  // isP2P is false throughout: nccl2 counts p2p and collectives in the one
-  // per-PG sequence_number_, so there is no separate p2p sequence space.
-  debug_info->setSequenceInfo(static_cast<int64_t>(sequence_number), false);
+  debug_info->setSequenceInfo(static_cast<int64_t>(sequence_number), is_p2p);
   debug_info_guard_ = std::make_unique<c10::DebugInfoGuard>(
       c10::DebugInfoKind::PARAM_COMMS_INFO, std::move(debug_info));
 
   if (record_function_guard_->needsInputs()) {
     std::initializer_list<const c10::IValue> paramList = {
         c10::IValue(input_tensor_list),
-        std::make_tuple(static_cast<int64_t>(sequence_number), false),
+        std::make_tuple(static_cast<int64_t>(sequence_number), is_p2p),
         std::make_tuple(std::string(comm_name), std::string(comm_id)),
         collective_rank,
         std::string(collective_name),
@@ -123,7 +122,8 @@ TracingGuard::TracingGuard(
     int collective_rank,
     uint64_t sequence_number,
     const at::Tensor& input_tensor,
-    const at::Tensor& output_tensor) {
+    const at::Tensor& output_tensor,
+    bool is_p2p) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
   if (!record_function_guard_->isActive()) {
     return;
@@ -136,7 +136,8 @@ TracingGuard::TracingGuard(
       collective_rank,
       sequence_number,
       {input_tensor},
-      {output_tensor});
+      {output_tensor},
+      is_p2p);
 }
 
 TracingGuard::TracingGuard(
@@ -146,7 +147,8 @@ TracingGuard::TracingGuard(
     int collective_rank,
     uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
-    const std::vector<at::Tensor>& output_tensor_list) {
+    const std::vector<at::Tensor>& output_tensor_list,
+    bool is_p2p) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
   if (!record_function_guard_->isActive()) {
     return;
@@ -159,7 +161,8 @@ TracingGuard::TracingGuard(
       collective_rank,
       sequence_number,
       input_tensor_list,
-      output_tensor_list);
+      output_tensor_list,
+      is_p2p);
 }
 
 TracingGuard::TracingGuard(
