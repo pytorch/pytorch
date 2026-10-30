@@ -105,11 +105,15 @@ class ItertoolsVariable(VariableTracker):
         args: list["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker | None":
+        from .builder import SourcelessBuilder
+
         # Only itertools.chain has from_iterable; declining (None) falls
         # through to the generic protocol for other itertools callables.
         if self.value is not itertools.chain:
             return None
-        return ItertoolsVariable(_CHAIN_FROM_ITERABLE).call_function(tx, args, kwargs)
+        return SourcelessBuilder.create_internal_itertools(
+            _CHAIN_FROM_ITERABLE
+        ).call_function(tx, args, kwargs)
 
     tp_methods = {
         "from_iterable": Method(_from_iterable),
@@ -168,7 +172,9 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [unpack_iterable(tx, arg) for arg in args]
+            seqs: list[list[VariableTracker]] = (
+                [] if r == 0 else [unpack_iterable(tx, arg) for arg in args]
+            )
             items = [
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
@@ -538,16 +544,14 @@ class CountIteratorVariable(IteratorVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
-        if not (self.item.is_python_constant() and self.step.is_python_constant()):
-            return super().tp_repr_impl(tx)
-        cnt = self.item.as_python_constant()
-        step = self.step.as_python_constant()
+        cnt = tracked_repr(tx, self.item)
         # Suppress step in the repr when it is an integer equal to 1.
+        step = (
+            self.step.as_python_constant() if self.step.is_python_constant() else None
+        )
         if isinstance(step, int) and step == 1:
-            result = f"count({cnt!r})"
-        else:
-            result = f"count({cnt!r}, {step!r})"
-        return ConstantVariable.create(result)
+            return ConstantVariable.create(f"count({cnt})")
+        return ConstantVariable.create(f"count({cnt}, {tracked_repr(tx, self.step)})")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -865,8 +869,10 @@ class FilterVariable(IteratorVariable):
                 res = item
             else:
                 res = self.fn.call_function(tx, [item], {})
-            pred_res = variables.UserFunctionVariable(
-                polyfills.predicate  # type: ignore[arg-type]
+            from .builder import SourcelessBuilder
+
+            pred_res = SourcelessBuilder.create_internal_user_function(
+                polyfills.predicate
             ).call_function(tx, [res], {})
             if pred_res.as_python_constant():
                 return item

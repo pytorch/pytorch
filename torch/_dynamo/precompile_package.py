@@ -29,6 +29,8 @@ import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import itertools
+import logging
 import os
 import re
 import site
@@ -46,6 +48,7 @@ from torch.utils._config_module import ConfigModule
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .convert_frame import ConvertFrame
 from .exc import PackageError
+from .graph_utils import _graph_device_types
 from .guards import (
     CheckFunctionManager,
     is_portable_function_guard,
@@ -78,6 +81,8 @@ if TYPE_CHECKING:
     from .variables.builder import FrameStateSizeEntry
 
 
+log = logging.getLogger(__name__)
+
 # Built once: config.patch() allocates a class and a ContextVar each time it is
 # called, and this runs on every frame Dynamo compiles for a package.
 _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
@@ -85,8 +90,38 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
+def _frozen_kernel_config() -> dict[str, object]:
+    """The Triton config both precompile tracers lower under.
+
+    A frozen DynamoTracer artifact replays each kernel with one recorded
+    config, so every kernel is tuned before replay. A nonzero
+    ``triton.multi_kernel`` is turned off: a multi-kernel picks its sub-kernel
+    when the loaded module runs, by benchmarking at first launch or from the
+    serving process's ``triton.multi_kernel``, which a frozen artifact cannot
+    record. Warns once for each user value overridden.
+    """
+    import torch._inductor.config as inductor_config
+
+    if inductor_config.triton.autotune_at_compile_time is False:
+        torch._logging.warning_once(
+            log,
+            "precompile capture overrides triton.autotune_at_compile_time=False: "
+            "every kernel is tuned during capture, before the artifact is written",
+        )
+    frozen: dict[str, object] = {"triton.autotune_at_compile_time": True}
+    if multi_kernel := inductor_config.triton.multi_kernel:
+        torch._logging.warning_once(
+            log,
+            f"precompile capture overrides triton.multi_kernel={multi_kernel} to 0: "
+            "a frozen artifact cannot record which sub-kernel a multi-kernel "
+            "picks when it first runs",
+        )
+        frozen["triton.multi_kernel"] = 0
+    return frozen
+
+
 @contextlib.contextmanager
-def _capture_config() -> Iterator[None]:
+def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
@@ -98,6 +133,22 @@ def _capture_config() -> Iterator[None]:
     inference call therefore compiles a backward too, and a backward the
     backend cannot compile fails the capture; capturing under
     ``torch.no_grad()`` avoids both.
+    Triton kernels autotune while their graph lowers, on generated example
+    inputs, as standalone_compile does: a backward no captured call runs would
+    otherwise keep every candidate config, and the artifact can only freeze a
+    kernel tuned down to one. This covers forward kernels too, which tune on
+    synthetic inputs at capture rather than on first launch: replay runs
+    frozen configs, so every kernel's config must be chosen before replay
+    anyway. Each kernel's synthetic arguments are allocated while the captured
+    forward's tensors are still live, so peak device memory during capture
+    grows by roughly the backward's working set.
+    ``triton.multi_kernel`` is off (see _frozen_kernel_config). These Triton
+    overrides, and their warnings, apply only when ``lowers_kernels``: an
+    eager-backend capture lowers no kernels.
+    Under ``cpp_wrapper`` the forced flag also turns off
+    ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``). Captured graphs
+    keep ``aten.repeat_interleave.Tensor`` as an aten fallback rather than
+    decomposing it, since its output depends on the data in ``repeat``.
     The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
     bundle per compile context, left open on a remote-cache miss until the
     first compiled call, but eager lowering compiles the forward and the
@@ -146,7 +197,12 @@ def _capture_config() -> Iterator[None]:
     # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
-        inductor_config.patch(bundled_autotune_remote_cache=False),
+        inductor_config.patch(
+            {
+                "bundled_autotune_remote_cache": False,
+                **(_frozen_kernel_config() if lowers_kernels else {}),
+            }
+        ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
@@ -235,11 +291,15 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     CLASS_MATCH is still kept when ``is_portable_identity_guard`` finds that
     its object unpickles by reference to the loading process's own: a module
     that is its ``sys.modules`` entry, a class or function that its
-    ``__module__`` and ``__qualname__`` lead back to, or a member of such an
-    enum. A ``<locals>`` class, a module missing from ``sys.modules``, a
-    ``functools.wraps`` wrapper and a NamedTuple class nested in a class (the
-    guard-state pickler rebuilds it as a fresh class) are still dropped, and so
-    is a class whose metaclass is nested or local. An object defined in
+    ``__module__`` and ``__qualname__`` lead back to, a member of such an
+    enum, or a top-level global of its ``__module__`` whose class is neither
+    nested nor local and whose reduction (its ``copyreg.dispatch_table``
+    entry, else ``__reduce_ex__``) names that global, such as
+    ``typing.List``. A ``<locals>`` class, a module missing from
+    ``sys.modules``, a ``functools.wraps`` wrapper, a NamedTuple class nested
+    in a class (the guard-state pickler rebuilds it as a fresh class) and a
+    singleton stored as a class attribute are still dropped, and so is a class
+    whose metaclass is nested or local. An object defined in
     ``__main__`` is kept like any other and resolves against the loading
     process's ``__main__``: a serving script that does not define it fails the
     load with an ``AttributeError`` rather than serving without the guard.
@@ -701,9 +761,8 @@ def _defined_where_read(
     why the name compared is ``__qualname__``, backed by the code object's own
     name: functools.wraps copies ``__qualname__`` onto a wrapper but cannot
     forge its ``co_qualname``, so a same-file ``wraps`` decorator a flag turns
-    on is a slot in both arms (before 3.11 only ``co_name`` exists, so a
-    wrapper def named after what it wraps slips through there). Only a plain
-    function or a class is judged; a bound method or any other proxy that
+    on is a slot in both arms. Only a plain function or a class is judged; a
+    bound method or any other proxy that
     forwards ``__qualname__`` and ``__code__`` is refused before an attribute
     is read, which also keeps a proxy that answers reads by raising, such as
     ``torch.classes.<ns>``, out of the value slot. The file is read off the
@@ -737,12 +796,11 @@ def _defined_where_read(
     pass`` fails closed. So does a class statement whose only functions are
     generated: a fields-only ``@dataclass``'s and a ``NamedTuple``'s are defs
     of a factory (dataclasses' ``__create_fn__``, ``namedtuple``), so their
-    code objects' own qualname carries the factory's ``<locals>.`` prefix (on
-    3.10, where only ``co_name`` exists, the ``<string>`` or stdlib file they
-    compile in refuses them instead), and an ``Enum``'s arrive in the subclass
-    ``__dict__`` under ``Enum.`` qualnames the key rule refuses; so a plain
-    config dataclass read as a global is reported. The one function the
-    compiler itself puts in a class ``__dict__``, the PEP 649 annotate function
+    code objects' own qualname carries the factory's ``<locals>.`` prefix, and
+    an ``Enum``'s arrive in the subclass ``__dict__`` under ``Enum.`` qualnames
+    the key rule refuses; so a plain config dataclass read as a global is
+    reported. The one function the compiler itself puts in a class
+    ``__dict__``, the PEP 649 annotate function
     3.14 stores for an annotated class body, compiles in the reading file, but
     under key ``__annotate_func__`` with ``__qualname__`` ``Cls.__annotate__``,
     so the key rule refuses it and the verdict is the same on every version;
@@ -752,9 +810,7 @@ def _defined_where_read(
     the reader's module the same way. A ``co_filename`` is not always a path:
     an exec records ``<string>``, a REPL ``<stdin>``, and ``_norm`` would
     resolve either against the cwd, so a def exec'd under ``<string>`` and read
-    from an exec-generated frame would collide with it and be waived (on 3.10 a
-    fields-only dataclass too, whose ``__init__`` compiles in ``<string>``
-    under a ``co_name`` that cannot tell it from a class statement's def). Only
+    from an exec-generated frame would collide with it and be waived. Only
     absolute filenames on both sides compare; anything else fails closed. What this
     cannot see is a same-name fork inside the reading file -- ``try: from x
     import impl as op`` / ``except ImportError: def op``, or a class statement
@@ -767,12 +823,10 @@ def _defined_where_read(
     if value.__qualname__ != global_name:
         return False
 
-    # functools.wraps copies __qualname__ but not the code object's own name:
-    # co_qualname from 3.11, before that co_name, its last component only.
+    # functools.wraps copies __qualname__ but not the code object's own
+    # co_qualname.
     def compiled_as(fn: types.FunctionType, qualname: str) -> bool:
-        if sys.version_info >= (3, 11):
-            return fn.__code__.co_qualname == qualname
-        return fn.__code__.co_name == qualname.rpartition(".")[2]
+        return fn.__code__.co_qualname == qualname
 
     if isinstance(value, type):
         # 3.14 stores the PEP 649 annotate function under __annotate_func__
@@ -1592,9 +1646,34 @@ class _CapturePackage(CompilePackage):
     registering it, whether or not that compile is later bypassed.
     """
 
+    records_graph_break_ops = True
+
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
+        # The operators each backend graph calls, by backend id, and those Dynamo
+        # graph-breaks on and runs eagerly, for any reason.
+        # Not recorded: the ops of a torch._dynamo.disable'd function; in a frame Dynamo
+        # falls back on or cannot resume (a graph break in a loop or a try block), every
+        # op but the one it graph-broke on; under the eager backend the ops of a custom
+        # op's backward formula, which no graph holds; under cpp_wrapper the ops only
+        # Inductor's code calls (inserted by a post-grad pass, or in the backward),
+        # which it names in C++ strings; and those of a bypassed compile, whose frame
+        # serving re-traces under allow_serve_time_compiles=True. The artifact adds the
+        # ops Inductor's Python code calls.
+        self.op_names: dict[str, set[tuple[str, str]]] = {}
+        # The device types each backend graph runs on, by backend id.
+        self.device_types: dict[str, frozenset[str]] = {}
+        self.graph_break_op_names: set[tuple[str, str]] = set()
+        # The current compile's graph-break ops, kept only if it records a guarded
+        # code or falls back to eager, so a bypassed compile's ops are dropped like
+        # its backend graphs.
+        self._compile_graph_break_op_names: set[tuple[str, str]] = set()
+        # Each graph-break op's name with the device type of each of its inputs,
+        # kept like the names.
+        self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
+        self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
+        self._compile_graph_break_code: types.CodeType | None = None
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1606,6 +1685,69 @@ class _CapturePackage(CompilePackage):
         self.note_compute()
         super()._add_backend_id(backend_id, backend)
 
+    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        from torch._precompile import _op_names
+
+        self.op_names[backend_id] = _op_names(gm)
+        self.device_types[backend_id] = _graph_device_types(gm.graph)
+
+    def add_graph_break_op(
+        self,
+        op: object,
+        failed_op: object = None,
+        device_types: frozenset[str] = frozenset(),
+    ) -> None:
+        from torch._precompile import _overload_names
+
+        names = _overload_names(op)
+        has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+        backend_keys = [torch._C._dispatch_key_for_device(t) for t in device_types]
+
+        def runs_own_kernel(qualname: str) -> bool:
+            if has_kernel(qualname, "CompositeExplicitAutograd"):
+                return True
+            return bool(backend_keys) and all(
+                has_kernel(qualname, k) for k in backend_keys
+            )
+
+        # Eagerly, op calls failed_op only if it decomposes into it; otherwise
+        # only op's fake impl does.
+        qualnames = [f"{n}.{o}" if o else n for n, o in names]
+        if not qualnames or not all(map(runs_own_kernel, qualnames)):
+            names |= _overload_names(failed_op)
+        self._compile_graph_break_op_names |= names
+        self._compile_graph_break_op_devices |= set(
+            itertools.product(names, device_types)
+        )
+
+    @contextlib.contextmanager
+    def code_context(
+        self, code: types.CodeType, global_scope: dict[str, object] | None = None
+    ) -> Iterator[None]:
+        self._compile_graph_break_op_names = set()
+        self._compile_graph_break_op_devices = set()
+        self._compile_graph_break_code = code
+        with super().code_context(code, global_scope):
+            yield
+
+    def add_guarded_code(
+        self, guards_state: bytes, dynamo_code: types.CodeType
+    ) -> None:
+        super().add_guarded_code(guards_state, dynamo_code)
+        self.graph_break_op_names |= self._compile_graph_break_op_names
+        self.graph_break_op_devices |= self._compile_graph_break_op_devices
+
+    def record_eager_fallback(self, code: types.CodeType) -> None:
+        super().record_eager_fallback(code)
+        # Only the ops of the compile that gave up on this frame, not those a
+        # bypassed compile of another frame left behind.
+        if code is self._compile_graph_break_code:
+            self.graph_break_op_names |= self._compile_graph_break_op_names
+            self.graph_break_op_devices |= self._compile_graph_break_op_devices
+        self._compile_graph_break_op_names = set()
+        self._compile_graph_break_op_devices = set()
+        self._compile_graph_break_code = None
+
     def add_resume_function(
         self,
         python_code: types.CodeType,
@@ -1614,6 +1756,38 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         self.note_compute()
         super().add_resume_function(python_code, python_module, function_name)
+
+
+def _is_variantless_entry_fallback(entry: _DynamoCacheEntry) -> bool:
+    # The artifact build refuses an entry frame that fell back on its first
+    # call (it has no variant to dispatch to), so that one stays uncovered.
+    if not entry.codes:
+        return False
+    first = entry.codes[0]
+    return first.eager_fallback and not first.bypassed and not first.guarded_codes
+
+
+def _variantless_entry_fallback_message(fn_name: str) -> str:
+    return (
+        f"precompile captured no dispatchable graph for {fn_name!r}: Dynamo gave up "
+        f"on the entry frame at its first call, so it holds no variant to serve. "
+        f"Dynamo gives up on, and skips for the rest of the capture, a frame with a "
+        f"graph break it cannot resume from (such as one inside a loop; check "
+        f"TORCH_LOGS=graph_breaks), a frame that calls torch._dynamo.skip_frame(), "
+        f"a frame it refuses to trace such as a generator, a frame whose UserError "
+        f"Dynamo suppressed, or one whose graph the backend declined by raising "
+        f"SkipFrame or failed on with an error Dynamo falls back on, such as "
+        f"DynamicOutputShapeException (check the backend's log). Fix that, or "
+        f"capture the functions the entry calls instead."
+    )
+
+
+def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
+    return (
+        code.eager_fallback
+        and not code.bypassed
+        and not (code is entry.codes[0] and _is_variantless_entry_fallback(entry))
+    )
 
 
 def _summarize(
@@ -1636,18 +1810,22 @@ def _summarize(
     ``bypassed`` and ``uncovered_frames`` are read off the entry, one bare
     ``co_name`` per frame, so a repeated name is two frames and both lists are
     subsets of ``frames`` by construction. Uncovered is the coverage gap: the
-    frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
-    not bypassed. ``install()`` ``skip_code()``s a superset, every entry that is
-    not bypassed and has no guarded codes whether or not it entered Dynamo, so a
-    generated-but-never-executed resume entry is skipped there and is not a gap
-    here. ``backend_graphs`` counts the backend ids of the entries that are not
-    bypassed, the ones ``install()`` loads: a save-time bypass
-    (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
-    the entry and leaves its ids in place. ``truncated`` comes from the compile
-    path, which sees a frame hit the limit once and records it as ``co_name
-    (filename:firstlineno)``, so that set cannot merge two frames.
-    ``served_eagerly`` names the frames ``PrecompileSession._served_entry``
-    emptied: they hold no guarded code by design, not for lack of coverage.
+    frame entered Dynamo (``has_compile_id``, or ``eager_fallback`` for a
+    generator entry, flagged before ``_compile``), holds no guarded code, and
+    was neither bypassed nor served as an ``eager_fallback`` (Dynamo gave up on
+    it, so a load serves any variants it has and runs a call they miss
+    eagerly; those are ``eager_fallbacks``). ``install()`` ``skip_code()``s
+    every entry that is not bypassed and has no guarded codes whether or not it
+    entered Dynamo, so a generated-but-never-executed resume entry is skipped
+    there and is not a gap here. ``backend_graphs`` counts the backend ids of
+    the entries that are not bypassed, the ones ``install()`` loads: a
+    save-time bypass (``PrecompileCacheEntry.from_cache_entry``, backend
+    artifact missing) marks the entry and leaves its ids in place.
+    ``truncated`` comes from the compile path, which sees a frame hit the limit
+    once and records it as ``co_name (filename:firstlineno)``, so that set
+    cannot merge two frames. ``served_eagerly`` names the frames
+    ``PrecompileSession._served_entry`` emptied: they hold no guarded code by
+    design, not for lack of coverage.
     """
     return PrecompileSummary(
         frames=len(entry.codes),
@@ -1661,10 +1839,17 @@ def _summarize(
         uncovered_frames=tuple(
             c.python_code.co_name
             for c in entry.codes
-            if c.has_compile_id
+            if (c.has_compile_id or c.eager_fallback)
             and not c.guarded_codes
             and not c.bypassed
             and _frame_key(c.python_code) not in served_eagerly
+            and not _served_as_eager_fallback(entry, c)
+        ),
+        eager_fallbacks=tuple(
+            f"{c.python_code.co_name} "
+            f"({c.python_code.co_filename}:{c.python_code.co_firstlineno})"
+            for c in entry.codes
+            if _served_as_eager_fallback(entry, c)
         ),
         wont_generalize=_wont_generalize(kept, guard_sets),
         dropped_guards=tuple(sorted(dropped)),
@@ -1733,6 +1918,8 @@ class PrecompileSession(Generic[_P, _R]):
         self._compiled: Callable[_P, _R] | None = None
         self._entered = False
         self._finished = False
+        # What earlier snapshots warned about, so a save() warns only when it is new.
+        self._warned_ops: set[tuple[str, object]] = set()
 
     def _recording_filter(
         self,
@@ -1831,7 +2018,7 @@ class PrecompileSession(Generic[_P, _R]):
         )
         try:
             with (
-                _capture_config(),
+                _capture_config(lowers_kernels=self._backend == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
             ):
                 return self._compiled(*args, **kwargs)
@@ -1926,14 +2113,22 @@ class PrecompileSession(Generic[_P, _R]):
                 and (code.bypassed or (code.guarded_codes and key in lossy))
             ):
                 codes[i] = dataclasses.replace(
-                    code, guarded_codes=[], bypassed=False, skip_recursive=True
+                    code,
+                    guarded_codes=[],
+                    bypassed=False,
+                    skip_recursive=True,
+                    eager_fallback=False,
                 )
                 eager.add(key)
         return dataclasses.replace(entry, codes=codes), frozenset(eager)
 
     def summary(self) -> PrecompileSummary:
         """Coverage and guard information for everything captured so far."""
-        entry, eager = self._served_entry()
+        return self._summary_of(*self._served_entry())
+
+    def _summary_of(
+        self, entry: _DynamoCacheEntry, eager: frozenset[tuple[str, str, int]]
+    ) -> PrecompileSummary:
         # A frame served eagerly checks no guard, so neither its guards nor
         # its drops describe what the artifact serves.
         guard_sets = {k: v for k, v in self._guard_sets.items() if k not in eager}
@@ -1978,7 +2173,18 @@ class PrecompileSession(Generic[_P, _R]):
         require_no_risky_drops: bool,
     ) -> PrecompileSummary:
         """Run the coverage and guard gates, or raise saying which one failed."""
-        summary = self.summary()
+        entry, eager = self._served_entry()
+        summary = self._summary_of(entry, eager)
+        if _is_variantless_entry_fallback(entry):
+            # The artifact build refuses this too, so no flag is a way out; say
+            # so rather than suggest one. Checked before every other gate and
+            # whatever require_complete says: the entry did run, and the later
+            # gates either suggest a flag or say it never ran.
+            name = entry.codes[0].python_code.co_name
+            raise PackageError(
+                f"{_variantless_entry_fallback_message(name)} The artifact build "
+                f"refuses this whatever require_complete says."
+            )
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped guard(s) that can affect dispatch on "
@@ -2017,8 +2223,9 @@ class PrecompileSession(Generic[_P, _R]):
                     f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
                     f"from the artifact. This is expected for a frame that only "
                     f"dispatches to covered submodules; it also looks exactly like a "
-                    f"frame Dynamo gave up on (check TORCH_LOGS=graph_breaks). Pass "
-                    f"require_complete=False once you have confirmed which."
+                    f"frame whose compile error was suppressed (suppress_errors=True; "
+                    f"Dynamo logs that error as a warning). Pass require_complete=False "
+                    f"once you have confirmed which."
                 )
             if summary.bypassed:
                 raise PackageError(
@@ -2050,15 +2257,76 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
-        from torch._precompile import _build_multigraph_artifact
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            BundledAOTAutogradCacheArtifact,
+        )
+        from torch._inductor.output_code import CompiledFxGraph
+        from torch._precompile import (
+            _build_multigraph_artifact,
+            _called_op_names,
+            _custom_op_modules,
+            _custom_ops,
+            _device_kernel_keys,
+            _KERNEL_KEYS,
+            _multigraph_frames,
+            _served_modules,
+            _warn_unregistered_ops,
+        )
 
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
+        package = self._package
+        # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
+        # on those of any compiled frame, and a graph's ops on the graph's devices.
+        op_devices: dict[tuple[str, str], set[str]] = {
+            n: set(package._device_types) for n in package.graph_break_op_names
+        }
+        for n, t in package.graph_break_op_devices:
+            op_devices.setdefault(n, set()).add(t)
+        for backend_id, artifact in backends.items():
+            # Unlike a make_fx capture, the graph's ops stay even if Inductor
+            # decomposed them, since the frame's guards can name them.
+            names = set(package.op_names.get(backend_id, ()))
+            if isinstance(artifact, BundledAOTAutogradCacheArtifact):
+                # Inductor's code also calls the ops a post-grad pass inserted,
+                # and those of the backward.
+                compiled = (artifact.content.compiled_fw, artifact.content.compiled_bw)
+                for result in (c.result for c in compiled if c is not None):
+                    if isinstance(result, CompiledFxGraph):
+                        names |= _called_op_names(result.source_code)
+            for n in names:
+                op_devices.setdefault(n, set()).update(
+                    package.device_types.get(backend_id, ())
+                )
+        entry = self._served_entry()[0]
+        ops = _custom_ops(op_devices)
+        # An op no compiled graph names a device for is checked on every key.
+        keys = {
+            n: _device_kernel_keys(op_devices[n]) if op_devices[n] else _KERNEL_KEYS
+            for n in ops
+        }
+        found = _custom_op_modules(keys)
+        served: set[str] = set()
+        mapped = any(m.partition(".")[0] != "torch" for m in found.modules)
+        if found.unrecorded or found.unrecorded_kernels or mapped:
+            # A module the frames run in, which the driver imports only after the ops
+            # are checked, may register a kernel over an override's, or an op or kernel
+            # with no known module (one registered from __main__, a C++ extension).
+            # Torch's own ops skip this.
+            served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
+        wanted = {*found.modules, *served}
+        modules = tuple(m for m in sys.modules if m in wanted)
+        fields = ("lazy", "unrecorded", "untracked_kernels")
+        warned = {(f, x) for f in fields for x in getattr(found, f)}
+        if not warned <= self._warned_ops:
+            self._warned_ops |= warned
+            _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
+        sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         return _build_multigraph_artifact(
-            self._served_entry()[0], backends, summary, self._backend, self._fn
+            entry, backends, summary, self._backend, self._fn, **sections
         )
 
 
