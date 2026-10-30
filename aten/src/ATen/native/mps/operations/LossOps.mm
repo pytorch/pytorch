@@ -53,6 +53,13 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
                               " on MPS");
   TORCH_CHECK(target_arg.is_same_size(input_arg),
               "binary_cross_entropy: target and input tensors must have identical shapes");
+  TORCH_CHECK(target_arg.scalar_type() == input_arg.scalar_type() && loss.scalar_type() == input_arg.scalar_type(),
+              "binary_cross_entropy: expected input, target and out to have the same dtype, but got input: ",
+              input_arg.scalar_type(),
+              ", target: ",
+              target_arg.scalar_type(),
+              ", out: ",
+              loss.scalar_type());
 
   loss.resize_(reduction == Reduction::None ? target_arg.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
@@ -70,7 +77,7 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
   const auto weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const auto& weight = *weight_maybe_owned;
   const Tensor input = input_arg.contiguous();
-  const Tensor target = target_arg.to(input.scalar_type()).contiguous();
+  const Tensor target = target_arg.contiguous();
   const int64_t numel = input.numel();
   MPSStream* stream = getCurrentMPSStream();
 
