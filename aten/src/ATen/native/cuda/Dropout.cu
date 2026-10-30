@@ -261,11 +261,9 @@ inline void launcher(
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           };
           switch (vec_size) {
-#ifdef USE_ROCM
             case 16:
               launch_vec(std::integral_constant<int, 16>{});
               break;
-#endif
             case 8:
               launch_vec(std::integral_constant<int, 8>{});
               break;
