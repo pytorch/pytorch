@@ -2,11 +2,17 @@
 
 import inspect
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.utils._inspect import _fast_bind
 
 
 class TestFastBind(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_fast_bind_matches_sig_bind(self, sig, args, kwargs):
         try:
             ref = sig.bind(*args, **kwargs)

@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     ccache \
     git \
     wget \
+    curl \
     python3-pip \
     python3-venv \
     python-is-python3 \
@@ -54,8 +55,8 @@ WORKDIR /opt
 
 # Build zlib (for compression)
 RUN echo "--- Building zlib ---" \
-    && wget -c https://www.zlib.net/zlib-${ZLIB_VERSION}.tar.gz \
-    && tar -xf zlib-${ZLIB_VERSION}.tar.gz --no-same-permissions --no-same-owner \
+    && curl -fsSL https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz \
+        | tar -xz --no-same-permissions --no-same-owner \
     && cd zlib-${ZLIB_VERSION}/ \
     && mkdir build && cd build \
     && ../configure --prefix=${SYSROOT} \
@@ -161,7 +162,7 @@ SHELL ["/bin/bash", "-c"]
 # so it does not depend on pip resolving manylinux glibc tags for the target.
 RUN source /opt/riscv-cross-env/bin/activate \
     && pip install setuptools pyyaml typing_extensions wheel \
-                   build "scikit-build-core>=1.0" packaging six numpy==1.26.4
+                   build "scikit-build-core>=1.1.1" packaging six numpy==1.26.4
 
 # Set default environment variables for PyTorch build
 ENV Python_ROOT_DIR=${SYSROOT}

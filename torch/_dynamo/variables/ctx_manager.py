@@ -43,8 +43,8 @@ from ..utils import (
     is_safe_constant,
 )
 from .base import VariableTracker
+from .descriptors import MethodDescriptorVariable
 from .functions import (
-    MethodDescriptorVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
@@ -55,6 +55,7 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -741,6 +742,9 @@ class GradModeVariable(ContextWrappingVariable):
     def python_type(self) -> type:
         return torch.set_grad_enabled
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
@@ -889,6 +893,12 @@ class CurrentDeviceContextVariable(ContextWrappingVariable):
         *ContextWrappingVariable._nonvar_fields,
         "device_context",
     }
+
+    @classmethod
+    def create(
+        cls, device_type: str, device_context: type
+    ) -> "CurrentDeviceContextVariable":
+        return cls(device_type, device_context)
 
     def __init__(
         self,
@@ -1467,8 +1477,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         from ..tensor_version_op import _unsafe_set_version_counter
+        from .builder import SourcelessBuilder
 
-        return variables.TorchInGraphFunctionVariable(
+        return SourcelessBuilder.create_internal_torch_function(
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 

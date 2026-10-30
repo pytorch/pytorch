@@ -47,6 +47,7 @@ import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
+import torch.fx.experimental._config as symbolic_shapes_config
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
@@ -4409,15 +4410,17 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-            min_func = Min
-            max_func = Max
-        elif any(
-            # Only needed when backed_size_oblivious is on.
-            x.has(sympy.Min, sympy.Max, Min, Max)
-            for x in (start, end, dim_size)
-            if isinstance(x, Expr)
+        if (
+            symbolic_shapes_config.backed_size_oblivious
+            or any(free_unbacked_symbols(x) for x in (start, end, dim_size))
+            or any(
+                x.has(sympy.Min, sympy.Max, Min, Max)
+                for x in (start, end, dim_size)
+                if isinstance(x, Expr)
+            )
         ):
+            # Avoid hint-based comparisons for size-oblivious and unbacked bounds;
+            # preserve symbolic Min/Max already present in the inputs.
             min_func = Min
             max_func = Max
         else:
@@ -8804,32 +8807,19 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            get_reset_to_zero_args,
+            get_restore_value_args,
+            kernel_side_table,
+        )
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
         restore_value_args: list[str] = []
         reset_to_zero_args: list[str] = []
         if isinstance(kernel, Autotuner):
-            # https://github.com/triton-lang/triton/pull/5083
-            # changes kernel.restore_idx to kernel.restore_value
-            if hasattr(kernel, "restore_idx"):
-                restore_value_args.extend(
-                    kernel.fn.arg_names[i] for i in kernel.restore_idx
-                )
-            else:
-                if not hasattr(kernel, "restore_value"):
-                    raise AssertionError('Expected hasattr(kernel, "restore_value")')
-                restore_value_args.extend(kernel.restore_value)
-
-            if hasattr(kernel, "reset_idx"):
-                for i in kernel.reset_idx:
-                    reset_to_zero_args.append(kernel.fn.arg_names[i])
-            else:
-                if not hasattr(kernel, "reset_to_zero"):
-                    raise AssertionError('Expected hasattr(kernel, "reset_to_zero")')
-                reset_to_zero_args.extend(kernel.reset_to_zero)
-
+            restore_value_args = get_restore_value_args(kernel)
+            reset_to_zero_args = get_reset_to_zero_args(kernel)
             configs = kernel.configs
             kernel = kernel.fn
 

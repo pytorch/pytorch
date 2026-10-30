@@ -52,8 +52,7 @@ instead of silently reducing the wrong elements.
   group's row lanes (halving offsets), so every lane holds the group value.
   The in-pass feed has no in-thread fold and needs one row per thread.
 * axis=0, wider groups: reduce within each warp, then stitch the group's
-  warps through smem in ascending warp order behind the
-  epilogue barrier.
+  warps through smem in ascending warp order behind the epilogue barrier.
 
 Every fold order is fixed and data-independent, so results are bitwise
 reproducible run to run. Two semantic notes:
@@ -211,12 +210,14 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
         if axis == 0 or getattr(config, "device_capacity", None) != 10:
             return False
         axis = 1 - axis
+    if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH:
+        return False
     if config.device_capacity == 9:
         return _sm90_grouped_reduce_supported(config, axis, group)
     if axis == 1 and config.device_capacity == 12:
         return False
     tile = config.tile_m if axis == 0 else config.tile_n
-    if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH or tile % group:
+    if tile % group:
         return False
 
     fragment_width = GROUPED_FRAGMENT_WIDTH
@@ -259,13 +260,12 @@ def _sm90_grouped_reduce_supported(config, axis: int, group: int) -> bool:
 
     N groups: in-thread fold of the 2-column runs plus a butterfly over the 4
     column lanes reduce one 32-column epi subtile (64 for 8-bit outputs);
-    wider groups combine consecutive epi-N subtiles. M groups: a thread's rows r / r + 8 plus a
-    butterfly over the 8 row lanes cover one warp's 16 rows; wider groups
-    stitch whole warps through smem inside one epilogue subtile. In-pass feeds
-    are narrower still, see ``GroupedLocalReduceFeed.supports_config``.
+    wider groups combine consecutive epi-N subtiles, so they must be multiples
+    of 64 to tile either subtile width. M groups: a thread's rows r / r + 8
+    plus a butterfly over the 8 row lanes cover one warp's 16 rows; wider
+    groups stitch whole warps through smem inside one epilogue subtile. In-pass
+    feeds are narrower still, see ``GroupedLocalReduceFeed.supports_config``.
     """
-    if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH:
-        return False
     if axis == 1:
         if group <= GROUPED_FRAGMENT_WIDTH:
             return GROUPED_FRAGMENT_WIDTH % group == 0
@@ -377,10 +377,10 @@ class _GroupGeometry(NamedTuple):
 
     Only the fields the device paths read; every other layout property is
     checked in :func:`_fragment_geometry` and never travels. ``axis`` is the
-    physical kernel axis after swap-at-trace. ``cols`` is the number of N
-    columns one thread owns per row of an epi subtile and ``run_n`` the row
-    extent the warp's column lanes cover together (``cols`` unless the columns
-    interleave across lanes, as in SM90 WGMMA fragments). ``chunks`` are the
+    physical kernel axis after swap-at-trace. ``run_n`` is the N extent one
+    fragment fold covers per row of an epi subtile: the thread's contiguous
+    run, or the whole run the warp's column lanes cover together when columns
+    interleave across lanes (SM90 WGMMA fragments). ``chunks`` are the
     per-(row, group) flat fragment indices in ascending column order (the
     axis-1 fold unit), ``lanes_per_group`` > 1 the column lanes that then
     combine one group, ``fragments_per_group`` > 1 means a group spans that many
@@ -389,7 +389,6 @@ class _GroupGeometry(NamedTuple):
     """
 
     axis: int
-    cols: int
     run_n: int
     chunk: int
     chunks: tuple
@@ -442,12 +441,14 @@ def _interleaved_row_chunks(by_row, cols, lanes_n, group):
     first = sorted(n for n, _ in next(iter(by_row.values())))
     width = next((k for k in range(1, cols) if first[k] != k), cols)
     stride = width * lanes_n
+    # A partial last run leaves ``expected`` shorter than ``cols``.
     expected = [j * stride + r for j in range(cols // width) for r in range(width)]
     for m_off, entries in by_row.items():
-        if cols % width or sorted(n for n, _ in entries) != expected:
+        owned = sorted(n for n, _ in entries)
+        if owned != expected:
             raise NotImplementedError(
                 "grouped N reduce needs each thread to own equal column runs interleaved "
-                f"across {lanes_n} column lanes; row {m_off} owns {sorted(n for n, _ in entries)}"
+                f"across {lanes_n} column lanes; row {m_off} owns {owned}"
             )
     if group % width:
         raise NotImplementedError(
@@ -459,10 +460,11 @@ def _interleaved_row_chunks(by_row, cols, lanes_n, group):
         for g in sorted(OrderedSet([n // group for n, _ in entries]))
     )
     chunk = len(chunks[0])
-    lanes_per_group = min(group, cols * lanes_n) // chunk
+    lane_span = min(group, cols * lanes_n)
+    lanes_per_group = lane_span // chunk
     if (
         any(len(c) != chunk for c in chunks)
-        or lanes_per_group * chunk != min(group, cols * lanes_n)
+        or lane_span % chunk
         or lanes_n % lanes_per_group
         or lanes_per_group & (lanes_per_group - 1)
     ):
@@ -511,11 +513,9 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
     run_n, lanes_per_group = cols, 1
     chunk, chunks = 1, ()
     if axis == 1:
-        contiguous = all(
-            sorted(n for n, _ in entries) == list(range(cols))
-            for entries in by_row.values()
-        )
-        if contiguous:
+        # The first row picks the layout family; each helper validates every row.
+        first_row = sorted(n for n, _ in next(iter(by_row.values())))
+        if first_row == list(range(cols)):
             chunk, chunks = _row_chunks(by_row, cols, group)
         else:
             lanes_n = cute.size(lane_layout_MN, mode=[1])
@@ -593,7 +593,6 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
                 )
     return _GroupGeometry(
         axis=axis,
-        cols=cols,
         run_n=run_n,
         chunk=chunk,
         chunks=chunks,
@@ -1010,8 +1009,12 @@ class GroupedReduceBase(EpiOp):
         only when its physical axis is M.
         """
         # Caller axis 1 reaches physical M only through SM100 swap-at-trace.
-        limit = GROUPED_FRAGMENT_WIDTH if self.axis == 1 else rows_per_warp
-        if self.group <= min(limit, GROUPED_FRAGMENT_WIDTH):
+        warp_rows = (
+            GROUPED_FRAGMENT_WIDTH
+            if self.axis == 1
+            else min(rows_per_warp, GROUPED_FRAGMENT_WIDTH)
+        )
+        if self.group <= warp_rows:
             return False
         return gemm is None or self.physical_axis(gemm) == 0
 
@@ -1495,8 +1498,7 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
         ):
             return (
                 "grouped feed-main on SM90/SM120 supports axis-0 groups <= "
-                f"{SM90_ROW_LANES}; "
-                f"got group={self.group}"
+                f"{SM90_ROW_LANES}; got group={self.group}"
             )
         return super().config_support_error(configs)
 

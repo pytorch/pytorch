@@ -798,6 +798,26 @@ class GemmLocalReduceAnalysis:
             for arg in iter_fx_node_inputs((value.args, value.kwargs))
         )
 
+    def grouped_operand(self, node: torch.fx.Node) -> torch.fx.Node | None:
+        """Return the grouped view a feed-main operand is computed from elementwise.
+
+        The grouped view of ``x`` may be combined with captures and constants (e.g.
+        ``x * w``) before meeting the reduced value. Every GEMM-dependent input must
+        resolve to the same view; a reduction or other non-pointwise input would be
+        a second physical value and disqualifies the operand.
+        """
+        if isinstance(self.graph.normalized_nodes.get(node), NormalizedView):
+            return node if node in self.grouped_tensors else None
+        gemm = self.gemm
+        if gemm is None or not is_shape_preserving_pointwise_node(node):
+            return None
+        leaves = OrderedSet(
+            self.grouped_operand(arg)
+            for arg in iter_fx_node_inputs((node.args, node.kwargs))
+            if self.graph.depends_on(arg, gemm)
+        )
+        return next(iter(leaves)) if len(leaves) == 1 else None
+
     def match_feed_main_candidate(
         self,
         grouped_source: Any,
@@ -809,9 +829,10 @@ class GemmLocalReduceAnalysis:
             value, torch.fx.Node
         ):
             return None
-        layout = self.grouped_tensors.get(grouped_source)
-        if layout is None:
+        grouped_source = self.grouped_operand(grouped_source)
+        if grouped_source is None:
             return None
+        layout = self.grouped_tensors[grouped_source]
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None

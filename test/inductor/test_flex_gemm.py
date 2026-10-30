@@ -822,7 +822,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertTrue(pair.supports_config(sm90))
         self.assertTrue(pair.supports_config(dataclasses.replace(sm90, tile_n=192)))
         # The SM90 STSM store needs tile_n % 32; group 4 and paired fragment
-        # reductions stay SM100-only.
+        # reductions are not supported on SM90.
         self.assertFalse(pair.supports_config(dataclasses.replace(sm90, tile_n=208)))
         self.assertFalse(pair.supports_config(dataclasses.replace(sm90, swap_ab=True)))
         self.assertFalse(GroupedMainStore("main", 4).supports_config(sm90))
@@ -1273,6 +1273,67 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
         self.assertEqual(len(shape_env.guards), 1)
+
+    @parametrize(
+        "case",
+        (
+            ("capture", 1, lambda x, r, acc, row, col: r - x * col.view(1, 8, 2), None),
+            ("transform", 1, lambda x, r, acc, row, col: r - x.exp(), None),
+            ("sibling", 1, lambda x, r, acc, row, col: r - acc.view(4, 8, 2) * 2, None),
+            ("m_scale", 0, lambda x, r, acc, row, col: x * 2.0 - r, None),
+            (
+                "m_row_capture",
+                0,
+                lambda x, r, acc, row, col: x * row.view(2, 2, 1) - r,
+                None,
+            ),
+            (
+                "m_column_capture",
+                0,
+                lambda x, r, acc, row, col: x * col.view(1, 1, 16) - r,
+                "different grouped layouts",
+            ),
+            (
+                "mixed_views",
+                1,
+                lambda x, r, acc, row, col: r - x * acc.view(4, 8, 2).exp(),
+                "recognized broadcast",
+            ),
+            (
+                "second_reduction",
+                1,
+                lambda x, r, acc, row, col: r - x * x.amax(-1, keepdim=True),
+                "one generated physical reduction",
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_feed_main_scaled_source_analysis(self, case):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, axis, combine, error = case
+        shape, dim = ((2, 2, 16), 1) if axis == 0 else ((4, 8, 2), -1)
+
+        def body(a, b, row, col):
+            acc = torch.mm(a, b)
+            x = acc.view(shape)
+            return combine(x, x.sum(dim, keepdim=True), acc, row, col).view(4, 16)
+
+        a, b = torch.randn(4, 8), torch.randn(8, 16)
+        graph_module = make_fx(body)(a, b, torch.randn(4, 1), torch.randn(1, 16))
+        gemm = gemm_node(graph_module, torch.ops.aten.mm.default)
+        if error is not None:
+            with self.assertRaisesRegex(NotImplementedError, error):
+                analyze_flex_gemm_epilogue(graph_module, gemm)
+            return
+        analysis = analyze_flex_gemm_epilogue(graph_module, gemm)
+        local_reduce = analysis.outputs.local_reduce
+        self.assertTrue(local_reduce.feeds_main)
+        self.assertEqual(local_reduce.match.geometry.axis, axis)
 
     def test_output_contraction_does_not_contract_other_axes(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
@@ -2588,12 +2649,21 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("shared_tile", torch.bmm, lambda acc, t: acc * t, (4, 5), "must match"),
             ("aux", torch.bmm, lambda acc, t: (acc * t, acc + 1), (2, 1, 5), "aux"),
             ("baddbmm", torch.baddbmm, lambda acc, t: acc * t, (2, 1, 5), "aten.mm"),
+            # An expanded [B, M, 2N] main output would read the row in the wrong domain.
+            (
+                "output_transform",
+                torch.bmm,
+                lambda acc, t: torch.cat([acc * t, acc], -1),
+                (2, 1, 8),
+                "shape-preserving main output",
+            ),
         ),
         name_fn=lambda case: case[0],
     )
     def test_generated_bmm_capture_rejects_unsupported_scope(self, case):
         _, gemm, epilogue, capture_shape, error = case
-        a, b = torch.randn(2, 4, 8), torch.randn(2, 8, 5)
+        n = capture_shape[-1]
+        a, b = torch.randn(2, 4, 8), torch.randn(2, 8, n)
         operands = (torch.randn(2, 4, 5), a, b) if gemm is torch.baddbmm else (a, b)
 
         def fn(capture, *operands):
@@ -2611,14 +2681,29 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @parametrize(
-        "case", ("vector", "cast_column", "squeezed_row", "prims_reshape", "dtype_view")
+        "case",
+        (
+            "vector",
+            "cast_column",
+            "squeezed_row",
+            "prims_reshape",
+            "dtype_view",
+            "flattened_acc",
+        ),
     )
     def test_bmm_capture_rejects_axis_changing_views(self, case):
         a, b = torch.randn(8, 8, 8), torch.randn(8, 8, 8)
-        shape = {"cast_column": (8, 1), "squeezed_row": (8, 1, 8)}.get(case, (8,))
+        shape = {
+            "cast_column": (8, 1),
+            "squeezed_row": (8, 1, 8),
+            "flattened_acc": (8, 1),
+        }.get(case, (8,))
 
         def fn(a, b, capture):
             def epilogue(acc):
+                if case == "flattened_acc":
+                    # Eager scales each batch; a [B, 1] capture would read as a column.
+                    return (acc.view(8, 64) * capture).view(8, 8, 8)
                 if case == "squeezed_row":
                     value = capture.squeeze(1)
                 elif case == "cast_column":
@@ -6009,6 +6094,97 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ).check("feeds_main=True").check("combine='add'").check(
             "prepass_combine='add'"
         ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("form", ("r_minus_xw", "xw_minus_r", "affine"))
+    def test_mm_local_reduce_feeds_main_through_scaled_source(self, form):
+        # A 2-point Hadamard per column pair: y0 = (x0 + x1) / sqrt(2) and
+        # y1 = (x0 - x1) / sqrt(2) = (r - 2 * x1) / sqrt(2), with r the pair sum.
+        # The grouped source meets the reduced value only after a capture scale.
+        m, n, k = 256, 256, 64
+        odd = (torch.arange(n, device="cuda") % 2).float()[None, :]
+        scale = 2**-0.5
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, 2)
+            r = x.sum(-1, keepdim=True)
+            w = (2 * odd).view(1, -1, 2)
+            if form == "r_minus_xw":
+                y = (r - x * w) * scale
+            elif form == "xw_minus_r":
+                y = (x * w - r) * -scale
+            else:
+                y = r * scale + x * (-w * scale)
+            return y.view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        FileCheck().check("feeds_main=True").check("combine='add'").run(code)
+
+        pairs = (a.double() @ b.double()).view(m, -1, 2)
+        hadamard = torch.stack(
+            (pairs[..., 0] + pairs[..., 1], pairs[..., 0] - pairs[..., 1]), -1
+        ).view(m, n)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b), hadamard * scale, k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feeds_main_through_scaled_source(self):
+        m, n, k, group = 256, 128, 64, 8
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            r = x.sum(1, keepdim=True)
+            return (x * 2.0 - r).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b), epilogue_fn(a.double() @ b.double()), k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_reduce_feed_main_rejects_source_mixing_grouped_views(self):
+        m, n = 128, 128
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, 2)
+            r = x.sum(-1, keepdim=True)
+            # The operand multiplies two grouped views; neither is "the" source.
+            return (r - x * acc.float().view(m, -1, 2).exp()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(
+            InductorError, "feed the main output through a recognized broadcast"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -9859,20 +10035,56 @@ class TestFlexGemmBatchedCaptureDevice(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         weight = self.makeTensor(self.N, self.K, device=device)
-        for batch, rows in ((2, 125), (4, 201)):
+        for index, (batch, rows) in enumerate(((2, 125), (4, 201))):
             a = self.makeTensor(batch, rows, self.K, device=device)
             modulation = self.makeTensor(batch, 6, self.N, device=device)
             gate = modulation[:, 5:6, :]
             residual = self.makeTensor(batch, rows, self.N, device=device)
-            actual = compiled(a, weight, gate, residual)
+            if index == 0:
+                actual, (code,) = run_and_get_code(compiled, a, weight, gate, residual)
+                self.assertFlexGemmGeneratedCode(code)
+                self.assertNotIn("extern_kernels.bmm(", code)
+            else:
+                actual = compiled(a, weight, gate, residual)
             self.assertMatchesLowPrecisionEager(
                 actual,
                 epilogue(a @ weight.t(), gate, residual),
                 (a.double() @ weight.double().t()) * gate.double() + residual.double(),
                 self.K,
             )
+        # One dynamic-batch graph serves both batch sizes.
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_bmm_capture_terminal_dtype_view(self, device):
+        # A terminal storage view of a GEMM-derived value is not a capture view.
+        a = self.makeTensor(self.B, self.M, self.K, device=device)
+        b = self.makeTensor(self.B, self.K, self.N, device=device)
+        row = self.makeTensor(self.B, 1, self.N, device=device)
+
+        def fn(a, b, row):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                lambda acc: (acc * row).view(torch.float16),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, row
+        )
+        self.assertFlexGemmGeneratedCode(code)
+        self.assertEqual(actual.dtype, torch.float16)
+        self.assertMatchesLowPrecisionEager(
+            actual.view(torch.bfloat16),
+            torch.bmm(a, b) * row,
+            torch.bmm(a.double(), b.double()) * row.double(),
+            self.K,
+        )
 
 
 instantiate_device_type_tests(
@@ -10118,12 +10330,13 @@ class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
             options = {"backend": "QUACK", "config": config}
             return flex_gemm(torch.mm, (a, b), epilogue_fn, kernel_options=options)
 
+        def outputs(result):
+            return result if stores else (result,)
+
         actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
-        actual = actual if stores else (actual,)
-        low = epilogue_fn(a @ b)
-        high = epilogue_fn(a.double() @ b.double())
-        low, high = (low, high) if stores else ((low,), (high,))
-        for out, lo, hi in zip(actual, low, high, strict=True):
+        low = outputs(epilogue_fn(a @ b))
+        high = outputs(epilogue_fn(a.double() @ b.double()))
+        for out, lo, hi in zip(outputs(actual), low, high, strict=True):
             self.assertMatchesLowPrecisionEager(out, lo, hi, k)
         self.assertIn("flex_gemm_epilogue(", code)
 
@@ -10871,27 +11084,40 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             torch.compile(fn, fullgraph=True)(a, b, bias)
 
     @parametrize(
-        "case", ("invalid", "swapped", "partial", "k_major_b", "one_cta", "bf16")
+        "case",
+        (
+            # (name, two-CTA config overrides or None to pin only tile_m,
+            #  column-major operand or "", rejected)
+            ("invalid", {}, "", True),
+            ("swapped", dict(swap_ab=True), "a", True),
+            ("partial", None, "", False),
+            ("k_major_b", {}, "b", False),
+            # Each CTA would hold 80 of B's N columns, 2.5 K-major TF32 atoms.
+            ("k_major_b_partial_atom", dict(tile_n=160), "b", True),
+            ("swapped_k_major_partial_atom", dict(tile_n=160, swap_ab=True), "", True),
+            ("k_major_b_whole_atoms", dict(tile_n=128), "b", False),
+            ("one_cta", dict(tile_m=128, cluster_m=1), "", False),
+            ("bf16", {}, "", False),
+        ),
+        name_fn=lambda case: case[0],
     )
     @recover_orig_fp32_precision
     def test_tf32_config_respects_mn_smem_atom(self, device, case):
         if torch.cuda.get_device_capability()[0] not in (10, 11):
             self.skipTest("requires the SM100/SM110 TF32 mainloop")
+        name, overrides, col_major, rejected = case
         torch.set_float32_matmul_precision("high")
-        dtype = torch.bfloat16 if case == "bf16" else torch.float32
+        dtype = torch.bfloat16 if name == "bf16" else torch.float32
         a = self.makeTensor(128, 64, device=device, dtype=dtype).sign_()
         b = self.makeTensor(64, 128, device=device, dtype=dtype).sign_()
-        config = {"tile_m": 256, "is_dynamic_persistent": False}
-        if case != "partial":
-            config.update(
-                tile_n=32, cluster_m=2, cluster_n=1, swap_ab=case == "swapped"
-            )
-        if case == "one_cta":
-            config.update(tile_m=128, cluster_m=1)
-        if case == "k_major_b":
-            b = b.t().contiguous().t()
-        if case == "swapped":
+        if col_major == "a":
             a = a.t().contiguous().t()
+        if col_major == "b":
+            b = b.t().contiguous().t()
+        config = {"tile_m": 256, "is_dynamic_persistent": False}
+        if overrides is not None:
+            two_cta = dict(tile_n=32, cluster_m=2, cluster_n=1, swap_ab=False)
+            config |= two_cta | overrides
 
         def fn(a, b):
             return flex_gemm(
@@ -10902,7 +11128,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             )
 
         compiled = torch.compile(fn, fullgraph=True)
-        if case in ("invalid", "swapped"):
+        if rejected:
             with self.assertRaisesRegex(
                 InductorError, "no supported GemmConfig matches"
             ):
