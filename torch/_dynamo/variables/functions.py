@@ -54,6 +54,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    CellAliasRestartAnalysis,
     CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
@@ -2529,6 +2530,17 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.closure and any(
+            isinstance(c, variables.CellVariable) and c.linked_cell is not None
+            for c in self.closure.items  # type: ignore[attr-defined]
+        ):
+            # This function outlives the trace and could bind a class closure
+            # cell (see SideEffects.track_cell_alias) to anything later, so
+            # retrace and graph break at the class statement instead.
+            codegen.tx.speculation_log.graph_break_on_cell_alias = True
+            raise CellAliasRestartAnalysis(
+                restart_reason="escaping closure over a class closure cell"
+            )
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )

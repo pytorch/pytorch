@@ -18660,12 +18660,18 @@ fn
         self.assertEqual(compiled_fn(t), fn(t))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_build_class_closure_unbound_name_shared_across_calls(self):
+    def test_build_class_closure_unbound_name_rejected(self):
         # The class is built once at trace time and reused by every call of
         # the compiled code, and so is the cell its methods close over. A
-        # value that differs per call must not end up in that cell: the class
-        # statement graph breaks instead and runs on every call, like CPython.
-        def fn(t):
+        # value that can change must not end up in that cell, even if it
+        # looks constant at store time, and no other function may hold the
+        # cell past the trace. The class statement graph breaks instead and
+        # runs on every call, like CPython.
+        class Obj:
+            def __init__(self, t):
+                self.t = t
+
+        def tensor(t, obj):
             class C:
                 def get(self):
                     return value
@@ -18673,23 +18679,47 @@ fn
             value = t + 1
             return C
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Non-constant store to a class closure cell"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
+        def list_append_after_store(t, obj):
+            class C:
+                def get(self):
+                    return value[0]
 
-        compiled_fn = torch.compile(fn, backend="eager")
-        cls1 = compiled_fn(torch.tensor(1.0))
-        cls2 = compiled_fn(torch.tensor(2.0))
-        self.assertIsNot(cls1, cls2)
-        self.assertEqual(cls1().get(), torch.tensor(2.0))
-        self.assertEqual(cls2().get(), torch.tensor(3.0))
+            value = []
+            value.append(t + 1)
+            return C
 
-    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_build_class_closure_unbound_name_store_after_graph_break(self):
-        # Code resumed after a graph break binds the name without the store
-        # check, so the class statement graph breaks as well.
-        def fn(t):
+        def rebind_after_store(t, obj):
+            class C:
+                def get(self):
+                    return value
+
+            value = 1
+            value = t + 1
+            return C
+
+        def rebind_captured_after_store(t, obj):
+            class C:
+                def get(self):
+                    return value()
+
+            x = 1
+
+            def h():
+                return x
+
+            value = h
+            x = t + 1
+            return C
+
+        def input_object(t, obj):
+            class C:
+                def get(self):
+                    return value.t
+
+            value = obj
+            return C
+
+        def store_after_graph_break(t, obj):
             class C:
                 def get(self):
                     return value
@@ -18698,36 +18728,101 @@ fn
             value = t + 1
             return C
 
-        compiled_fn = torch.compile(fn, backend="eager")
-        cls1 = compiled_fn(torch.tensor(1.0))
-        cls2 = compiled_fn(torch.tensor(2.0))
-        self.assertIsNot(cls1, cls2)
-        self.assertEqual(cls1().get(), torch.tensor(2.0))
-        self.assertEqual(cls2().get(), torch.tensor(3.0))
-
-    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_build_class_closure_unbound_name_input_object(self):
-        # An input object is the same on every call that passes the ID_MATCH
-        # guard, so it may be stored in the shared cell.
-        class Obj:
-            pass
-
-        def fn(t, obj):
+        def make():
             class C:
                 def get(self):
                     return value
 
-            value = obj
-            return t + 1, C
+            def setv(v):
+                nonlocal value
+                value = v
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        obj1, obj2 = Obj(), Obj()
-        _, cls1 = compiled_fn(torch.tensor(0.0), obj1)
-        _, cls2 = compiled_fn(torch.tensor(0.0), obj2)
-        self.assertIs(cls1().get(), obj1)
-        self.assertIs(cls2().get(), obj2)
-        self.assertEqual(cnt.frame_count, 2)
+            value = None
+            return C, setv
+
+        def escaped_setter(t, obj):
+            C, setv = make()
+            torch._dynamo.graph_break()
+            setv(t + 1)
+            return C
+
+        def returned_setter(t, obj):
+            C, setv = make()
+            return C, setv
+
+        for case in (
+            tensor,
+            list_append_after_store,
+            rebind_after_store,
+            rebind_captured_after_store,
+            input_object,
+            store_after_graph_break,
+            escaped_setter,
+            returned_setter,
+        ):
+            with self.subTest(case.__name__):
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(case, backend="eager", fullgraph=True)(
+                        torch.tensor(1.0), Obj(torch.tensor(2.0))
+                    )
+                compiled_fn = torch.compile(case, backend="eager")
+                cls1 = compiled_fn(torch.tensor(1.0), Obj(torch.tensor(2.0)))
+                cls2 = compiled_fn(torch.tensor(2.0), Obj(torch.tensor(3.0)))
+                if case is returned_setter:
+                    (cls1, s1), (cls2, s2) = cls1, cls2
+                    s1(torch.tensor(2.0))
+                    s2(torch.tensor(3.0))
+                self.assertIsNot(cls1, cls2)
+                self.assertEqual(cls1().get(), torch.tensor(2.0))
+                self.assertEqual(cls2().get(), torch.tensor(3.0))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name_immutable_values(self):
+        # The class is built once at trace time and reused by every call of
+        # the compiled code, and so is the cell its methods close over. Values
+        # that can never change may go into that cell: constants, tuples of
+        # them, and classes built in the same trace.
+        def fn(t):
+            class C:
+                def get(self):
+                    return value, D
+
+            value = (1, "a")
+            obj = C()
+
+            class D:
+                pass
+
+            return t + 1, obj.get()
+
+        t = torch.tensor(0.0)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res, (value, cls) = compiled_fn(t)
+        self.assertEqual(res, t + 1)
+        self.assertEqual(value, (1, "a"))
+        self.assertEqual(cls.__name__, "D")
+
+    def test_build_class_free_var_name_error_not_baked_in(self):
+        # An empty free variable caught as NameError must not be baked into
+        # the compiled code: the enclosing function can bind it later.
+        def outer(t):
+            def fn(t):
+                try:
+                    return t + value
+                except NameError:
+                    return t - 1
+
+            compiled_fn = torch.compile(fn, backend="eager")
+            r1 = compiled_fn(t)
+            value = 1
+            return r1, compiled_fn(t)
+
+        t = torch.tensor(0.0)
+        for enabled in (False, True):
+            with torch._dynamo.config.patch(enable_trace_load_build_class=enabled):
+                torch._dynamo.reset()
+                self.assertEqual(outer(t), (t - 1, t + 1))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_body_unbound_name(self):

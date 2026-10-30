@@ -361,7 +361,7 @@ class SpeculationLog:
     graph_break_on_requires_grad_: bool = False
     # If True, don't hand classes built by __build_class__ alias cells for
     # names bound later, so the class statement graph breaks. Set when such a
-    # name is later bound to a value that can differ between calls.
+    # name is bound to a mutable value or its cell escapes the trace.
     graph_break_on_cell_alias: bool = False
 
     def restart(self) -> None:
@@ -2383,12 +2383,14 @@ class InstructionTranslatorBase(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
         cell = self._cellvar(inst.argval)
-        # A pre-existing cell that is still empty, e.g. a free variable bound
-        # later by the enclosing function or the closure of a method of a
-        # class built during tracing (see SideEffects.track_cell_alias).
+        # The empty cell a method of a class built during this trace closes
+        # over (see SideEffects.track_cell_alias), read before it is bound.
+        # The cell is created by this trace and bound later in it, so the read
+        # is unbound on every call, like CPython's fresh cell. Other empty
+        # cells keep falling through to load_cell.
         if (
             isinstance(cell, variables.CellVariable)
-            and isinstance(cell.pre_existing_contents, variables.DeletedVariable)
+            and cell.alias_cell is not None
             and not self.output.side_effects.has_pending_mutation_of_attr(
                 cell, "cell_contents"
             )

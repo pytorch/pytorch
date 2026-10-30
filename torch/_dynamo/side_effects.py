@@ -659,69 +659,43 @@ class SideEffects:
                 f"Expected VariableTracker, got {type(value)} in store_cell"
             )
         if cellvar.linked_cell is not None:
-            self._check_linked_cell_store(cellvar, value)
+            self._check_linked_cell_store(value)
         self.store_attr(cellvar, "cell_contents", value)
         if cellvar.linked_cell is not None:
             self.store_attr(cellvar.linked_cell, "cell_contents", value)
 
-    def _check_linked_cell_store(
-        self, cellvar: VariableTracker, value: VariableTracker
-    ) -> None:
+    def _check_linked_cell_store(self, value: VariableTracker) -> None:
         """A cell linked by `track_cell_alias` is shared by every call of the
         compiled code, as is the class closing over it. Only accept values
-        that are the same on every call, like the bound-cell path of
-        `NestedUserFunctionVariable._get_function_impl`: Python constants, and
-        source-backed objects not mutated during tracing, pinned by ID_MATCH,
-        plus nested functions that only capture linked cells.
-        For anything else, retrace with aliasing off so the class statement
-        graph breaks and runs on every call.
+        that can never differ between calls: immutable constants, and classes
+        created during tracing (e.g. the class being built), which every call
+        reuses too. For anything else, retrace with aliasing off so the class
+        statement graph breaks and runs on every call.
         """
-        if isinstance(value, variables.DeletedVariable) or value.is_python_constant():
-            return
-        if (
-            isinstance(value, variables.UserDefinedObjectVariable)
-            and value.source is not None
-            and not self.is_modified(value)
-        ):
-            value.guard_as_python_constant()
-            return
-        # A function made during tracing, e.g. a recursive helper used by the
-        # class. It is recreated on every call, but behaves the same if every
-        # cell it captures is linked too, so its stores are checked here.
-        if (
-            isinstance(value, variables.NestedUserFunctionVariable)
-            and value.wrapped_fn is None
-            and not self.has_pending_mutation(value)
-            and all(
-                x is None or x.is_python_constant()
-                for x in (value.defaults, value.kwdefaults)
-            )
-            and all(
-                isinstance(c, variables.CellVariable) and c.linked_cell is not None
-                for c in (value.closure.items if value.closure else ())  # type: ignore[attr-defined]
-            )
-        ):
-            return
         output_graph = self.output_graph_weakref()
         if output_graph is None:
             raise AssertionError("output_graph weakref is dead in store_cell")
         tx = output_graph.current_tx
-        if tx.one_graph or tx.error_on_graph_break:
-            unimplemented(
-                gb_type="Non-constant store to a class closure cell",
-                context=f"cellvar: {cellvar}, value: {value}",
-                explanation="A method of a class built during tracing closes "
-                "over this name, and the class is reused by every call of the "
-                "compiled code. Dynamo only supports binding the name to a "
-                "Python constant or an unmodified input object.",
-                hints=[
-                    "Bind the name before the class statement.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+
+        def is_immutable_constant(v: VariableTracker) -> bool:
+            if isinstance(v, variables.ConstantVariable):
+                return True
+            if type(v) in (variables.TupleVariable, variables.FrozensetVariable):
+                return all(map(is_immutable_constant, v.unpack_var_sequence(tx)))
+            return False
+
+        if (
+            isinstance(value, variables.DeletedVariable)
+            or is_immutable_constant(value)
+            or (
+                isinstance(value, variables.UserDefinedClassVariable)
+                and value.source is None
             )
+        ):
+            return
         tx.speculation_log.graph_break_on_cell_alias = True
         raise CellAliasRestartAnalysis(
-            restart_reason="non-constant store to a class closure cell"
+            restart_reason="store of a mutable value to a class closure cell"
         )
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
@@ -1090,14 +1064,15 @@ class SideEffects:
 
         The real cell is a global of the compiled code, as is the class built
         at trace time, so every call of the compiled code shares it. Stores
-        into it are limited to values that are the same on every call (see
-        `_check_linked_cell_store`).
+        into it are limited to values that never change (see
+        `_check_linked_cell_store`), and no other function may hold either
+        cell past the trace (see `NestedUserFunctionVariable.reconstruct` and
+        `OutputGraph.codegen_cells`).
 
         Returns None for a cell that existed before tracing (e.g. a free
         variable of the compiled frame): it must not be replaced by a new
         cell, since the enclosing function keeps writing to the original.
-        Also returns None once a frame has restarted with aliasing off (see
-        `_check_linked_cell_store` and `OutputGraph.codegen_cells`).
+        Also returns None once a frame has restarted with aliasing off.
         """
         if not isinstance(cellvar, variables.CellVariable):
             raise AssertionError(
@@ -1345,13 +1320,7 @@ class SideEffects:
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
                 # `make_cell` for the non-root-frame cells here.
                 # TODO generalize this so we never need to call `make_cell`.
-                #
-                # A cell linked to a real cell (see `track_cell_alias`) is
-                # codegen'd as that real cell, so functions holding either
-                # one share a single cell after the graph runs.
-                if var.linked_cell is not None:
-                    var.source = var.linked_cell.source
-                elif var.local_name is None:
+                if var.local_name is None:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "make_cell")
                     )
