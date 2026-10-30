@@ -42,8 +42,14 @@ inline void gather_shape_check(const Tensor& self, int64_t dim,
   const Tensor& index
 ) {
   auto self_dims = ensure_nonempty_dim(self.dim());
+  // ensure_nonempty_dim maps 0 -> 1, so a 0-D tensor is deliberately accepted
+  // opposite a 1-D one. Spell that out and report both dims; the bare
+  // "same number of dimensions" wording reads as a contradiction when a 0-D
+  // index is accepted against a 1-D input (issue #134244).
   TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
-    "Index tensor must have the same number of dimensions as input tensor"
+    "Index tensor must have the same number of dimensions as input tensor, "
+    "where a 0-D tensor counts as 1-D, but got index with ", index.dim(),
+    " and input with ", self.dim(), " dimension(s)"
   );
 
   for (const auto i : c10::irange(self_dims)) {
@@ -63,7 +69,8 @@ inline void gather_shape_check(const Tensor& self, int64_t dim,
 // Tests:
 //  1. index.size(d) <= self.size(d) for all d != dim
 //  2. index.size(d) <= src.size(d) for all d if src is a Tensor
-//  3. index.dim() == self.dim() == src.dim()
+//  3. index.dim() == self.dim() == src.dim(), where a 0-D tensor counts as
+//     1-D because ensure_nonempty_dim maps 0 -> 1 (issue #110084)
 inline void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
   const std::optional<Tensor>& src_opt = std::nullopt
@@ -71,7 +78,9 @@ inline void scatter_shape_check(
   if (index.numel() == 0) return;
   TORCH_CHECK(
     ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
-    "Index tensor must have the same number of dimensions as self tensor"
+    "Index tensor must have the same number of dimensions as self tensor, "
+    "where a 0-D tensor counts as 1-D, but got index with ", index.dim(),
+    " and self with ", self.dim(), " dimension(s)"
   );
 
   bool is_wrong_shape = false;
@@ -104,7 +113,9 @@ inline void scatter_shape_check(
 
     TORCH_CHECK(
       ensure_nonempty_dim(src.dim()) == ensure_nonempty_dim(index.dim()),
-      "Index tensor must have the same number of dimensions as src tensor"
+      "Index tensor must have the same number of dimensions as src tensor, "
+      "where a 0-D tensor counts as 1-D, but got index with ", index.dim(),
+      " and src with ", src.dim(), " dimension(s)"
     );
 
     TORCH_CHECK(!is_wrong_shape,
