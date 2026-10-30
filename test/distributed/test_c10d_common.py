@@ -2,6 +2,7 @@
 
 import copy
 import importlib.metadata
+import logging
 import os
 import pickle
 import re
@@ -262,9 +263,20 @@ class BackendEntryPointTest(TestCase):
         self._default_device_backend_map = (
             dist.Backend.default_device_backend_map.copy()
         )
+        fr_patch = unittest.mock.patch.object(
+            c10d,
+            "_FR_SELF_RECORDING_BACKENDS",
+            set(c10d._FR_SELF_RECORDING_BACKENDS),
+        )
+        fr_patch.start()
+        self.addCleanup(fr_patch.stop)
+        impl_patch = unittest.mock.patch.object(c10d, "_nccl_impl_checked_world", False)
+        impl_patch.start()
+        self.addCleanup(impl_patch.stop)
         self._custom_backend_attrs = {
             "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
             "NCCL-LEGACY": hasattr(dist.Backend, "NCCL-LEGACY"),
+            "NCCL-LAZY": hasattr(dist.Backend, "NCCL-LAZY"),
         }
 
     def tearDown(self):
@@ -416,28 +428,224 @@ class BackendEntryPointTest(TestCase):
         with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
             self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
-    @parametrize("nccl2_override", [None, "0", "1"])
-    def test_nccl_backend_registration(self, nccl2_override):
+    def _register_nccl(self, registrar, nccl2_override):
         with unittest.mock.patch.dict(os.environ):
-            if nccl2_override is None:
+            if nccl2_override == "unset":
                 os.environ.pop("TORCH_DIST_USE_NCCL2", None)
             else:
                 os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
-            c10d._register_builtin_nccl_backend()
+            getattr(c10d, registrar)()
 
-        expected_creator = (
-            c10d._create_nccl_process_group
-            if nccl2_override == "0"
-            else c10d._create_nccl2_process_group
-        )
+    @parametrize(
+        "registrar,nccl2_override,use_nccl2",
+        [
+            ("_register_builtin_nccl_backend", "unset", True),
+            ("_register_builtin_nccl_backend", "0", False),
+            ("_register_builtin_nccl_backend", "1", True),
+            ("_register_builtin_nccl_opt_in_backend", "unset", False),
+            ("_register_builtin_nccl_opt_in_backend", "0", False),
+            ("_register_builtin_nccl_opt_in_backend", "1", True),
+            ("_register_builtin_nccl_as_legacy", "unset", False),
+            ("_register_builtin_nccl_as_legacy", "1", False),
+        ],
+    )
+    def test_nccl_backend_registration(self, registrar, nccl2_override, use_nccl2):
+        # Start from the opposite FR state so both add and discard are checked.
+        if use_nccl2:
+            c10d._FR_SELF_RECORDING_BACKENDS.add(dist.Backend.NCCL)
+        else:
+            c10d._FR_SELF_RECORDING_BACKENDS.discard(dist.Backend.NCCL)
+        self._register_nccl(registrar, nccl2_override)
+
         self.assertIs(
             dist.Backend._plugins["NCCL"].creator_fn,
-            expected_creator,
+            c10d._create_nccl2_process_group
+            if use_nccl2
+            else c10d._create_nccl_process_group,
+        )
+        self.assertEqual(
+            dist.Backend.NCCL in c10d._FR_SELF_RECORDING_BACKENDS, not use_nccl2
         )
         self.assertEqual(
             dist.Backend.backend_type_map["nccl"],
             dist.ProcessGroup.BackendType.NCCL,
         )
+
+    @parametrize("default", [True, False])
+    def test_use_nccl2_from_env_warns_on_unknown_value(self, default):
+        with unittest.mock.patch.dict(os.environ, {"TORCH_DIST_USE_NCCL2": "true"}):
+            with self.assertWarnsRegex(
+                UserWarning,
+                rf"TORCH_DIST_USE_NCCL2='true'.* using the default "
+                rf"\({'nccl2' if default else 'nccl-legacy'}\)",
+            ):
+                self.assertEqual(c10d._use_nccl2_from_env(default=default), default)
+
+    @parametrize("value", ["unset", "0", "1"])
+    @parametrize("default", [True, False])
+    def test_use_nccl2_from_env_silent_on_valid_values(self, value, default):
+        with unittest.mock.patch.dict(os.environ):
+            if value == "unset":
+                os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+            else:
+                os.environ["TORCH_DIST_USE_NCCL2"] = value
+            self.assertNotWarn(lambda: c10d._use_nccl2_from_env(default=default))
+
+    def _impl_check_opts(self, group_size=2):
+        opts = c10d._DistributedBackendOptions()
+        opts.store = dist.HashStore()
+        opts.group_size = group_size
+        opts.group_id = "pg"
+        opts.group_desc = "desc"
+        return opts
+
+    def _set_default_pg_size(self, size):
+        default_pg = None
+        if size is not None:
+            default_pg = unittest.mock.Mock()
+            default_pg.size.return_value = size
+        patcher = unittest.mock.patch.object(c10d._world, "_default_pg", default_pg)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @parametrize("first", ["nccl-legacy", "nccl2"])
+    def test_nccl_impl_agreement(self, first):
+        second = "nccl2" if first == "nccl-legacy" else "nccl-legacy"
+        self._set_default_pg_size(4)  # a subgroup, so every call checks
+        opts = self._impl_check_opts()
+        with self.assertNoLogs(c10d.logger, logging.WARNING):
+            c10d._check_nccl_impl_agreement(opts, first)
+            c10d._check_nccl_impl_agreement(opts, first)
+        with self.assertLogs(c10d.logger, logging.WARNING) as logs:
+            c10d._check_nccl_impl_agreement(opts, second)
+        self.assertRegex(
+            logs.output[0],
+            rf"group pg\(desc\) may mix .* this rank uses {second}, but {first} was",
+        )
+
+    @parametrize("desc", ["", "undefined"])
+    def test_nccl_impl_agreement_omits_undefined_desc(self, desc):
+        opts = self._impl_check_opts()
+        opts.group_desc = desc
+        opts.store.set("nccl_impl/nccl-legacy", "1")
+        with self.assertLogs(c10d.logger, logging.WARNING) as logs:
+            c10d._check_nccl_impl_agreement(opts, "nccl2")
+        self.assertIn("Process group pg may mix", logs.output[0])
+
+    @parametrize("teardown", ["destroy_process_group", "_abort_process_group"])
+    def test_world_teardown_resets_nccl_impl_check(self, teardown):
+        dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
+        self.addCleanup(lambda: dist.is_initialized() and dist.destroy_process_group())
+        c10d._nccl_impl_checked_world = True
+        getattr(c10d, teardown)()
+        self.assertFalse(c10d._nccl_impl_checked_world)
+
+    @parametrize("default_pg_size", [None, 2])
+    def test_nccl_impl_agreement_stops_after_world_group(self, default_pg_size):
+        # None: the default group itself, created before _world.default_pg is set.
+        self._set_default_pg_size(default_pg_size)
+        world = self._impl_check_opts()
+        c10d._check_nccl_impl_agreement(world, "nccl2")
+        self.assertTrue(world.store.check(["nccl_impl/nccl2"]))
+        later = self._impl_check_opts()
+        c10d._check_nccl_impl_agreement(later, "nccl2")
+        self.assertFalse(later.store.check(["nccl_impl/nccl2"]))
+
+    def test_nccl_impl_agreement_checks_each_subgroup(self):
+        # e.g. a gloo default group: intra-node subgroups need not span the
+        # ranks that disagree.
+        self._set_default_pg_size(4)
+        for _ in range(2):
+            opts = self._impl_check_opts()
+            c10d._check_nccl_impl_agreement(opts, "nccl2")
+            self.assertTrue(opts.store.check(["nccl_impl/nccl2"]))
+
+    def test_nccl_impl_agreement_sets_before_check(self):
+        # Publishing before checking guarantees that one rank of a mixed group
+        # sees the other key.
+        ops = []
+
+        class RecordingStore(dist.Store):
+            def set(self, key, value):
+                ops.append(("set", key))
+
+            def check(self, keys):
+                ops.append(("check", keys))
+                return False
+
+        store = RecordingStore()  # opts.store does not keep the Python object alive
+        opts = self._impl_check_opts()
+        opts.store = store
+        c10d._check_nccl_impl_agreement(opts, "nccl2")
+        self.assertEqual(
+            ops, [("set", "nccl_impl/nccl2"), ("check", ["nccl_impl/nccl-legacy"])]
+        )
+
+    def test_nccl_impl_agreement_skips_single_rank(self):
+        opts = self._impl_check_opts(group_size=1)
+        c10d._check_nccl_impl_agreement(opts, "nccl2")
+        self.assertFalse(opts.store.check(["nccl_impl/nccl2"]))
+
+    def test_nccl_impl_agreement_ignores_store_errors(self):
+        class NoCheckStore(dist.Store):
+            def set(self, key, value):
+                pass
+
+        store = NoCheckStore()
+        opts = self._impl_check_opts()
+        opts.store = store
+        self._set_default_pg_size(None)
+        with self.assertNoLogs(c10d.logger, logging.WARNING):
+            c10d._check_nccl_impl_agreement(opts, "nccl2")
+        # A failed check does not count as checking the world group.
+        self.assertFalse(c10d._nccl_impl_checked_world)
+
+    @unittest.skipIf(not c10d.is_nccl_available(), "requires NCCL")
+    @parametrize(
+        "registrar,nccl2_override,backend,impl",
+        [
+            ("_register_builtin_nccl_as_legacy", "unset", "nccl", "nccl-legacy"),
+            ("_register_builtin_nccl_backend", "1", "nccl", "nccl2"),
+            ("_register_builtin_nccl_lazy_backend", "unset", "nccl-lazy", "nccl2"),
+        ],
+    )
+    def test_nccl_group_creation_checks_impl_agreement(
+        self, registrar, nccl2_override, backend, impl
+    ):
+        self._register_nccl(registrar, nccl2_override)
+        self.addCleanup(lambda: dist.is_initialized() and dist.destroy_process_group())
+        with unittest.mock.patch.object(
+            c10d,
+            "_check_nccl_impl_agreement",
+            side_effect=RuntimeError("impl check"),
+        ) as check:
+            with self.assertRaisesRegex(RuntimeError, "impl check"):
+                dist.init_process_group(
+                    backend, store=dist.HashStore(), rank=0, world_size=2
+                )
+        self.assertFalse(dist.is_initialized())
+        check.assert_called_once()
+        opts, called_impl = check.call_args.args
+        self.assertEqual(called_impl, impl)
+        self.assertEqual(opts.group_size, 2)
+
+    @unittest.skipIf(not c10d.is_nccl_available(), "requires NCCL")
+    @parametrize(
+        "creator",
+        [
+            "_create_nccl_process_group",
+            "_create_nccl2_process_group",
+            "_create_nccl_lazy_process_group",
+        ],
+    )
+    def test_nccl_split_skips_impl_agreement(self, creator):
+        opts = self._impl_check_opts()
+        opts.split_from = dist.ProcessGroupGloo(dist.HashStore(), 0, 1)
+        with unittest.mock.patch.object(c10d, "_check_nccl_impl_agreement") as check:
+            # The creators reject a non-NCCL parent after the skipped check.
+            with self.assertRaisesRegex(AssertionError, "Expected split_from"):
+                getattr(c10d, creator)(opts, None)
+        check.assert_not_called()
 
     def test_nccl2_device_uses_rank_without_local_rank(self):
         opts = c10d._DistributedBackendOptions()
