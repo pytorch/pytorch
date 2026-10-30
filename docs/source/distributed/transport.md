@@ -19,7 +19,8 @@ Ordinary reads and writes are not ordered on CUDA streams. The API does not
 provide tracing or batching. Views and remote buffers support `slice(offset, length)`
 and step-1 `[a:b]` byte ranges. Like Python sequences, `[a:b]` counts negative
 bounds from the end and clamps out-of-range ones, while `slice` raises; a
-transfer of a clamped view copies fewer bytes. A remote slice does not
+transfer of a clamped view copies fewer bytes. Non-slice keys raise `TypeError`
+and steps other than 1 raise `ValueError`. A remote slice does not
 restrict the peer's access to the rest of the registration. Descriptor classes define explicit
 `serialize()`/`deserialize()` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary

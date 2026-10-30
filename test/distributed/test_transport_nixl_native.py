@@ -92,10 +92,11 @@ def _native_worker(rank, connection, progress_thread):
     connection.close()
 
 
-def _exit_after(worker, *args):
+def _run_worker(worker, *args):
+    # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
+    # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
+    os.environ.setdefault("UCX_MODULES", "^efa,rdmacm")
     worker(*args)
-    # NIXL 1.5 can segfault during interpreter teardown after a clean close.
-    os._exit(0)
 
 
 @instantiate_parametrized_tests
@@ -110,7 +111,7 @@ class TestNIXLNative(TestCase):
         connections = context.Pipe()
         processes = [
             context.Process(
-                target=_exit_after,
+                target=_run_worker,
                 args=(_native_worker, rank, connections[rank], progress_thread),
             )
             for rank in range(2)
