@@ -192,6 +192,44 @@ class BenchmarkFusionTestTemplate:
                 f"empty_strided_{GPU_TYPE}", 1, exactly=True
             ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
 
+    def test_fused_kernel_pool_failure_does_not_fail_compile(self):
+        # A fused candidate that fails in a compile-pool worker must not fail the
+        # whole compile; the in-process benchmark decides the fusion.
+        if self.device == "cpu":
+            self.skipTest("the C++ backend does not benchmark fusions")
+        from torch._inductor.codecache import LambdaFuture
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        def failing():
+            raise SubprocException("RuntimeError: PassManager::run failed", "triton_")
+
+        orig_compile_kernel = Scheduler.compile_kernel
+        recent: list[list] = []
+        failed_fusions = []
+
+        def compile_kernel(self, nodes, *args, **kwargs):
+            fut, mod = orig_compile_kernel(self, nodes, *args, **kwargs)
+            nodes = list(nodes)
+            # speedup_by_fusion compiles node1, node2, then node1 + node2.
+            if len(recent) == 2 and nodes == recent[0] + recent[1]:
+                failed_fusions.append(nodes)
+                fut = LambdaFuture(failing)
+            recent[:] = (recent + [nodes])[-2:]
+            return fut, mod
+
+        def f(x):
+            y = realize(x + x.t())
+            return y + 1
+
+        with (
+            config.patch(force_disable_caches=True),
+            unittest.mock.patch.object(Scheduler, "compile_kernel", compile_kernel),
+        ):
+            self.common(
+                f, (torch.randn(1024, 1024, device=self.device),), check_lowp=False
+            )
+        self.assertTrue(failed_fusions)
+
     def test_tield_kernel_fusion(self):
         def f(x):
             y = realize(x + x.t())

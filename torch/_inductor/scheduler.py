@@ -7911,13 +7911,22 @@ class Scheduler:
 
                 try:
                     # Wait for all compilations to complete
-                    for fut in (
-                        future_and_mod_l1[0],
-                        future_and_mod_l2[0],
-                        future_and_mod_l1_fused[0],
-                    ):
+                    for fut in (future_and_mod_l1[0], future_and_mod_l2[0]):
                         if fut is not None:
                             fut.result()
+                    if future_and_mod_l1_fused[0] is not None:
+                        try:
+                            future_and_mod_l1_fused[0].result()
+                        except Exception as e:
+                            if _is_loop_carried_compile_error(e):
+                                raise
+                            # As in speedup_by_combo_kernel: the in-process
+                            # benchmark below recompiles and scores a failure as
+                            # inf, so the verdict doesn't depend on the pool.
+                            fusion_log.debug(
+                                "Fused kernel failed to compile in the pool",
+                                exc_info=True,
+                            )
 
                     ms1, path1 = self.benchmark_codegened_module(
                         future_and_mod_l1[1],
