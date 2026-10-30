@@ -95,19 +95,35 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
   const auto n_chunks = std::clamp(split_target_groups / num_rows, uint64_t(1), ceil_div(dim_size, split_min_chunk));
   const auto chunk_size = ceil_div(dim_size, n_chunks);
   const bool use_split = contiguous_rows && !use_row_kernel && n_chunks > 1;
+  // double the width for 2-byte dtypes so a threadgroup row spans a full 128-byte cache line
+  const auto max_tg_x = uint64_t((self.element_size() == 2 ? 2u : 1u) * c10::metal::simdgroup_size);
+  const auto tg_x = std::min(inner_size, max_tg_x);
+  const auto tg_y =
+      std::min({std::bit_ceil(dim_size), uint64_t(kSoftmaxThreads), std::bit_floor(kSoftmaxMaxThreads / tg_x)});
+  // the strided kernel runs one threadgroup per tg_x columns, which leaves the
+  // GPU idle when there are few columns; split the reduction dim over grid.z
+  const auto col_groups = ceil_div(inner_size, tg_x) * (num_rows / inner_size);
+  constexpr uint64_t strided_target_groups = 256;
+  // below this many elements per thread a chunk cannot amortize the second pass
+  constexpr uint64_t strided_min_elems_per_thread = 16;
+  const auto strided_chunks = std::max(
+      uint64_t(1), std::min(strided_target_groups / col_groups, dim_size / (strided_min_elems_per_thread * tg_y)));
+  const auto strided_chunk_size = ceil_div(dim_size, strided_chunks);
+  const bool use_strided_split = !use_row_kernel && !use_split && strided_chunks > 1;
   SoftmaxParams<uint64_t> params{.dim_size = dim_size,
                                  .num_rows = num_rows,
                                  .inner_size = inner_size,
-                                 .chunk_size = chunk_size,
-                                 .n_chunks = n_chunks,
+                                 .chunk_size = use_strided_split ? strided_chunk_size : chunk_size,
+                                 .n_chunks = use_strided_split ? strided_chunks : n_chunks,
                                  .ndim = static_cast<uint32_t>(self_.dim()),
                                  .dim = static_cast<uint32_t>(wrapped_dim)};
   for (const auto d : c10::irange(self_.dim())) {
     params.sizes[d] = self_.size(d);
     params.strides[d] = self_.size(d) == 1 ? 0 : self_.stride(d);
   }
-  const auto partials = use_split
-      ? at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(n_chunks), 2}, self.options().dtype(kFloat))
+  const auto partials = use_split || use_strided_split
+      ? at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(params.n_chunks), 2},
+                  self.options().dtype(kFloat))
       : Tensor();
 
   MPSStream* stream = getCurrentMPSStream();
@@ -123,12 +139,12 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
         run_softmax(stream, "softmax_partial", self, use_u32, grid, group, params, self_, partials);
         run_softmax(stream, kernel + "_finalize", self, use_u32, grid, group, params, self_, output, partials);
+      } else if (use_strided_split) {
+        const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, strided_chunks);
+        const auto group = MTLSizeMake(tg_x, tg_y, 1);
+        run_softmax(stream, "softmax_strided_partial", self, use_u32, grid, group, params, self_, partials);
+        run_softmax(stream, kernel + "_strided_finalize", self, use_u32, grid, group, params, self_, output, partials);
       } else {
-        // double the width for 2-byte dtypes so a threadgroup row spans a full 128-byte cache line
-        const auto max_tg_x = uint64_t((self.element_size() == 2 ? 2u : 1u) * c10::metal::simdgroup_size);
-        const auto tg_x = std::min(inner_size, max_tg_x);
-        const auto tg_y =
-            std::min({std::bit_ceil(dim_size), uint64_t(kSoftmaxThreads), std::bit_floor(kSoftmaxMaxThreads / tg_x)});
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
         run_softmax(stream, kernel, self, use_u32, grid, group, params, self_, output);
