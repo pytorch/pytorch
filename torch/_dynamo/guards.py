@@ -78,6 +78,11 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+    is_functorch_wrapped_tensor,
+)
 from torch._dynamo.package import (
     _globals_module,
     _Missing,
@@ -349,20 +354,15 @@ def _has_tangent(value: object) -> bool:
 
     `_unpack_dual` has no batching rule and a BatchedTensor never holds the
     tangent (under jvp(vmap(f)) it is on an inner layer), so batched layers are
-    skipped. A tensor that cannot be unpacked, such as a subclass without
-    `aten.alias`, cannot hold a tangent either.
+    skipped. A tensor that cannot be unpacked cannot hold a tangent either:
+    unpacking dispatches `aten.alias`, which a subclass's `__torch_dispatch__`
+    may reject with any exception.
     """
-    from torch._C._functorch import (
-        get_unwrapped,
-        is_batchedtensor,
-        is_functorch_wrapped_tensor,
-    )
-
     while isinstance(value, torch.Tensor):
         if not is_batchedtensor(value):
             try:
                 dual = torch.autograd.forward_ad.unpack_dual(value, level=0)
-            except (RuntimeError, TypeError):
+            except Exception:
                 pass
             else:
                 if dual.tangent is not None:

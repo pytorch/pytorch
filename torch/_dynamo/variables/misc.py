@@ -918,8 +918,8 @@ class AutogradFunctionVariable(VariableTracker):
         # forward-AD rules of the primitives it decomposes into.
         jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
         if jvp_fn is not torch.autograd.Function.jvp:
-            forward_ad = _forward_ad_active(tx, (args, kwargs))
-            if (requires_grad and torch.is_grad_enabled()) or forward_ad:
+            reverse_ad = requires_grad and torch.is_grad_enabled()
+            if reverse_ad or _forward_ad_active(tx, (args, kwargs)):
                 unimplemented(
                     gb_type="Unsupported custom jvp",
                     context=f"call_apply {self} {args} {kwargs}",

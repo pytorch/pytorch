@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._debug_mode import DebugMode
 
 
@@ -4014,6 +4015,27 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         with fwAD.dual_level():
             actual = torch.compile(g, backend="eager")(n, t)
         self.assertEqual(actual, g(n, t))
+
+    def test_custom_jvp_on_subclass_rejecting_alias(self):
+        """Unpacking dispatches aten.alias, which a subclass may reject with
+        any exception, not only RuntimeError."""
+
+        class NoAlias(TwoTensor):
+            @staticmethod
+            def __tensor_unflatten__(inner, meta, outer_size, outer_stride):
+                return NoAlias(inner["a"], inner["b"], outer_size, outer_stride)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func is torch.ops.aten.alias.default:
+                    raise KeyError(func)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        def fn(t):
+            return SinWithZeroJvp.apply(t) * 2
+
+        t = NoAlias(torch.randn(4), torch.randn(4))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
 
     def test_custom_jvp_vmap_of_compiled_under_dual_level(self):
         """The guard must unwrap a BatchedTensor input the same way the trace
