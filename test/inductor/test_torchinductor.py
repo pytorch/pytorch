@@ -8034,18 +8034,44 @@ for dtype in (torch.int32, torch.int64):
 
     def test_var_mean_identical_large_values(self):
         # https://github.com/pytorch/pytorch/issues/201334
-        # The mean of identical values whose sum is not representable in
-        # float32 rounds away from the input; the plain two-pass fallback then
+        # sum(x) / n of identical values whose sum is not representable in
+        # float32 rounds away from the input, and the two-pass fallback then
         # reports a nonzero variance where eager (Welford) reports zero.
+        # n=3 takes the unrolled lowering (var_mean_sum_), n=100 and n=1000
+        # the persistent-reduction fallback in SIMD codegen on GPU. On main
+        # the variance differs on GPU for every n and on CPU for n=1000; the
+        # mean differs on GPU for n=3 and on CPU for n=1000.
         def fn(x):
             return (
-                torch.var_mean(x, dim=1, correction=0)[0],
+                *torch.var_mean(x, dim=1, correction=0),
                 torch.var(x, dim=1),
                 torch.std(x, dim=1),
             )
 
-        x = torch.full((2, 3), 7.5e10, dtype=torch.float32)
-        self.common(fn, (x,), atol=0, rtol=0)
+        for n in (3, 100, 1000):
+            x = torch.full((2, n), 7.5e10, dtype=torch.float32)
+            # 7.5e10 overflows float16, so skip the automatic half rerun
+            self.common(fn, (x,), atol=0, rtol=0, check_lowp=False)
+
+    def test_var_mean_identical_bfloat16(self):
+        # Covers the two-step variance window for bfloat16 on GPU
+        # (1024 <= n <= 32768). Sums of identical bfloat16 values are exact in
+        # float32, so this case passes on main as well.
+        def fn(x):
+            return torch.var_mean(x, dim=1, correction=0)
+
+        x = torch.full((2, 2048), 7.5e10, dtype=torch.bfloat16)
+        self.common(fn, (x,), atol=0, rtol=0, check_lowp=False)
+
+    def test_var_mean_empty_reduction(self):
+        def fn(x):
+            return (
+                torch.var(x, dim=1),
+                torch.var_mean(x, dim=1)[0],
+                torch.std(x, dim=1, correction=0),
+            )
+
+        self.common(fn, (torch.empty(4, 0),), check_lowp=False)
 
     def test_var_mean_div_by(self):
         def fn(x):
