@@ -1,12 +1,14 @@
 """``torch.compiler.export_python``: a decorator whose compile cache is a file you own."""
 
 import functools
+import logging
 import os
 from collections.abc import Callable
 from typing import cast, TypeVar
 from typing_extensions import ParamSpec
 
 from torch._precompile import (
+    _cache_matches_artifact,
     _DynamoCapture,
     capture,
     DynamoTracer,
@@ -15,6 +17,8 @@ from torch._precompile import (
     PrecompileError,
 )
 
+
+log = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -43,7 +47,14 @@ def export_python(
     captured variant whose guards hold, and does not trace or compile. A call no
     captured variant covers raises :class:`~torch.compiler.PrecompileError` rather than
     recompiling. Nothing hashes the function, its config or the machine, so editing
-    the function does not recapture it: delete ``path`` to recapture::
+    the function does not recapture it: delete ``path`` to recapture.
+
+    ``path`` is also the artifact to edit: each compiled graph's Inductor code is in
+    its ``GRAPH_SOURCES`` section, and that text is what runs. An edited file is
+    served without its cache (built for the captured text), and its edited graphs
+    compile the kernels their text defines. A process serves one version of a
+    capture: rerun in a new process to pick up an edit, since loading the edited
+    file where an earlier version of it is loaded raises::
 
         @torch.compiler.export_python(path="artifacts/step.py")
         def step(model, x):
@@ -101,8 +112,22 @@ class _ExportedPython:
         if self._runnable is None:
             if not os.path.exists(self._path):
                 return self._capture(*args, **kwargs)
-            self._runnable = load(self._path, self._cache_path)
+            self._runnable = self._load()
         return self._runnable(*args, **kwargs)
+
+    def _load(self) -> PrecompiledRunnable:
+        cache: str | None = self._cache_path
+        if not _cache_matches_artifact(self._path, self._cache_path):
+            # An edit (or a missing cache) leaves nothing to accelerate: the edited
+            # graphs compile the kernels their text defines.
+            log.info(
+                "export_python: %s does not match its cache %s (edited after capture, "
+                "or the cache is missing); serving it without the cache",
+                self._path,
+                self._cache_path,
+            )
+            cache = None
+        return load(self._path, cache)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
@@ -116,7 +141,7 @@ class _ExportedPython:
             result = cap(*args, **kwargs)
         # The capture's live compile holds the names its artifact binds on load.
         cast(_DynamoCapture, cap)._release_live_compile()
-        self._runnable = load(self._path, self._cache_path)
+        self._runnable = self._load()
         return result
 
 
