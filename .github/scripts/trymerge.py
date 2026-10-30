@@ -1603,8 +1603,11 @@ class GitHubPR:
         labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
+        numbered = re.compile(rf"{re.escape(label_base)}X\d+")
         for label in labels:
-            if label_base in label:
+            # Count only this label's own repeats: a substring match let an
+            # unrelated label such as "mergedog" turn "merged" into "mergedX1".
+            if label == label_base or numbered.fullmatch(label):
                 count += 1
                 full_label = f"{label_base}X{count}"
         self.add_label(full_label, dry_run)

@@ -3213,6 +3213,30 @@ class NoNetworkTestCase(TestCase):
         return patcher.start()
 
 
+class TestAddNumberedLabel(NoNetworkTestCase):
+    def added_label(self, labels: list[str]) -> str:
+        add = self.patch("trymerge.gh_add_labels")
+        pr = GitHubPR.__new__(GitHubPR)
+        pr.org, pr.project, pr.pr_num, pr.labels = "pytorch", "pytorch", 1, labels
+        pr.add_numbered_label("merged", False)
+        return add.call_args.args[3][0]
+
+    def test_unrelated_label_containing_base_is_not_counted(self) -> None:
+        self.assertEqual(self.added_label(["mergedog", "autoland"]), "merged")
+        self.assertEqual(self.added_label(["mergedX1foo", "mergedx1"]), "merged")
+
+    def test_capitalized_repo_label_is_not_counted(self) -> None:
+        # GitHub applies "merged" as the repo's existing "Merged" label; matching
+        # stays case-sensitive so such PRs keep getting plain "Merged".
+        self.assertEqual(self.added_label(["Merged", "mergedog"]), "merged")
+
+    def test_own_repeats_are_counted(self) -> None:
+        self.assertEqual(self.added_label(["merged"]), "mergedX1")
+        self.assertEqual(
+            self.added_label(["mergedog", "merged", "mergedX1"]), "mergedX2"
+        )
+
+
 class TestGetNativeStackPrs(NoNetworkTestCase):
     def setUp(self) -> None:
         super().setUp()
