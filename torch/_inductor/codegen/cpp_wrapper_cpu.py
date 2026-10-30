@@ -3022,7 +3022,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # use the ABI shim to extract the scalar selector value from the Tensor;
             # always as int64 so the branch loop can use uniform index comparisons
             # (cond: True==1, False==0)
-            selector_var = f"{node.selector.get_name()}_scalar"
+            if self.is_shareable_selector(node.selector):
+                selector_var = f"{node.selector.get_name()}_scalar"
+            else:
+                selector_var = f"{node.get_name()}_selector"
             if selector_var not in self.used_switch_selector:
                 self.codegen_tensor_item(
                     torch.int64,
