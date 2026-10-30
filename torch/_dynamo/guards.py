@@ -264,6 +264,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 
 
 def _sequence_length(value: object) -> int:
+    if issubclass(type(value), dict):
+        return dict.__len__(cast(dict[Any, Any], value))
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
@@ -1870,8 +1872,15 @@ class GuardBuilder(GuardBuilderBase):
         source_name = source.name
         if source_name == "":
             return False
-        obj_id = id(self.get(source))
-        return obj_id in self.key_order_guarded_dict_ids
+        value = self.get(source)
+        # DictGuardManager's empty fast path skips subclass attribute guards.
+        if (
+            issubclass(type(value), dict)
+            and type(value) is not dict
+            and not dict.__len__(value)
+        ):
+            return False
+        return id(value) in self.key_order_guarded_dict_ids
 
     def get_guard_manager_type(
         self,
@@ -3535,12 +3544,14 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not isinstance(value, dict):
+        if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if isinstance(value, set):
+        if issubclass(type(value), dict):
+            code.append(f"dict.__len__({ref}) == {length}")
+        elif isinstance(value, set):
             code.append(f"set.__len__({ref}) == {length}")
         elif isinstance(value, frozenset):
             code.append(f"frozenset.__len__({ref}) == {length}")
@@ -3550,7 +3561,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
-        if isinstance(value, dict):
+        if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
                 get_verbose_code_parts(code, guard),
@@ -3571,18 +3582,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         t = type(value)
+        remaining = tuple_iterator_len(value)
 
         code = []
-        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        code.append(f"___tuple_iterator_len({ref}) == {remaining}")
         self._set_guard_export_info(guard, code)
+        item_word = "item" if remaining == 1 else "items"
+        reason = (
+            f"Iterator {ref} must be a tuple iterator with {remaining} {item_word} left; "
+            "Dynamo specialized the compiled code on the tuple iterator type and remaining count."
+        )
 
-        t = type(value)
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value),
+            remaining,
             obj_id,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -3783,19 +3799,15 @@ class GuardBuilder(GuardBuilderBase):
         order = _ordered_dict_order(self.get(guard))
         storage_order = order == tuple(range(len(order)))
 
-        def guard_fn(
-            value: collections.OrderedDict[Any, Any], expected: tuple[int, ...]
-        ) -> bool:
-            if dict.__len__(value) != len(expected):
+        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
+            if dict.__len__(value) != len(order):
                 return False
             keys, linked = dict.keys(value), collections.OrderedDict.keys(value)
             if storage_order:
                 return all(map(operator.is_, keys, linked))
-            return all(
-                map(operator.is_, map(tuple(keys).__getitem__, expected), linked)
-            )
+            return all(map(operator.is_, map(tuple(keys).__getitem__, order), linked))
 
-        code = [f"___ordered_dict_order_matches({self.arg_ref(guard)}, {order!r})"]
+        code = [f"___ordered_dict_order_matches({self.arg_ref(guard)})"]
         self.add_python_lambda_leaf_guard_to_root(
             code,
             get_verbose_code_parts(code, guard),
@@ -4959,7 +4971,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 # Preserve constructor attributes and aliases to the saved state.
                 for name, item in value.__dict__.items():
                     attrs.setdefault(name, item)
-                value.__dict__ = attrs
+                object.__setattr__(value, "__dict__", attrs)
             if slots:
                 for name, item in slots.items():
                     setattr(value, name, item)
@@ -5284,22 +5296,26 @@ class GuardsStatePickler(FunctionPicklerBase):
         if (
             issubclass(type(obj), collections.OrderedDict)
             and type(obj) not in copyreg.dispatch_table
-            and type(obj).__reduce__ is collections.OrderedDict.__reduce__
-            and type(obj).__reduce_ex__ is collections.OrderedDict.__reduce_ex__
+            and inspect.getattr_static(obj, "__reduce__")
+            is collections.OrderedDict.__reduce__
+            and inspect.getattr_static(obj, "__reduce_ex__")
+            is collections.OrderedDict.__reduce_ex__
         ):
             # Native pickle normalizes storage to linked order, invalidating
             # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
-            state = (
-                vars(obj)
-                if type(obj) is collections.OrderedDict
-                else obj.__reduce__()[2]
+            # Custom constructors/items/setitem must retain native callback order.
+            preserve_storage = type(type(obj)).__call__ is type.__call__ and all(
+                getattr(type(obj), name) is getattr(collections.OrderedDict, name)
+                for name in ("__new__", "__init__", "__setitem__", "items")
             )
+            reduced = obj.__reduce__()
+            state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
             return (
-                type(obj),
-                (),
-                (state, _ordered_dict_order(obj)),
-                None,
-                iter(dict.items(obj)),
+                reduced[0],
+                reduced[1],
+                (state, _ordered_dict_order(obj) if preserve_storage else ()),
+                reduced[3],
+                iter(dict.items(obj)) if preserve_storage else reduced[4],
                 type(self)._restore_ordered_dict_state,
             )
 
