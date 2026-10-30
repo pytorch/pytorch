@@ -223,6 +223,36 @@ class AbstractFaultToleranceTest:
             time.sleep(1)
             self.backend.abort()
 
+    def test_launch_timeout_revokes_comm(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL launch behavior")
+        from torch._C._distributed_c10d import ErrorType
+
+        # Peers connect at the first collective only with runtime connect.
+        os.environ["NCCL_RUNTIME_CONNECT"] = "1"
+        self._create_reconfigured_pg("ft_launch_timeout", 1500)
+        if self.rank == 0:
+            # The first collective on a fresh comm blocks at launch until
+            # peers connect; they never join this one.
+            self.backend.set_timeout(timedelta(milliseconds=500))
+            # Reported like a watchdog-caught timeout of this collective.
+            with self.assertRaisesRegex(
+                dist.DistBackendError,
+                r"^\[PG GUID [^\]]+ Rank 0\] Watchdog caught collective operation "
+                r"timeout: WorkNCCL\(SeqNum=\d+, OpType=ALLREDUCE, NumelIn=4, "
+                r"NumelOut=4, Timeout\(ms\)=500\) ran for \d+ milliseconds before "
+                r"timing out\.",
+            ):
+                dist.all_reduce(torch.ones(4, device=self.device))
+            self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
+            torch.cuda.synchronize()
+            self.backend.set_timeout(timedelta(seconds=30))
+        self._store_barrier("ft_launch_timeout_observed")
+
+        handles = self._collect_handles("ft_launch_timeout_recover")
+        self._reconfigure(1501, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)
         excluded_rank = self.world_size - 1
@@ -271,6 +301,9 @@ class AbstractFaultToleranceTest:
         self._reconfigure(603, handles)
         self.assertEqual(dist.get_world_size(), self.world_size)
         self.assertEqual(dist.get_rank(), self.rank)
+        # A rank can return from the Gloo mesh connect before its peers do;
+        # shrinking right away closes its sockets under their handshake.
+        self._store_barrier("ft_scale_down_up_connected")
 
         self._reconfigure(604 + self.rank, [dist._get_reconfigure_handle()])
         self.assertEqual(dist.get_world_size(), 1)
@@ -383,14 +416,21 @@ class AbstractFaultToleranceTest:
         self._create_reconfigured_pg("ft_timeout", 1300)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
         self.backend.set_timeout(timedelta(milliseconds=50))
+        # nccl2 reports legacy ProcessGroupNCCL's watchdog timeout line.
+        error = (
+            r"Watchdog caught collective operation timeout: WorkNCCL\(.* "
+            r"before timing out\."
+            if self.backend_name == "nccl2"
+            else "[Tt]imed out"
+        )
 
         if self.rank == 1:
             tensor = torch.ones(4, device=self.device)
             work = dist.all_reduce(tensor, async_op=True)
             try:
                 work.wait()
-            except RuntimeError as error:
-                self.assertRegex(str(error), "[Tt]imed out|before timing out")
+            except RuntimeError as err:
+                self.assertRegex(str(err), error)
             else:
                 deadline = time.monotonic() + 10
                 while (
@@ -399,9 +439,7 @@ class AbstractFaultToleranceTest:
                 ):
                     time.sleep(0.1)
                 self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
-                with self.assertRaisesRegex(
-                    RuntimeError, "[Tt]imed out|before timing out"
-                ):
+                with self.assertRaisesRegex(RuntimeError, error):
                     dist.all_reduce(tensor, async_op=True)
             del work
 
@@ -411,6 +449,55 @@ class AbstractFaultToleranceTest:
         handles = self._collect_handles("ft_timeout_recover")
         self._reconfigure(1301, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_with_pending_work(self):
+        # Rank 1's unmatched collective is still in flight when reconfigure()
+        # starts: unexpired (i=0), already timed out and revoked by the
+        # watchdog (i=1, nccl2), or racing the watchdog (i=2).
+        from torch._C._distributed_c10d import ErrorType
+
+        self._create_reconfigured_pg("ft_pending", 1400)
+        # Connect the communicator so launching the unmatched collective does
+        # not block on peer setup.
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+        for i in range(3):
+            timeout = timedelta(seconds=30) if i == 0 else timedelta(milliseconds=100)
+            self.backend.set_timeout(timeout)
+            work = None
+            if self.rank == 1:
+                work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+            if self.rank == 1 and i == 1 and self.backend_name == "nccl2":
+                deadline = time.monotonic() + 10
+                while (
+                    self.backend.get_error() != ErrorType.TIMEOUT
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+                self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
+            handles = self._collect_handles(f"ft_pending_{i}")
+            self._reconfigure(1401 + i, handles)
+            del work
+            self.backend.set_timeout(timedelta(seconds=30))
+            self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_shrink_with_pending_work(self):
+        # Rank 0's unmatched collective is in flight when the survivors shrink
+        # away the last rank.
+        handles = self._create_reconfigured_pg("ft_shrink_pending", 1800)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+        last = self.world_size - 1
+        if self.rank == last:
+            self._store_barrier("ft_shrink_pending_done")
+            return
+        self.backend.set_timeout(timedelta(milliseconds=100))
+        work = None
+        if self.rank == 0:
+            work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+        self._reconfigure(1801, handles[:last])
+        del work
+        self.backend.set_timeout(timedelta(seconds=30))
+        self._assert_all_reduce_sum(sum(range(1, self.world_size)))
+        self._store_barrier("ft_shrink_pending_done")
 
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
@@ -549,6 +636,8 @@ def _make_fault_tolerance_test_class(backend):
 for backend in FAULT_TOLERANCE_BACKENDS:
     cls = _make_fault_tolerance_test_class(backend)
     globals()[cls.__name__] = cls
+# Unbound so the last class isn't collected a second time as `cls`.
+del cls
 
 
 class ReconfigureContractTest(TestCase):

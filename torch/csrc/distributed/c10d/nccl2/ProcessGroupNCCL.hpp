@@ -242,7 +242,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 #endif
   }
   bool supportsSplitting() const override {
-    return true;
+    // A lazy_init communicator is created by every member on the first
+    // operation, so ranks agree once it has started.
+    return !options_c10d_->lazy_init ||
+        init_state_ != InitializationState::UNINITIALIZED;
   }
   bool isInitialized() override;
   bool supportsShrinking() const override {
@@ -326,15 +329,23 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Unlike the stock backend, plain ncclCommRegister of every private-pool
   // segment already happens unconditionally through NCCLCachingAllocatorHook,
   // so this only has to cover the segments the hook could not reach and -- for
-  // symm -- perform the collective NCCL_WIN_COLL_SYMMETRIC upgrade that the
-  // hook must not do from an allocator thread. Collective when symm is set:
-  // every rank must call it with the same pool contents, in the same order.
+  // symm -- upgrade the pool's existing segments to collective
+  // NCCL_WIN_COLL_SYMMETRIC windows. Segments the pool allocates afterwards are
+  // upgraded by register_address. Collective when symm is set: every rank must
+  // call it with the same pool contents, in the same order.
   void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
   void deregisterMemPool(at::cuda::MemPool* pool);
 
   // Caching-allocator segment registration (called by
-  // NCCLCachingAllocatorHook, potentially from allocator threads).
-  void register_address(void* addr, size_t len);
+  // NCCLCachingAllocatorHook, potentially from allocator threads). `pool` is
+  // the segment's owning pool, passed only for a fresh SEGMENT_ALLOC: if it was
+  // registered with symm=True the segment is also window-registered, which is
+  // collective, so every rank must allocate the pool's segments in the same
+  // order (the same contract as the stock backend).
+  void register_address(
+      void* addr,
+      size_t len,
+      const std::optional<c10::MempoolId_t>& pool = std::nullopt);
   // from_allocator_hook only controls diagnostics: tearing a symmetric window
   // down from the hook is the uncollective path worth warning about.
   void deregister_address(void* addr, bool from_allocator_hook = false);
@@ -393,7 +404,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   friend class WindowNCCL;
 
  protected:
+  // work: the operation being launched; a launch timeout reports it.
   void waitForNcclOperation(
+      const WorkNCCL& work,
       ncclResult_t status,
       std::chrono::milliseconds timeout,
       std::string_view operation);
@@ -428,13 +441,20 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
+  // another thread cannot still be inside commRevoke when the comm is aborted.
+  std::mutex revoke_mutex_;
 
-  // Matches ::c10d::ProcessGroupNCCL::logPrefix() so tooling that parses the
-  // legacy watchdog messages keeps working.
-  std::string logPrefix() const;
-  // The first watchdog timeout of the current communicator generation; later
-  // timeouts and follow-on errors report it instead of a generic message.
-  void recordTimeoutMessage(const std::string& message);
+  // Same as legacy WorkNCCL's per-work prefix, which starts its watchdog
+  // timeout line: "[PG GUID <uid>(<desc>) Rank <rank>] ".
+  std::string workLogPrefix(int rank) const;
+  // The first timeout of a communicator generation; later timeouts and
+  // follow-on errors of that generation report it instead of a generic
+  // message. reconfigure() starts a new generation.
+  uint64_t timeoutMessageGeneration() const;
+  void recordTimeoutMessage(uint64_t generation, const std::string& message);
+  std::string timeoutMessage(uint64_t generation, int rank) const;
+  // The current generation's message.
   std::string timeoutMessage() const;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
@@ -498,6 +518,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
+  // options_c10d_->config with commName resolved for a new communicator.
+  ncclConfig_t commConfig();
   void finalize();
   void initNcclResources();
   // Adopt a child communicator and bring this backend to the INITIALIZED state,
@@ -524,49 +546,59 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const std::vector<BatchSendRecv::P2POp>& ops,
       bool async_op,
       std::chrono::milliseconds timeout);
+  MaterializedCollectiveConfig materializeConfig(
+      const OptionalCollectiveConfig& config);
   c10::intrusive_ptr<WorkNCCL> broadcastImpl(
       at::Tensor& tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_reduce(
       at::Tensor& tensor,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceImpl(
       const at::Tensor& tensor,
       int root,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_gather(
       const std::vector<at::Tensor>& tensor_list,
       const at::Tensor& tensor,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceScatterSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allToAllSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_to_all_v_single(
       at::Tensor& output,
       const at::Tensor& input,
@@ -593,7 +625,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& input_tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      bool contiguous_output = false,
+      const MaterializedCollectiveConfig& config = {});
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
   std::chrono::milliseconds operationTimeout(
@@ -605,7 +639,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
-  void checkInitialized() const;
+  // Creates a lazy_init communicator and checks that it is ready.
+  void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
   void drainRetiredGraphWork();
@@ -615,6 +650,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
+  // Folds a *_coalesced op's per-tensor works into the last one.
+  c10::intrusive_ptr<WorkNCCL> coalesceWorks(
+      std::vector<c10::intrusive_ptr<WorkNCCL>> works,
+      std::vector<at::Tensor> outputs);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
@@ -673,14 +712,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   bool is_high_priority_stream_{false};
   std::string name_;
+  // Backs the default commName; NCCL keeps the pointer for the comm's lifetime.
+  std::string comm_name_;
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;
 
   c10::intrusive_ptr<Options> options_c10d_;
-  const size_t local_id_;
 
   mutable std::mutex timeout_message_mutex_;
+  // Written under timeout_message_mutex_; atomic so works can read it lock-free
+  // at creation.
+  std::atomic<uint64_t> timeout_message_generation_{0};
   std::string timeout_message_;
 
   std::mutex ephemeral_timeout_mutex_;
@@ -709,15 +752,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Caller must hold memory_registration_mutex_. Returns end() when ptr is not
   // inside a registered segment.
   RegistrationMap::iterator findContainingRegistrationLocked(const void* ptr);
+  // ensureSegmentWindow for a known registration; caller must hold
+  // memory_registration_mutex_.
+  ncclResult_t ensureSymmetricWindow(RegistrationMap::iterator it);
   // Guards memoryRegistrationHandles_ and registeredMemPools_:
   // register/deregister_address run on allocator threads while window ops look
   // segments up on the main thread.
   std::mutex memory_registration_mutex_;
-  // MemPools passed to registerMemPool, so deregisterMemPool can reject a pool
-  // that was never registered (stock does the same via its global
-  // ncclCommMemPoolMap). The symm mode is not tracked: a segment carries its
-  // own window handle, so teardown does not need to be told which mode to use.
-  std::set<c10::cuda::MempoolId_t> registeredMemPools_;
+  // MemPools passed to registerMemPool -> whether any registration asked for
+  // symm. deregisterMemPool uses it to reject a pool that was never registered
+  // (stock does the same via its global ncclCommMemPoolMap); register_address
+  // uses the symm flag to window-register segments the pool allocates later.
+  std::map<c10::cuda::MempoolId_t, bool> registeredMemPools_;
   // Caller must hold memory_registration_mutex_ and have checked that `addr`
   // is not already registered.
   void registerAddressLocked(void* addr, size_t len);
@@ -739,7 +785,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
-  c10::intrusive_ptr<WorkNCCL> coalesced_work_;
+  // Works enqueued while coalescing_batch_ is engaged; endCoalescing()
+  // returns a work covering all of them.
+  std::vector<c10::intrusive_ptr<WorkNCCL>> coalescing_works_;
+
+  // Configs issued between startTimeEstimate() and endTimeEstimate().
+  bool time_estimate_active_ = false;
+  std::vector<std::shared_ptr<const void>> time_estimate_configs_;
 
   std::unordered_map<
       unsigned long long,

@@ -108,6 +108,11 @@ void WorkNCCL::InputTensorShelf::append(InputTensorShelf& other) {
   other.tensors.clear();
 }
 
+void WorkNCCL::InputTensorShelf::appendCopy(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(tensors.end(), other.tensors.begin(), other.tensors.end());
+}
+
 void WorkNCCL::InputTensorShelf::clear() {
   std::lock_guard<std::mutex> lock(mutex);
   tensors.clear();
@@ -119,6 +124,8 @@ WorkNCCL::State::State(
     std::chrono::milliseconds timeout)
     : comm(comm),
       reconfigureUuid(comm->reconfigure_uuid_),
+      timeoutMessageGeneration(comm->timeoutMessageGeneration()),
+      rank(comm->getRank()),
       blockingWait(comm->blocking_wait_),
       stream(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
@@ -193,7 +200,7 @@ void WorkNCCL::recordEnd() {
 
 bool WorkNCCL::State::setTerminalStatus(
     WorkStatus terminal_status,
-    std::string timeout_message) {
+    std::optional<std::string> timeout_message) {
   TORCH_INTERNAL_ASSERT(
       terminal_status == WorkStatus::COMPLETED ||
       terminal_status == WorkStatus::TIMEDOUT ||
@@ -210,15 +217,15 @@ bool WorkNCCL::State::setTerminalStatus(
 
     if (terminal_status == WorkStatus::TIMEDOUT) {
       result = WorkResult::TIMEOUT;
-      // Only a work that won the race, and only in the current communicator
-      // generation, becomes the comm's timeout message.
-      if (timeout_message.empty()) {
-        timeout_message = comm->timeoutMessage();
-      } else if (reconfigureUuid == comm->reconfigure_uuid_) {
-        comm->recordTimeoutMessage(timeout_message);
+      // Only a work that won the race records its message, and only into its
+      // own communicator generation.
+      if (timeout_message) {
+        comm->recordTimeoutMessage(timeoutMessageGeneration, *timeout_message);
+      } else {
+        timeout_message = comm->timeoutMessage(timeoutMessageGeneration, rank);
       }
       workException = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, timeout_message));
+          C10_BUILD_ERROR(DistBackendError, *timeout_message));
     } else if (terminal_status == WorkStatus::ERROR) {
       result = WorkResult::COMM_ERROR;
       workException = std::make_exception_ptr(
@@ -275,13 +282,33 @@ std::chrono::milliseconds WorkNCCL::getTimeout() const {
   return state_->timeout;
 }
 
+void WorkNCCL::setDurationStart(const WorkNCCL& first) {
+  std::scoped_lock lock(state_->durationMutex, first.state_->durationMutex);
+  state_->durationStartEvents = first.state_->durationStartEvents;
+}
+
 void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
   if (!children.empty()) {
-    std::lock_guard<std::mutex> lock(state_->durationMutex);
-    state_->durationStartEvents = children.front()->state_->events;
+    setDurationStart(*children.front());
   }
   for (const auto& child : children) {
     inputTensors_->append(*child->inputTensors_);
+  }
+}
+
+void WorkNCCL::retainInputs(
+    const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    inputTensors_->appendCopy(*work->inputTensors_);
+  }
+}
+
+void WorkNCCL::waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    if (work->state_->stream == state_->stream) {
+      continue;
+    }
+    work->state_->events->end->block(state_->stream);
   }
 }
 
@@ -360,23 +387,29 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
   if (elapsed < work_timeout) {
     return status();
   }
+  auto message = timeoutMessage(elapsed);
+  if (setTerminalStatus(WorkStatus::TIMEDOUT, message)) {
+    // Not TC_LOG: message already has the prefix parsers expect.
+    LOG(ERROR) << message;
+  }
+  return status();
+}
+
+std::string WorkNCCL::State::timeoutMessage(
+    std::chrono::milliseconds elapsed) const {
   // Same text as ::c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(), which
   // triage tooling parses.
-  auto message = fmt::format(
+  return fmt::format(
       "{}Watchdog caught collective operation timeout: WorkNCCL(SeqNum={}, "
       "OpType={}, NumelIn={}, NumelOut={}, Timeout(ms)={}) ran for {} "
       "milliseconds before timing out.",
-      comm->logPrefix(),
+      comm->workLogPrefix(rank),
       seq,
       opTypeToString(opType),
       numelIn,
       numelOut,
-      this->timeout.count(),
+      timeout.count(),
       elapsed.count());
-  if (setTerminalStatus(WorkStatus::TIMEDOUT, message)) {
-    LOG(ERROR) << message;
-  }
-  return status();
 }
 
 bool WorkNCCL::isCompleted() {

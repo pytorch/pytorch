@@ -105,6 +105,14 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
+  // Makes getDuration() measure from where first's duration starts.
+  void setDurationStart(const WorkNCCL& first);
+  // Keeps the works' input tensors alive until this work is waited on, without
+  // taking them from the works.
+  void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq);
@@ -115,9 +123,9 @@ class WorkNCCL : public c10d::Work {
   // op_type and the numels only feed the watchdog timeout message.
   void recordStart(
       std::string_view coll_name,
-      OpType op_type = OpType::UNKNOWN,
-      int64_t numel_in = 0,
-      int64_t numel_out = 0);
+      OpType op_type,
+      int64_t numel_in,
+      int64_t numel_out);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -129,6 +137,7 @@ class WorkNCCL : public c10d::Work {
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
     void append(InputTensorShelf& other);
+    void appendCopy(InputTensorShelf& other);
     void clear();
 
     std::mutex mutex;
@@ -142,14 +151,23 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status, std::string timeout_message = {});
+    // timeout_message: this work's own timeout text; without one a timed-out
+    // work reports its generation's recorded message.
+    bool setTerminalStatus(
+        WorkStatus status,
+        std::optional<std::string> timeout_message = std::nullopt);
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    // Legacy ProcessGroupNCCL's watchdog timeout line for this work.
+    std::string timeoutMessage(std::chrono::milliseconds elapsed) const;
     void notifyCompletion();
     float getDuration();
 
     ProcessGroupNCCL* comm;
     int64_t reconfigureUuid;
+    uint64_t timeoutMessageGeneration;
+    // The comm's rank at creation; reconfigure may change it.
+    int rank;
     bool blockingWait;
     at::cuda::CUDAStream stream;
     std::chrono::steady_clock::time_point workStartTime;
