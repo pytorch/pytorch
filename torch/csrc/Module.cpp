@@ -2883,13 +2883,10 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_fake_sym_memo",
       [](const at::Tensor& fake,
          const std::string& name,
-         py::handle memo,
+         c10::SymInt memo,
          uint64_t epoch) {
-        Py_INCREF(memo.ptr());
         fake.unsafeGetTensorImpl()->set_fake_sym_memo(
-            name,
-            std::make_unique<c10::SafePyObject>(memo.ptr(), getPyInterpreter()),
-            epoch);
+            name, std::move(memo), epoch);
       },
       py::arg("fake"),
       py::arg("name"),
@@ -2898,15 +2895,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_fake_sym_memo",
-      [](const at::Tensor& fake,
-         const std::string& name,
-         uint64_t epoch) -> py::object {
-        auto* memo = fake.unsafeGetTensorImpl()->fake_sym_memo(name, epoch);
-        if (memo == nullptr) {
-          return py::none();
-        }
-        return py::reinterpret_borrow<py::object>(
-            memo->ptr(getPyInterpreter()));
+      [](const at::Tensor& fake, const std::string& name, uint64_t epoch) {
+        return fake.unsafeGetTensorImpl()->fake_sym_memo(name, epoch);
       },
       py::arg("fake"),
       py::arg("name"),
