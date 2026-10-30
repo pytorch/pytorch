@@ -6658,11 +6658,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         else:
+            if name not in self.f_globals:
+                registered_module = _registered_module_for_globals(
+                    self.f_globals.get("__name__"), self.f_globals
+                )
+                if registered_module is None:
+                    return self.load_builtin(inst)
+
+                _, module = registered_module
+                side_effects = self.output.side_effects
+                for fglobals_vt in side_effects.store_attr_mutations:
+                    if (
+                        isinstance(fglobals_vt, PythonModuleVariable)
+                        and fglobals_vt.value is module
+                        and side_effects.has_pending_mutation_of_attr(
+                            fglobals_vt, name
+                        )
+                    ):
+                        self.push(side_effects.load_attr(fglobals_vt, name))
+                        return
+                return self.load_builtin(inst)
+
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
-            elif name not in self.f_globals:
-                return self.load_builtin(inst)
             else:
                 value = self.f_globals[name]
                 self.push(VariableTracker.build(self, value, global_source))
