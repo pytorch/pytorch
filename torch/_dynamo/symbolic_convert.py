@@ -1019,7 +1019,11 @@ def generic_jump(
                 self.jump(inst)
         elif not value.is_tensor():
             result = generic_is_true(self, value)  # type: ignore[arg-type]
-            if truth_fn(result):
+            if isinstance(result, SymNodeVariable):
+                result_val = result.evaluate_expr()
+            else:
+                result_val = result.as_python_constant()
+            if truth_fn(result_val):
                 if push:
                     self.push(value)
                 self.jump(inst)
