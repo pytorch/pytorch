@@ -4960,6 +4960,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             m.impl("foo", autocast, "AutocastCPU")
             m.impl("foo", autocast, "AutocastCUDA")
             m.impl("foo", autocast, "AutocastXPU")
+            m.impl("foo", autocast, "AutocastPrivateUse1")
 
             foo = torch.ops.mylib.foo.default
 
@@ -4990,28 +4991,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
                     out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
             (grad,) = torch.autograd.grad(out, x)
             return out, grad
-
-    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
-    def test_backward_pass_autocast_on(self, device):
-        out, grad = self._compile_autocast(device, forward_autocast=True)
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.ones_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_off(self, device):
-        out, grad = self._compile_autocast(device, forward_autocast=True)
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.zeros_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_custom(self, device):
-        device_type = torch.device(device).type
-        with torch._functorch.config.patch(
-            backward_pass_autocast=[{"device_type": device_type}]
-        ):
-            out, grad = self._compile_autocast(device, forward_autocast=False)
-            self.assertEqual(out, torch.zeros_like(out))
-            self.assertEqual(grad, torch.ones_like(grad))
 
     @onlyAccelerator
     def test_mem_leak_from_save_for_bw(self, device):
@@ -10389,6 +10368,119 @@ def forward(self, primals_1, tangents_1):
         sg_ops = [n for n in sg_mod.graph.nodes if n.op == "call_function"]
         self.assertEqual(len(sg_ops), 1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitions_device_valued_node(self):
+        """A device-valued node must be placeable, not just sizeable.
+
+        Sizing it as zero (test_size_of_device_valued_node) only gets past the first
+        gate. solve_min_cut still has to put the node somewhere, and it has no tensor
+        to weigh: get_node_weight gives a non-tensor output infinite weight, and the
+        op is not in the recomputable allowlist, so it can be neither saved across the
+        boundary nor recomputed in the backward.
+
+        Reaching that needs two things at once, which is why a device-valued node on
+        its own does not show it:
+          - a current_device() node, from any device= operand, and
+          - a cheap cast of a parameter, which min-cut elects to recompute in the
+            backward rather than save, dragging the device node across with it.
+        Drop either -- make the parameter already bf16, or the cast dtype-only -- and
+        min-cut keeps the device node in the forward and never has to classify it.
+
+        Mixed-precision casting of a parameter is the ordinary way a real model hits
+        this. Note the default partitioner config is the one that fails;
+        aggressive_recomputation=True happens to route around it.
+        """
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+
+            def forward(self, x):
+                w = self.w.to(device="cuda", dtype=torch.bfloat16)
+                return (x @ w).relu().sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch._dynamo.reset()
+        model = M().cuda()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(model, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitions_must_save_device_valued_node(self):
+        """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
+
+        compile_on_one_rank emits one current_device() node per graph, at the first
+        device= operand. When that operand is inside a checkpointed region whose
+        policy says MUST_SAVE, the node inherits the tag, and the same node later
+        feeds the parameter cast that min-cut recomputes in the backward (see
+        test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
+        recompute, and a device cannot be saved, so no finite cut existed.
+        """
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def must_save(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.MUST_SAVE
+
+        context_fn = partial(create_selective_checkpoint_contexts, must_save)
+        w = torch.randn(64, 64, device="cuda", requires_grad=True)
+
+        def inner(x):
+            return x.sin() + torch.zeros(x.shape, device="cuda", dtype=x.dtype)
+
+        def f(x):
+            y = checkpoint(inner, x, use_reentrant=False, context_fn=context_fn)
+            return (y @ w.to(device="cuda", dtype=torch.bfloat16)).relu().sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch._dynamo.reset()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(f, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(w.grad)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_register_hook_in_checkpoint_accumulated_grad(self):
+        def body(y):
+            y.register_hook(lambda grad: grad * 0.5)
+            return y.clone()
+
+        def fn(x):
+            y = x * 2
+            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
+            return z + y
+
+        x = torch.randn(4, device="cuda", requires_grad=True)
+        out = fn(x)
+        out.sum().backward()
+        eager_grad = x.grad.clone()
+
+        x2 = x.detach().clone().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out2 = opt_fn(x2)
+        out2.sum().backward()
+        self.assertEqual(x2.grad, eager_grad)
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
@@ -11687,12 +11779,7 @@ Expected a .* tangent but got a plain Tensor.""",
         y.backward(grad)
         self.assertEqual(ref_x.grad, x.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @parametrize("dynamic_shapes", [True, False])
-    @parametrize("test_subclasses", [True, False])
-    @parametrize("device", ["cuda", "cpu"])
-    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
-    def test_noncontig_nonmemformat_tangents(
+    def _test_noncontig_nonmemformat_tangents(
         self, dynamic_shapes, test_subclasses, device
     ):
         B = 2
@@ -12610,6 +12697,20 @@ class TestAOTAutogradDeviceWithCache(
     hw_classification = HardwareClassification.ACCELERATOR
 
 
+class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
+    _compile_autocast = TestAOTAutogradDevice._compile_autocast
+
+    def _test_backward_pass_autocast(
+        self, device, *, backward_autocast, forward_autocast, expected_grad
+    ):
+        with torch._functorch.config.patch(backward_pass_autocast=backward_autocast):
+            out, grad = self._compile_autocast(
+                device, forward_autocast=forward_autocast
+            )
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.full_like(grad, expected_grad))
+
+
 class _PartitioningHardwareTestBase(AOTTestCase):
     _make_effectful_op = TestPartitioning._make_effectful_op
     _make_wrapper_via_post_compile = TestPartitioning._make_wrapper_via_post_compile
@@ -12622,65 +12723,7 @@ class _PartitioningHardwareTestBase(AOTTestCase):
 
 
 class TestPartitioningCUDA(_PartitioningHardwareTestBase):
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
-        mod.train()
-
-        x = torch.randn(16, 3, 32, 32, device="cuda")
-        aot_mod = memory_efficient_fusion(mod)
-
-        # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
-            res = aot_mod(x)
-        res.sum().backward()
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_min_cut_partitions_device_valued_node(self):
-        """A device-valued node must be placeable, not just sizeable.
-
-        Sizing it as zero (test_size_of_device_valued_node) only gets past the first
-        gate. solve_min_cut still has to put the node somewhere, and it has no tensor
-        to weigh: get_node_weight gives a non-tensor output infinite weight, and the
-        op is not in the recomputable allowlist, so it can be neither saved across the
-        boundary nor recomputed in the backward.
-
-        Reaching that needs two things at once, which is why a device-valued node on
-        its own does not show it:
-          - a current_device() node, from any device= operand, and
-          - a cheap cast of a parameter, which min-cut elects to recompute in the
-            backward rather than save, dragging the device node across with it.
-        Drop either -- make the parameter already bf16, or the cast dtype-only -- and
-        min-cut keeps the device node in the forward and never has to classify it.
-
-        Mixed-precision casting of a parameter is the ordinary way a real model hits
-        this. Note the default partitioner config is the one that fails;
-        aggressive_recomputation=True happens to route around it.
-        """
-        from functorch.compile import min_cut_rematerialization_partition
-        from torch._dynamo.backends.common import aot_autograd
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
-
-            def forward(self, x):
-                w = self.w.to(device="cuda", dtype=torch.bfloat16)
-                return (x @ w).relu().sum()
-
-        backend = aot_autograd(
-            fw_compiler=lambda gm, _: gm.forward,
-            bw_compiler=lambda gm, _: gm.forward,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        torch._dynamo.reset()
-        model = M().cuda()
-        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-        with torch.compiler.config.patch(compile_on_one_rank=True):
-            torch.compile(model, backend=backend, fullgraph=True)(x).backward()
-        self.assertIsNotNone(x.grad)
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functionalized_rng_codegen_emitted(self):
@@ -13040,29 +13083,6 @@ class TestPartitioningCUDA(_PartitioningHardwareTestBase):
             h2.destroy()
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_in_checkpoint_accumulated_grad(self):
-        def body(y):
-            y.register_hook(lambda grad: grad * 0.5)
-            return y.clone()
-
-        def fn(x):
-            y = x * 2
-            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
-            return z + y
-
-        x = torch.randn(4, device="cuda", requires_grad=True)
-        out = fn(x)
-        out.sum().backward()
-        eager_grad = x.grad.clone()
-
-        x2 = x.detach().clone().requires_grad_(True)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        out2 = opt_fn(x2)
-        out2.sum().backward()
-        self.assertEqual(x2.grad, eager_grad)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_control_deps_mixed_fwd_bw_deps_e2e(self):
         """Forward compilation and backward must not crash when
         wait_stream's control_deps collects forward deps."""
@@ -13083,52 +13103,29 @@ class TestPartitioningCUDA(_PartitioningHardwareTestBase):
         out = compiled(x, w)
         out.sum().backward()
 
+
+class TestPartitioningAutocast(AOTTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_min_cut_partitions_must_save_device_valued_node(self):
-        """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_autocast(self, device):
+        mod = torchvision.models.resnet18().to(device)
+        mod.train()
 
-        compile_on_one_rank emits one current_device() node per graph, at the first
-        device= operand. When that operand is inside a checkpointed region whose
-        policy says MUST_SAVE, the node inherits the tag, and the same node later
-        feeds the parameter cast that min-cut recomputes in the backward (see
-        test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
-        recompute, and a device cannot be saved, so no finite cut existed.
-        """
-        from functorch.compile import min_cut_rematerialization_partition
-        from torch._dynamo.backends.common import aot_autograd
-        from torch.utils.checkpoint import (
-            checkpoint,
-            CheckpointPolicy,
-            create_selective_checkpoint_contexts,
-        )
+        x = torch.randn(16, 3, 32, 32, device=device)
+        aot_mod = memory_efficient_fusion(mod)
 
-        def must_save(ctx, op, *args, **kwargs):
-            return CheckpointPolicy.MUST_SAVE
-
-        context_fn = partial(create_selective_checkpoint_contexts, must_save)
-        w = torch.randn(64, 64, device="cuda", requires_grad=True)
-
-        def inner(x):
-            return x.sin() + torch.zeros(x.shape, device="cuda", dtype=x.dtype)
-
-        def f(x):
-            y = checkpoint(inner, x, use_reentrant=False, context_fn=context_fn)
-            return (y @ w.to(device="cuda", dtype=torch.bfloat16)).relu().sum()
-
-        backend = aot_autograd(
-            fw_compiler=lambda gm, _: gm.forward,
-            bw_compiler=lambda gm, _: gm.forward,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        torch._dynamo.reset()
-        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-        with torch.compiler.config.patch(compile_on_one_rank=True):
-            torch.compile(f, backend=backend, fullgraph=True)(x).backward()
-        self.assertIsNotNone(x.grad)
-        self.assertIsNotNone(w.grad)
+        # Ensure that AOT Autograd works with AMP
+        with torch.cuda.amp.autocast(True):
+            res = aot_mod(x)
+        res.sum().backward()
 
 
 class _AOTModuleSimplifiedHardwareTestBase(AOTTestCase):
+    _test_noncontig_nonmemformat_tangents = (
+        TestAOTModuleSimplified._test_noncontig_nonmemformat_tangents
+    )
     _test_pack_hooks = TestAOTModuleSimplified._test_pack_hooks
 
 
@@ -13557,6 +13554,125 @@ class TestAOTModuleSimplifiedCUDA(_AOTModuleSimplifiedHardwareTestBase):
         )
 
 
+class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+@inherit_device_tests
+class TestAOTAutogradWithDynamoAutocast(
+    _AOTAutogradDynamoMixin, TestAOTAutogradAutocast
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+@inherit_device_tests
+class TestAOTAutogradWithCacheAutocast(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAutocast
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+@inherit_device_tests
+class TestAOTAutogradWithDynamoAccelerator(
+    _AOTAutogradDynamoMixin, TestAOTAutogradAccelerator
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+@inherit_device_tests
+class TestAOTAutogradWithCacheAccelerator(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAccelerator
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+class TestAOTModuleSimplifiedNoncontiguousTangents(
+    _AOTModuleSimplifiedHardwareTestBase
+):
+    hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @parametrize("dynamic_shapes", [True, False])
+    @parametrize("test_subclasses", [True, False])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_noncontig_nonmemformat_tangents(
+        self, dynamic_shapes, test_subclasses, device
+    ):
+        self._test_noncontig_nonmemformat_tangents(
+            dynamic_shapes, test_subclasses, device
+        )
+
+
+class TestAOTModuleSimplifiedAccelerator(_AOTModuleSimplifiedHardwareTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @onlyAccelerator
+    @parametrize("dynamic_shapes", [True, False])
+    @parametrize("test_subclasses", [True, False])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_noncontig_nonmemformat_tangents(
+        self, dynamic_shapes, test_subclasses, device
+    ):
+        self._test_noncontig_nonmemformat_tangents(
+            dynamic_shapes, test_subclasses, device
+        )
+
+
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(
@@ -13577,6 +13693,64 @@ instantiate_device_type_tests(
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+
+
+instantiate_device_type_tests(
+    TestAOTModuleSimplifiedNoncontiguousTangents,
+    globals(),
+    only_for=("cpu",),
+)
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradAccelerator,
+    globals(),
+    allow_xpu=True,
+)
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoAccelerator,
+    globals(),
+    allow_xpu=True,
+)
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheAccelerator,
+    globals(),
+    allow_xpu=True,
+)
+
+
+instantiate_device_type_tests(
+    TestAOTModuleSimplifiedAccelerator,
+    globals(),
+)
+
+
+instantiate_device_type_tests(TestPartitioningAutocast, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
