@@ -196,7 +196,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout, tensor);
-  work->recordStart("put");
+  work->recordStart("put", ::c10d::OpType::UNKNOWN, 0, 0);
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
   try {
@@ -221,7 +221,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
     throw;
   }
   pg_->waitForNcclOperation(
-      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
+      *work, nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -237,7 +237,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout);
-  work->recordStart("signal");
+  work->recordStart("signal", ::c10d::OpType::UNKNOWN, 0, 0);
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
   try {
@@ -257,7 +257,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
     throw;
   }
   pg_->waitForNcclOperation(
-      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
+      *work, nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;
@@ -273,7 +273,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
   cudaStream_t stream = pg_->getOperationStream(asyncOp);
   auto timeout = pg_->operationTimeout(opts.timeout);
   auto work = pg_->createWork(stream, timeout);
-  work->recordStart("wait_signal");
+  work->recordStart("wait_signal", ::c10d::OpType::UNKNOWN, 0, 0);
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
   try {
@@ -293,7 +293,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
     throw;
   }
   pg_->waitForNcclOperation(
-      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
+      *work, nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   work->recordEnd();
   pg_->enqueueWork(work, stream);
   return work;

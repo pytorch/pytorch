@@ -373,9 +373,10 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         break;
       }
       if (comm_state_ != CommState::NORMAL) {
+        // The timeout message makes the abort log line self-describing.
         handleWatchdogFailure(
             comm_state_ == CommState::TIMEOUT
-                ? "timeout - timeout watchdog detected operation timeout"
+                ? "timeout - " + timeoutMessage()
                 : "error - timeout watchdog detected operation error");
       }
 
@@ -444,10 +445,11 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
-      TORCH_CHECK(false, "NCCL operation timed out");
+      C10_THROW_ERROR(DistBackendError, timeoutMessage());
     } else {
-      handleWatchdogFailure("timeout - collective operation timed out");
-      TORCH_CHECK(false, "NCCL operation timed out");
+      const auto message = timeoutMessage();
+      handleWatchdogFailure("timeout - " + message);
+      C10_THROW_ERROR(DistBackendError, message);
     }
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog

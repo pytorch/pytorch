@@ -180,7 +180,7 @@ class AbstractFaultToleranceTest:
         torch.cuda._sleep(int(500 * get_cycles_per_ms()))
         work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
 
-        with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+        with self.assertRaisesRegex(dist.DistBackendError, "before timing out"):
             work.wait(timeout=timedelta(milliseconds=50))
 
         self.assertFalse(torch.cuda.current_stream().query())
@@ -235,7 +235,14 @@ class AbstractFaultToleranceTest:
             # The first collective on a fresh comm blocks at launch until
             # peers connect; they never join this one.
             self.backend.set_timeout(timedelta(milliseconds=500))
-            with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+            # Reported like a watchdog-caught timeout of this collective.
+            with self.assertRaisesRegex(
+                dist.DistBackendError,
+                r"^\[PG GUID [^\]]+ Rank 0\] Watchdog caught collective operation "
+                r"timeout: WorkNCCL\(SeqNum=\d+, OpType=ALLREDUCE, NumelIn=4, "
+                r"NumelOut=4, Timeout\(ms\)=500\) ran for \d+ milliseconds before "
+                r"timing out\.",
+            ):
                 dist.all_reduce(torch.ones(4, device=self.device))
             self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
             torch.cuda.synchronize()
@@ -409,14 +416,21 @@ class AbstractFaultToleranceTest:
         self._create_reconfigured_pg("ft_timeout", 1300)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
         self.backend.set_timeout(timedelta(milliseconds=50))
+        # nccl2 reports legacy ProcessGroupNCCL's watchdog timeout line.
+        error = (
+            r"Watchdog caught collective operation timeout: WorkNCCL\(.* "
+            r"before timing out\."
+            if self.backend_name == "nccl2"
+            else "[Tt]imed out"
+        )
 
         if self.rank == 1:
             tensor = torch.ones(4, device=self.device)
             work = dist.all_reduce(tensor, async_op=True)
             try:
                 work.wait()
-            except RuntimeError as error:
-                self.assertRegex(str(error), "[Tt]imed out")
+            except RuntimeError as err:
+                self.assertRegex(str(err), error)
             else:
                 deadline = time.monotonic() + 10
                 while (
@@ -425,7 +439,7 @@ class AbstractFaultToleranceTest:
                 ):
                     time.sleep(0.1)
                 self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
-                with self.assertRaisesRegex(RuntimeError, "timed out"):
+                with self.assertRaisesRegex(RuntimeError, error):
                     dist.all_reduce(tensor, async_op=True)
             del work
 

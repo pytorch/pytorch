@@ -2,6 +2,7 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import contextlib
 import ctypes
 import gc
 import glob
@@ -302,6 +303,16 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
             event.synchronize()
             del send, recv
             torch.cuda.synchronize()
+
+
+# Legacy ProcessGroupNCCL's watchdog timeout line, parsed by triage tools. Its
+# prefix has the PG GUID with an optional (desc) and no PG ID.
+TIMEOUT_MESSAGE = (
+    r"^\[PG GUID [^\]]+ Rank \d+\] "
+    r"Watchdog caught collective operation timeout: WorkNCCL\(SeqNum=\d+, "
+    r"OpType=\w+, NumelIn=\d+, NumelOut=\d+, Timeout\(ms\)=\d+\) "
+    r"ran for \d+ milliseconds before timing out\."
+)
 
 
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
@@ -1640,6 +1651,14 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
         super().setUp()
         torch.cuda.set_device(self.rank)
 
+    @contextlib.contextmanager
+    def _raises_timeout_message(self):
+        # device_type is a classmethod here, so TestCase.assertRaisesRegex
+        # would skip the message check.
+        with self.assertRaises(dist.DistBackendError) as cm:
+            yield cm
+        self.assertRegex(str(cm.exception), TIMEOUT_MESSAGE)
+
     def _new_subgroup(self, timeout=timedelta(seconds=60)):
         return dist.new_group(
             backend="nccl2",
@@ -1702,7 +1721,11 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce()
 
 
+@instantiate_parametrized_tests
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
+    # The expected numels and P2P peers assume two ranks.
+    world_size = 2
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_timeout_without_process_abort(self) -> None:
@@ -1728,9 +1751,13 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 time.sleep(0.5)
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
             # The next collective on the timed-out group raises rather than
-            # silently proceeding on a dead communicator.
-            with self.assertRaises(RuntimeError):
+            # silently proceeding on a dead communicator, and reports the
+            # collective that timed out.
+            with self._raises_timeout_message() as cm:
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            self.assertIn(
+                "OpType=ALLREDUCE, NumelIn=1024, NumelOut=1024", str(cm.exception)
+            )
 
         self._wait_for_rank_zero(pg)
         self._abort_timed_out_group(pg)
@@ -1754,8 +1781,70 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
-            with self.assertRaises(RuntimeError):
+            with self._raises_timeout_message():
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    def _issue(self, op, pg):
+        t = torch.ones(4, device=self.device)
+        if op == "all_gather_single":
+            out = torch.empty(8, device=self.device)
+            return dist.all_gather_into_tensor(out, t, group=pg, async_op=True)
+        if op == "reduce_scatter_single":
+            inp = torch.ones(8, device=self.device)
+            return dist.reduce_scatter_tensor(t, inp, group=pg, async_op=True)
+        if op == "all_gather":
+            out = [torch.empty_like(t) for _ in range(self.world_size)]
+            return dist.all_gather(out, t, group=pg, async_op=True)
+        if op == "coalesced":
+            pg._start_coalescing(self.device)
+            dist.all_reduce(t, group=pg, async_op=True)
+            dist.all_reduce(t.clone(), group=pg, async_op=True)
+            return pg._end_coalescing(self.device)
+        # Rank 0 sends 4 elements and receives 6.
+        peer = 1 - self.rank
+        send, recv = (4, 6) if self.rank == 0 else (6, 4)
+        ops = [
+            dist.P2POp(dist.isend, torch.ones(send, device=self.device), peer, pg),
+            dist.P2POp(dist.irecv, torch.empty(recv, device=self.device), peer, pg),
+        ]
+        works = dist.batch_isend_irecv(ops)
+        self.assertEqual(len(works), 1)
+        return works[0]
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "op, fields",
+        [
+            ("all_gather_single", "OpType=_ALLGATHER_BASE, NumelIn=4, NumelOut=8"),
+            (
+                "reduce_scatter_single",
+                "OpType=_REDUCE_SCATTER_BASE, NumelIn=8, NumelOut=4",
+            ),
+            ("all_gather", "OpType=ALLGATHER, NumelIn=4, NumelOut=8"),
+            ("coalesced", "OpType=COALESCED, NumelIn=0, NumelOut=0"),
+            ("batch_isend_irecv", "OpType=COALESCED, NumelIn=4, NumelOut=6"),
+        ],
+        name_fn=lambda op, fields: op,
+    )
+    def test_timeout_message_op_fields(self, op, fields) -> None:
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=60))
+        # Run the op once on every rank so rank 0's unmatched one does not
+        # block at launch connecting peers.
+        self._issue(op, pg).wait()
+
+        if self.rank == 0:
+            work = self._issue(op, pg)
+            with self._raises_timeout_message() as cm:
+                work.wait(timedelta(milliseconds=100))
+            # Timeout(ms) is the op's timeout, not the wait's.
+            self.assertIn(f"{fields}, Timeout(ms)=60000)", str(cm.exception))
 
         self._wait_for_rank_zero(pg)
         self._abort_timed_out_group(pg)
@@ -1763,6 +1852,9 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
 
 
 class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
+    # The expected numels assume two ranks.
+    world_size = 2
+
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
@@ -1779,11 +1871,80 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
             work = dist.all_reduce(
                 torch.ones(1024, device=self.device), group=pg, async_op=True
             )
-            with self.assertRaisesRegex(RuntimeError, "timed out"):
+            with self._raises_timeout_message():
                 work.wait()
 
         self._wait_for_rank_zero(pg)
         self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_clears_timeout_message(self) -> None:
+        # Blocking wait marks the communicator timed out before wait() raises,
+        # so the next op deterministically reports the communicator's message.
+        torch.cuda.set_device(self.device)
+        name = "zzz_reconf_timeout"
+        store = dist.distributed_c10d._get_default_store()
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.enable_reconfigure = True
+        opts.group_name = name
+        backend = dist.ProcessGroupNCCL2(
+            dist.PrefixStore(name, store), self.rank, self.world_size, opts
+        )
+
+        def reconfigure(uuid):
+            handles = dist.PrefixStore(f"{name}/handles/{uuid}", store)
+            handles.set(str(self.rank), backend.get_reconfigure_handle())
+            reconfigure_opts = ReconfigureOptions()
+            reconfigure_opts.uuid = uuid
+            reconfigure_opts.handles = [
+                handles.get(str(rank)).decode() for rank in range(self.world_size)
+            ]
+            reconfigure_opts.timeout = timedelta(seconds=30)
+            backend.reconfigure(reconfigure_opts).wait()
+
+        def all_reduce(numel):
+            return backend.allreduce([torch.ones(numel, device=self.device)])
+
+        def all_gather(numel):
+            out = torch.empty(numel * self.world_size, device=self.device)
+            return backend._allgather_base(out, torch.ones(numel, device=self.device))
+
+        def time_out(op, numel, fields):
+            # Every rank runs the op once so rank 0's unmatched one does not
+            # block at launch connecting peers.
+            op(numel).wait()
+            if self.rank == 0:
+                work = op(numel)
+                with self._raises_timeout_message():
+                    work.wait(timedelta(milliseconds=100))
+                with self._raises_timeout_message() as cm:
+                    all_reduce(4)
+                self.assertIn(fields, str(cm.exception))
+                return str(cm.exception)
+            return ""
+
+        reconfigure(1)
+        time_out(all_reduce, 1024, "OpType=ALLREDUCE, NumelIn=1024, NumelOut=1024")
+        reconfigure(2)
+        message = time_out(
+            all_gather, 8, "OpType=_ALLGATHER_BASE, NumelIn=8, NumelOut=16"
+        )
+        self.assertNotIn("NumelIn=1024", message)
+
+        reconfigure(3)
+        t = torch.ones(4, device=self.device)
+        backend.allreduce([t]).wait()
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+        backend.shutdown()
         self._check_all_reduce()
 
 

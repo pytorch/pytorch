@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -119,7 +120,12 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  // op_type and the numels only feed the watchdog timeout message.
+  void recordStart(
+      std::string_view coll_name,
+      OpType op_type,
+      int64_t numel_in,
+      int64_t numel_out);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -145,14 +151,23 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    // timeout_message: this work's own timeout text; without one a timed-out
+    // work reports its generation's recorded message.
+    bool setTerminalStatus(
+        WorkStatus status,
+        std::optional<std::string> timeout_message = std::nullopt);
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    // Legacy ProcessGroupNCCL's watchdog timeout line for this work.
+    std::string timeoutMessage(std::chrono::milliseconds elapsed) const;
     void notifyCompletion();
     float getDuration();
 
     ProcessGroupNCCL* comm;
     int64_t reconfigureUuid;
+    uint64_t timeoutMessageGeneration;
+    // The comm's rank at creation; reconfigure may change it.
+    int rank;
     bool blockingWait;
     at::cuda::CUDAStream stream;
     std::chrono::steady_clock::time_point workStartTime;
@@ -162,6 +177,9 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
+    OpType opType{OpType::UNKNOWN};
+    int64_t numelIn{0};
+    int64_t numelOut{0};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
