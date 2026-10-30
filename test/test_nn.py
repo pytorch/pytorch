@@ -6454,6 +6454,21 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 class TestNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("use_pos_weight", [False, True])
+    @parametrize_test("create_graph", [False, True])
+    def test_bce_with_logits_numerical_stability(self, device, dtype, use_pos_weight, create_graph):
+        x = torch.tensor([37.42994775023705, -37.42994775023705], device=device, dtype=dtype, requires_grad=True)
+        target = torch.tensor([1.0, 0.0], device=device, dtype=dtype)
+        pos_weight = torch.tensor([2.0, 3.0], device=device, dtype=dtype) if use_pos_weight else None
+
+        loss = F.binary_cross_entropy_with_logits(x, target, pos_weight=pos_weight, reduction="sum")
+        (grad,) = torch.autograd.grad(loss, x, create_graph=create_graph)
+
+        scale = torch.tensor([-2.0 if use_pos_weight else -1.0, 1.0], device=device, dtype=dtype)
+        expected_grad = torch.sigmoid(-x.detach().abs()) * scale
+        self.assertEqual(grad, expected_grad)
+
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -12785,6 +12800,14 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_silu_backward_large_positive(self, device, dtype):
+        value = 255 + 2**-16 if dtype == torch.float32 else 2**24
+        # The derivative rounds to 1 at these finite inputs in both dtypes.
+        x = torch.tensor([value], device=device, dtype=dtype, requires_grad=True)
+        F.silu(x).backward()
+        self.assertEqual(x.grad, torch.ones_like(x), atol=0, rtol=0)
+
     @onlyNativeDeviceTypes
     def test_mish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
@@ -15714,7 +15737,6 @@ class TestNNDeviceType(NNTestCase):
             # Check that backward does not cause a hard error
             outs[0].sum().backward()
 
-    @skipMPS
     def test_PReLU_backward_requires_grad_false(self, device):
         m = nn.PReLU().to(device)
         x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)
@@ -17746,6 +17768,8 @@ class TestFusedRMSNormOverrideRouting(TestCase):
 
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
         w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
         self.assertTrue(torch._C._is_cow_tensor(x))
         self.assertTrue(torch._C._is_cow_tensor(w))
@@ -17945,6 +17969,8 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         gout = torch.randn(*shape, dtype=torch.float16, device="cuda")._lazy_clone()
         rstd = torch.empty(shape[0], dtype=torch.float32, device="cuda")._lazy_clone()
         tensors = (gout, x, rstd, w)
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(
             _fused_rms_norm_backward_cond(gout, x, [128], rstd, w, [True, True])
         )
@@ -17973,6 +17999,8 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
     def test_fwd_preserves_cow_inputs(self):
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
         w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
         self.assertTrue(torch._C._is_cow_tensor(x))
         self.assertTrue(torch._C._is_cow_tensor(w))
@@ -17991,6 +18019,8 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
             rstd_base._lazy_clone(),
             w_base._lazy_clone(),
         )
+        if not torch._C._is_cow_tensor(tensors[0]):
+            self.skipTest("allocator does not support COW sharing")
         gout, x, rstd, w = tensors
         torch.ops.aten._fused_rms_norm_backward(
             gout, x, [128], rstd, w, [True, True]

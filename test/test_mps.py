@@ -2625,6 +2625,12 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "source < number of ones in mask"):
             x_mps.masked_scatter_(mask_mps, source_mps)
 
+        # Like CPU and CUDA, only bool masks are accepted, even for empty inputs
+        for n in (3, 0):
+            with self.assertRaisesRegex(RuntimeError, "only supports boolean masks"):
+                torch.zeros(n, device="mps").masked_scatter_(
+                    torch.ones(n, dtype=torch.uint8, device="mps"), torch.ones(n, device="mps"))
+
     def test_masked_scatter_without_mask_indices(self):
         x_mps = torch.tensor([1, 2, 3, 4], device="mps")
         mask_mps = torch.tensor(0, dtype=torch.bool, device="mps")
@@ -5678,6 +5684,9 @@ class TestMPS(TestCaseMPS):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
         helper([1, 1, 32, 32], 'mean')
+        # sizes that are not a multiple of 4 and span several threadgroups
+        helper([3, 7, 11], 'sum')
+        helper([1000003], 'mean')
 
     def test_bce_loss_empty(self):
         # A zero-sized input has no Metal buffer to bind, which used to trip the
@@ -5713,6 +5722,20 @@ class TestMPS(TestCaseMPS):
         b = torch.rand(25, 1, device='mps')
         with self.assertRaisesRegex(ValueError, r'Using a target size \('):
             bceloss(a, b)
+
+    def test_bce_loss_out_of_range(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201153
+        valid = torch.rand(4, device='mps')
+        for reduction, value in itertools.product(['none', 'sum', 'mean'], [float('nan'), float('inf'), float('-inf'), -0.1, 1.1]):
+            invalid = torch.full((4,), value, device='mps')
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of input should be between 0 and 1'):
+                F.binary_cross_entropy(invalid, valid, reduction=reduction)
+                torch.mps.synchronize()
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of target should be between 0 and 1'):
+                F.binary_cross_entropy(valid, invalid, reduction=reduction)
+                torch.mps.synchronize()
+        # The failed asserts must not leak into later ops
+        self.assertEqual(F.binary_cross_entropy(valid, valid), F.binary_cross_entropy(valid.cpu(), valid.cpu()))
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
         x_size = 1024
@@ -11655,6 +11678,34 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(Vh @ Vh.mH, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
         self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
 
+    @parametrize("n", [5, 40])
+    def test_linalg_eig_compiled(self, device, n):
+        x = torch.randn(n, n, device=device)
+        e, V = torch.linalg.eig(x)
+        ec, Vc = torch.compile(lambda t: torch.linalg.eig(t))(x)
+        self.assertEqual(e, ec)
+        self.assertEqual(V, Vc)
+
+    # A[i, j] ~ randn * 2^(e * (i - j))
+    def _eig_graded(self, n, e):
+        s = 2.0 ** (e * torch.arange(n, dtype=torch.float64))
+        return (torch.randn(n, n, dtype=torch.float64) * s[:, None] / s).float()
+
+    EIG_ILL_CONDITIONED_CASES = [
+        lambda self: torch.randn(32, 32) * 2.0 ** (-3 * torch.arange(32))[:, None],
+        lambda self: self._eig_graded(32, 3),
+    ]
+
+    # Given a matrix with ill-conditioned eigenvalues, the output of linalg.eig
+    # should approximately satisfy `A V = w V` --> `|A V - w V| / ||A|| = 0`,
+    # for each pair of computed eigenvalues and eigenvectors, w and V.
+    @parametrize("case", range(len(EIG_ILL_CONDITIONED_CASES)))
+    def test_linalg_eig_ill_conditioned(self, device, case):
+        A = self.EIG_ILL_CONDITIONED_CASES[case](self)
+        w, V = (t.cpu().to(torch.complex128) for t in torch.linalg.eig(A.to(device)))
+        A = A.to(torch.complex128)
+        self.assertTrue(((A @ V - V * w[None, :]).norm(dim=-2) / A.norm(dim=[-2, -1])).max() < 1e-4)
+
     @parametrize("n", [5, 32, 600])
     @parametrize("left", [True, False])
     @parametrize("b_row_major", [True, False])
@@ -14681,6 +14732,9 @@ class TestConsistency(TestCaseMPS):
         # end up within ~3e-5 of fp64 but differ from each other by more
         # than the default fp32 tolerance.
         'nn.functional.binary_cross_entropy_with_logits',
+        # MPS and LAPACK use different QR iterations, so their eigenvalues
+        # differ by more than the default fp32 tolerance.
+        'linalg.eig',
     }
 
     # Operators whose output is a random draw, therefore MPS and CPU can
@@ -14927,7 +14981,57 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(A_herm, recon, atol=atol, rtol=rtol)
                 continue
 
+            if op.name == "linalg.eig":
+                self._assert_eig_match(mps_sample.input, mps_out, cpu_out, atol, rtol)
+                continue
+
+            if op.name == "linalg.eigvals":
+                self._assert_eigvals_match(mps_out, cpu_out, atol, rtol)
+                continue
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+
+    def _assert_eigvals_match(self, w_m, w_c, atol, rtol):
+        # Eigenvalues come in an implementation-defined order. Match each CPU
+        # eigenvalue to the closest MPS one not matched yet, so that repeated
+        # eigenvalues give a permutation, and compare them. Returns the indices
+        # of the matching MPS eigenvalues.
+        w_m, w_c = w_m.detach().cpu(), w_c.detach()
+        if w_c.numel() == 0:
+            self.assertEqual(w_c.shape, w_m.shape)
+            return torch.empty(w_c.shape, dtype=torch.long)
+        n = w_c.shape[-1]
+        distance = (w_c.unsqueeze(-1) - w_m.unsqueeze(-2)).abs().reshape(-1, n, n)
+        perm = torch.empty(distance.shape[:-1], dtype=torch.long)
+        for b, i in itertools.product(range(distance.shape[0]), range(distance.shape[1])):
+            perm[b, i] = distance[b, i].argmin()
+            distance[b, :, perm[b, i]] = float("inf")
+        perm = perm.reshape(w_c.shape)
+        self.assertEqual(w_c, w_m.gather(-1, perm), atol=atol, rtol=rtol)
+        return perm
+
+    def _assert_eig_match(self, A, mps_out, cpu_out, atol, rtol):
+        # In addition to the eigenvalue order, the eigenvectors are only defined up
+        # to a phase, so compare their magnitudes and check A V == V diag(w).
+        # Returns the indices of the MPS eigenvalues matching the CPU ones.
+        perm = self._assert_eigvals_match(mps_out[0], cpu_out[0], atol, rtol)
+        w_m, V_m = (t.detach().cpu() for t in mps_out)
+        V_c = cpu_out[1].detach()
+        if V_c.numel() == 0:
+            self.assertEqual(V_c.shape, V_m.shape)
+            return perm
+        w_m = w_m.gather(-1, perm)
+        V_m = V_m.gather(-1, perm.unsqueeze(-2).expand_as(V_m))
+        self.assertEqual(V_c.abs(), V_m.abs(), atol=atol, rtol=rtol)
+        # A V == V diag(w) holds up to roundoff relative to ||A||, so compare the
+        # residual norm with ||A||, computing it in float64 since cancellation in
+        # A @ V can lose all of float32's precision
+        A = A.detach().cpu().to(torch.complex128)
+        V_m, w_m = V_m.to(torch.complex128), w_m.to(torch.complex128)
+        A_norm = A.norm(dim=(-2, -1)).clamp_min(torch.finfo(torch.float32).tiny)
+        residual = (A @ V_m - V_m * w_m.unsqueeze(-2)).norm(dim=-2) / A_norm.unsqueeze(-1)
+        self.assertLessEqual(residual.max().item(), atol)
+        return perm
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
@@ -14993,6 +15097,10 @@ class TestConsistency(TestCaseMPS):
                     A_herm = A_in.tril(-1) + A_in.tril(-1).mH + diag
                 recon = (Q_m * w_m.to(Q_m.dtype).unsqueeze(-2)) @ Q_m.mH
                 self.assertEqual(A_herm, recon, atol=atol, rtol=rtol)
+            elif op.name == "linalg.eig":
+                eig_perm = self._assert_eig_match(mps_sample.input, mps_out, cpu_out, atol, rtol)
+            elif op.name == "linalg.eigvals":
+                eig_perm = self._assert_eigvals_match(mps_out, cpu_out, atol, rtol)
             else:
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -15030,7 +15138,7 @@ class TestConsistency(TestCaseMPS):
                     g if i == 1 else torch.zeros_like(g)
                     for i, g in enumerate(cpu_grad_outputs))
 
-            if op.name in ("linalg.eigh",):
+            if op.name in ("linalg.eigh", "linalg.eig"):
                 # Only the eigenvalue gradient is gauge-invariant, so seed only it
                 # (output order is eigenvalues, eigenvectors).
                 cpu_grad_outputs = tuple(
@@ -15038,6 +15146,10 @@ class TestConsistency(TestCaseMPS):
                     for i, g in enumerate(cpu_grad_outputs))
 
             mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
+            if op.name in ("linalg.eig", "linalg.eigvals"):
+                # MPS orders the eigenvalues differently, so move each seed to the matching MPS eigenvalue
+                g = cpu_grad_outputs[0]
+                mps_grad_outputs = (torch.zeros_like(g).scatter(-1, eig_perm, g).to("mps"),) + mps_grad_outputs[1:]
 
             # Compare computed gradients with cpu given random grad_output vector
             # Sometimes when the derivative is 0, we just don't bother creating the graph

@@ -5134,9 +5134,8 @@
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
-    CPU, CUDA, XPU: _prelu_kernel_backward
+    CPU, CUDA, MPS, XPU: _prelu_kernel_backward
     MkldnnCPU: mkldnn_prelu_backward
-    MPS: prelu_backward_mps
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11814,8 +11813,7 @@
 - func: mse_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_backward_out
-    MPS: mse_loss_backward_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_backward_out
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
@@ -11973,8 +11971,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: smooth_l1_loss_out
-    MPS: smooth_l1_loss_out_mps
+    CPU, CUDA, MPS, XPU: smooth_l1_loss_out
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -11996,14 +11993,12 @@
 - func: huber_loss.out(Tensor self, Tensor target, int reduction=Mean, float delta=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: huber_loss_out
-    MPS: huber_loss_out_mps
+    CPU, CUDA, MPS, XPU: huber_loss_out
 
 - func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: huber_loss
-    MPS: huber_loss_mps
+    CPU, CUDA, MPS, XPU: huber_loss
 
 - func: huber_loss_backward.out(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -14450,17 +14445,17 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_eig
+    CPU, CUDA, MPS: linalg_eig
 
 - func: linalg_eig.out(Tensor self, *, Tensor(a!) eigenvalues, Tensor(b!) eigenvectors) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   python_module: linalg
   dispatch:
-    CPU, CUDA: linalg_eig_out
+    CPU, CUDA, MPS: linalg_eig_out
 
 - func: _linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
   dispatch:
-    CPU, CUDA: _linalg_eigvals
+    CPU, CUDA, MPS: _linalg_eigvals
 
 - func: linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
@@ -14468,7 +14463,7 @@
 - func: linalg_eigvals.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CPU, CUDA: linalg_eigvals_out
+    CPU, CUDA, MPS: linalg_eigvals_out
 
 # This function is exposes the `compute_v` flag, which is then used to implement `linalg.eigh` and
 # `linalg.eigvalsh` as composite functions that call this one
