@@ -79,6 +79,8 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+from torch.utils._debug_mode import DebugMode
+from torch.utils._debug_mode._calls import _TritonKernelCall
 
 
 def _get_raw_stream():
@@ -1254,6 +1256,15 @@ def debug_cos_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
     tl.store(out_ptr0 + xindex, tl_math.cos(tmp0), xmask)
 
 
+@triton.jit
+def debug_atomic_add_kernel(in_ptr0, in_out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)
+    xmask = xindex < xnumel
+    tmp0 = tl.load(in_ptr0 + xindex, xmask)
+    tl.atomic_add(in_out_ptr0 + xindex, tmp0, xmask)
+
+
+@instantiate_parametrized_tests
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestDebugAutotuner(TestCase):
     numel = 1000
@@ -1262,10 +1273,19 @@ class TestDebugAutotuner(TestCase):
         super().setUp()
         self.enterContext(patch.object(triton_heuristics, "collected_calls", []))
 
-    def _make_autotuner(self, fn, *, regex_filter=""):
+    def _make_autotuner(
+        self,
+        fn,
+        *,
+        mutated_arg_names=(),
+        reset_to_zero_arg_names=(),
+        regex_filter="",
+        configs=(triton_config({"x": 1024}, 128),),
+        **inductor_meta,
+    ):
         signature = {
             "in_ptr0": "*fp32",
-            "out_ptr0": "*fp32",
+            fn.arg_names[1]: "*fp32",
             "xnumel": "i32",
             "XBLOCK": "constexpr",
         }
@@ -1279,15 +1299,19 @@ class TestDebugAutotuner(TestCase):
                     AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())
                 ],
             },
-            configs=[triton_config({"x": 1024}, 128)],
+            configs=list(configs),
             save_cache_hook=False,
-            mutated_arg_names=[],
-            reset_to_zero_arg_names=[],
+            mutated_arg_names=list(mutated_arg_names),
+            reset_to_zero_arg_names=list(reset_to_zero_arg_names),
             optimize_mem=True,
             heuristic_type=HeuristicType.POINTWISE,
             size_hints={"x": 1024},
             regex_filter=regex_filter,
-            inductor_meta={"grid_type": "Grid1D", "kernel_name": fn.__name__},
+            inductor_meta={
+                "grid_type": "Grid1D",
+                "kernel_name": fn.__name__,
+                **inductor_meta,
+            },
         )
 
     def _run(self, kernel, x, out):
@@ -1310,6 +1334,66 @@ class TestDebugAutotuner(TestCase):
         bench.assert_called_once()
         self.assertEqual(triton_heuristics.collected_calls, [kernel.cached] * 3)
 
+    def test_every_call_writes_its_outputs(self):
+        kernel = self._make_autotuner(debug_cos_kernel)
+        self._check_cos_calls(kernel, 3)
+
+    def test_every_call_updates_in_place_once(self):
+        kernel = self._make_autotuner(
+            debug_atomic_add_kernel, mutated_arg_names=["in_out_ptr0"]
+        )
+        acc = torch.zeros(self.numel, device=GPU_TYPE)
+        expected = acc.clone()
+        for i in range(3):
+            # Small integers, so that the sums are exact.
+            x = torch.randint(-8, 8, (self.numel,), device=GPU_TYPE).float()
+            self._run(kernel, x, acc)
+            expected += x
+            self.assertEqual(acc, expected, msg=f"call {i}")
+
+    @parametrize("num_configs", [1, 2])
+    def test_timing_zeroes_reset_to_zero_args_as_autotuning_does(self, num_configs):
+        # An output the kernel accumulates into, which bench zeroes and launches into.
+        # Like autotuning, the timing leaves it zeroed for the real launch.
+        configs = [triton_config({"x": 1024}, b) for b in (128, 256)[:num_configs]]
+        kernel = self._make_autotuner(
+            debug_atomic_add_kernel,
+            reset_to_zero_arg_names=["in_out_ptr0"],
+            configs=configs,
+        )
+        x = torch.arange(self.numel, device=GPU_TYPE).float()
+        out = torch.full_like(x, 5.0)
+        self._run(kernel, x, out)
+        self.assertEqual(out, x)
+
+    def _check_timed_launcher(self, kernel):
+        # The launcher timed, by the last call to bench (tuning calls it too), is the
+        # one every call launches.
+        with patch.object(kernel, "bench", wraps=kernel.bench) as bench:
+            self._check_cos_calls(kernel, 2)
+        (launcher,) = kernel.launchers
+        self.assertIs(bench.call_args.args[0], launcher)
+        return launcher
+
+    def test_calls_launch_the_timed_config(self):
+        # Coordinate descent tuning runs before the timing.
+        kernel = self._make_autotuner(debug_cos_kernel, coordinate_descent_tuning=True)
+        launcher = self._check_timed_launcher(kernel)
+        self.assertTrue(getattr(launcher.config, "found_by_coordesc", False))
+
+    def test_a_plugin_picks_the_config_that_is_timed(self):
+        configs = [triton_config({"x": 1024}, 64), triton_config({"x": 1024}, 256)]
+
+        class PickTheLast(CachingAutotunerPlugin):
+            def pre_autotune(self, autotuner, *args, stream, **kwargs):
+                autotuner.launchers = autotuner.launchers[-1:]
+                return DEFER
+
+        with patch(_PLUGIN_FACTORY_PATH, return_value=[PickTheLast()]):
+            kernel = self._make_autotuner(debug_cos_kernel, configs=configs)
+        launcher = self._check_timed_launcher(kernel)
+        self.assertEqual(launcher.config.kwargs, {"XBLOCK": 256})
+
     def test_the_regex_matches_the_name_the_kernel_is_bound_to(self):
         kernel = self._make_autotuner(
             debug_cos_kernel, regex_filter="triton_poi_fused_cos"
@@ -1327,12 +1411,25 @@ class TestDebugAutotuner(TestCase):
         self._check_cos_calls(kernel, 1)
         self.assertEqual(kernel.cached[-1], "triton_poi_0")
 
+    @parametrize("regex", ["", "no_such_kernel"])
+    def test_the_name_is_looked_up_once(self, regex):
+        # Including a call under the profiler, which takes the slow path again.
+        kernel = self._make_autotuner(debug_cos_kernel, regex_filter=regex)
+        find_names = patch(
+            "torch._inductor.runtime.triton_heuristics._find_names",
+            wraps=triton_heuristics._find_names,
+        )
+        activities = [torch.profiler.ProfilerActivity.CPU]
+        with find_names as found:
+            self._check_cos_calls(kernel, 2)
+            with torch.profiler.profile(activities=activities):
+                self._check_cos_calls(kernel, 1)
+        found.assert_called_once()
+
     def test_a_kernel_the_regex_does_not_select_is_not_timed(self):
         kernel = self._make_autotuner(debug_cos_kernel, regex_filter="no_such_kernel")
-        x = torch.randn(self.numel, device=GPU_TYPE)
         with patch.object(kernel, "bench") as bench:
-            for _ in range(2):
-                self._run(kernel, x, torch.empty_like(x))
+            self._check_cos_calls(kernel, 2)
         bench.assert_not_called()
         self.assertIsNone(kernel.cached)
         self.assertEqual(triton_heuristics.collected_calls, [])
@@ -1351,6 +1448,72 @@ class TestDebugAutotuner(TestCase):
         bench.assert_not_called()
         self.assertIsNone(kernel.cached)
         self.assertEqual(triton_heuristics.collected_calls, [])
+
+    @parametrize("autotune_at_compile_time", [False, True])
+    @parametrize("regex", ["", "no_such_kernel"])
+    def test_a_compiled_function_matches_eager(self, autotune_at_compile_time, regex):
+        # With compile-time autotuning, the module's call is a kernel's second call.
+        def fn(x, y):
+            y.add_(1)
+            return torch.mm(x, x).relu().cos() + y.sum(), y.clone()
+
+        x = torch.randn(64, 64, device=GPU_TYPE)
+        y = torch.randn(64, device=GPU_TYPE)
+        y_compiled = y.clone()
+        torch._dynamo.reset()
+        options = {
+            "profile_bandwidth": True,
+            "profile_bandwidth_regex": regex,
+            "force_disable_caches": True,
+            "triton.autotune_at_compile_time": autotune_at_compile_time,
+        }
+        with config.patch(options):
+            compiled = torch.compile(fn)
+            for i in range(3):
+                self.assertEqual(
+                    compiled(x, y_compiled),
+                    fn(x, y),
+                    atol=1e-3,
+                    rtol=1e-3,
+                    msg=f"call {i}",
+                )
+
+    def test_calls_are_instrumented(self):
+        kernel = self._make_autotuner(debug_cos_kernel)
+        x = torch.randn(self.numel, device=GPU_TYPE)
+        out = torch.full_like(x, float("nan"))
+        # The first call: bench's own launches are not DebugMode calls.
+        with DebugMode() as debug_mode:
+            self._run(kernel, x, out)
+        calls = [c for c in debug_mode.operators if isinstance(c, _TritonKernelCall)]
+        self.assertEqual([c.kernel_name for c in calls], ["debug_cos_kernel"])
+
+        # Profile a later call, so the first call's bench launches are not in the trace.
+        out = torch.full_like(x, float("nan"))
+        activities = [torch.profiler.ProfilerActivity.CPU]
+        with torch.profiler.profile(activities=activities, record_shapes=True) as prof:
+            self._run(kernel, x, out)
+        self.assertEqual(out, torch.cos(x))
+        (event,) = [e for e in prof.events() if e.name == "debug_cos_kernel"]
+        self.assertEqual(event.kwinputs["kernel_backend"], "triton")
+        self.assertEqual(event.kwinputs["kernel_name"], "debug_cos_kernel")
+        self.assertEqual(event.kwinputs["kernel_kwargs"], "XBLOCK=128")
+
+    @skipUnless(GPU_TYPE == "cuda", "requires CUDA graphs")
+    def test_a_call_after_the_first_replays_in_cuda_graph(self):
+        # The first call times the kernel, which a capture cannot do.
+        kernel = self._make_autotuner(debug_cos_kernel)
+        self._check_cos_calls(kernel, 1)
+        x = torch.randn(self.numel, device=GPU_TYPE)
+        out = torch.empty_like(x)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            self._run(kernel, x, out)
+        for _ in range(3):
+            x.copy_(torch.randn_like(x))
+            out.fill_(float("nan"))
+            graph.replay()
+            self.assertEqual(out, torch.cos(x))
 
 
 _PLUGIN_FACTORY_PATH = (
