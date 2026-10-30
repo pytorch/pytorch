@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/headeronly/macros/Macros.h>
+#include <cmath>
 #include <limits>
 #include <type_traits>
 
@@ -26,6 +27,23 @@ inline constexpr bool is_negative(const T& x) {
     return false;
   } else {
     return x < T(0);
+  }
+}
+
+/// Returns true if the sign bit of x is set
+/// NOTE: Unlike is_negative, returns true for -0.0 and -NaN
+template <typename T>
+C10_HOST_DEVICE inline bool signbit(const T& x) {
+  if constexpr (std::is_integral_v<T>) {
+    return is_negative(x);
+  } else if constexpr (std::is_floating_point_v<T>) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    return ::signbit(x);
+#else
+    return std::signbit(x);
+#endif
+  } else {
+    return signbit(static_cast<float>(x));
   }
 }
 
@@ -95,6 +113,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::greater_than_max;
 using c10::is_negative;
 using c10::less_than_lowest;
+using c10::signbit;
 using c10::signs_differ;
 using c10::signum;
 HIDDEN_NAMESPACE_END(torch, headeronly)
