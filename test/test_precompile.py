@@ -6453,6 +6453,10 @@ def breaking_helper(y):
 
 def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
+
+
+def kernelless_backward(model, x):
+    return x.sin().sum() + model.lin.weight.sum()
 """
 
 _CUDAGRAPH_LOADER = """
@@ -6609,6 +6613,19 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
         # One graph for the forward, one for the backward.
         self.assertEqual(recorded, 2)
+
+    def test_a_training_artifact_whose_backward_runs_without_a_cudagraph_serves(self):
+        # The weight's backward is an expand with no kernel, so it runs without a
+        # CUDA graph, and it is lowered before the forward's first call creates the
+        # CUDA graph tree manager.
+        fn = self.mod.kernelless_backward
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(fn, grad=True, options=options)
+        self.model.zero_grad(set_to_none=True)
+        fn(self.model, self.x).backward()
+        grad = self.model.lin.weight.grad.clone()
+        recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
+        self.assertEqual(recorded, 1)
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
