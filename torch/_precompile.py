@@ -2686,8 +2686,8 @@ def _split_graph_sources(
     sources: dict[str, str] = {}
     for backend_id, artifact in backends.items():
         for part in ("fw", "bw"):
-            compiled = getattr(artifact.content, f"compiled_{part}", None)
-            graph = getattr(compiled, "result", None)
+            compiled: Any = getattr(artifact.content, f"compiled_{part}", None)
+            graph: Any = getattr(compiled, "result", None)
             if not isinstance(getattr(graph, "source_code", None), str):
                 continue
             if stripped[backend_id] is artifact:
