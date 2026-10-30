@@ -31,8 +31,8 @@ namespace c10d {
 //
 // Contract on T: subclasses supply a PairFactory that returns a fully
 // constructed (but not necessarily bootstrapped) 2-rank sibling backend for
-// the pair (this->getRank(), peer). Inside a pair comm the lower-numbered
-// global rank is local rank 0. The wrapper supplies a `pair_name` unique
+// the pair (this->getRank(), peer). Inside a pair comm the lower group rank
+// is local rank 0. The wrapper supplies a `pair_name` unique
 // across allocations for the same {lo,hi} pair, so a store-based bootstrap
 // can safely use it as a key prefix without collisions.
 //
@@ -52,8 +52,8 @@ class LazyBackend : public Backend {
 
  public:
   // Builds the 2-rank sibling backend for a peer. The pair rank is 0 for the
-  // lower-numbered global rank and 1 for the higher; peer is the other rank in
-  // this group; pair_name is unique per allocation for the same pair.
+  // lower group rank and 1 for the higher; peer is the other rank in this
+  // group; pair_name is unique per allocation for the same pair.
   using PairFactory = std::function<c10::intrusive_ptr<
       T>(int pair_rank, int peer, const std::string& pair_name)>;
 
@@ -451,8 +451,8 @@ class LazyBackend : public Backend {
     return it->second;
   }
 
-  // The peer's local rank in the 2-rank pair comm: the lower-numbered global
-  // rank is local rank 0, so the peer's index is the opposite of ours.
+  // The peer's local rank in the 2-rank pair comm: the lower group rank is
+  // local rank 0, so the peer's index is the opposite of ours.
   int peerInPair(int peer) const {
     return (getRank() < peer) ? 1 : 0;
   }

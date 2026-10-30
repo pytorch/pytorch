@@ -48,10 +48,10 @@ void WindowNCCL::exchangePeerMetadata(
   ::c10d::AllgatherOptions opts;
   opts.asyncOp = false;
   opts.timeout = pg_->options_c10d_->timeout;
-  // _allgather_base always returns the WorkNCCL from allGatherSingleImpl.
-  c10::static_intrusive_pointer_cast<WorkNCCL>(
-      pg_->_allgather_base(gathered_metadata, local_metadata, opts))
-      ->waitUntraced(opts.timeout);
+  auto work = c10::dynamic_intrusive_pointer_cast<WorkNCCL>(
+      pg_->_allgather_base(gathered_metadata, local_metadata, opts));
+  TORCH_INTERNAL_ASSERT(work, "_allgather_base must return a WorkNCCL");
+  work->waitUntraced(opts.timeout);
   const auto gathered_metadata_cpu = gathered_metadata.cpu();
   const auto* gathered_data = gathered_metadata_cpu.const_data_ptr<int64_t>();
 

@@ -21,9 +21,6 @@ namespace c10d::nccl2 {
 
 namespace {
 std::atomic<uint64_t> nextCompletionKey{1};
-// Set while a CoalescedProfilerEvent is open on this thread.
-thread_local bool suppressWorkProfilerEvents = false;
-
 // Starts an async event named like stock ProcessGroupNCCL's: the
 // dist.record_comm name if set, else `nccl:<coll_name>`.
 void startProfilerEvent(
@@ -129,6 +126,11 @@ void WorkNCCL::InputTensorShelf::append(InputTensorShelf& other) {
   other.tensors.clear();
 }
 
+void WorkNCCL::InputTensorShelf::appendCopy(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(tensors.end(), other.tensors.begin(), other.tensors.end());
+}
+
 void WorkNCCL::InputTensorShelf::clear() {
   std::lock_guard<std::mutex> lock(mutex);
   tensors.clear();
@@ -157,24 +159,41 @@ WorkNCCL::WorkNCCL(
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     const std::vector<at::Tensor>& inputTensors)
-    : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      inputTensors_(std::make_shared<InputTensorShelf>(inputTensors)) {}
+    : WorkNCCL(
+          ScopedHideCommProfilingName(),
+          comm,
+          stream,
+          timeout_ms,
+          inputTensors) {}
 
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     at::Tensor inputTensor)
+    : WorkNCCL(
+          ScopedHideCommProfilingName(),
+          comm,
+          stream,
+          timeout_ms,
+          std::vector<at::Tensor>{std::move(inputTensor)}) {}
+
+WorkNCCL::WorkNCCL(
+    ScopedHideCommProfilingName&& /*hidden*/,
+    ProcessGroupNCCL* comm,
+    cudaStream_t stream,
+    std::chrono::milliseconds timeout_ms,
+    std::vector<at::Tensor> inputTensors)
     : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      inputTensors_(std::make_shared<InputTensorShelf>(
-          std::vector<at::Tensor>{std::move(inputTensor)})) {}
+      inputTensors_(
+          std::make_shared<InputTensorShelf>(std::move(inputTensors))) {}
 
 WorkNCCL::~WorkNCCL() = default;
 
 void WorkNCCL::recordFunctionStart(
     std::string_view coll_name,
     c10::ArrayRef<at::Tensor> inputs) {
-  if (suppressWorkProfilerEvents) {
+  if (coll_name.empty()) {
     return;
   }
   recordFunction_.emplace(at::RecordScope::USER_SCOPE);
@@ -200,16 +219,10 @@ void WorkNCCL::recordEnd() {
 
 CoalescedProfilerEvent::CoalescedProfilerEvent(
     std::string_view coll_name,
-    c10::ArrayRef<at::Tensor> inputs)
-    : prevSuppressed_(std::exchange(suppressWorkProfilerEvents, true)) {
+    c10::ArrayRef<at::Tensor> inputs) {
   if (recordFunction_.isActive()) {
     startProfilerEvent(recordFunction_, coll_name, inputs);
   }
-}
-
-// recordFunction_'s destructor ends the event.
-CoalescedProfilerEvent::~CoalescedProfilerEvent() {
-  suppressWorkProfilerEvents = prevSuppressed_;
 }
 
 bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
@@ -289,13 +302,33 @@ std::chrono::milliseconds WorkNCCL::getTimeout() const {
   return state_->timeout;
 }
 
+void WorkNCCL::setDurationStart(const WorkNCCL& first) {
+  std::scoped_lock lock(state_->durationMutex, first.state_->durationMutex);
+  state_->durationStartEvents = first.state_->durationStartEvents;
+}
+
 void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
   if (!children.empty()) {
-    std::lock_guard<std::mutex> lock(state_->durationMutex);
-    state_->durationStartEvents = children.front()->state_->events;
+    setDurationStart(*children.front());
   }
   for (const auto& child : children) {
     inputTensors_->append(*child->inputTensors_);
+  }
+}
+
+void WorkNCCL::retainInputs(
+    const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    inputTensors_->appendCopy(*work->inputTensors_);
+  }
+}
+
+void WorkNCCL::waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    if (work->state_->stream == state_->stream) {
+      continue;
+    }
+    work->state_->events->end->block(state_->stream);
   }
 }
 

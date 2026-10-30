@@ -66,7 +66,7 @@ static bool sequence_has_torch_function(PyObject* seq) {
     return false;
   }
 
-  for (Py_ssize_t i = 0; i < length; i++) {
+  for (const auto i : c10::irange(length)) {
     THPObjectPtr item(PySequence_GetItem(seq, i));
     if (!item.get()) {
       PyErr_Clear();
@@ -89,7 +89,7 @@ static int64_t count_specified_dimensions(
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
   auto size = PyTuple_GET_SIZE(index);
-  for (Py_ssize_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
     if (!skip_torch_function && check_has_torch_function(obj)) {
       return -1;
@@ -135,9 +135,7 @@ static Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
       options, kLong, std::nullopt, seq);
 }
 
-static inline Scalar valueToScalar(
-    c10::TensorOptions options,
-    PyObject* value) {
+inline Scalar valueToScalar(c10::TensorOptions options, PyObject* value) {
   Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     // uint64 values above INT64_MAX must not go through signed long long unpack
@@ -169,31 +167,13 @@ static inline Scalar valueToScalar(
   return scalar;
 }
 
-Variable valueToTensor(
-    c10::TensorOptions options,
-    PyObject* value,
-    const at::Device& device) {
-  if (THPVariable_Check(value)) {
-    return THPVariable_Unpack(value);
-  }
-  auto scalar = valueToScalar(options, value);
-  // lift_fresh is supposed to be used in situations where you are guaranteed to
-  // get a plain Tensor which is not true for cpu device but not for non cpu
-  // device
-  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
-  at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  if (device == at::kCPU && !scalar.isSymbolic()) {
-    return at::lift_fresh(
-        at::indexing::scalarToTensor(scalar, options, device));
-  } else {
-    return at::indexing::scalarToTensor(scalar, options, device);
-  }
-}
-
 static inline Tensor asTensor(const Tensor& value, const Tensor& target) {
   return value;
 }
 static inline Tensor asTensor(const Scalar& value, const Tensor& self) {
+  // lift_fresh is supposed to be used in situations where you are guaranteed to
+  // get a plain Tensor which is not true for cpu device but not for non cpu
+  // device
   at::AutoDispatchBelowADInplaceOrView guard;
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   Tensor tensor = at::indexing::asTensor(value, self);
@@ -267,11 +247,14 @@ static Variable applySlicing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
         /*index=*/([&]() {
-          if (THPUtils_checkLong(obj)) {
+          if (THPUtils_checkLong(obj) || torch::is_symint(obj)) {
             if (is_tracing && THPVariable_Check(obj)) {
               recordSelectTrace(THPVariable_Unpack(obj));
             }
-            return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
+            auto symint = torch::is_symint(obj)
+                ? py::cast<SymInt>(obj)
+                : SymInt(THPUtils_unpackLong(obj));
+            return at::indexing::TensorIndex(symint);
           } else if (PySlice_Check(obj)) {
             auto val = __PySlice_Unpack(obj);
             if (is_tracing) {
@@ -364,7 +347,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
   if (n >= 32) {
     return false;
   }
-  for (Py_ssize_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     auto obj = THPObjectPtr{PySequence_GetItem(index, i)};
     if (!obj.get()) {
       PyErr_Clear();
@@ -435,12 +418,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices, bool
-  if (THPUtils_checkLong(index)) {
+  if (THPUtils_checkLong(index) || torch::is_symint(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return THPVariable_Wrap(at::indexing::get_item(
-        self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
+    auto symint = torch::is_symint(index) ? py::cast<SymInt>(index)
+                                          : SymInt(THPUtils_unpackLong(index));
+    return THPVariable_Wrap(
+        at::indexing::get_item(self_, {at::indexing::TensorIndex(symint)}));
   } else if (PySlice_Check(index)) {
     auto val = __PySlice_Unpack(index);
     if (is_tracing) {

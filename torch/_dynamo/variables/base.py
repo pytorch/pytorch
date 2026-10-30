@@ -49,6 +49,12 @@ from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
 
 
+# Stands in for the %p address object_repr/slot_tp_repr print: the real address
+# is runtime-only for objects created during tracing, and baking a sourced
+# object's address into the graph would need an ID_MATCH guard.
+REPR_ADDRESS_PLACEHOLDER = "0x..."
+
+
 _RICHCOMPARE_OPS = frozenset(
     {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
 )
@@ -939,7 +945,11 @@ def _wrap_descr_get(
     if all(a.is_constant_none() for a in args):
         raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
-    owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
+    owner = (
+        args[1]
+        if len(args) > 1 and not args[1].is_constant_none()
+        else obj.tp_getattro_impl(tx, "__class__")
+    )
     return func(self, tx, obj, owner)
 
 
@@ -1945,8 +1955,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         Return the type name for the Python type this VariableTracker represents.
 
-        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
-        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). type.__name__
+        matches CPython's tp_name exactly (e.g., "list", "NoneType").
 
         Note: There are no external callers outside torch._dynamo that rely on this.
         Internal uses should prefer this over hardcoded type name strings.
@@ -2847,43 +2857,31 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
-        """Mirrors CPython's tp_repr slot.
+        """Default tp_repr: object_repr, "<module.qualname object at 0x...>".
 
-        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
+        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6214-L6243
 
-        Called when type_implements_tp_repr returns True for this type.
-        Subclasses override to provide the actual repr implementation.
+        VT subclasses override this for types with their own tp_repr.
         """
-        unimplemented(
-            gb_type="tp_repr_impl not implemented",
-            context=f"{type(self).__name__} has tp_repr slot but no tp_repr_impl override",
-            explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
-            "the corresponding VariableTracker doesn't implement tp_repr_impl.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    def repr_recursive_sentinel(self) -> str:
-        """What repr() emits for this object when it contains itself.
-
-        Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
-        """
-        return "..."
+        py_type, addr = self.python_type(), REPR_ADDRESS_PLACEHOLDER
+        mod = getattr(py_type, "__module__", None)
+        if isinstance(mod, str) and mod != "builtins":
+            return VariableTracker.build(
+                tx, f"<{mod}.{py_type.__qualname__} object at {addr}>"
+            )
+        return VariableTracker.build(tx, f"<{py_type.__name__} object at {addr}>")
 
     def tp_str_impl(
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
-        """Dynamo hook for VariableTrackers with dedicated str behavior.
-        Subclasses override this for the per-type str result; generic_str()
-        handles dispatch and repr fallback.
+        """Default tp_str: object_str, which calls Py_TYPE(self)->tp_repr.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6245-L6254
+
+        VT subclasses override this for types with their own tp_str.
         """
-        unimplemented(
-            gb_type="tp_str_impl not implemented",
-            context=f"{type(self).__name__} has no tp_str_impl override for {self.python_type_name()}",
-            explanation=f"Dynamo does not implement __str__ for {self.python_type_name()} "
-            f"in {type(self).__name__}.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return self.tp_repr_impl(tx)
 
     def nb_int_impl(
         self,

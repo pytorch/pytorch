@@ -48,7 +48,7 @@ from .cpp_utils import (
 from .wrapper import (
     _get_profiling_args,
     _rewrite_symbol_solution_for_int_codegen,
-    codegen_reinterpret_view_helper,
+    codegen_reinterpret_view_layout_match,
     EnterKernelProfileScopeLine,
     EnterSubgraphLine,
     ExitKernelProfileScopeLine,
@@ -475,6 +475,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # The C++ wrapper keeps each Triton kernel as an async_compile.triton(...) source
+        # string: its call wrappers and its compile-time autotune block compile from it.
+        return False
+
     @contextlib.contextmanager
     def _target_buf(self, attr: str, buf: IndentedBuffer):
         """Temporarily redirect self.<attr> to a specific buffer."""
@@ -599,6 +604,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
+
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError(
+            "TMA descriptors are not supported by the CPU cpp_wrapper"
+        )
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
@@ -1656,6 +1666,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         metadata: str | None = None,
         gpu: bool = False,
         cpp_definition: str | None = None,
+        # Ignored: a C++ wrapper compiles each Triton kernel from its source string, not
+        # from a module-level def (see defines_triton_kernels_as_code). Accepted to keep
+        # one signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         # Misnomer: `gpu` actually means "is this a Triton kernel?"
         if gpu:
@@ -1700,23 +1715,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
-    @staticmethod
-    def output_aliases_constant(output: str, output_buffer: ir.IRNode) -> bool:
-        def aliases_constant(name: str) -> bool:
-            if name in V.graph.constants:
-                return True
-            # IR views of a constant already resolve to its name, but fallback
-            # view ops (e.g. under fallback_by_default) alias their input
-            # without an IR view in between.
-            buf = V.graph.try_get_buffer(name)
-            return isinstance(buf, ir.Buffer) and any(
-                map(aliases_constant, buf.get_inputs_that_alias_output())
-            )
-
-        name = output_buffer.maybe_get_name()
-        return output in V.graph.constants or bool(name and aliases_constant(name))
-
     def generate_return(self, output_refs: list[str]):
+        cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
@@ -1731,8 +1731,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if output == "nullptr":
                 continue
 
+            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
+            if isinstance(output_buffer, ir.BaseView):
+                output_storage = output_buffer.unwrap_view()
+                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
+                    raise AssertionError(
+                        f"expected output_storage to be BaseView or MutableBox, "
+                        f"got {type(output_storage)}"
+                    )
+                if isinstance(output_storage.data, ir.ConstantBuffer):
+                    is_constant_buffer = True
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
@@ -1983,9 +1992,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
         output_handle: str | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
+        _ = tunable_dyn_dims_mask
         # We can do this unconditionally, since we cache this call.
         self.add_device_include(device)
 
@@ -2076,6 +2087,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=extern_kernel.tunable_dyn_dims_mask,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -2145,6 +2157,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=fallback_kernel.tunable_dyn_dims_mask,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2158,6 +2171,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -2174,6 +2188,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             stack_traces=stack_traces,
             profiling_args=profiling_args,
             output_handle=out_name,
+            tunable_dyn_dims_mask=tunable_dyn_dims_mask,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -2768,10 +2783,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reinterpreted tensor data.  Callers of this function are responsible for saving
         the handle if persistent access is needed."""
 
-        d_size, d_stride, d_offset, d_dtype, collapsible = (
-            codegen_reinterpret_view_helper(data)
-        )
-
         dim = str(len(size))
         original_offset = offset
         offset = self.codegen_sizevar(offset)
@@ -2817,17 +2828,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
-        collapsed = collapsible and original_offset == d_offset
-        if collapsed:
-            same_layout = size == d_size and stride == d_stride
-            base_dtype = d_dtype
-        else:
-            same_layout = (
-                size == data.layout.size
-                and stride == data.layout.stride
-                and original_offset == data.layout.offset
-            )
-            base_dtype = data.dtype
+        same_layout, base_dtype = codegen_reinterpret_view_layout_match(
+            data, size, stride, original_offset
+        )
 
         if same_layout:
             # pure dtypeview
