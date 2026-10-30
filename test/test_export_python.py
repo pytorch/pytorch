@@ -237,8 +237,12 @@ class TestExportPython(_ExportPythonTestCase):
         )
 
     def test_a_recursive_first_call_is_refused(self):
-        with self.assertRaisesRegex(PrecompileError, "called itself during the first"):
-            self.module.countdown(torch.zeros(2), 2)
+        # Refused every time, writing nothing: each refusal resets the capture.
+        for _ in range(2):
+            with self.assertRaisesRegex(PrecompileError, "called itself during the"):
+                self.module.countdown(torch.zeros(2), 2)
+        artifact = os.path.join(self.dir, "decorated", "countdown.py")
+        self.assertFalse(os.path.exists(artifact))
 
     def test_a_first_call_that_raises_writes_nothing_and_the_next_call_captures(self):
         path = os.path.join(self.dir, "flaky.py")
