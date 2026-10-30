@@ -3135,10 +3135,17 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                 else:
                     d[obj] = v
     # PrivateUse1 backends (e.g. npu) register a device module on torch after
-    # import, so the map (built during torch import) is rebuilt here on every
-    # cache clear; torch._register_device_module also clears these caches when
-    # the backend registers, so routing is re-established for a late-registered
-    # backend. When no backend is registered this adds nothing.
+    # import, so the map (built lazily on first lookup) is probed here whenever
+    # it is (re)built. A backend that registers after the map already exists is
+    # routed in place by _register_privateuse1_backend(), called from
+    # torch._register_device_module, without rebuilding the map (a rebuild
+    # would drop substitute_in_graph polyfill entries). When no backend is
+    # registered this adds nothing.
+    _probe_privateuse1_rule_map(d)
+    return d
+
+
+def _probe_privateuse1_rule_map(d: dict[Any, type["VariableTracker"]]) -> None:
     name = torch._C._get_privateuse1_backend_name()
     if name != "privateuseone":
         backend_mod = getattr(torch, name, None)
@@ -3147,7 +3154,17 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                 fn = getattr(backend_mod, fn_name, None)
                 if callable(fn):
                     d.setdefault(fn, TorchInGraphFunctionVariable)
-    return d
+
+
+def _register_privateuse1_backend() -> None:
+    # A privateuse1 backend registers torch.<name> after Dynamo is loaded;
+    # route its stream/synchronize/exchange_device functions in the existing
+    # rule map in place and clear the handler cache so the backend's handlers
+    # are probed on the next compile. Called from torch._register_device_module;
+    # when the backend registered before the first map build, the build itself
+    # picks it up.
+    _probe_privateuse1_rule_map(get_torch_obj_rule_map())
+    TorchInGraphFunctionVariable._get_handlers.cache_clear()
 
 
 def _load_obj_from_str(fully_qualified_name: str) -> Any:

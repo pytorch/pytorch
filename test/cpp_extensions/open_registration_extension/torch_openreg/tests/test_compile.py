@@ -314,10 +314,16 @@ class TestPrivateUse1Routing(TestCase):
             self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
             self.assertIn(fn, TorchInGraphFunctionVariable._get_handlers())
 
-        # Routing is re-established after rule-map cache clears, e.g. from
-        # torch.distributed.init_process_group.
-        trace_rules.clear_lru_cache()
+        # A backend that registers after the rule map was built is routed in
+        # place by trace_rules._register_privateuse1_backend() (called from
+        # torch._register_device_module) without rebuilding the map, which
+        # would drop substitute_in_graph polyfill entries.
+        rule_map = trace_rules.get_torch_obj_rule_map()
         for fn in fns:
+            del rule_map[fn]
+        trace_rules._register_privateuse1_backend()
+        for fn in fns:
+            self.assertIn(fn, rule_map)
             self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
 
 

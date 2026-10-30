@@ -2990,13 +2990,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        # PrivateUse1 backends (e.g. npu) register a device module after torch
-        # import; probe it for the stream/synchronize/exchange_device handlers
-        # below. Routing for these functions is resolved in
-        # trace_rules.get_torch_obj_rule_map(), rebuilt on trace_rules cache
-        # clears and when the backend registers (torch._register_device_module);
-        # the handlers are captured here, cached on first compile, so a backend
-        # must still register before the first compile.
+        # PrivateUse1 backends (e.g. npu) register a device module on torch
+        # after import; probe it for the stream/synchronize/exchange_device
+        # handlers below. Routing for these functions is resolved in
+        # trace_rules.get_torch_obj_rule_map() when it is (re)built and
+        # re-established in place by trace_rules._register_privateuse1_backend()
+        # when the backend registers. The handlers are captured here, cached on
+        # first compile; torch._register_device_module clears that cache on
+        # registration, so a backend that registers after the first compile is
+        # picked up on the next dispatch.
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
         privateuse1_backend_mod = (
             getattr(torch, privateuse1_backend_name, None)
