@@ -304,6 +304,22 @@ class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
             torch.cuda.synchronize()
 
 
+def _param_comms_args(prof) -> list[dict]:
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        trace_path = f.name
+    try:
+        prof.export_chrome_trace(trace_path)
+        with open(trace_path) as f:
+            trace = json.load(f)
+    finally:
+        os.unlink(trace_path)
+    return [
+        ev.get("args", {})
+        for ev in trace.get("traceEvents", [])
+        if ev.get("name") == "record_param_comms"
+    ]
+
+
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -518,6 +534,39 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         if context.estimated_time is None:
             self.fail("NCCL time estimator did not produce a result")
         self.assertGreater(context.estimated_time, 0)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 22), "Need NCCL 2.22+ for collective time estimation")
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_list_ops_leave_outputs(self) -> None:
+        # The list paths copy out of temporaries the simulated collective never
+        # fills.
+        torch.cuda.set_device(self.device)
+        process_group = dist.distributed_c10d._get_default_group()
+        shape = (1, 2, 2, 2)
+        tensor = torch.ones(shape, device=self.device)
+        inputs = [tensor] * self.world_size
+        gathered = [torch.full_like(tensor, -1.0) for _ in inputs]
+        output = torch.full(shape, -1.0, device=self.device).to(
+            memory_format=torch.channels_last
+        )
+        # Uneven sizes stage the output on another device.
+        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        uneven = [
+            torch.full((r + 1,), -1.0, device=self.device)
+            for r in range(self.world_size)
+        ]
+        uneven[-1] = torch.full((self.world_size,), -1.0, device=other_device)
+        with dist._time_estimator(group=process_group, device=self.device):
+            dist.all_gather(gathered, tensor)
+            dist.reduce_scatter(output, inputs)
+            dist.all_gather(uneven, torch.ones(self.rank + 1, device=self.device))
+        torch.cuda.synchronize(self.device)
+        torch.cuda.synchronize(other_device)
+        for t in [*gathered, output]:
+            self.assertEqual(t, torch.full(shape, -1.0, device=self.device))
+        for t in uneven:
+            self.assertEqual(t, torch.full_like(t, -1.0))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -2397,18 +2446,8 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
                         dist.all_reduce(t, group=group)
                 torch.cuda.synchronize()
 
-            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-                trace_path = f.name
-            try:
-                prof.export_chrome_trace(trace_path)
-                with open(trace_path) as f:
-                    trace = json.load(f)
-            finally:
-                os.unlink(trace_path)
-
             recorded: dict[str, set[int]] = {}
-            for ev in trace.get("traceEvents", []):
-                args = ev.get("args", {})
+            for args in _param_comms_args(prof):
                 if "Process Group Name" in args and "Seq" in args:
                     recorded.setdefault(args["Process Group Name"], set()).add(
                         args["Seq"]
@@ -2421,6 +2460,30 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         finally:
             for group in groups:
                 dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_all_gather_list_nelems(self) -> None:
+        # Uneven list all_gather used to report its outputs as inputs.
+        ws, rank = self.world_size, self.rank
+        for sizes in ([4] * ws, [r + 1 for r in range(ws)]):
+            with self.subTest(sizes=sizes):
+                input = torch.ones(sizes[rank], device=self.device)
+                outputs = [torch.empty(s, device=self.device) for s in sizes]
+                dist.all_gather(outputs, input)
+                torch.cuda.synchronize()
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU]
+                ) as prof:
+                    dist.all_gather(outputs, input)
+                    torch.cuda.synchronize()
+                nelems = [
+                    (args["In msg nelems"], args["Out msg nelems"])
+                    for args in _param_comms_args(prof)
+                    if args.get("Collective name") == "all_gather"
+                ]
+                self.assertIn((sizes[rank], sum(sizes)), nelems)
+                self.assertNotIn((sum(sizes), sizes[rank]), nelems)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
