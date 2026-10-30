@@ -9200,11 +9200,11 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         runtime_args, constant_args = self.split_args()
         name = wrapper.define_user_defined_cutedsl_kernel(
-            self.kernel, tuple(runtime_args), constant_args, runtime_args
+            self.kernel, constant_args, runtime_args
         )
         self.codegen_comment(wrapper, name)
         wrapper.generate_user_defined_cutedsl_kernel_call(
-            name, self.kernel, runtime_args, constant_args, self.get_device()
+            name, self.kernel, runtime_args, self.get_device()
         )
 
 

@@ -5130,24 +5130,28 @@ class PythonWrapperCodegen(CodeGen):
     def define_user_defined_cutedsl_kernel(
         self,
         kernel,
-        arg_names: tuple[str, ...],
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
     ) -> str:
         """Define a user CuTeDSL kernel (a ``CuteDSLKernel`` side-table record) and
         return its name in the generated code: the counterpart of
-        define_user_defined_triton_kernel.
+        define_user_defined_triton_kernel. ``constant_args`` are the constants it
+        binds and ``runtime_args`` the arguments each launch passes, by name in
+        signature order (see ir.UserDefinedCuteDSLKernel.split_args). This wrapper
+        uses only the names of the runtime arguments; the C++ wrapper also needs their
+        layouts and types, to compile the kernel when it defines it.
 
         The host function cannot be written out as source, so the generated module
         gets a ``CuteDSLKernelLauncher`` object under that name when it is loaded
         (``user_defined_cutedsl_launchers``); its ``run(*args, stream=...)`` takes
-        ``arg_names`` positionally, with ``constant_args`` bound here. A run of the
-        module as a script rebuilds it in get_args() (benchmark_compiled_module).
+        the runtime arguments positionally. A run of the module as a script rebuilds
+        it in get_args() (benchmark_compiled_module).
         """
         from torch._higher_order_ops.user_kernel_hop import constant_key
 
         from ..runtime.cutedsl_user_kernel import CuteDSLKernelLauncher
 
+        arg_names = tuple(runtime_args)
         # Every constant is a snapshot (a passed one is the side table's, a default
         # is copied in split_args), so equal ones can share a launcher.
         cache_key = (
@@ -5177,11 +5181,12 @@ class PythonWrapperCodegen(CodeGen):
         kernel_name: str,
         kernel,
         runtime_args: dict[str, Any],
-        constant_args: dict[str, Any],
         device: torch.device,
     ) -> None:
-        """Launch a kernel defined by define_user_defined_cutedsl_kernel on the
-        current stream."""
+        """Launch ``kernel_name``, defined by define_user_defined_cutedsl_kernel for
+        ``kernel``, with ``runtime_args`` on the current stream of ``device``. This
+        wrapper uses ``kernel`` only to name it in errors; the C++ wrapper also reads
+        the host function's signature from it."""
 
         def arg_str(arg: Any) -> str:
             if isinstance(arg, ir.IRNode):
@@ -5195,19 +5200,9 @@ class PythonWrapperCodegen(CodeGen):
                 )
             return pexpr(V.graph.sizevars.simplify(arg))
 
-        current_stream_idx = V.graph.scheduler.current_stream_idx
-        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
-            # Inside a user stream context: read the active stream at runtime, as
-            # _generate_kernel_call_helper does.
-            self.write_get_raw_stream_header()
-            stream_name = "raw_stream"
-            self.writeline(
-                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
-            )
-        else:
-            stream_name = PythonWrapperCodegen.write_get_raw_stream(
-                self, device.index, V.graph.name
-            )
+        stream_name = self._get_kernel_call_stream_name(
+            device, V.graph.name, V.graph.scheduler.current_stream_idx
+        )
         args = ", ".join(arg_str(arg) for arg in runtime_args.values())
         self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
 
@@ -5731,6 +5726,21 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    def _get_kernel_call_stream_name(
+        self, device: torch.device, graph_name: str, current_stream_idx: int | None
+    ) -> str:
+        """Write the line fetching the raw stream that a kernel call on ``device``
+        runs on, and return the variable holding it."""
+        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
+            # Inside a user stream context: emit a fresh get_raw_stream call so
+            # it picks up the active stream at runtime, rather than reusing the
+            # LRU-cached stream0 variable which captured the default stream.
+            self.write_get_raw_stream_header()
+            device_idx = _coor_device_idx_ref(device.index)
+            self.writeline(f"raw_stream = get_raw_stream({device_idx})")
+            return "raw_stream"
+        return PythonWrapperCodegen.write_get_raw_stream(self, device.index, graph_name)
+
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
@@ -5760,19 +5770,9 @@ class PythonWrapperCodegen(CodeGen):
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
-        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
-            # Inside a user stream context: emit a fresh get_raw_stream call so
-            # it picks up the active stream at runtime, rather than reusing the
-            # LRU-cached stream0 variable which captured the default stream.
-            self.write_get_raw_stream_header()
-            stream_name = "raw_stream"
-            self.writeline(
-                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
-            )
-        else:
-            stream_name = PythonWrapperCodegen.write_get_raw_stream(
-                self, device.index, graph_name
-            )
+        stream_name = self._get_kernel_call_stream_name(
+            device, graph_name, current_stream_idx
+        )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
             self.writeline(

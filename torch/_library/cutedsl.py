@@ -90,6 +90,16 @@ def wrap_cutedsl(
     parameters the kernel writes, or is ``"unknown"`` to treat every tensor argument
     as written; PT2 uses it to functionalize the launch.
 
+    Dynamo captures a raw call as the call of ``wrap_cutedsl(host_fn,
+    mutates_args="unknown")``: every tensor argument counts as written, read-only
+    ones included. Each is cloned in the functionalized graph; a graph input passed
+    to the call becomes a mutated input, copied back after the graph runs and listed
+    in ``graph_signature.user_inputs_to_mutate`` by strict ``torch.export``; and the
+    same tensor passed for two parameters, or views that may overlap, graph-break
+    (two written arguments that share memory cannot be functionalized), although
+    eager runs the call. To give the precise write set, call the kernel through
+    ``wrap_cutedsl(host_fn, mutates_args=[...])`` instead.
+
     Examples:
 
         >>> # xdoctest: +SKIP

@@ -29,6 +29,7 @@ from torch._higher_order_ops.user_kernel_hop import (
     KernelSideTable,
     register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
+    specialize_symbolic,
     store_non_graphable_args,
     trace_user_kernel_wrapper,
     UserKernelHOPifier,
@@ -41,7 +42,6 @@ from torch._higher_order_ops.utils import register_fake
 # estimator import it from this module.
 from torch._prims_common import clone_preserve_strides  # noqa: F401
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
 
@@ -2915,12 +2915,7 @@ class TraceableTritonKernelWrapper:
             return self.kernel[self.grid](*args, **kwargs)
 
     def specialize_symbolic(self, arg: Sequence[Any]) -> Any:
-        import torch
-
-        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-        if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
-            return guard_scalar(arg)
-        return arg
+        return specialize_symbolic(arg)
 
 
 # Imported after every definition: importing torch._dynamo imports TritonHOPifier and
@@ -2942,5 +2937,6 @@ register_user_kernel_hop(
         get_kernel_name=get_triton_kernel_name,
         functional_dense=triton_kernel_wrapper_functional_dense,
         reinplace_trigger=ReInplaceTrigger.TRITON_OPS,
+        serializable=True,
     )
 )

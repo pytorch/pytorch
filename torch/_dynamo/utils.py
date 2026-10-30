@@ -4216,6 +4216,30 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def _tensor_device_types(tree: Any) -> frozenset[str]:
+    return frozenset(
+        t.device.type for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)
+    ) - {"meta"}
+
+
+def _records_graph_break_ops(tx: InstructionTranslatorBase) -> bool:
+    package = tx.output.package
+    return package is not None and package.records_graph_break_ops
+
+
+def _record_graph_break_op(
+    tx: InstructionTranslatorBase, record: Callable[[Any], object]
+) -> None:
+    """Calls ``record`` with the capture package, if it records graph-break ops. A
+    failure only drops the record, so the graph break or error being handled stands."""
+    if not _records_graph_break_ops(tx):
+        return
+    try:
+        record(tx.output.package)
+    except Exception:
+        log.debug("precompile: dropped a graph-break op record", exc_info=True)
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4309,6 +4333,15 @@ def _get_fake_value_impl(
             for arg in args
         )
 
+    def record_op(failed_op: object = None) -> None:
+        # The op graph-breaks, then runs eagerly on its inputs' devices.
+        _record_graph_break_op(
+            tx,
+            lambda p: p.add_graph_break_op(
+                node.target, failed_op, _tensor_device_types((args, kwargs))
+            ),
+        )
+
     try:
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
@@ -4316,13 +4349,26 @@ def _get_fake_value_impl(
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
-    except Unsupported:
+    except Unsupported as e:
+        # run_node and wrap_fake_exception graph-break on these.
+        fake_failures = (NotImplementedError, UnsupportedFakeTensorException)
+        if isinstance(e.__cause__, fake_failures):
+            record_op()
         raise
     except RuntimeError as e:
         cause: BaseException = e
         if e.__cause__ is not None:
             cause = e.__cause__
 
+        graph_break_causes = (
+            torch._subclasses.fake_tensor.DataDependentOutputException,
+            torch._subclasses.fake_tensor.DynamicOutputShapeException,
+            torch._subclasses.fake_tensor.UnsupportedOperatorException,
+        )
+        if isinstance(cause, graph_break_causes):
+            # These graph-break below; so do the TypeError and pending fake impl
+            # branches.
+            record_op(cause.func)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -4425,6 +4471,7 @@ def _get_fake_value_impl(
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
+            record_op()
             unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
@@ -4449,6 +4496,7 @@ def _get_fake_value_impl(
             # so do NOT wrap it as a hard TorchRuntimeError.
             # NB: gated on a pending _abstract_fn mutation so a genuinely
             # unregistered op still hard-errors below with actionable guidance.
+            record_op()
             unimplemented(
                 gb_type="Custom op missing fake impl during tracing",
                 context=f"{node.target}",

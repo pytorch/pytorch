@@ -1012,8 +1012,8 @@ class CompiledFxGraph(OutputCode):
             raise RuntimeError(
                 "This compiled graph launches user CuTeDSL kernels "
                 f"({', '.join(self.process_local_kernels)}) through objects bound in "
-                "this process, so it cannot be serialized (aot_compile, precompile, "
-                "compiling in a subprocess). Compile it in the process that runs it."
+                "this process, so it cannot be serialized (aot_compile, precompile). "
+                "Compile it in the process that runs it."
             )
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
