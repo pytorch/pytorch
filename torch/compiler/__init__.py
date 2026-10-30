@@ -577,10 +577,11 @@ def wrap_numpy(fn):
 
 # Session flags live in per-thread TLS ("presence means True"), so sessions
 # in different threads cannot see each other and cannot fight over stash /
-# restore (#202042). Plain caller-spawned threads never inherit the flags;
-# threads that receive an at::ThreadLocalState copy mid-session (autograd
-# engine workers, e.g. CUDA backward tracing) observe the session and, being
-# a copy, keep observing it after the session ends.
+# restore (#202042). Plain caller-spawned threads never inherit the flags.
+# The autograd engine installs an at::ThreadLocalState copy on its worker
+# per GraphTask (engine.cpp), so backward started inside the session
+# observes it while that task runs; an unused mid-session copy is never
+# updated when the parent session exits early.
 _IS_COMPILING = "torch.compiler.is_compiling"
 _IS_EXPORTING = "torch.compiler.is_exporting"
 _IS_NON_STRICT_TRACING = "torch.compiler.is_non_strict_tracing"
@@ -614,13 +615,13 @@ def is_compiling() -> bool:
     """
     Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().
 
-    The flag is per-thread: during a session, only the session's own thread
-    observes True. Threads spawned by the caller (the DataLoader pin-memory
-    thread, ThreadPoolExecutor, DataParallel replicas) read False, while
-    autograd engine worker threads inherit the session through
-    at::ThreadLocalState (e.g. CUDA backward tracing) and observe it while
-    the session is active; being a copy, a worker keeps observing it after
-    the session ends.
+    The flag is per session: it is True in the thread running a
+    ``torch.compile`` / ``torch.export`` tracing session, and in backward
+    started from inside that session (the autograd engine propagates the
+    session to its worker threads; a CPU-only backward runs on the calling
+    thread and sees it directly). Threads spawned by the caller (the
+    DataLoader pin-memory thread, ThreadPoolExecutor, DataParallel
+    replicas) read False.
 
     Note that there are 2 other related flags that should deprecated eventually:
       * torch._dynamo.external_utils.is_compiling()
@@ -761,7 +762,7 @@ def is_exporting() -> bool:
     Indicates whether we're under exporting.
 
     It's stricter than is_compiling() flag, as it would only be set to True when
-    torch.export is used. See is_compiling() for the per-thread visibility
+    torch.export is used. See is_compiling() for the session visibility
     semantics of the session flags.
 
     Example::
@@ -1016,7 +1017,6 @@ def nested_compile_region(
 
 
 if nested_compile_region.__doc__:
-    # pyrefly: ignore [missing-attribute]
     nested_compile_region.__doc__ = nested_compile_region.__doc__.format(
         supported_config_keys=", ".join(
             f"``{key}``"

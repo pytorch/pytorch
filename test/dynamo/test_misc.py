@@ -10175,52 +10175,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
 
-        worker_read = {}
-        entered, release = (threading.Event() for _ in range(2))
-
-        def inherited_job():
-            # Simulate at::ThreadLocalState::setThreadLocalState: the worker's
-            # TLS map becomes a copy of the parent's (same value objects).
-            key = torch.compiler._IS_COMPILING
-            torch._C._stash_obj_in_tls(key, inherited_value)
-            try:
-                worker_read["inherited_compiling"] = torch.compiler.is_compiling()
-                with _compiling_state_context():
-                    worker_read["own_export"] = (
-                        torch.compiler.is_compiling(),
-                        torch.compiler.is_exporting(),
-                    )
-                worker_read["export_session_over"] = (
-                    torch.compiler.is_compiling(),
-                    torch.compiler.is_exporting(),
-                )
-                entered.set()
-                if not release.wait(60):
-                    raise AssertionError("release event not set in time")
-                # The parent's session ended while this thread was parked on
-                # its map copy: presence keeps the flag True there.
-                worker_read["parent_exited"] = torch.compiler.is_compiling()
-            finally:
-                torch._C._remove_obj_from_tls(key)
-
-        # The parent is inside its own compile session, so its map holds the
-        # value the map copy will share.
-        with torch.compiler._compile_session_context():
-            inherited_value = torch._C._get_obj_in_tls(torch.compiler._IS_COMPILING)
-            inherited_thread = self._start_flags_thread(
-                inherited_job, "inherited-thread", errors
-            )
-            self.assertTrue(entered.wait(60))
-            # The worker's own export session inside the copy never crosses
-            # back into the parent thread.
+        # _session_flags never clears a key it did not set, so a flag
+        # inherited through an at::ThreadLocalState copy (what a GraphTask
+        # snapshot holds, e.g. an autograd worker's map) survives unrelated
+        # sessions inside that thread. Single-threaded on purpose; real
+        # engine inheritance is covered by test_tracing_flags_autograd_
+        # worker_thread.
+        torch._C._stash_obj_in_tls(torch.compiler._IS_COMPILING, True)
+        try:
             self.assertTrue(torch.compiler.is_compiling())
+            with torch.compiler._compile_session_context():
+                self.assertTrue(torch.compiler.is_compiling())
+            self.assertTrue(
+                torch._C._is_key_in_tls(torch.compiler._IS_COMPILING)
+            )
+            with _compiling_state_context():
+                self.assertTrue(torch.compiler.is_compiling())
+                self.assertTrue(torch.compiler.is_exporting())
+            self.assertTrue(
+                torch._C._is_key_in_tls(torch.compiler._IS_COMPILING)
+            )
+            self.assertFalse(
+                torch._C._is_key_in_tls(torch.compiler._IS_EXPORTING)
+            )
             self.assertFalse(torch.compiler.is_exporting())
-            release.set()
-        self._join_flags_thread(inherited_thread, errors)
-        self.assertTrue(worker_read["inherited_compiling"])
-        self.assertEqual(worker_read["own_export"], (True, True))
-        self.assertEqual(worker_read["export_session_over"], (True, False))
-        self.assertTrue(worker_read["parent_exited"])
+        finally:
+            torch._C._remove_obj_from_tls(torch.compiler._IS_COMPILING)
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
 
