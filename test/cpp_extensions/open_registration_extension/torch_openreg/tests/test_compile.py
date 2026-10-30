@@ -1,5 +1,7 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import builtins
+
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
@@ -246,21 +248,6 @@ class TestDeviceInterface(TestCase):
         self.assertGreater(iface.device_count(), 0)
 
 
-class _RecordOnlyBackend:
-    # Compiles the graph without executing it: the emitted synchronize_device
-    # call would fail on a host without the corresponding accelerator
-    # semantics. Only the exchange_device guard and set_device cleanup hook
-    # run, through the real torch.openreg.current_device()/set_device() calls.
-    def __init__(self) -> None:
-        self.frame_count = 0
-        self.graphs: list[torch.fx.GraphModule] = []
-
-    def __call__(self, gm, example_inputs):
-        self.frame_count += 1
-        self.graphs.append(gm)
-        return lambda *args, **kwargs: None
-
-
 class TestPrivateUse1Routing(TestCase):
     def test_stream_synchronize_exchange_routing(self):
         # The backend calls are the first torch calls traced, so this is the
@@ -268,7 +255,8 @@ class TestPrivateUse1Routing(TestCase):
         # first looked up (get_torch_obj_rule_map, rebuilt on cache clears and
         # backend registration), not later by _get_handlers() which runs only
         # on the first dispatch.
-        cnt = _RecordOnlyBackend()
+        cnt = CompileCounterWithBackend("eager")
+        prev_device = torch.openreg.current_device()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def compiled_fn():
@@ -280,6 +268,9 @@ class TestPrivateUse1Routing(TestCase):
         compiled_fn()
         compiled_fn()  # second call evaluates the current_device guard
         self.assertEqual(cnt.frame_count, 1)
+        # The eager backend executes the emitted graph; the exchange cleanup
+        # hook restores the previous device after each call.
+        self.assertEqual(torch.openreg.current_device(), prev_device)
 
         graph = cnt.graphs[0]
         call_targets = {
@@ -315,16 +306,89 @@ class TestPrivateUse1Routing(TestCase):
             self.assertIn(fn, TorchInGraphFunctionVariable._get_handlers())
 
         # A backend that registers after the rule map was built is routed in
-        # place by trace_rules._register_privateuse1_backend() (called from
-        # torch._register_device_module) without rebuilding the map, which
-        # would drop substitute_in_graph polyfill entries.
+        # place without rebuilding the map, which would drop substitute_in_graph
+        # polyfill entries. Exercise the production wiring end-to-end: unbind
+        # the module and re-register it through torch._register_device_module,
+        # which calls trace_rules._register_privateuse1_backend() for a
+        # privateuse1 backend.
+        from torch._dynamo.variables import PolyfilledFunctionVariable
+
         rule_map = trace_rules.get_torch_obj_rule_map()
         for fn in fns:
             del rule_map[fn]
-        trace_rules._register_privateuse1_backend()
+        openreg_module = torch.openreg
+        try:
+            delattr(torch, "openreg")
+            torch._register_device_module("openreg", openreg_module)
+            for fn in fns:
+                self.assertIn(fn, rule_map)
+                self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+            # The in-place re-routing must not rebuild the map: the polyfill
+            # entry (and everything else) survives.
+            self.assertIs(rule_map[builtins.all], PolyfilledFunctionVariable)
+        finally:
+            # Restore unconditionally: torch._dynamo.reset() does not clear the
+            # rule map, so a failure here must not corrupt it for later tests.
+            setattr(torch, "openreg", openreg_module)
+            for fn in fns:
+                rule_map[fn] = TorchInGraphFunctionVariable
+
+    def test_maybe_exchange_device_invalid_index(self):
+        # Invalid indices (negative or out of range) must not switch the device:
+        # report no exchange and leave the current device unchanged.
+        prev = torch.openreg.current_device()
+        for idx in (-1, torch.openreg.device_count() + 10):
+            self.assertEqual(torch.openreg._maybe_exchange_device(idx), prev)
+            self.assertEqual(torch.openreg.current_device(), prev)
+
+    def test_rename_reroutes_late_backend(self):
+        # Renaming a backend after the rule map was built re-routes it in place
+        # through the rename hook (torch.utils.rename_privateuse1_backend), the
+        # same path a backend author hits when registering under a new name.
+        from torch._dynamo import trace_rules
+        from torch._dynamo.variables import PolyfilledFunctionVariable
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        fns = (
+            torch.openreg.current_stream,
+            torch.openreg.synchronize,
+            torch.openreg._exchange_device,
+            torch.openreg._maybe_exchange_device,
+        )
+        rule_map = trace_rules.get_torch_obj_rule_map()
         for fn in fns:
-            self.assertIn(fn, rule_map)
-            self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+            del rule_map[fn]
+        try:
+            torch.utils.rename_privateuse1_backend("openreg")
+            for fn in fns:
+                self.assertIn(fn, rule_map)
+                self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+            # The re-routing must not rebuild the map: the polyfill entry (and
+            # everything else) survives.
+            self.assertIs(rule_map[builtins.all], PolyfilledFunctionVariable)
+        finally:
+            for fn in fns:
+                rule_map[fn] = TorchInGraphFunctionVariable
+
+    def test_aliased_exchange_device_functions(self):
+        # A backend may define _maybe_exchange_device = _exchange_device (or
+        # vice versa); handler registration deduplicates the alias instead of
+        # raising "Handler already registered".
+        from torch._dynamo import trace_rules
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        exchange = torch.openreg._exchange_device
+        maybe = torch.openreg._maybe_exchange_device
+        self.assertIsNot(exchange, maybe)
+        try:
+            torch.openreg._maybe_exchange_device = exchange
+            trace_rules._register_privateuse1_backend()
+            self.assertIn(exchange, TorchInGraphFunctionVariable._get_handlers())
+        finally:
+            torch.openreg._maybe_exchange_device = maybe
+            # Re-probe the restored (non-aliased) module so the rule map and
+            # handler cache are left as they were found.
+            trace_rules._register_privateuse1_backend()
 
 
 if __name__ == "__main__":

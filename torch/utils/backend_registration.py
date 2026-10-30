@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+import sys
+
 import torch
 from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
 from torch.overrides import handle_torch_function, has_torch_function_unary
@@ -127,6 +129,26 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (2) ``current_device() -> int``
         Returns the index of a currently selected device.
 
+    Note(Dynamo): To have stream and device-exchange calls traced inside
+    compiled regions, BackendModule may define any of the following functions;
+    each is matched by name and routed in-graph by TorchDynamo when present:
+
+    (1) ``current_stream(device: Union[int, str, torch.device, None] = None) -> torch.Stream``
+        Return the current stream for the device.
+    (2) ``synchronize(device: Union[int, str, torch.device, None] = None) -> None``
+        Wait for all kernels on the device to complete; Dynamo emits
+        ``torch.ops.streams.synchronize_device`` for it.
+    (3) ``_exchange_device(device_index: int) -> int``
+        Switch the current device and return the previous one.
+    (4) ``_maybe_exchange_device(device_index: int) -> int``
+        Switch the current device and return the previous one, but only when
+        the requested index is valid.
+
+    If either exchange function is present, BackendModule must also define
+    ``current_device() -> int`` and ``set_device(int)``, which the exchange
+    handler uses for its guard source and its cleanup hook that restores the
+    previous device after the compiled region runs.
+
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
 
@@ -144,6 +166,13 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
     _rename_profiler_activity(backend_name)
     _rename_device_type(backend_name)
+    # A privateuse1 backend may register its device module before or after this
+    # rename; whichever order was used, route its stream/synchronize/
+    # exchange_device functions in Dynamo's existing rule map in place. No-op
+    # when Dynamo is not loaded yet (entry-point backends rename during torch
+    # import, before the rule map exists; the map-build probe picks them up).
+    if "torch._dynamo.trace_rules" in sys.modules:
+        torch._dynamo.trace_rules._register_privateuse1_backend()
 
 
 def _check_register_once(module, attr) -> None:

@@ -55,8 +55,9 @@ def current_stream(device=None):
 
 
 def synchronize(device=None):
-    # OpenReg is CPU-backed; there is nothing to wait on.
-    return None
+    # Match the compiled path, which emits streams::synchronize_device and
+    # waits through torch.accelerator.synchronize.
+    return torch.accelerator.synchronize(device)
 
 
 def _exchange_device(device_index):
@@ -64,6 +65,8 @@ def _exchange_device(device_index):
 
 
 def _maybe_exchange_device(device_index):
+    if not 0 <= device_index < device_count():
+        return current_device()
     return torch_openreg._C._exchangeDevice(device_index)
 
 

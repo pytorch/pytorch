@@ -3102,9 +3102,12 @@ torch_name_rule_map = [
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
-# Functions probed on a registered privateuse1 backend module and routed to
-# TorchInGraphFunctionVariable; keep in sync with the handler probes in
-# TorchInGraphFunctionVariable._get_handlers().
+# Dynamo routes these callables on a registered privateuse1 backend module
+# (torch.<name>) to TorchInGraphFunctionVariable so they are traced by the
+# dedicated handlers in TorchInGraphFunctionVariable._get_handlers() instead
+# of graph-breaking. Keep in sync with the handler probes in _get_handlers().
+# The per-function contract is documented for backend authors in
+# torch.utils.rename_privateuse1_backend's docstring.
 _PRIVATEUSE1_ROUTED_FNS: tuple[str, ...] = (
     "current_stream",
     "synchronize",
@@ -3145,15 +3148,23 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
     return d
 
 
-def _probe_privateuse1_rule_map(d: dict[Any, type["VariableTracker"]]) -> None:
+def _get_privateuse1_backend_fns() -> dict[str, Callable[..., Any]]:
     name = torch._C._get_privateuse1_backend_name()
-    if name != "privateuseone":
-        backend_mod = getattr(torch, name, None)
-        if backend_mod is not None:
-            for fn_name in _PRIVATEUSE1_ROUTED_FNS:
-                fn = getattr(backend_mod, fn_name, None)
-                if callable(fn):
-                    d.setdefault(fn, TorchInGraphFunctionVariable)
+    if name == "privateuseone":
+        return {}
+    backend_mod = getattr(torch, name, None)
+    if backend_mod is None:
+        return {}
+    return {
+        fn_name: fn
+        for fn_name in _PRIVATEUSE1_ROUTED_FNS
+        if callable(fn := getattr(backend_mod, fn_name, None))
+    }
+
+
+def _probe_privateuse1_rule_map(d: dict[Any, type["VariableTracker"]]) -> None:
+    for fn in _get_privateuse1_backend_fns().values():
+        d.setdefault(fn, TorchInGraphFunctionVariable)
 
 
 def _register_privateuse1_backend() -> None:
@@ -4351,7 +4362,11 @@ def _lookup_inner(
 
 def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
-    TorchInGraphFunctionVariable._get_handlers.cache_clear()
+    # The handler cache only needs clearing when a privateuse1 backend is
+    # present (its handlers are probed into the cached dict on rebuild);
+    # otherwise the rebuild re-runs ~150 @register closures for nothing.
+    if torch._C._get_privateuse1_backend_name() != "privateuseone":
+        TorchInGraphFunctionVariable._get_handlers.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()

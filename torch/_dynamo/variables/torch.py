@@ -3000,20 +3000,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         # registration, so a backend that registers after the first compile is
         # picked up on the next dispatch.
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-        privateuse1_backend_mod = (
-            getattr(torch, privateuse1_backend_name, None)
-            if privateuse1_backend_name != "privateuseone"
-            else None
-        )
 
-        from ..trace_rules import _PRIVATEUSE1_ROUTED_FNS
+        from ..trace_rules import _get_privateuse1_backend_fns
 
-        privateuse1_backend_fns: dict[str, Callable[..., Any]] = {}
-        if privateuse1_backend_mod is not None:
-            for fn_name in _PRIVATEUSE1_ROUTED_FNS:
-                backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
-                if callable(backend_fn):
-                    privateuse1_backend_fns[fn_name] = backend_fn
+        privateuse1_backend_fns = _get_privateuse1_backend_fns()
 
         current_stream_fns: list[Callable[..., Any]] = [
             torch.accelerator.current_stream,
@@ -3450,12 +3440,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, list(args), kwargs, torch.cuda._maybe_exchange_device
             )
 
-        privateuse1_exchange_fns = [
-            privateuse1_backend_fns[name]
-            for name in ("_exchange_device", "_maybe_exchange_device")
-            if name in privateuse1_backend_fns
-            and privateuse1_backend_fns[name] not in handlers
-        ]
+        # Dedupe: a backend may define _maybe_exchange_device = _exchange_device,
+        # and register() would raise on the duplicate.
+        privateuse1_exchange_fns = list(
+            dict.fromkeys(
+                privateuse1_backend_fns[name]
+                for name in ("_exchange_device", "_maybe_exchange_device")
+                if name in privateuse1_backend_fns
+                and privateuse1_backend_fns[name] not in handlers
+            )
+        )
         if privateuse1_exchange_fns:
             # exchange_device_helper additionally requires the backend to
             # provide current_device / set_device (guard source + cleanup hook).

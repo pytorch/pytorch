@@ -70,8 +70,8 @@ class OpenRegInterface(DeviceInterface):
 
     @staticmethod
     def maybe_exchange_device(device):
-        if device < 0:
-            return -1
+        if not 0 <= device < torch_openreg._C._get_device_count():
+            return torch_openreg._C._get_device()
         return torch_openreg._C._exchangeDevice(device)
 
     @staticmethod
