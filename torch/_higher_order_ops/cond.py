@@ -713,12 +713,27 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_alias,
+        _check_alias_and_mutation,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        # Auto-functionalization supports operand mutation, but not aliasing that it
+        # does not repair: returning a mutated operand is fine, since the output then
+        # aliases the clone inserted for that base, while returning an operand that is
+        # not mutated leaves the output aliasing the caller's tensor.
+        # _check_alias_and_mutation is skipped on this path because it would also
+        # reject the mutation, so check aliasing only.  This re-traces both branches;
+        # see the PR discussion for why the maps gen_schema computed are not reused.
+        unwrapped_inputs = ctx.unwrap_tensors(inputs)
+        pre_dispatch = ctx.mode.pre_dispatch
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            _check_alias(branch, unwrapped_inputs, branch_name, pre_dispatch)
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,

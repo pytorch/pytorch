@@ -603,6 +603,30 @@ def _collect_fake_inputs(inputs):
     return inputs_fake
 
 
+def _check_alias(
+    graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
+):
+    """Raise for aliasing that auto-functionalization does not repair.
+
+    The aliasing half of :func:`_check_alias_and_mutation`, which that path cannot use
+    because it rejects input mutation as well, minus the one case auto-functionalization
+    makes safe: an output aliasing a *mutated* input aliases the clone functionalization
+    inserts for that base, not the caller's tensor.  An output aliasing an input that is
+    not mutated gets no such clone, so its address stays undefined.
+    """
+    (
+        (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(graph_module, inputs_fake, pre_dispatch)
+    mutated = set(inp_mutation)
+    if (
+        (len(inp_inp_alias_map) > 0 and not allow_input_input_aliasing)
+        or any(inp not in mutated for inp in inp_out_alias_map)
+        or len(out_out_alias_map) > 0
+    ):
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")
+
+
 def _check_alias_and_mutation(
     graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
 ):
