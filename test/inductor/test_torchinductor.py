@@ -161,15 +161,14 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
     HAS_TPU,
     HAS_TRITON,
     IS_BIG_GPU,
     requires_block_ptr,
+    requires_triton,
     RUN_CPU,
-    RUN_GPU,
     RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
@@ -1263,7 +1262,6 @@ def skip_if_cpu(fn):
 # skips to enforce CPU/CUDA contracts without splitting the shared template.
 # CPU hosts can also run tests on an accelerator, so distinguish the host
 # device from the execution device.
-# Keep historical MPS paths that do not require Triton via allow_mps.
 def skip_if_not_cuda(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1296,32 +1294,9 @@ def skip_if_accelerator_not_cuda(fn):
     return wrapper
 
 
-def skip_if_no_accelerator(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        accelerator_device(self.device)
-        return fn(self, *args, **kwargs)
-
-    return wrapper
-
-
 def _require_triton():
     if not has_triton():
         raise unittest.SkipTest("triton is required")
-
-
-def skip_if_no_accelerator_triton(fn=None, *, allow_mps=False):
-    if fn is None:
-        return functools.partial(skip_if_no_accelerator_triton, allow_mps=allow_mps)
-
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        device = accelerator_device(self.device)
-        if not (allow_mps and torch.device(device).type == "mps"):
-            _require_triton()
-        return fn(self, *args, **kwargs)
-
-    return wrapper
 
 
 def _require_multiple_accelerators(device):
@@ -6225,7 +6200,7 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_to_device(self):
         device = accelerator_device(self.device)
 
@@ -6256,7 +6231,7 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_to_device_constant(self):
         device = accelerator_device(self.device)
 
@@ -6279,7 +6254,7 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([10]),),
         )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @parametrize(
         "size,view",
         ((2, "reshape"), (64, "transpose"), (64, "slice")),
@@ -6321,7 +6296,7 @@ for dtype in (torch.int32, torch.int64):
             assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
         )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_to_copy_fp64_to_no_fp64_device(self):
         # See https://github.com/pytorch/pytorch/issues/180664
         # When the target device does not support fp64, _to_copy should
@@ -6341,7 +6316,7 @@ for dtype in (torch.int32, torch.int64):
         code = "\n".join(code)
         self.assertNotIn("'*fp64'", code)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @xfail_if_triton_cpu
     def test_multi_device(self):
         device = accelerator_device(self.device)
@@ -7038,7 +7013,7 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     @parametrize("comprehensive_padding", (False, True))
@@ -10686,7 +10661,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1.3e-06,
         )
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_grid_sampler_expand_preserves_view(self):
         # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
@@ -11227,7 +11202,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # The following 2 tests are meant to check the logic that drops
     # xmask from triton load/store if xnumel = 1
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_single_elem(self):
         def fn(a):
             b = a + 1
@@ -11235,7 +11210,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(1),))
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_single_elem_indirect(self):
         def fn(a, b):
             c = a[b] + 1
@@ -11249,7 +11224,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # This test is meant to check for issues from the logic
     # that drops xmask from trito load/store if XBLOCK divides xnumel
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_xblock_divides_xnumel(self):
         def fn(a):
             b = a + 1
@@ -13038,10 +13013,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [], assert_equal=False)
 
-    # `skip_if_no_accelerator` otherwise
+    # the accelerator availability check otherwise
     # RuntimeError: pin_memory=True requires a CUDA or other accelerator backend;
     # no pinned memory allocator is available on this system.
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @unittest.skipIf(IS_MACOS, "fails on macos")
     @parametrize(
         "constructor_case",
@@ -13085,7 +13060,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(result.is_pinned())
         self.assertEqual(result.shape, expected_shape)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @unittest.skipIf(IS_MACOS, "fails on macos")
     @dynamo_config.patch(assume_static_by_default=False)
     @config.patch({"fx_graph_cache": False})
@@ -13789,7 +13764,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(a0.shape, a1.shape)
         self.assertEqual(a0.stride(), a1.stride())
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_triton_cpu("Flaky on Triton CPU")
     def test_like_rands3(self):
         # rand_like with `device` which is different from `x.device`
@@ -14748,7 +14723,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ]
         self.common(forward, args, atol=1e-5, rtol=1e-5)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
         test_device = torch.device(type=self.device)
@@ -15203,7 +15178,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # Shape padding causes the inputs to all get specialized, so the codegen
     # test fails
     @expectedFailureCodegenDynamic
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         dtypes = [
@@ -15236,7 +15211,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @torch._inductor.config.patch("layout_optimization", True)
     @tf32_on_and_off(0.005)
     def test_inductor_layout_optimization_input_mutations(self):
@@ -15261,7 +15236,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(out_ref.stride(), out_test.stride())
             self.assertEqual(x_ref, x_test)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -15305,7 +15280,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         dynamic_specialized = inductor_matmul(dynamic_specialized_a, b)
         self.assertEqual(dynamic, dynamic_specialized)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -15332,7 +15307,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(no_override(x_small), override(x_small))
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -15372,7 +15347,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             branching(x_small)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -15417,7 +15392,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             lambda msg: f"{msg}\nsecond compilation has hint {HINT_A}; stale cache hit",
         )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -15784,7 +15759,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # expanded dim should not cause copy in require_stride_order
         assertGeneratedKernelCountEqual(self, 0)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @parametrize("prefer_nd_tiling", (False, True))
     @parametrize(
         "use_block_ptr",
@@ -15868,7 +15843,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if not is_halide_backend(self.device):
                 self.assertEqual(have_block_ptr, use_block_ptr)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
@@ -15913,7 +15888,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1e4,
         )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
@@ -16632,7 +16607,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_gpu_halide
     @skip_if_not_triton
     def test_searchsorted_broadcast(self):
@@ -16891,7 +16866,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             for right in [True, False]:
                 self.common(fn, (boundaries, out_int32, right), check_lowp=False)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_gpu_halide
     @skip_if_not_triton
     def test_bucketize_broadcast(self):
@@ -16918,7 +16893,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # because bucketize is computationally expensive.
         FileCheck().check("def triton").check("def triton").run(code[0])
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_gpu_halide
     @skip_if_not_triton
     def test_bucketize_nan_consistency(self):
@@ -16936,7 +16911,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(x, boundaries, right), expected)
             self.common(fn, (x, boundaries, right), check_lowp=False)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -16963,7 +16938,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 res2 = fn_c(inp2)
                 self.assertEqual(ref2, res2, atol=1e-5, rtol=1e-5)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment_recompiles(self):
         # Inputs:
@@ -17010,7 +16985,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # see Note: [Input Alignment handling in Inductor]
         self.assertLessEqual(len(failed_guards), failed_guard_count_iteration_2)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment_cudagraphs(self):
         def fn(x):
@@ -17141,7 +17116,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @config.patch(implicit_fallbacks=True)
     def test_generated_code_has_size_stride_assert(self):
@@ -17170,7 +17145,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
         ).run(code[0])
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @config.patch(implicit_fallbacks=True)
     def test_generated_code_has_alignment_assert(self):
@@ -17234,7 +17209,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
             assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     def test_input_asserts_deferred_to_first_use(self):
         def fn(x, y, z):
@@ -17258,7 +17233,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "extern_kernels.mm("
             ).check("assert_size_stride(").check("extern_kernels.mm(").run(code[0])
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     def test_input_asserts_grouped_for_same_first_use(self):
         def fn(x, y, z):
@@ -17276,7 +17251,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "assert_size_stride_grouped(", 1, exactly=True
             ).check_not("assert_size_stride(").run(code[0])
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @unittest.skipIf(
         config.cpp_wrapper,
@@ -17300,7 +17275,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "extern_kernels.mm("
         ).run(code[0])
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_not_triton
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_alignment_copy_not_emitted_for_cpp_wrapper(self):
@@ -17388,7 +17363,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # No error
         f(x)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)
     @config.patch(implicit_fallbacks=True)
@@ -17481,7 +17456,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @config.patch(implicit_fallbacks=True)
     @tf32_on_and_off(0.005)
     def test_mutable_custom_op_fixed_layout2(self):
@@ -17615,7 +17590,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             compiled_inductor_out = compiled_inductor_f(x)
             self.assertEqual(compiled_inductor_out, eager_out)
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_fixed_layout_channels_last(self):
         class Block(nn.Module):
@@ -17813,7 +17788,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @parametrize("inplace", [False, True])
     def test_index_add_device_mismatch(self, inplace):
         if self.device == "cpu":
@@ -18007,7 +17982,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
 
     @xfail_if_triton_cpu
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_scalar_cpu_tensor_arg(self):
         def fn(x, y):
             return x + y.sum()
@@ -18648,7 +18623,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(model.bias.grad.shape, model.bias.shape)
             self.assertEqual(model.bias.grad, torch.zeros_like(model.bias))
 
-    @skip_if_no_accelerator_triton(allow_mps=True)
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @config.patch(fallback_random=True)
     def test_mix_device_index(self):
         """
@@ -19087,7 +19062,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             FileCheck().check("torch.ops.aten.add").run(code[0])
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_lite_mode_triton_kernel_no_clone(self):
         # The decomposition emits "clone(s) + the mutation node" and relies on
         # reinplacing to mark the unnecessary clones; lite mode used to skip
@@ -19175,7 +19150,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ).run(source_code)
         self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch(use_fast_math=True)
     def test_prepare_softmax_with_fast_math(self):
         """
@@ -19716,7 +19691,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_triton_kernel_bool_tensor_arg(self):
         if self.device in ("cpu", "mps"):
             raise unittest.SkipTest("requires GPU")
@@ -19746,7 +19721,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (x, y, mask)
         self.common(Model(), inputs)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):
         def f(a_list):
@@ -19798,7 +19773,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         "event sync only emitted for Python wrapper",
     )
     @skip_if_halide
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_non_blocking_d2h_event_sync(self):
         def f(x):
@@ -19907,7 +19882,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inp = torch.randn(100, 100, device=self.device)
         self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_cpu_scalar_with_gpu_tensor(self):
         def fn(a, b):
             return a + b[0]
@@ -19921,7 +19896,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cpu_scalar_with_gpu_tensor_cpp(self):
         def fn(a, b):
@@ -19934,7 +19909,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor")(a, b)
         self.assertEqual(eager, compiled)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_cpu_scalar_with_gpu_tensor_dynamic(self):
         def fn(a, b):
             return a + b[0]
@@ -19959,7 +19934,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_gpu_scalar_with_gpu_tensor(self):
         def fn(a, b):
             return a + b[0]
@@ -19973,7 +19948,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_cpu_tensor_with_gpu_tensor(self):
         def fn(a, b):
             return a + b
@@ -20006,7 +19981,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor")(a, b)
         self.assertEqual(eager, compiled)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_gpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
             return a[0] + b
@@ -20017,7 +19992,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             compiled = torch.compile(fn, backend="inductor")(a, b)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_triton_fp_fusion(self):
         def fn(a, b):
@@ -20035,7 +20010,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("'enable_fp_fusion': False" in code)
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch(runtime_triton_nan_asserts=True)
     def test_nan_assert_inside_triton_kernel(self):
         def fn(x):
@@ -20055,7 +20030,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         config.triton.autotune_at_compile_time is True,
         "autotune_at_compile_time doesn't work for test with indexing",
     )
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_repeat_interleave_decomposition_has_clamp(self):
         repeat = torch.ones(
             2560, dtype=torch.int64, device=accelerator_device(self.device)
@@ -20247,7 +20222,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(code.count("triton_helpers.max_with_"), 1)
 
     @skip_if_halide
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_triton_argmin_argmax_transpose_logical_index(self):
         device = accelerator_device(self.device)
 
@@ -20301,7 +20276,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.max_with_"), 2)
 
     @skip_if_halide
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_unbacked_float_item(self):
         def fn(x, max_val):
             return torch.clamp(x, 0, max_val.item())
@@ -20341,7 +20316,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device.lower() == "cuda":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch(combo_kernels=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_combo_kernel_store_mask(self):
@@ -20362,7 +20337,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_triton_cpu
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_bitwise_equal(self):
         """Test that addcmul with FMA lowering produces bitwise equal results to eager."""
@@ -20397,7 +20372,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_triton_cpu
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_uses_fma_instruction(self):
         """Test that addcmul generates code using FMA instruction."""
@@ -20415,7 +20390,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_triton_cpu
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_addcdiv_fma_bitwise_equal(self):
         """Compiled addcdiv matches eager bitwise for both value==1 and value!=1 branches."""
         s = torch.randn(64, 64, device=accelerator_device(self.device))
@@ -20436,7 +20411,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_triton_cpu
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     def test_addcdiv_fma_uses_fma_and_div_rn(self):
         """Test that addcdiv re-fusion emits tl.fma and triton.language.div_rn."""
         from torch._dynamo.utils import counters
@@ -20469,7 +20444,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("triton.language.div_rn", code)
 
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_type_promotion(self):
         """Test that addcmul correctly promotes types when inputs have different dtypes."""
@@ -20554,7 +20529,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager_result5, compiled_result5)
 
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
@@ -20588,7 +20563,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ).run(code)
 
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
@@ -20616,7 +20591,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ).run(code)
 
     @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_triton()
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
@@ -20703,7 +20678,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         expected = torch.tensor([[311.0], [1.0]])
         self.assertEqual(out, expected)
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     def test_device_context_with_python_scalar(self):
         from torch.utils._device import DeviceContext
 
@@ -20759,7 +20734,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
-    @skip_if_no_accelerator
+    @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
     @skip_if_cpp_wrapper("cross-device shallow_copy_data_ not in AOTI shim")
     def test_tensor_set_data_cross_device(self):
         def func(x):
@@ -21338,15 +21313,7 @@ if RUN_CPU:
             FileCheck().check_not(".abs()").run(code_vec)
 
 
-class _AcceleratorTestCase(TestCase):
-    def setUp(self):
-        # Preserve the historical MPS path, which does not require Triton.
-        if torch.device(self.device).type != "mps":
-            _require_triton()
-        super().setUp()
-
-
-if RUN_GPU or HAS_MPS:
+if HAS_TRITON or HAS_MPS:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         hw_classification = HardwareClassification.ACCELERATOR
@@ -21355,14 +21322,14 @@ if RUN_GPU or HAS_MPS:
     SweepInputsGPUTest.populate()
 
 
-if RUN_GPU or HAS_MPS or HAS_TRITON:
+if HAS_TRITON or HAS_MPS:
 
-    class GPUTests(_AcceleratorTestCase):
+    class GPUTests(TestCase):
         hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
 
-        @skip_if_no_accelerator_triton
+        @requires_triton()
         def test_noncontiguous_reshape_cat_backward(self):
             # Cross the 1024-element padding threshold with a non-aligned width.
             width = 342
@@ -21401,7 +21368,6 @@ if RUN_GPU or HAS_MPS or HAS_TRITON:
             )
 
         @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
         def test_special_bessel_inf_matches_eager(self):
             ops = (
                 ("bessel_j0", torch.special.bessel_j0),
@@ -21431,7 +21397,6 @@ if RUN_GPU or HAS_MPS or HAS_TRITON:
                         self.assertTrue(torch.isnan(compiled[:3]).all())
 
         @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
         def test_signbit_negative_zero_cuda(self):
             def fn(x):
                 return torch.signbit(x)
@@ -21445,7 +21410,6 @@ if RUN_GPU or HAS_MPS or HAS_TRITON:
                 self.common(fn, (x,), check_lowp=False)
 
         @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
         def test_modified_bessel_i_inf_matches_eager(self):
             ops = (
                 ("i0", torch.special.i0),
@@ -21471,7 +21435,7 @@ if RUN_GPU or HAS_MPS or HAS_TRITON:
                         torch.testing.assert_close(actual, expected, equal_nan=True)
                         self.assertTrue(torch.isnan(actual[:3]).all())
 
-        @skip_if_no_accelerator_triton
+        @requires_triton()
         @functorch_config.patch(view_replay_for_aliased_outputs=True)
         def test_complex_view_as_complex_exact_stride_copy_cuda(self):
             def fn(x):
@@ -21485,7 +21449,7 @@ if RUN_GPU or HAS_MPS or HAS_TRITON:
 
             self.assertEqual(actual, expected, exact_stride=True)
 
-        @skip_if_no_accelerator_triton
+        @requires_triton()
         def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
             def fn(x):
                 y = torch.view_as_complex(x)
@@ -21497,7 +21461,7 @@ if RUN_GPU or HAS_MPS or HAS_TRITON:
 
             self.assertEqual(actual, expected, exact_stride=True)
 
-        @skip_if_no_accelerator_triton
+        @requires_triton()
         def test_complex_copy_strided_stride_order_copy_cuda(self):
             def fn(x):
                 y = torch.view_as_complex(x)
@@ -21670,7 +21634,7 @@ if RUN_TPU:
 
     SweepInputsTpuTest.populate()
 
-if RUN_GPU:
+if HAS_TRITON:
 
     @instantiate_parametrized_tests
     class TritonCodeGenTests(TestCase):
@@ -21984,7 +21948,7 @@ if RUN_GPU:
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
-        @skip_if_no_accelerator
+        @unittest.skipIf(not (HAS_TRITON or HAS_MPS), "requires accelerator")
         @unittest.skipIf(
             not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
             "Does not support mem_eff_attention",
@@ -22028,7 +21992,6 @@ if RUN_GPU:
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
         @skip_if_accelerator_not_cuda
-        @skip_if_no_accelerator_triton
         @config.patch(implicit_fallbacks=True)
         @parametrize("backend", ["cublaslt", "cutlass"])
         def test_grouped_mm(self, backend):
@@ -23788,16 +23751,9 @@ if RUN_GPU:
             self.assertEqual(ref, out)
 
 
-class _TritonDeviceTestCase(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        _require_triton()
-
-
 if HAS_TRITON:
 
-    class RNNTest(_TritonDeviceTestCase):
+    class RNNTest(TestCase):
         hw_classification = HardwareClassification.ACCELERATOR
 
         class Model(torch.nn.Module):
@@ -23814,7 +23770,7 @@ if HAS_TRITON:
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
 
-    class NanCheckerTest(_TritonDeviceTestCase):
+    class NanCheckerTest(TestCase):
         hw_classification = HardwareClassification.ACCELERATOR
 
         @config.patch("nan_asserts", True)
@@ -23941,7 +23897,7 @@ if RUN_CPU:
         only_for="cpu",
     )
 
-if RUN_GPU or HAS_MPS or HAS_TRITON:
+if HAS_TRITON or HAS_MPS:
     instantiate_device_type_tests_from_templates(
         GPUTests,
         globals(),
