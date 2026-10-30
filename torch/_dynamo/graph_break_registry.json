@@ -6813,5 +6813,25 @@
         "Define context_fn at module scope, or pass a functools.partial with constant arguments, or a method bound to an object created outside the compiled region."
       ]
     }
+  ],
+  "GB3543": [
+    {
+      "Gb_type": "checkpoint context_fn decorated nested function",
+      "Context": "context_fn={ctx}",
+      "Explanation": "checkpoint needs context_fn as a plain nested function, but this nested function was decorated inside the compiled frame.",
+      "Hints": [
+        "Define context_fn at module scope without decorators, or pass a functools.partial with constant arguments, or a method bound to an object created outside the compiled region."
+      ]
+    }
+  ],
+  "GB4680": [
+    {
+      "Gb_type": "checkpoint context_fn nested function with non-constant attribute",
+      "Context": "context_fn={ctx}, attr={name!r}",
+      "Explanation": "checkpoint needs context_fn attributes to be Python constants at trace time, but this attribute cannot be resolved.",
+      "Hints": [
+        "Set only constant attributes (e.g. cache_hash) on nested context_fn, or define context_fn at module scope."
+      ]
+    }
   ]
 }

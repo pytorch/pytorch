@@ -4498,6 +4498,64 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def _nested_checkpoint_context_fn_as_python_constant(
+    tx: "InstructionTranslatorBase",
+    ctx: "torch._dynamo.variables.functions.NestedUserFunctionVariable",
+) -> Any:
+    from torch._dynamo.variables.functions import WrappedNestedUserFunctionVariable
+    from torch._dynamo.variables.misc import DeletedVariable
+
+    if isinstance(ctx, WrappedNestedUserFunctionVariable):
+        unimplemented(
+            gb_type="checkpoint context_fn decorated nested function",
+            context=f"context_fn={ctx}",
+            explanation="checkpoint needs context_fn as a plain nested function, "
+            "but this nested function was decorated inside the compiled frame.",
+            hints=[
+                "Define context_fn at module scope without decorators, or pass a "
+                "functools.partial with constant arguments, or a method bound to "
+                "an object created outside the compiled region.",
+            ],
+        )
+
+    try:
+        context_fn = ctx.guard_as_python_constant()
+    except Unsupported as e:
+        unimplemented(
+            gb_type="checkpoint context_fn nested function with non-constant closure or defaults",
+            context=f"context_fn={ctx}",
+            explanation="checkpoint needs context_fn as a Python callable, "
+            "but this nested function's closure or defaults cannot be "
+            "resolved to Python constants at trace time.",
+            hints=[
+                "Define context_fn at module scope, or pass a "
+                "functools.partial with constant arguments, or a method "
+                "bound to an object created outside the compiled region.",
+            ],
+            from_exc=e,
+        )
+
+    if tx.output.side_effects.has_pending_mutation(ctx):
+        for name, value in tx.output.side_effects.store_attr_mutations[ctx].items():
+            if isinstance(value, DeletedVariable):
+                continue
+            try:
+                setattr(context_fn, name, value.as_python_constant())
+            except (NotImplementedError, Unsupported) as e:
+                unimplemented(
+                    gb_type="checkpoint context_fn nested function with non-constant attribute",
+                    context=f"context_fn={ctx}, attr={name!r}",
+                    explanation="checkpoint needs context_fn attributes to be Python "
+                    "constants at trace time, but this attribute cannot be resolved.",
+                    hints=[
+                        "Set only constant attributes (e.g. cache_hash) on nested "
+                        "context_fn, or define context_fn at module scope.",
+                    ],
+                    from_exc=e,
+                )
+    return context_fn
+
+
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.utils.checkpoint.checkpoint"
     supports_input_mutation = True
@@ -4526,25 +4584,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.NestedUserFunctionVariable
             ):
-                # Nested/closure context_fn defined inside the compiled frame.
-                # Reconstruct it as a real callable when closure/defaults are
-                # constant; otherwise graph-break instead of InternalTorchDynamoError.
-                try:
-                    context_fn = ctx.guard_as_python_constant()
-                except Unsupported as e:
-                    unimplemented(
-                        gb_type="checkpoint context_fn nested function with non-constant closure or defaults",
-                        context=f"context_fn={ctx}",
-                        explanation="checkpoint needs context_fn as a Python callable, "
-                        "but this nested function's closure or defaults cannot be "
-                        "resolved to Python constants at trace time.",
-                        hints=[
-                            "Define context_fn at module scope, or pass a "
-                            "functools.partial with constant arguments, or a method "
-                            "bound to an object created outside the compiled region.",
-                        ],
-                        from_exc=e,
-                    )
+                context_fn = _nested_checkpoint_context_fn_as_python_constant(tx, ctx)
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):

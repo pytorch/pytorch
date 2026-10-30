@@ -2451,12 +2451,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     f"annotations must be a dict, got {type(annotations)}"
                 )
             func.__annotations__ = annotations
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
-        if tx.output.side_effects.has_pending_mutation(self):
-            for name, value in tx.output.side_effects.store_attr_mutations[self].items():
-                setattr(func, name, value.as_python_constant())
         return func
 
     def has_closure(self) -> bool:

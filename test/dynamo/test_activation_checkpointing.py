@@ -3018,6 +3018,89 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
+    def test_sac_nested_context_fn_decorated_graph_breaks(self):
+        def f(x):
+            return torch.sin(x) @ torch.eye(3)
+
+        def fn(x):
+            @torch.no_grad()
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    [torch.ops.aten.mm.default]
+                )
+
+            return checkpoint(f, x, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.ones(3, 3, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+        self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "decorated nested function",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_sac_nested_context_fn_nonconstant_attribute_graph_breaks(self):
+        def f(x):
+            return torch.sin(x) @ torch.eye(3)
+
+        def fn(x):
+            marker = torch.ones(1)
+
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    [torch.ops.aten.mm.default]
+                )
+
+            context_fn.marker = marker
+            return checkpoint(f, x, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.ones(3, 3, requires_grad=True)
+        cnt = CompileCounterWithBackend("aot_eager")
+        self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "non-constant attribute",
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    def test_sac_nested_context_fn_deleted_attribute_preserves_cache_hash(self):
+        cache_hash = "nested_after_delete_v1"
+
+        def f(x):
+            return torch.sin(x) @ torch.eye(3)
+
+        def fn(x):
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    [torch.ops.aten.mm.default]
+                )
+
+            context_fn.temp = 1
+            del context_fn.temp
+            context_fn.cache_hash = cache_hash
+            return checkpoint(f, x, use_reentrant=False, context_fn=context_fn)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.ones(3, 3, requires_grad=True)
+        opt_fn(x)
+
+        stored_context_fn = None
+        for gm in backend.graphs:
+            for module in gm.modules():
+                if "_checkpoint_context_fn" in module.meta:
+                    stored_context_fn = module.meta["_checkpoint_context_fn"]
+                    break
+            if stored_context_fn is not None:
+                break
+
+        self.assertIsNotNone(stored_context_fn)
+        self.assertEqual(getattr(stored_context_fn, "cache_hash", None), cache_hash)
+        self.assertFalse(hasattr(stored_context_fn, "temp"))
+
     def test_sac_partial_context_fn_with_tensor_arg_graph_breaks(self):
         # A partial bound to a tensor cannot be resolved to a Python callable at
         # trace time. That is a graph break, not an internal error.
