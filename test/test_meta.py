@@ -1725,6 +1725,26 @@ class TestMetaCore(TestCase):
         with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
             t.masked_fill_((t > 0).unsqueeze(0), 0.1)
 
+    def test_masked_scatter_mask_dtype_error(self):
+        # Like eager, masked_scatter only accepts bool masks, even for empty
+        # inputs
+        for n, op in itertools.product((3, 0), (torch.Tensor.masked_scatter_, torch.Tensor.masked_scatter)):
+            for device in ('cpu', 'meta'):
+                with self.subTest(n=n, op=op.__name__, device=device):
+                    with self.assertRaisesRegex(RuntimeError, "masked_scatter_ only supports boolean masks"):
+                        op(
+                            torch.zeros(n, device=device),
+                            torch.ones(n, dtype=torch.uint8, device=device),
+                            torch.ones(n, device=device),
+                        )
+                    # The self/source dtype check comes first, as in eager
+                    with self.assertRaisesRegex(RuntimeError, "expected self and source to have same dtypes"):
+                        op(
+                            torch.zeros(n, device=device),
+                            torch.ones(n, dtype=torch.uint8, device=device),
+                            torch.ones(n, dtype=torch.double, device=device),
+                        )
+
     def test_inplace_bin_ops_error(self):
         t = torch.randn(3, 3, device='meta')
         for op in (torch.Tensor.add_, torch.Tensor.sub_, torch.Tensor.mul_, torch.Tensor.div_,

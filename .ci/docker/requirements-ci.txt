@@ -422,6 +422,13 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
+fsspec==2026.9.0
+#Description: torch runtime dependency. Pinned here so the Linux images ship it
+# and the torch wheel install at test time finds it already satisfied, instead of
+# downloading the newest release on every run.
+#Pinned versions: 2026.9.0
+#test that import: distributed/checkpoint/test_fsspec.py
+
 cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin" and python_version < "3.15"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
