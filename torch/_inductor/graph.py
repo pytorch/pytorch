@@ -56,6 +56,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._typing_utils import not_none
+from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config, ir
 from .codegen.common import (
@@ -2154,6 +2155,14 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+
+            # Realize saved activations
+            # AOTDispatch partitioner puts saved activations on graph boundaries,
+            # but in case of joint graph compilations they are intermediates.
+            if n.meta.get("recompute") == CheckpointPolicy.MUST_SAVE and isinstance(
+                result, TensorBox
+            ):
+                result.realize()
 
             if n.meta.get("inductor_realize_to_strides", False) and isinstance(
                 result, TensorBox

@@ -19,11 +19,20 @@ from torch._inductor.cpp_builder import (
     CppTorchOptions,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
+from torch._inductor.debug import DebugContext
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
+from torch._inductor.virtualized import V
+from torch._subclasses import FakeTensorMode
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils.checkpoint import CheckpointPolicy
 
 
 _IS_MACOS = sys.platform.startswith("darwin")
@@ -69,6 +78,7 @@ class MyModule3(MyModule):
         return (super().forward(x),)
 
 
+@instantiate_parametrized_tests
 class TestStandaloneInductor(TestCase):
     """
     These test check that you can call TorchInductor directly without
@@ -85,6 +95,32 @@ class TestStandaloneInductor(TestCase):
             cpp_builder.get_compiler_version_info,
         ):
             func.cache_clear()
+
+    @parametrize("export_saved", (False, True))
+    def test_joint_graph_backward_reads_saved_value(self, export_saved):
+        def joint(a, m):
+            residual = a + m
+            loss = residual.square().sum()
+            grad = 2 * residual
+            return (loss, grad, residual) if export_saved else (loss, grad)
+
+        with FakeTensorMode() as mode:
+            inputs = [torch.randn(8), torch.randn(8)]
+            gm = make_fx(joint)(*inputs)
+        saved = next(n for n in gm.graph.nodes if n.target == torch.ops.aten.add.Tensor)
+        saved.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        grad = next(n for n in gm.graph.nodes if n.target == torch.ops.aten.mul.Tensor)
+        grad.meta["autograd_backward"] = True
+        with V.set_fake_mode(mode):
+            graph = GraphLowering(gm)
+            with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
+                graph.run(*inputs)
+                reads = set(graph.graph_outputs[1].get_read_names())
+                self.assertEqual(len(reads), 1)
+                self.assertEqual(
+                    reads,
+                    {b.get_name() for b in graph.buffers if b.origin_node is saved},
+                )
 
     def test_inductor_via_fx(self):
         mod = MyModule3().eval()
