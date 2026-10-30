@@ -1604,6 +1604,30 @@ class _OrderedDictWithMeta(collections.OrderedDict, metaclass=_OrderedDictMeta):
     __getstate__ = _OrderedDictWithGetState.__getstate__
 
 
+class _OrderedDictWithNew(collections.OrderedDict):
+    def __new__(cls):
+        return super().__new__(cls)
+
+
+class _OrderedDictWithItems(collections.OrderedDict):
+    def items(self):
+        return super().items()
+
+
+class _OrderedDictWithStateHooks(collections.OrderedDict):
+    def __getstate__(self):
+        return self.saved
+
+    def __setstate__(self, state):
+        self.saved = state
+        self.state_restored = (tuple(dict.keys(self)), tuple(self))
+
+
+class _OrderedDictWithSlotsState(_OrderedDictSubclass):
+    def __getstate__(self):
+        return {"saved": self.saved}, {"slot": self.slot}
+
+
 _generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
 if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
     _RAW_DESCRIPTORS.append(_generic_class_getitem)
@@ -1636,7 +1660,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     @parametrize(
         "mapping_type",
-        [collections.OrderedDict, _OrderedDictSubclass, _KeyNormalizingOrderedDict],
+        [collections.OrderedDict, _OrderedDictSubclass],
     )
     @parametrize("nan_key", [False, True])
     def test_ordered_dict_storage_order_and_aliases(self, mapping_type, nan_key):
@@ -1648,8 +1672,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         mapping.slot = shared
         mapping["self"] = mapping
         mapping.alias = mapping
-        if mapping_type is _KeyNormalizingOrderedDict and not nan_key:
-            mapping["a"] = []  # normalization must keep the last linked-order value
         mapping.move_to_end(key)
         buf = io.BytesIO()
         GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(
@@ -1661,17 +1683,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         if nan_key:
             self.assertTrue(math.isnan(loaded_key))
         else:
-            self.assertEqual(
-                loaded_key, "a" if mapping_type is _KeyNormalizingOrderedDict else "A"
-            )
+            self.assertEqual(loaded_key, "A")
         linked_order = ["b", "self", loaded_key]
         self.assertEqual(list(loaded), linked_order)
-        self.assertEqual(
-            list(dict.keys(loaded)),
-            linked_order
-            if mapping_type is _KeyNormalizingOrderedDict
-            else [loaded_key, "b", "self"],
-        )
+        self.assertEqual(list(dict.keys(loaded)), [loaded_key, "b", "self"])
         self.assertIs(loaded[loaded_key], loaded["b"])
         self.assertIs(loaded.slot, loaded[loaded_key])
         self.assertIs(loaded["self"], loaded)
@@ -1687,7 +1702,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         mapping = mapping_type()
         mapping.clear()
         mapping.update(a=1, b=2)
-        mapping.move_to_end("a")
         mapping.saved = saved
         mapping.recreated = "overwritten"
         expected = pickle.loads(pickle.dumps(mapping))
@@ -1701,6 +1715,49 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(loaded.recreated, "constructor")
         if mapping_type is _OrderedDictWithSetState and saved is not None:
             self.assertEqual(loaded.state_restored, expected.state_restored)
+
+    @parametrize(
+        "mapping_type",
+        [
+            _OrderedDictWithGetState,
+            _OrderedDictWithNew,
+            _KeyNormalizingOrderedDict,
+            _OrderedDictWithItems,
+            _OrderedDictWithMeta,
+        ],
+    )
+    def test_reordered_ordered_dict_overrides_cannot_pickle(self, mapping_type):
+        mapping = mapping_type()
+        mapping.clear()
+        mapping.update(a=1, b=2)
+        mapping.move_to_end("a")
+        with self.assertRaisesRegex(
+            PackageError, "Cannot preserve OrderedDict storage order"
+        ):
+            GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, io.BytesIO()).dump(
+                mapping
+            )
+
+    @parametrize(
+        "mapping_type", [_OrderedDictWithStateHooks, _OrderedDictWithSlotsState]
+    )
+    def test_ordered_dict_preserves_orders_with_state_hooks(self, mapping_type):
+        shared = []
+        mapping = mapping_type(a=shared, b=shared)
+        mapping.saved = shared
+        mapping.slot = shared
+        mapping.move_to_end("a")
+        buf = io.BytesIO()
+        GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(mapping)
+        loaded = load_guards_state(buf.getvalue())
+        self.assertEqual(list(dict.keys(loaded)), ["a", "b"])
+        self.assertEqual(list(loaded), ["b", "a"])
+        self.assertIs(loaded.saved, loaded["a"])
+        self.assertIs(loaded.saved, loaded["b"])
+        if mapping_type is _OrderedDictWithStateHooks:
+            self.assertEqual(loaded.state_restored, (("a", "b"), ("b", "a")))
+        else:
+            self.assertIs(loaded.slot, loaded.saved)
 
     @parametrize("reducer", ["registered", "__reduce__", "__reduce_ex__"])
     def test_ordered_dict_registered_reducer(self, reducer):
@@ -2267,13 +2324,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the rebuilt guard compares against the sentinel forever: it
         # is refused by name, and pickle_guards_state re-raises that
         # PackageError unchanged as the bypass reason.
-        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+        from torch._C._distributed_c10d import Backend, ProcessGroup
+        from torch.distributed._backends.fake import FakeProcessGroup
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, Backend)
         self.assertNotIsInstance(pg, ProcessGroup)
         referent = _ModuleWithDtypeAttr()
-        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        objs = (
+            pg,
+            Backend(0, 1),
+            _PyBackend(),
+            ProcessGroup(0, 1),
+            torch.Stream(device="cpu"),
+        )
         for obj in (*objs, weakref.ref(referent)):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
