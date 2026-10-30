@@ -1860,6 +1860,12 @@ def _view_base_sharing_storage(arg: torch.Tensor) -> torch.Tensor | None:
         return None
     if arg.is_nested or base.is_nested:
         return base
+    # Sparse layouts throw on untyped_storage(), so only run the storage
+    # identity test on strided pairs and trust _base elsewhere. This mirrors
+    # the alias test in torch/_subclasses/meta_utils.py so the two copies of
+    # "is _base still a real alias?" agree.
+    if arg.layout != torch.strided or base.layout != torch.strided:
+        return base
     if base.untyped_storage()._cdata == arg.untyped_storage()._cdata:
         return base
     return None
