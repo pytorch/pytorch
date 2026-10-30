@@ -96,6 +96,7 @@ from .utils import (
     is_nvidia_sm100_or_later,
     is_pointwise_use,
     is_strict_cuda_triton,
+    is_strict_float_dtype,
     is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -8008,8 +8009,7 @@ def div_mode(a, b, rounding_mode=None):
             and (device := a.get_device()) is not None
             and is_strict_cuda_triton(device)
             and scalar_divisor is not None
-            and a.get_dtype()
-            in (torch.bfloat16, torch.float16, torch.float32, torch.float64)
+            and is_strict_float_dtype(a.get_dtype())
         ):
             return _div_trunc_cuda_scalar(a, scalar_divisor)
         return trunc(div(a, b))

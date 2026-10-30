@@ -5097,6 +5097,11 @@ def is_strict_cuda_triton(device: torch.device) -> bool:
     )
 
 
+def is_strict_float_dtype(dtype: torch.dtype) -> bool:
+    """Flag for floating dtypes supported by strict mode."""
+    return dtype in (torch.bfloat16, torch.float16, torch.float32, torch.float64)
+
+
 def device_supports_fp64(device: torch.device | None) -> bool:
     """Check if the given device supports float64."""
     if device is not None and device.type == "xpu":

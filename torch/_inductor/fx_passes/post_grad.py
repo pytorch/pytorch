@@ -75,6 +75,7 @@ from ..utils import (
     is_gpu,
     is_pointwise_use,
     is_strict_cuda_triton,
+    is_strict_float_dtype,
     is_view,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
@@ -3049,8 +3050,7 @@ class ConstructorMoverPass:
         return (
             isinstance(val, torch.Tensor)
             and is_strict_cuda_triton(val.device)
-            and val.dtype
-            in (torch.bfloat16, torch.float16, torch.float32, torch.float64)
+            and is_strict_float_dtype(val.dtype)
             and isinstance(divisor, fx.Node)
             and self.is_cpu_scalar_tensor(divisor)
         )
