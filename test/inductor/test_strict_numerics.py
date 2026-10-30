@@ -40,6 +40,13 @@ from torch.testing._internal.common_utils import (
     skipIfNoCuteDSL,
     TEST_CUTEDSL,
 )
+from torch.testing._internal.inductor_pointwise_coverage import (
+    coverage_case,
+    CoverageRecord,
+    record_class_fixtures,
+    record_result,
+    write_event,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -2554,6 +2561,45 @@ _LEDGER_ARCH = LazyVal(lambda: bool(IS_SM89 or IS_SM90 or IS_SM100))
     "requires CUDA and Triton on sm_89, sm_90 or sm_100 (the ledger's measured arches)",
 )
 class PointwiseStrictNumericsTest(TestCase):
+    _coverage = None
+
+    def run(self, result=None):
+        directory = os.getenv("PYTORCH_POINTWISE_COVERAGE_DIR")
+        case = coverage_case(self._testMethodName)
+        if not directory or case is None:
+            return super().run(result)
+        ledgers = {
+            "test_pointwise_bitwise": POINTWISE_XFAIL,
+            "test_pointwise_backward": BACKWARD_XFAIL,
+            "test_pointwise_nonfloat": NONFLOAT_XFAIL,
+        }
+        self._coverage = CoverageRecord(
+            case,
+            (case["op"], case["dtype"]) in ledgers.get(case["family"], ()),
+        )
+        if result is None:
+            result = self.defaultTestResult()
+        try:
+            with record_result(self._coverage, result, self):
+                return super().run(result)
+        except BaseException as error:
+            self._coverage.status, self._coverage.reason = "failed", str(error)
+            raise
+        finally:
+            write_event(directory, self._coverage.event())
+
+    def _coverage_filter(self, reason, count=1):
+        if self._coverage is not None and count:
+            self._coverage.filters[reason] += count
+
+    def _coverage_comparison(self, equal, kind=""):
+        if self._coverage is not None:
+            self._coverage.compared += 1
+            self._coverage.matched += int(equal)
+            self._coverage.generated_kernels = metrics.generated_kernel_count
+            if not equal:
+                self._coverage.mismatches[kind] += 1
+
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)
@@ -2572,6 +2618,34 @@ class PointwiseStrictNumericsTest(TestCase):
             fn, inp, (), {"weight": weight}, torch.ones_like(inp)
         )
         self.assertEqual(grads, (weight, inp))
+
+    @dtypes(torch.float32)
+    def test_coverage_filtered_samples(self, device, dtype):
+        self._coverage = CoverageRecord({"test": self._testMethodName})
+        x = torch.ones(2, device=device, dtype=dtype)
+        add = next(op for op in POINTWISE_OPS if op.name == "add")
+        with self.assertRaisesRegex(unittest.SkipTest, "no differentiable sample"):
+            self._sweep_backward(
+                device,
+                add,
+                dtype,
+                POINTWISE_STRICT_CFG,
+                calls=[("sample", x, (x[:1],), {})],
+            )
+        self.assertEqual(self._coverage.filters, {"backward_requires_reduction": 1})
+        self.assertEqual(self._coverage.compared, 0)
+
+        reduction = next(op for op in op_db if op.name == "sum")
+        with self.assertRaisesRegex(unittest.SkipTest, "no usable sample"):
+            self._sweep(
+                device,
+                reduction,
+                dtype,
+                POINTWISE_STRICT_CFG,
+                calls=[("sample", x, (), {})],
+            )
+        self.assertEqual(self._coverage.filters["output_shape_not_pointwise"], 1)
+        self.assertEqual(self._coverage.compared, 0)
 
     def _is_tensor_output(self, out):
         return isinstance(out, torch.Tensor) or (
@@ -2594,10 +2668,13 @@ class PointwiseStrictNumericsTest(TestCase):
         calls = []
         for sample in samples:
             if not isinstance(sample.input, torch.Tensor):
+                self._coverage_filter("non_tensor_input")
                 continue
             tensors = [sample.input, *sample.args]
             if any(isinstance(t, torch.Tensor) and t.dtype == dtype for t in tensors):
                 calls.append((sample.input, tuple(sample.args), dict(sample.kwargs)))
+            else:
+                self._coverage_filter("input_dtype_not_selected")
         return calls
 
     def _sample_inputs(self, op, device, dtype):
@@ -2613,6 +2690,7 @@ class PointwiseStrictNumericsTest(TestCase):
     def _bitpattern_call(self, op, dtype, device):
         r"""Build valid raw-bit calls for each sampled signature and mask parity."""
         if op.name in BITPATTERN_SLOW:
+            self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
             return []
         if dtype in (torch.float16, torch.bfloat16):
             x = _exhaustive_16bit(dtype, device)
@@ -2621,6 +2699,7 @@ class PointwiseStrictNumericsTest(TestCase):
             x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=0)
             y = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=1)
         else:
+            self._coverage_filter("no_raw_bit_generator_for_dtype")
             return []
         # Cross special values to cover missing pairs such as (+0, -0).
         sp = _SPECIALS.to(device=device, dtype=dtype)
@@ -2628,7 +2707,10 @@ class PointwiseStrictNumericsTest(TestCase):
         y = torch.cat([y, sp.repeat(sp.numel())])
         try:
             samples = self._sample_inputs(op, device, dtype)
-        except Exception:
+        except Exception as error:
+            self._coverage_filter(
+                f"raw_bit_input_generation_error:{type(error).__name__}"
+            )
             return []
 
         def sig(v):
@@ -2639,6 +2721,7 @@ class PointwiseStrictNumericsTest(TestCase):
         seen = set()
         for sample in samples:
             if not isinstance(sample.input, torch.Tensor):
+                self._coverage_filter("non_tensor_raw_bit_input")
                 continue
             operands = (*sample.args, *sample.kwargs.values())
             masked = any(
@@ -2656,11 +2739,15 @@ class PointwiseStrictNumericsTest(TestCase):
                     tuple(sorted((k, sig(v)) for k, v in kwargs.items())),
                 )
                 if key in seen:
+                    self._coverage_filter("duplicate_raw_bit_signature")
                     continue
                 seen.add(key)
                 try:
                     op.op(x, *args, **kwargs)
-                except Exception:
+                except Exception as error:
+                    self._coverage_filter(
+                        f"invalid_raw_bit_call:{type(error).__name__}"
+                    )
                     continue  # e.g. per-channel PReLU weights
                 calls.append((x, args, kwargs))
         return calls
@@ -2683,7 +2770,14 @@ class PointwiseStrictNumericsTest(TestCase):
                 samples = self._sample_inputs(op, device, dtype)
                 sample_calls = self._build_calls(samples, dtype)
                 if not keep_samples:
-                    sample_calls = [c for c in sample_calls if c[0].numel() > 1][:1]
+                    usable = [c for c in sample_calls if c[0].numel() > 1]
+                    self._coverage_filter(
+                        "small_reference_input", len(sample_calls) - len(usable)
+                    )
+                    self._coverage_filter(
+                        "reference_signature_not_selected", max(0, len(usable) - 1)
+                    )
+                    sample_calls = usable[:1]
                 calls += [("sample", *c) for c in sample_calls]
         except Exception as e:
             self.skipTest(f"input generation failed: {type(e).__name__}")
@@ -2730,13 +2824,17 @@ class PointwiseStrictNumericsTest(TestCase):
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 eager = fn(inp, args, kwargs)
                 if not self._is_tensor_output(eager):
+                    self._coverage_filter("non_tensor_output")
                     continue
                 if not self._is_pointwise_output(inp, args, kwargs, eager):
+                    self._coverage_filter("output_shape_not_pointwise")
                     continue
                 result = compiled(inp, args, kwargs)
                 tested += 1
-                if not _outputs_equal(eager, result):
-                    kind = _diff_kind(eager, result)
+                equal = _outputs_equal(eager, result)
+                kind = "" if equal else _diff_kind(eager, result)
+                self._coverage_comparison(equal, kind)
+                if not equal:
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
         if not mismatches:
@@ -2840,8 +2938,10 @@ class PointwiseStrictNumericsTest(TestCase):
                     probe = fn(inp, args, kwargs)
                 probe_out = _diff_output(probe)
                 if probe_out is None:
+                    self._coverage_filter("no_floating_output")
                     continue
                 if not self._is_pointwise_output(inp, args, kwargs, probe):
+                    self._coverage_filter("output_shape_not_pointwise")
                     continue
                 # Exclude broadcasted inputs whose gradients require a reduction.
                 diff_ts = [
@@ -2850,6 +2950,7 @@ class PointwiseStrictNumericsTest(TestCase):
                     if isinstance(t, torch.Tensor) and t.is_floating_point()
                 ]
                 if any(t.shape != probe_out.shape for t in diff_ts):
+                    self._coverage_filter("backward_requires_reduction")
                     continue
                 if tag.startswith("edge_"):
                     values = _pointwise_grad_values(probe_out.dtype, probe_out.device)
@@ -2872,21 +2973,28 @@ class PointwiseStrictNumericsTest(TestCase):
                     _, eager_grads = self._input_grads(
                         fn, inp, args, kwargs, grad_output
                     )
-                except Exception:
+                except Exception as error:
                     if tag.startswith("edge_"):
                         raise
+                    self._coverage_filter(
+                        f"eager_backward_error:{type(error).__name__}"
+                    )
                     continue
                 if eager_grads is None:
+                    self._coverage_filter("no_input_gradients")
                     continue
                 _, comp_grads = self._input_grads(
                     compiled, inp, args, kwargs, grad_output
                 )
                 tested += 1
                 if comp_grads is None:
+                    self._coverage_comparison(False, "shape")
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, "shape"))
                     continue
-                if not _outputs_equal(eager_grads, comp_grads):
-                    kind = _diff_kind(eager_grads, comp_grads)
+                equal = _outputs_equal(eager_grads, comp_grads)
+                kind = "" if equal else _diff_kind(eager_grads, comp_grads)
+                self._coverage_comparison(equal, kind)
+                if not equal:
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
         if not mismatches:
@@ -2915,6 +3023,32 @@ class PointwiseStrictNumericsTest(TestCase):
 
 
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
+
+if directory := os.getenv("PYTORCH_POINTWISE_COVERAGE_DIR"):
+    device_class = globals().get("PointwiseStrictNumericsTestCUDA")
+    cases = []
+    if device_class is not None:
+        record_class_fixtures(device_class, directory)
+        for method in unittest.defaultTestLoader.getTestCaseNames(device_class):
+            if case := coverage_case(method):
+                cases.append(case)
+    write_event(
+        directory,
+        {
+            "kind": "manifest",
+            "configuration": {
+                "all_samples": ALL_SAMPLES,
+                "torch_version": torch.__version__,
+                "cuda_version": torch.version.cuda,
+                "gpu_capability": torch.cuda.get_device_capability()
+                if torch.cuda.is_available()
+                else None,
+                "strict_config": POINTWISE_STRICT_CFG,
+                "selected_opinfo_ids": [_op_id(op) for op in POINTWISE_OPS],
+            },
+            "cases": cases,
+        },
+    )
 
 if __name__ == "__main__":
     run_tests()

@@ -57,6 +57,8 @@ if [[ "$BUILD_ENVIRONMENT" == *py3.11-gcc11 ]]; then
   pip uninstall -y dill 2>/dev/null || true
 fi
 
+export PYTORCH_POINTWISE_COVERAGE_DIR="${PYTORCH_POINTWISE_COVERAGE_DIR:-$PWD/test/test-reports/pointwise-coverage}"
+
 echo "Environment variables:"
 env
 
