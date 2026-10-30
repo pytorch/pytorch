@@ -74,7 +74,6 @@ class PrivateUse1RoutingTests(torch._dynamo.test_case.TestCase):
             patch.object(torch, "npu", module, create=True),
         ):
             trace_rules.get_torch_obj_rule_map.cache_clear()
-            trace_rules.get_privateuse1_torch_obj_rule_map.cache_clear()
             TorchInGraphFunctionVariable._get_handlers.cache_clear()
             try:
                 # The backend call is the first torch call traced, so this
@@ -127,7 +126,6 @@ class PrivateUse1RoutingTests(torch._dynamo.test_case.TestCase):
                     )
             finally:
                 trace_rules.get_torch_obj_rule_map.cache_clear()
-                trace_rules.get_privateuse1_torch_obj_rule_map.cache_clear()
                 TorchInGraphFunctionVariable._get_handlers.cache_clear()
 
 

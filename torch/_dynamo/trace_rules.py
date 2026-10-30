@@ -3102,6 +3102,16 @@ torch_name_rule_map = [
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
+# Functions probed on a registered privateuse1 backend module and routed to
+# TorchInGraphFunctionVariable; keep in sync with the handler probes in
+# TorchInGraphFunctionVariable._get_handlers().
+_PRIVATEUSE1_ROUTED_FNS: tuple[str, ...] = (
+    "current_stream",
+    "synchronize",
+    "_exchange_device",
+    "_maybe_exchange_device",
+)
+
 
 @functools.cache
 def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
@@ -3124,33 +3134,19 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     )
                 else:
                     d[obj] = v
-    return d
-
-
-@functools.cache
-def get_privateuse1_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
     # PrivateUse1 backends (e.g. npu) register a device module on torch after
-    # import, so the static get_torch_obj_rule_map() (built during torch import)
-    # cannot know them. Probe lazily instead: this map is built on the first
-    # lookup after a backend registers, so routing to TorchInGraphFunctionVariable
-    # resolves at lookup time. Cleared by clear_lru_cache() so a later-registered
-    # backend is picked up on the next build.
+    # import, so the map (built during torch import) is rebuilt here on every
+    # cache clear; torch._register_device_module also clears these caches when
+    # the backend registers, so routing is re-established for a late-registered
+    # backend. When no backend is registered this adds nothing.
     name = torch._C._get_privateuse1_backend_name()
-    if name == "privateuseone":
-        return {}
-    backend_mod = getattr(torch, name, None)
-    if backend_mod is None:
-        return {}
-    d: dict[Any, type[VariableTracker]] = {}
-    for fn_name in (
-        "current_stream",
-        "synchronize",
-        "_exchange_device",
-        "_maybe_exchange_device",
-    ):
-        fn = getattr(backend_mod, fn_name, None)
-        if callable(fn):
-            d[fn] = TorchInGraphFunctionVariable
+    if name != "privateuseone":
+        backend_mod = getattr(torch, name, None)
+        if backend_mod is not None:
+            for fn_name in _PRIVATEUSE1_ROUTED_FNS:
+                fn = getattr(backend_mod, fn_name, None)
+                if callable(fn):
+                    d.setdefault(fn, TorchInGraphFunctionVariable)
     return d
 
 
@@ -4271,10 +4267,6 @@ def _lookup_inner(
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
-        if rule is None:
-            # PrivateUse1 backends register after torch import, so their fns are
-            # not in the static map above; resolve them at lookup time instead.
-            rule = get_privateuse1_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:
                 reasons.add("get_torch_obj_rule_map")
@@ -4342,7 +4334,6 @@ def _lookup_inner(
 
 def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
-    torch._dynamo.trace_rules.get_privateuse1_torch_obj_rule_map.cache_clear()
     TorchInGraphFunctionVariable._get_handlers.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()

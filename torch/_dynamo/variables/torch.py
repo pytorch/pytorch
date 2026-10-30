@@ -2992,10 +2992,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         # PrivateUse1 backends (e.g. npu) register a device module after torch
         # import; probe it for the stream/synchronize/exchange_device handlers
-        # below. Routing for these functions is resolved at lookup time in
-        # trace_rules.get_privateuse1_torch_obj_rule_map(), so a backend that
-        # registers after the static rule map is built still dispatches here.
-        # The handlers are captured here, cached on first compile, so a backend
+        # below. Routing for these functions is resolved in
+        # trace_rules.get_torch_obj_rule_map(), rebuilt on trace_rules cache
+        # clears and when the backend registers (torch._register_device_module);
+        # the handlers are captured here, cached on first compile, so a backend
         # must still register before the first compile.
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
         privateuse1_backend_mod = (
@@ -3004,14 +3004,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else None
         )
 
+        from ..trace_rules import _PRIVATEUSE1_ROUTED_FNS
+
         privateuse1_backend_fns: dict[str, Callable[..., Any]] = {}
         if privateuse1_backend_mod is not None:
-            for fn_name in (
-                "current_stream",
-                "synchronize",
-                "_exchange_device",
-                "_maybe_exchange_device",
-            ):
+            for fn_name in _PRIVATEUSE1_ROUTED_FNS:
                 backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
                 if callable(backend_fn):
                     privateuse1_backend_fns[fn_name] = backend_fn
