@@ -14,6 +14,7 @@ never part of the node: the kernel is launched on the current stream when the no
 runs.
 """
 
+import copy
 import dataclasses
 import inspect
 import weakref
@@ -27,6 +28,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.user_kernel_hop import (
+    _object_state,
     functional_hop_dense,
     functional_hop_fake,
     functionalize_functional_hop,
@@ -61,10 +63,33 @@ MutatesArgs = tuple[str, ...] | Literal["unknown"]
 class CuteDSLKernel:
     """Side-table entry for a CuTeDSL host function: plays the part a JITFunction
     plays for Triton. The write set is part of the record, so one host function
-    wrapped with two different lists gets two entries."""
+    wrapped with two different lists gets two entries. ``mutates_args`` may be any
+    iterable of parameter names (stored as a tuple without repeats), or "unknown"."""
 
     fn: Callable[..., Any]
     mutates_args: MutatesArgs
+
+    def __post_init__(self) -> None:
+        if self.mutates_args == "unknown":
+            return
+        if isinstance(self.mutates_args, str):
+            raise ValueError(
+                f'CuTeDSL kernel {self.name}: mutates_args must be "unknown" or a '
+                f"sequence of parameter names, got {self.mutates_args!r}"
+            )
+        names = tuple(dict.fromkeys(self.mutates_args))
+        object.__setattr__(self, "mutates_args", names)
+        if not names:
+            return
+        info = get_host_fn_info(self.fn)
+        writable = tuple(p for p in info.params if p != info.stream_param)
+        for name in names:
+            if name not in writable:
+                raise ValueError(
+                    f"CuTeDSL kernel {self.name}: mutates_args names {name!r}, but "
+                    f"its parameters other than the stream {info.stream_param!r} "
+                    f"are {writable}"
+                )
 
     @property
     def name(self) -> str:
@@ -344,25 +369,48 @@ def _same_storage(a: Tensor, b: Tensor) -> bool:
 
 def _may_overlap(a: Tensor, b: Tensor) -> bool:
     """Whether two tensors may share memory: the same tensor, or two on one storage
-    whose byte ranges are not provably disjoint (so views that interleave without
-    overlapping count as overlapping). Bytes, not elements: views of one storage can
-    differ in dtype."""
+    that are not provably disjoint (statically_known_true, so no guards). Provably
+    disjoint are an empty tensor and any other, tensors whose byte ranges do not
+    meet, and 2-D tensors with contiguous rows the same stride apart whose rows do
+    not meet modulo that stride, such as the q, k and v columns of a fused qkv
+    buffer. Bytes, not elements: views of one storage can differ in dtype. (Not
+    compute_overlapping_tensors, which reinplacing uses: it reports some
+    overlapping 2-D views as disjoint.)"""
     if a is b:
         return True
     if not _same_storage(a, b):
         return False
-    from torch._prims_common import compute_required_storage_length
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    def byte_range(t: Tensor) -> tuple[Any, Any]:
-        offset, itemsize = t.storage_offset(), t.element_size()
-        end = compute_required_storage_length(t.shape, t.stride(), offset)
-        return offset * itemsize, end * itemsize
+    if any(statically_known_true(t.numel() == 0) for t in (a, b)):
+        return False
 
-    (a_start, a_end), (b_start, b_end) = byte_range(a), byte_range(b)
+    def start(t: Tensor) -> Any:
+        return t.storage_offset() * t.element_size()
+
+    def end(t: Tensor) -> Any:
+        # Exact unless t is empty, and an empty tensor overlaps nothing.
+        last = sum((n - 1) * s for n, s in zip(t.shape, t.stride()))
+        return start(t) + (last + 1) * t.element_size()
+
+    if statically_known_true(end(a) <= start(b)) or statically_known_true(
+        end(b) <= start(a)
+    ):
+        return False
+    if a.dim() != 2 or b.dim() != 2:
+        return True
+    # Modulo a symbolic row stride, only a difference known to be >= 0 simplifies.
+    if statically_known_true(start(b) < start(a)):
+        a, b = b, a
+    row, b_row = (t.stride(0) * t.element_size() for t in (a, b))
+    same_rows = (a.stride(1) == 1, b.stride(1) == 1, row > 0, b_row == row)
+    if not all(map(statically_known_true, same_rows)):
+        return True
+    # Every row of b starts `shift` bytes into a period of a's rows.
+    shift = (start(b) - start(a)) % row
     return not (
-        statically_known_true(a_end <= b_start)
-        or statically_known_true(b_end <= a_start)
+        statically_known_true(a.shape[1] * a.element_size() <= shift)
+        and statically_known_true(shift + b.shape[1] * b.element_size() <= row)
     )
 
 
@@ -502,20 +550,6 @@ register_user_kernel_hop_dispatch(
     cutedsl_kernel_wrapper_mutation, cutedsl_kernel_wrapper_functional
 )
 
-register_user_kernel_hop(
-    UserKernelHOPInfo(
-        dsl="cutedsl",
-        mutation=cutedsl_kernel_wrapper_mutation,
-        functional=cutedsl_kernel_wrapper_functional,
-        get_mutated_tensors=lambda hop_kwargs, kwargs: get_cutedsl_mutated_tensors(
-            hop_kwargs["kernel_idx"], hop_kwargs["constant_args_idx"], kwargs
-        ),
-        get_kernel_name=lambda hop_kwargs: get_kernel(hop_kwargs["kernel_idx"]).name,
-        functional_dense=cutedsl_kernel_wrapper_functional_dense,
-        reinplace_trigger="CUTEDSL_OPS",
-    )
-)
-
 
 ###############################################################################
 # The "CuteDSLHOPifier": a class that transforms a call to a CuTeDSL host function
@@ -563,7 +597,8 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         raise NotImplementedError("abstract method")
 
     def leaves(self, val: Any) -> list[Any]:
-        """The values inside a list/tuple argument (the value itself otherwise)."""
+        """The values inside a container argument (the value itself otherwise);
+        dataclass instances and plain objects are containers (see _object_state)."""
         raise NotImplementedError("abstract method")
 
     def specialize_nested(self, variable: Any, val: Any) -> Any:
@@ -711,10 +746,26 @@ class TracingCuteDSLHOPifier(CuteDSLHOPifier):
         return type(val)
 
     def leaves(self, val: Any) -> list[Any]:
-        return pytree.tree_leaves(val)
+        leaves: list[Any] = []
+        for leaf in pytree.tree_leaves(val):
+            state = None if self.is_tensor(leaf) else _object_state(leaf)
+            leaves += [leaf] if state is None else self.leaves(list(state.values()))
+        return leaves
 
     def specialize_nested(self, variable: Any, val: Any) -> Any:
-        return pytree.tree_map(variable.specialize_symbolic, val)
+        def specialize(leaf: Any) -> Any:
+            state = _object_state(leaf)
+            if state is None:
+                return variable.specialize_symbolic(leaf)
+            values = {k: self.specialize_nested(variable, v) for k, v in state.items()}
+            if all(values[k] is v for k, v in state.items()):
+                return leaf
+            new = copy.copy(leaf)
+            for name, value in values.items():
+                object.__setattr__(new, name, value)
+            return new
+
+        return pytree.tree_map(specialize, val)
 
     def call_HOP(
         self,
@@ -771,3 +822,22 @@ class TraceableCuteDSLKernelWrapper:
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)
         return arg
+
+
+# Imported after every definition, as in triton_kernel_wrap.py.
+from torch._dynamo.utils import ReInplaceTrigger
+
+
+register_user_kernel_hop(
+    UserKernelHOPInfo(
+        dsl="cutedsl",
+        mutation=cutedsl_kernel_wrapper_mutation,
+        functional=cutedsl_kernel_wrapper_functional,
+        get_mutated_tensors=lambda hop_kwargs, kwargs: get_cutedsl_mutated_tensors(
+            hop_kwargs["kernel_idx"], hop_kwargs["constant_args_idx"], kwargs
+        ),
+        get_kernel_name=lambda hop_kwargs: get_kernel(hop_kwargs["kernel_idx"]).name,
+        functional_dense=cutedsl_kernel_wrapper_functional_dense,
+        reinplace_trigger=ReInplaceTrigger.CUTEDSL_OPS,
+    )
+)
