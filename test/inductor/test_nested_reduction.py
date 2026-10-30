@@ -1211,7 +1211,7 @@ class _NestedReductionBase:
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertGreater(metrics.generated_kernel_count, 1)
 
-    def test_producer_consumer_rejects_sub_parent_mutation(self):
+    def test_producer_consumer_sub_parent_mutation(self):
         B, D, G = 32, 1024, 16
 
         def f(x, weight, out):
@@ -1230,8 +1230,7 @@ class _NestedReductionBase:
         actual = torch.compile(f, fullgraph=True)(x, weight, out)
         self.assertEqual(actual, expected)
         self.assertEqual(out, ref_out)
-        self.assertEqual(metrics.codegen_nested_reduction, 1)
-        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.check_fusion()
 
     def test_producer_consumer_sub_parent_source_mutated_later(self):
         B, D, G = 8, 1024, 16
@@ -1405,10 +1404,33 @@ class _NestedReductionBase:
         actual, sources = run_and_get_code(torch.compile(f), x, weight)
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
         self.check_fusion()
-        expected_splits = 1 if shared_external_source else 2
-        FileCheck().check_count("tl.split(", expected_splits, exactly=True).run(
-            "\n".join(sources)
-        )
+        # One split of the lane source and one of the per-group scale, which
+        # is lifted to the parent tile and split like the data.
+        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+
+    def test_producer_consumer_lane_fold_splits_computed_value(self):
+        """Lanes split the normalized value once, not the raw x and w loads."""
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            inv = scale.reciprocal().unsqueeze(-1)
+            return pairs[..., 0] * inv, pairs[..., 1] * inv, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        expected = self.get_unnested_reference(f, (x, weight))
+        actual, sources = run_and_get_code(torch.compile(f), x, weight)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        # The weight lane split has a singleton leading dim; its absence means
+        # the lane replay folded x * rstd * w onto the parent value.
+        FileCheck().check_count("tl.split(", 2, exactly=True).check_not(
+            "[1, (R0_BLOCK//2), 2]"
+        ).run("\n".join(sources))
 
     def test_producer_consumer_independent_sub_parent_source(self):
         B, D, G = 32, 1024, 16
@@ -2389,7 +2411,7 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_fusion()
 
-    def test_standalone_sub_parent_rejects_mutation(self):
+    def test_standalone_sub_parent_mutation(self):
         B, D, G = 32, 1024, 16
 
         def f(x, out):
@@ -2406,8 +2428,28 @@ class _NestedReductionBase:
         act_scale = torch.compile(f, fullgraph=True)(x, out)
         self.assertEqual(act_scale, ref_scale, atol=1e-2, rtol=1e-2)
         self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+
+    def test_standalone_sub_parent_rejects_shared_mutation_target(self):
+        """Two epilogues storing into one destination cannot both be hoisted."""
+        B, D, G = 32, 1024, 16
+
+        def f(x, out):
+            xg = x.view(B, D // G, G)
+            scale = (xg.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            out[..., :4].copy_(pairs[..., 0].float()[..., :4] / scale.unsqueeze(-1))
+            out[..., 4:].copy_(pairs[..., 1].float()[..., 4:] / scale.unsqueeze(-1))
+            return scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        out = torch.randn(B, D // G, G // 2, device=GPU_TYPE)
+        ref_out = out.clone()
+        ref_scale = f(x, ref_out)
+        act_scale = torch.compile(f, fullgraph=True)(x, out)
+        self.assertEqual(act_scale, ref_scale, atol=1e-2, rtol=1e-2)
+        self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
         self.check_no_fusion()
-        self.assertGreater(metrics.generated_kernel_count, 1)
 
     def test_fullres_x_epilogue_rejects_intermediate_dependency(self):
         """Do not fuse a full-res consumer before its extra producer."""
@@ -2620,6 +2662,27 @@ class _NestedReductionBase:
 
         self._check_rejected(f, (torch.randn(4, 2048, device=GPU_TYPE),))
 
+    @inductor_config.patch("triton.multi_kernel", True)
+    @parametrize("staged", [False, True])
+    def test_multi_kernel(self, staged):
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            if not staged:
+                return scale
+            pairs = yg.view(B, D // G, G // 2, 2)
+            scale_f = scale.unsqueeze(-1)
+            return scale, pairs[..., 0] / scale_f, pairs[..., 1] / scale_f
+
+        args = (torch.randn(B, D, device=GPU_TYPE), torch.randn(D, device=GPU_TYPE))
+        self.check_nested_matches_unnested(f, args)
+        # A looped kernel has no persistent alternative to offer.
+        expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
+        self.check_fusion(expected_kernels)
+
 
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
@@ -2686,10 +2749,12 @@ def _run_and_capture_source_bundle(
     kernel_signatures = (
         (kernel_signature,) if isinstance(kernel_signature, str) else kernel_signature
     )
+    # Match on the kernel's own name: a chunk runs up to the next decorator, so
+    # it trails the following kernel's definition header.
     kernel_codes = [
         kernel_code
         for kernel_code in TRITON_KERNEL_RE.findall(combined_code)
-        if any(signature in kernel_code for signature in kernel_signatures)
+        if _kernel_name(kernel_code).startswith(kernel_signatures)
         and _is_wrapper_launched_kernel(wrapper_code, kernel_code)
     ]
     return wrapper_code, kernel_codes
@@ -3226,6 +3291,20 @@ class _InternalsBase:
                 kernel_code
             )
 
+    def multi_kernel_wrapper_checks(self, min_rblock: int) -> FileCheck:
+        """Both reduction forms carry the nested metadata and share a dispatcher."""
+        if self.force_persistent_outer_reduction is False:
+            # A looped base kernel has no persistent alternative to offer.
+            return FileCheck().check_not("async_compile.multi_kernel(")
+        return (
+            FileCheck()
+            .check_count(f"'min_rblock': {min_rblock}", 2, exactly=True)
+            .check("async_compile.multi_kernel(")
+            .check("triton_red_fused")
+            .check("triton_per_fused")
+            .check("multi_kernel_0.run(")
+        )
+
     def assert_single_kernel_form(
         self,
         capture,
@@ -3239,6 +3318,7 @@ class _InternalsBase:
         min_xblock: int | None = None,
         min_rblock: int | None = None,
         extra_checks: FileCheck | None = None,
+        wrapper_checks: FileCheck | None = None,
     ) -> str:
         wrapper_code, kernel_code = capture(
             *capture_args,
@@ -3279,6 +3359,8 @@ class _InternalsBase:
         )
         if extra_checks is not None:
             extra_checks.run(kernel_code)
+        if wrapper_checks is not None:
+            wrapper_checks.run(wrapper_code)
         return kernel_code
 
     def test_layernorm_block_amax_kernel_form(self):
@@ -3352,6 +3434,7 @@ class _InternalsBase:
             meta_num_load=self.looped_or_persistent(3, 2),
             min_rblock=16,
             extra_checks=FileCheck().check_not("tl.split("),
+            wrapper_checks=self.multi_kernel_wrapper_checks(16),
         )
 
     def test_producer_consumer_scale_kernel_form(self):
@@ -3601,6 +3684,7 @@ class _InternalsBase:
                 if self.force_persistent_outer_reduction is False
                 else FileCheck().check_count("tl.split(", 1, exactly=True)
             ),
+            wrapper_checks=self.multi_kernel_wrapper_checks(2),
         )
 
     @inductor_config.patch(benchmark_kernel=True)
@@ -3704,6 +3788,37 @@ class NestedReductionAOTITest(TestCase):
                 inductor_configs={
                     "loop_ordering_after_fusion": True,
                     "triton.nested_reduction": True,
+                },
+            )
+            compiled = torch._inductor.aoti_load_package(package_path)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+
+    def test_rmsnorm_block_amax_multi_kernel(self):
+        """cpp-wrapper resolves the multi-kernel choice at compile time."""
+        B, D, G = 8, 1024, 32
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                normalized = _rmsnorm(x)
+                block_amax = normalized.reshape(B, D // G, G).abs().amax(dim=-1)
+                return normalized, block_amax
+
+        model = Model()
+        x = torch.randn(B, D, device=GPU_TYPE)
+        expected = model(x)
+        metrics.reset()
+        with fresh_inductor_cache():
+            exported = torch.export.export(model, (x,))
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                inductor_configs={
+                    "loop_ordering_after_fusion": True,
+                    "triton.nested_reduction": True,
+                    "triton.multi_kernel": True,
+                    "triton.autotune_at_compile_time": True,
                 },
             )
             compiled = torch._inductor.aoti_load_package(package_path)

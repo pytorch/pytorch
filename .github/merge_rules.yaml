@@ -88,17 +88,6 @@
   - Lint
   - pull
 
-- name: OSS CI / pytorchbot / XLA
-  patterns:
-  - .github/ci_commit_pins/xla.txt
-  approved_by:
-  - pytorchbot
-  ignore_flaky_failures: false
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: Documentation
   patterns:
   - docs/**
@@ -196,9 +185,10 @@
 
 - name: MPS
   patterns:
-  - test/test_mps.py
-  - test/inductor/test_mps_basic.py
+  - test/**
   - torch/testing/_internal/common_mps.py
+  - torch/testing/_internal/common_methods_invocations.py
+  - torch/testing/_internal/opinfo/**
   - aten/src/ATen/native/native_functions.yaml
   - aten/src/ATen/mps/**
   - aten/src/ATen/native/mps/**
@@ -207,6 +197,7 @@
   - malfet
   - kurtamohler
   - jhavukainen
+  - Isalia20
 
   mandatory_checks_name:
   - EasyCLA
@@ -230,11 +221,9 @@
   patterns:
   - docs/source/pipeline.rst
   - docs/source/distributed*
-  - docs/source/rpc.rst
-  - docs/source/rpc/**
+  - docs/source/distributed/**
   - docs/source/_static/img/rpc*
   - docs/source/_static/img/*distributed*
-  - docs/source/elastic/**
   - benchmarks/distributed/**
   - torch/distributed/**
   - torch/nn/parallel/distributed*
@@ -277,7 +266,7 @@
 
 - name: DCP
   patterns:
-  - docs/source/distributed.checkpoint.rst
+  - docs/source/distributed/checkpoint.md
   - torch/distributed/checkpoint/**
   approved_by:
   - LucasLLC
@@ -433,7 +422,6 @@
   - torchgen/dest/lazy_ts_lowering.py
   - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
-  - .github/ci_commit_pins/xla.txt
   approved_by:
   - alanwaketan
   - JackCaoG
@@ -479,6 +467,27 @@
   - Lint
   - pull
 
+- name: Profiler
+  patterns:
+  - test/cpp/profiler/**
+  - test/profiler/**
+  - torch/_C/_profiler.pyi
+  - torch/autograd/profiler*
+  - torch/csrc/autograd/profiler*
+  - torch/csrc/profiler/**
+  - torch/profiler/**
+  approved_by:
+  - ryanzhang22
+  - scotts
+  - ngimel
+  - dolpm
+  - sanrise
+  - NicolasHug
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
@@ -495,6 +504,8 @@
   - rtimpe
   - trichmo
   - hameerabbasi
+  - riccardofelluga
+  - amjames
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -503,9 +514,34 @@
 - name: ROCm
   patterns:
   - '**rocm**'
+  - '**ROCm**'
+  - '**Rocm**'
   - '**hip**'
+  - '**HIP**'
+  - '**Hip**'
+  - '-**ship**'
+  - '**miopen**'
+  - '**MIOpen**'
+  - '**aotriton**'
+  - '**flydsl**'
+  - '**rccl**'
+  - '**rocshmem**'
+  - '**Rocprof**'
+  - '**Rocblas**'
+  - '**amdsmi**'
+  - '**Gfx9**'
+  - '**_ck_**'
+  - tools/amd_build/**
+  - .github/scripts/amd/**
+  - aten/src/ATen/cuda/tunable/**
+  - aten/src/ATen/native/TunableOp.h
+  - torch/cuda/tunable.py
+  - docs/source/cuda.tunable.md
+  - test/**
+  - torch/testing/**
   approved_by:
   - jeffdaily
+  - jithunnair-amd
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -520,8 +556,9 @@
   - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
-  - jgong5
   - gujinghui
+  - guangyey
+  - etaf
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -564,21 +601,58 @@
   - Lint
   - pull
 
+- name: Complex Compilation
+  patterns:
+  - torch/_subclasses/complex_tensor/**
+  - test/complex_tensor/**
+  - torch/_functorch/_aot_autograd/complex_decomposition.py
+  - test/dynamo/test_complex.py
+  approved_by:
+  - hameerabbasi
+  - amjames
+  - eellison
+  - ezyang
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - inductor
+
+- name: c10 utilities
+  patterns:
+  - c10/util/**
+  - c10/test/util/**
+  approved_by:
+  - r-barnes
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Testing (Temporarily used for test refactoring)
+  patterns:
+  - torch/testing/**
+  - test/**
+  approved_by:
+  - fffrog
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Metamates
   patterns:
   - '*'
   approved_by:
   - aditvenk
-  - AmesingFlank
-  - amirafzali
   - angelayi
+  - anshul-si
   - aorenste
   - atalman
   - blaine-rister
   - bobrenjc93
-  - ColinPeppler
+  - BoyuanFeng
   - d4l3k
-  - dcci
   - desertfire
   - digantdesai
   - dolpm
@@ -587,8 +661,6 @@
   - fegin
   - frgossen
   - georgehong
-  - han3101
-  - haoyuz
   - htyu
   - huydhn
   - IvanKobzarev
@@ -600,22 +672,28 @@
   - jeanschmidt
   - kapilsh
   - karthickai
-  - kqfu
   - laithsakka
   - liangel-02
+  - MengjiaoZhou
   - Microve
+  - Mingming-Ding
   - mlazos
+  - nandesuka
+  - NicolasHug
   - njriasan
   - oulgen
+  - pdesupinski
   - pianpwk
   - ryanzhang22
   - sanketpurandare
+  - sanrise
   - scotts
-  - seemethere
   - sevenEng
+  - shawnxu26
   - SherlockNoMad
   - slayton58
   - soulitzer
+  - tianyu-l
   - tushar00jain
   - vkuzo
   - warrendeng
@@ -624,6 +702,7 @@
   - williamwen42
   - ydwu4
   - yushangdi
+  - zoranzhao
   mandatory_checks_name:
   - EasyCLA
   - Lint

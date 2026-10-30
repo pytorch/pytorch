@@ -277,6 +277,37 @@ def fmaximum(a, b):
 
 
 @triton.jit
+def nextafter(x, y):
+    bitwidth: tl.constexpr = x.dtype.primitive_bitwidth
+    if bitwidth == 64:
+        result = libdevice.nextafter(x, y)
+    else:
+        # libdevice.nextafterf honors CUDA FTZ and skips fp32 subnormals. For
+        # fp16/bf16, stepping must happen before values are promoted to fp32.
+        idtype: tl.constexpr = tl.core.get_int_dtype(bitwidth, signed=False)
+        ix = x.to(idtype, bitcast=True)
+        iy = y.to(idtype, bitcast=True)
+        sign_mask: tl.constexpr = 1 << (bitwidth - 1)
+
+        x_is_zero = (ix & (sign_mask - 1)) == 0
+        y_is_zero = (iy & (sign_mask - 1)) == 0
+
+        # Compare bit patterns so denormal handling cannot affect IEEE ordering.
+        same_sign = (ix & sign_mask) == (iy & sign_mask)
+        step_up = same_sign & (iy > ix)
+        stepped = ix + tl.where(step_up, 1, -1).to(idtype)
+        zero_step = (iy & sign_mask) | 1
+
+        result = (
+            tl.where(x_is_zero, zero_step, stepped).to(idtype).to(x.dtype, bitcast=True)
+        )
+        result = tl.where((ix == iy) | (x_is_zero & y_is_zero), y, result)
+
+    # ROCm's fp64 libdevice nextafter can preserve signaling NaNs.
+    return tl.where((x != x) | (y != y), x + y, result)
+
+
+@triton.jit
 def min2(a, dim):
     return tl.reduce(a, dim, minimum)
 
@@ -334,6 +365,32 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
 
 
 @triton.jit
+def _first_index_of(value, result, index, dim):
+    # The smallest index whose lane attains `result` from max2/min2 (the NaN
+    # lanes when it is NaN): the index a NaN-aware tuple reduce would pick, at
+    # the cost of two native reductions instead of a combine of about ten
+    # instructions per element. The paired value is the extremum, not the
+    # winning lane's, which differs on a tie between -0.0 and 0.0.
+    hit = (value == tl.expand_dims(result, dim)) | (value != value)
+    sentinel = tl.full(
+        [1], (1 << (index.dtype.primitive_bitwidth - 1)) - 1, index.dtype
+    )
+    return tl.min(tl.where(hit, index, sentinel), dim)
+
+
+@triton.jit
+def min_with_first_index(value, index, dim):
+    min_value = min2(value, dim)
+    return min_value, _first_index_of(value, min_value, index, dim)
+
+
+@triton.jit
+def max_with_first_index(value, index, dim):
+    max_value = max2(value, dim)
+    return max_value, _first_index_of(value, max_value, index, dim)
+
+
+@triton.jit
 def min_with_index(value, index, dim):
     return tl.reduce((value, index), dim, minimum_with_index)
 
@@ -388,17 +445,15 @@ def online_softmax_combine(
     else:
         out_max = maximum(lhs_max, rhs_max)
 
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
+    scale = exp(-tl.abs(lhs_max - rhs_max), use_fast_math)
+    lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
+    rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
     # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
+    out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
 
@@ -439,14 +494,12 @@ def online_softmax_combine_with_sum(
     else:
         out_max = maximum(lhs_max, rhs_max)
 
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
+    scale = exp(-tl.abs(lhs_max - rhs_max), use_fast_math)
+    lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
+    rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
     out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
 

@@ -6,6 +6,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensor.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -494,7 +495,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
       "the requested broadcast shape has fewer dimensions than the input");
   const int64_t res_sparse_dim = new_sparse_dims + self.sparse_dim();
 
-  for (int64_t i = 0; i < self.dim(); ++i) {
+  for (const auto i : c10::irange(self.dim())) {
     TORCH_CHECK(
         self_size[i] == 1 || self_size[i] == size[i + new_sparse_dims],
         "The input's length ",
@@ -513,7 +514,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   int64_t largest_sparse_dim_len = -1;
   int64_t min_broadcast_dim = (new_sparse_dims > 0) ? 0 : -1;
   int64_t max_unchanged_dim = -1;
-  for (int64_t i = 0; i < res_sparse_dim; ++i) {
+  for (const auto i : c10::irange(res_sparse_dim)) {
     if ((i < new_sparse_dims) || (self_size[i - new_sparse_dims] != size[i])) {
       nnz_expand_factor *= size[i];
       largest_sparse_dim_len = std::max(size[i], largest_sparse_dim_len);
@@ -538,7 +539,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   // Replace non-broadcastable dims with 1 in the `size` vector {
   auto res_sparse_dim_broadcast_mask =
       at::DimVector(size.begin(), size.begin() + res_sparse_dim);
-  for (int64_t i = new_sparse_dims; i < res_sparse_dim; ++i) {
+  for (const auto i : c10::irange(new_sparse_dims, res_sparse_dim)) {
     res_sparse_dim_broadcast_mask[i] =
         (size[i] == self_size[i - new_sparse_dims]) ? 1 : size[i];
   }
@@ -586,7 +587,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   // - only for broadcast dims {
   const auto dim_arange =
       at::arange(largest_sparse_dim_len, self._indices().options());
-  for (int64_t i = 0; i < res_sparse_dim; ++i) {
+  for (const auto i : c10::irange(res_sparse_dim)) {
     Tensor curr_dim_idx;
     if ((i < new_sparse_dims) || (self_size[i - new_sparse_dims] != size[i])) {
       // If the dim is either a newly created sparse dim, or an already existing
@@ -1325,6 +1326,21 @@ static Tensor make_qtensor(
   return result;
 }
 
+// as_strided creates a new TensorImpl but shares the storage so for faketensor
+// we need to copy over the metadata like the device and also the faketensormode
+// pointer
+static void maybe_copy_fake_tensor_metadata(
+    const Tensor& self,
+    TensorImpl* result) {
+  if (!self.is_fake()) {
+    return;
+  }
+  auto fake_device = self.unsafeGetTensorImpl()->fake_device();
+  TORCH_INTERNAL_ASSERT(fake_device.has_value());
+  at::set_and_normalize_fake_device(result, *fake_device);
+  result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
+}
+
 Tensor as_strided_tensorimpl(
     const Tensor& self,
     IntArrayRef size,
@@ -1337,6 +1353,7 @@ Tensor as_strided_tensorimpl(
       self.key_set(),
       self.dtype());
   setStrided(result, size, stride, storage_offset);
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1371,6 +1388,7 @@ Tensor as_strided_tensorimpl_meta_symint(
   // bases / storage size.
   setStridedUnchecked(
       result, sym_size, sym_stride, std::move(sym_storage_offset));
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1896,8 +1914,9 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0) {
     std::vector<c10::SymInt> new_reps(size_diff, 1);
-    for (const auto i : c10::irange(reps.size())) {
-      new_reps.emplace_back(reps[i]);
+    new_reps.reserve(static_cast<size_t>(size_diff) + reps.size());
+    for (const auto& rep : reps) {
+      new_reps.emplace_back(rep);
     }
     return self.repeat_symint(SymIntArrayRef(new_reps));
   }
@@ -1937,6 +1956,7 @@ static Tensor alias_with_sizes_and_strides(
   } else {
     self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
+  maybe_copy_fake_tensor_metadata(self, self_tmp_);
   return self_;
 }
 
@@ -2593,7 +2613,7 @@ Tensor index_select_sparse_cpu(
           run_in_parallel ? at::internal::GRAIN_SIZE : idx_len;
       at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end) {
         auto* ptr_curr_cidx = ptr_cidx + ptr_idx[start] + 1;
-        for (int64_t i = start; i < std::min(end, idx_len - 1); ++i) {
+        for (const auto i : c10::irange(start, std::min(end, idx_len - 1))) {
           const auto diff = ptr_idx[i + 1] - ptr_idx[i];
           std::fill_n(ptr_curr_cidx, diff, i + 1);
           ptr_curr_cidx += diff;
@@ -4732,8 +4752,8 @@ at::Tensor as_strided_scatter_symint(
   auto output = clone_preserve_strides(self);
   auto slice =
       output.as_strided_symint(size, stride, std::move(storage_offset));
-  TORCH_CHECK(
-      slice.sym_sizes() == src.sym_sizes(),
+  TORCH_SYM_CHECK(
+      sym_equals(slice.sym_sizes(), src.sym_sizes()),
       "expected src to have a size equal to the slice of self. src size = ",
       src.sym_sizes(),
       ", slice size = ",
@@ -4825,9 +4845,9 @@ void unbind_copy_int_out(
     int64_t dim,
     at::TensorList out) {
   if (at::GradMode::is_enabled()) {
-    for (const auto i : c10::irange(out.size())) {
+    for (const auto& out_elem : out) {
       TORCH_CHECK(
-          !out[i].requires_grad(),
+          !out_elem.requires_grad(),
           "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
           "but one of the arguments requires grad.");
     }

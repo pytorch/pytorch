@@ -38,10 +38,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Interval + look-back defaults; override process-wide (first-come-first-serve) via
-# PmSampler.configure() -- there is no env var. Metrics are NOT process-wide -- each consumer
-# brings its own via add_consumer(). The HW sampling interval (GPU_TIME_INTERVAL units = ns),
-# default 1 ms.
+# Interval + look-back defaults; override them process-wide via PmSampler.configure() or for one
+# active session through add_consumer(). Metrics are NOT process-wide -- each consumer brings its
+# own. The HW sampling interval (GPU_TIME_INTERVAL units = ns), default 1 ms.
 _DEFAULT_SAMPLING_INTERVAL_NS = 1_000_000
 # Retained look-back window: the sampler is sized (max_samples + ring) to cover this much wall-clock
 # at the interval. Kept modest because the host counter-data image is ~18 KiB/sample (see
@@ -250,15 +249,37 @@ class PmSampler:
         self._retained_vals = np.empty((0, 0), dtype=np.float64)
         self._lock = threading.RLock()
 
-    def add_consumer(self, metrics: Iterable[str]) -> _Handle:
+    def add_consumer(
+        self,
+        metrics: Iterable[str],
+        *,
+        sampling_interval_ms: float | None = None,
+        lookback_window_ms: float | None = None,
+    ) -> _Handle:
         """Register a consumer for ``metrics`` and return its handle (``handle.poll()`` /
         ``handle.detach()``; dropping the handle also detaches). Raises ValueError if ``metrics`` is
-        empty or the resulting union can't be collected in one PM pass."""
+        empty or the resulting union can't be collected in one PM pass. The first consumer in an
+        active session selects its interval and look-back; later consumers share that timing."""
         metrics = list(metrics)
         if not metrics:
             raise ValueError("PM sampling requires a non-empty metric set")
         consumer = _Consumer(metrics)
         with self._lock:
+            if not self._consumers:
+                cls = type(self)
+                self._sampling_interval_ns = (
+                    cls._sampling_interval_ns
+                    if sampling_interval_ms is None
+                    else int(sampling_interval_ms * 1_000_000)
+                )
+                self._lookback_window_ns = (
+                    cls._lookback_window_ns
+                    if lookback_window_ms is None
+                    else int(lookback_window_ms * 1_000_000)
+                )
+                self._max_samples = max(
+                    1, self._lookback_window_ns // self._sampling_interval_ns
+                )
             self._check_single_pass(self._union_of([*self._consumers, consumer]))
             self._consumers.append(consumer)
             self._reconfigure()
