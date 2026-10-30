@@ -46,6 +46,17 @@ aoti_torch_set_current_xpu_device(const int32_t& device_index);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_sycl_queue(void** ret);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// XPU memory allocation using XPUCachingAllocator
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr // returns raw GPU memory pointer
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_xpu_caching_allocator_raw_delete(void* ptr);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #if AT_MKLDNN_ENABLED()
 
 AOTI_TORCH_EXPORT AOTITorchError
