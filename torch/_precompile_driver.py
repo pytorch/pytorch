@@ -132,8 +132,7 @@ def _import_custom_op_modules(served=(), import_served=None):
             continue
         try:
             importlib.import_module(module)
-        # Not just ImportError: e.g. importing torch.distributed.device_mesh before
-        # torch.distributed.tensor raises ValueError.
+        # Not just ImportError: a module can raise anything while it registers ops.
         except Exception as e:
             import_errors[module] = e
     # A served module that does not import fails the load here, not at the op
@@ -155,19 +154,25 @@ def _import_custom_op_modules(served=(), import_served=None):
             if not has_kernel(qualname, key):
                 missing.append(f"{qualname} ({key} kernel)")
     # Another module's kernel under the same key would pass the check above, so
-    # the active kernel must be registered from the overriding module's file.
+    # the active kernel must be registered from the overriding module's file, or
+    # by a register_kernel or torch.library.impl call from its body.
+    from torch._library.utils import kernel_callers
+
     overridden = []
     real = os.path.realpath
     override_errors = set()
     for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
         dump = torch._C._dispatch_dump(qualname)
+        callers = kernel_callers(qualname)
         for key, module in owners.items():
             pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
             active = re.search(pattern, dump, re.MULTILINE)
             path = getattr(sys.modules.get(module), "__file__", None)
             if module in import_errors:
                 override_errors.add(module)
-            elif not (active and path and real(active[1]) == real(path)):
+            elif callers.get(key) != module and not (
+                active and path and real(active[1]) == real(path)
+            ):
                 overridden.append(f"{qualname} ({key} kernel of {module})")
     if missing or override_errors or overridden:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
