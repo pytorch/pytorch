@@ -1428,6 +1428,17 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) {
     const auto& scalarType = inputs[0].scalar_type();
+
+    // Skip the collective when the per-rank input is empty. An empty input
+    // (numel() == 0) makes gloo's allgather abort every rank with SIGFPE; see
+    // the repro in https://github.com/pytorch/pytorch/issues/85234. All inputs
+    // and outputs are already validated to share inputs[0]'s sizes, so on an
+    // empty input the output tensors are correctly-sized empty tensors and
+    // there is nothing to communicate.
+    if (inputs[0].numel() == 0) {
+      return;
+    }
+
     gloo::AllgatherOptions opts(context_);
     opts.setTag(tag);
     opts.setTimeout(getTimeout());
