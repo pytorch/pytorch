@@ -748,6 +748,28 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_unmatched_enter_autocast_aot_eager_raises(self):
+        # Graph 0 from an unmatched _enter_autocast leaves autocast enabled.
+        # AOT backends used to drop set_autocast_enabled and silently miscompile;
+        # they now reject the mutation at compile time.
+        def f(x):
+            torch.amp.autocast_mode._enter_autocast("cpu")
+            return x + 1
+
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        prior_cache = torch.is_autocast_cache_enabled()
+        try:
+            compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                compiled(torch.randn(2))
+        finally:
+            torch.autocast_decrement_nesting()
+            torch.clear_autocast_cache()
+            torch.set_autocast_enabled("cpu", prior_enabled)
+            torch.set_autocast_dtype("cpu", prior_dtype)
+            torch.set_autocast_cache_enabled(prior_cache)
+
     def test__enter__exit_autocast_graph_break_explicit_dtype(self):
         def f(x):
             m = torch.amp.autocast_mode._enter_autocast(

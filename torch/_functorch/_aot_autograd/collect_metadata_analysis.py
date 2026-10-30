@@ -202,11 +202,6 @@ def run_functionalized_fw_and_collect_metadata(
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
-        # _get_autocast_states layout is [enabled, dtype] * N + [cache].
-        prior_autocast_dtypes = {
-            device_type: prior_autocast_states[2 * i + 1]
-            for i, device_type in enumerate(torch._C._autocast_supported_devices())
-        }
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -226,9 +221,10 @@ def run_functionalized_fw_and_collect_metadata(
         # ExcludeDispatchKeyGuard restores the excluded dispatch-key set on exit,
         # which includes the keys tracking autocast enabled state (not dtype), so
         # the comparison has to run before the guard restores those keys.
-        # Compare after disable_autocast_cache exits so a full-list compare does not
-        # false-positive on the temporary cache=False forced by that context manager.
-        # Autocast dtypes are independent TLS and are restored in finally on every exit.
+        # Compare after disable_autocast_cache exits: that CM temporarily forces
+        # cache=False and restores the prior cache flag, so cache need not be in
+        # the snapshot. Autocast dtypes are independent TLS and are restored in
+        # finally on every exit.
         with disable_above:
             try:
                 with mode, suppress_pending, disable_autocast_cache():
@@ -266,7 +262,7 @@ def run_functionalized_fw_and_collect_metadata(
                         "If you encounter this error while using torch.compile, please file a bug."
                     )
             finally:
-                for device_type, dtype in prior_autocast_dtypes.items():
+                for device_type, (_, dtype) in prior_autocast_states.items():
                     torch.set_autocast_dtype(device_type, dtype)
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info

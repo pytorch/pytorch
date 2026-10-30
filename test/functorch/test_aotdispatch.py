@@ -5360,6 +5360,224 @@ def get_fw_bw_graph(
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
+class TestAOTAutocastStates(AOTTestCase):
+    def _collect_metadata(self, f: Callable[..., list[torch.Tensor]]):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        return collect, x
+
+    def test_get_autocast_states_is_per_device_enabled_dtype(self):
+        from torch._functorch._aot_autograd.utils import _get_autocast_states
+
+        states = _get_autocast_states()
+        self.assertEqual(
+            list(states),
+            list(torch._C._autocast_supported_devices()),
+        )
+        for device_type, (enabled, dtype) in states.items():
+            self.assertEqual(enabled, torch.is_autocast_enabled(device_type))
+            self.assertEqual(dtype, torch.get_autocast_dtype(device_type))
+
+    def test_collect_metadata_preserves_stable_autocast_state(self):
+        from torch._functorch._aot_autograd.utils import _get_autocast_states
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        before = _get_autocast_states()
+        collect(x)
+        self.assertEqual(before, _get_autocast_states())
+
+    def test_collect_metadata_detects_cpu_autocast_enabled_mutation(self):
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_enabled("cpu", not prior_enabled)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+        finally:
+            torch.set_autocast_enabled("cpu", prior_enabled)
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_collect_metadata_detects_cpu_autocast_dtype_mutation(self):
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_dtype("cpu", new_dtype)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+        finally:
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_collect_metadata_restores_dtype_when_forward_raises(self):
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_dtype("cpu", new_dtype)
+            raise RuntimeError("forward failed after dtype mutation")
+
+        collect, x = self._collect_metadata(f)
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError, "forward failed after dtype mutation"
+            ):
+                collect(x)
+            self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+        finally:
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_collect_metadata_allows_balanced_cpu_autocast_context(self):
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            with torch.autocast("cpu"):
+                return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        collect(x)
+
+    @parametrize("cache_enabled", [True, False])
+    def test_collect_metadata_ignores_autocast_cache_enabled(self, cache_enabled: bool):
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_cache_enabled(not cache_enabled)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        prior_cache_enabled = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_cache_enabled(cache_enabled)
+            collect(x)
+            self.assertEqual(torch.is_autocast_cache_enabled(), cache_enabled)
+        finally:
+            torch.set_autocast_cache_enabled(prior_cache_enabled)
+
+    def test_collect_metadata_detects_mtia_autocast_mutation(self):
+        # mtia is always present in _AUTOCAST_SUPPORTED_DEVICES.
+        extra = "mtia"
+        prior_enabled = torch.is_autocast_enabled(extra)
+        prior_dtype = torch.get_autocast_dtype(extra)
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_enabled(extra, not prior_enabled)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.is_autocast_enabled(extra), prior_enabled)
+            self.assertEqual(torch.get_autocast_dtype(extra), prior_dtype)
+        finally:
+            torch.set_autocast_enabled(extra, prior_enabled)
+            torch.set_autocast_dtype(extra, prior_dtype)
+
+    def test_collect_metadata_restores_mtia_autocast_dtype_after_mutation(self):
+        extra = "mtia"
+        prior_dtype = torch.get_autocast_dtype(extra)
+        new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_dtype(extra, new_dtype)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.get_autocast_dtype(extra), prior_dtype)
+        finally:
+            torch.set_autocast_dtype(extra, prior_dtype)
+
+    def test_collect_metadata_detects_unmatched_enter_autocast(self):
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        prior_cache = torch.is_autocast_cache_enabled()
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.amp.autocast_mode._enter_autocast("cpu")
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                collect(x)
+            self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+            self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+        finally:
+            torch.autocast_decrement_nesting()
+            torch.clear_autocast_cache()
+            torch.set_autocast_enabled("cpu", prior_enabled)
+            torch.set_autocast_dtype("cpu", prior_dtype)
+            torch.set_autocast_cache_enabled(prior_cache)
+
+    def test_aot_function_detects_cpu_autocast_enabled_mutation(self):
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            torch.set_autocast_enabled("cpu", not prior_enabled)
+            return x + 1
+
+        try:
+            compiled = aot_function(f, nop)
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                compiled(torch.randn(2))
+            self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+            self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+        finally:
+            torch.set_autocast_enabled("cpu", prior_enabled)
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_aot_eager_detects_cpu_autocast_enabled_mutation(self):
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            torch.set_autocast_enabled("cpu", not prior_enabled)
+            return x + 1
+
+        try:
+            compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+            with self.assertRaisesRegex(RuntimeError, "mutate the autocast state"):
+                compiled(torch.randn(2))
+            self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+            self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+        finally:
+            torch.set_autocast_enabled("cpu", prior_enabled)
+            torch.set_autocast_dtype("cpu", prior_dtype)
+
+    def test_aot_function_allows_balanced_cpu_autocast(self):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            with torch.autocast("cpu"):
+                return x + 1
+
+        compiled = aot_function(f, nop)
+        out = compiled(torch.randn(2))
+        self.assertEqual(out.shape, (2,))
+
+
 class TestMod(torch.nn.Module):
     def __init__(self, fn):
         super().__init__()
@@ -12783,6 +13001,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestAOTAutocastStates)
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 only_for = "cpu"
 instantiate_device_type_tests(

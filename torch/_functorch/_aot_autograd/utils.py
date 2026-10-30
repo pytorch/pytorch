@@ -102,13 +102,16 @@ def normalize_as_list(x: object) -> list[object]:
     return [x]
 
 
-def _get_autocast_states() -> list[Any]:
-    states: list[Any] = []
-    for device_type in torch._C._autocast_supported_devices():
-        states.append(torch.is_autocast_enabled(device_type))
-        states.append(torch.get_autocast_dtype(device_type))
-    states.append(torch.is_autocast_cache_enabled())
-    return states
+def _get_autocast_states() -> dict[str, tuple[bool, torch.dtype]]:
+    # Per-device (enabled, dtype). Autocast cache is intentionally omitted: metadata
+    # collection forces cache off via disable_autocast_cache and restores it on exit.
+    return {
+        device_type: (
+            torch.is_autocast_enabled(device_type),
+            torch.get_autocast_dtype(device_type),
+        )
+        for device_type in torch._C._autocast_supported_devices()
+    }
 
 
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
