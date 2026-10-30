@@ -554,6 +554,7 @@ extern TORCH_API std::atomic<int64_t> num_callback_sources;
 
 TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmptySlow(
     RecordScope scope);
+TORCH_API bool hasCallbacksForScopeSlow(RecordScope scope);
 } // namespace detail
 
 // Called for every operator call, so check for the common case of no
@@ -761,6 +762,20 @@ TORCH_API void clearGlobalCallbacks();
 // for both thread local and global callbacks
 TORCH_API bool hasCallbacks();
 TORCH_API void clearCallbacks();
+
+/**
+ * hasCallbacksForScope returns whether any callback could run for `scope` on
+ * this thread: enabled, registered for the scope, and with RecordFunction
+ * enabled. Unlike getStepCallbacksUnlessEmpty it doesn't sample, and unlike
+ * hasCallbacks it doesn't lock.
+ */
+inline bool hasCallbacksForScope(RecordScope scope) {
+  if (C10_LIKELY(
+          detail::num_callback_sources.load(std::memory_order_relaxed) == 0)) {
+    return false;
+  }
+  return detail::hasCallbacksForScopeSlow(scope);
+}
 
 /**
  * enableRecordFunction enables RecordFunction thread locally
