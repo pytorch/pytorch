@@ -16,7 +16,7 @@ from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.fake_tensor import maybe_get_item_memo, maybe_set_item_memo
 from torch._subclasses.functional_tensor import FunctionalTensorMode
-from torch.amp.autocast_mode import _get_autocast_nesting, _set_autocast_nesting
+from torch.amp.autocast_mode import _preserve_autocast_nesting
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
@@ -130,66 +130,63 @@ def _create_graph(
     # Dynamo may emit unbalanced autocast_increment/decrement_nesting across
     # graph breaks; restore nesting after make_fx so capture matches metadata
     # collect (which also restores nesting and does not raise on it).
-    prior_autocast_nesting = _get_autocast_nesting()
-    try:
-        with (
-            enable_python_dispatcher(),
-            ctx,
-            torch._dynamo.eval_frame._use_eager_on_nested_compile(),
-        ):
-            fx_g = make_fx(
-                inner_f,
-                decomposition_table=aot_config.decompositions,
-                record_module_stack=True,
-                pre_dispatch=aot_config.pre_dispatch,
-                _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
-            )(*args)
+    with (
+        enable_python_dispatcher(),
+        ctx,
+        torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+        _preserve_autocast_nesting(),
+    ):
+        fx_g = make_fx(
+            inner_f,
+            decomposition_table=aot_config.decompositions,
+            record_module_stack=True,
+            pre_dispatch=aot_config.pre_dispatch,
+            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
+        )(*args)
 
-            if args_descs is not None:
-                flat_args_descs, _ = pytree.tree_flatten(args_descs)
-                flat_out_descs, _ = pytree.tree_flatten(out_descs)
+        if args_descs is not None:
+            flat_args_descs, _ = pytree.tree_flatten(args_descs)
+            flat_out_descs, _ = pytree.tree_flatten(out_descs)
 
-                # Unfortunately, flat_args_descs is not guaranteed to match the
-                # number of actual arguments that show up on the FX graph.
-                # Specifically, allow_token_discovery=True means that we will
-                # silently add extra token arguments to the backwards graph.
-                #
-                # Although there are a few ways to detect what these tokens are,
-                # we are going to settle for something dodgy but simple to
-                # implement: match tangents_token placeholders specifically,
-                # as these are the only placeholders that are created by token
-                # discovery (NB: there is NO other code that treats this name
-                # as load bearing, so this is a bit naughty!)
-                #
-                # I originally wanted to detect tokens in exactly the same way
-                # that they are detected at normal runtime, but to be honest
-                # the normal runtime detection is pretty strange: it seems the
-                # backward tokens are not reliably at the end of the argument list
-                # but *precede* the RNG arguments (I don't understand why this is
-                # the case).  And in unlift_tokens, token arguments are detected
-                # by seeing if they feed into an effects call!  Dastardly.  Why
-                # didn't we just introduce a new type.
+            # Unfortunately, flat_args_descs is not guaranteed to match the
+            # number of actual arguments that show up on the FX graph.
+            # Specifically, allow_token_discovery=True means that we will
+            # silently add extra token arguments to the backwards graph.
+            #
+            # Although there are a few ways to detect what these tokens are,
+            # we are going to settle for something dodgy but simple to
+            # implement: match tangents_token placeholders specifically,
+            # as these are the only placeholders that are created by token
+            # discovery (NB: there is NO other code that treats this name
+            # as load bearing, so this is a bit naughty!)
+            #
+            # I originally wanted to detect tokens in exactly the same way
+            # that they are detected at normal runtime, but to be honest
+            # the normal runtime detection is pretty strange: it seems the
+            # backward tokens are not reliably at the end of the argument list
+            # but *precede* the RNG arguments (I don't understand why this is
+            # the case).  And in unlift_tokens, token arguments are detected
+            # by seeing if they feed into an effects call!  Dastardly.  Why
+            # didn't we just introduce a new type.
 
-                i = 0
-                j = 0
-                for n in fx_g.graph.nodes:
-                    if n.op == "placeholder":
-                        if n.name.startswith("tangents_token"):
-                            n.meta["desc"] = BackwardTokenAOTInput(j)
-                            j += 1
-                        else:
-                            if i >= len(flat_args_descs):
-                                raise AssertionError(
-                                    f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
-                                    f"fn_wrappers={fn_wrappers(inner_f)}, "
-                                    f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
-                                )
-                            n.meta["desc"] = flat_args_descs[i]
-                            i += 1
-                    elif n.op == "output":
-                        n.meta["desc"] = flat_out_descs
-    finally:
-        _set_autocast_nesting(prior_autocast_nesting)
+            i = 0
+            j = 0
+            for n in fx_g.graph.nodes:
+                if n.op == "placeholder":
+                    if n.name.startswith("tangents_token"):
+                        n.meta["desc"] = BackwardTokenAOTInput(j)
+                        j += 1
+                    else:
+                        if i >= len(flat_args_descs):
+                            raise AssertionError(
+                                f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
+                                f"fn_wrappers={fn_wrappers(inner_f)}, "
+                                f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
+                            )
+                        n.meta["desc"] = flat_args_descs[i]
+                        i += 1
+                elif n.op == "output":
+                    n.meta["desc"] = flat_out_descs
 
     return fx_g
 

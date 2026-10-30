@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 import collections
+import contextlib
 import functools
 import warnings
+from collections.abc import Iterator
 from typing import Any
 
 import torch
@@ -54,6 +56,15 @@ def _set_autocast_nesting(target: int) -> None:
             torch.clear_autocast_cache()
     for _ in range(-delta):
         torch.autocast_increment_nesting()
+
+
+@contextlib.contextmanager
+def _preserve_autocast_nesting() -> Iterator[None]:
+    prior = _get_autocast_nesting()
+    try:
+        yield
+    finally:
+        _set_autocast_nesting(prior)
 
 
 def autocast_decorator(autocast_instance, func):
