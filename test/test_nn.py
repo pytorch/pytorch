@@ -2761,6 +2761,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
+    @parametrize_test("mode", ["RNN", "GRU", "LSTM"])
     @parametrize_test("input_kind", ["dense", "packed_sorted", "packed_unsorted"])
     @parametrize_test(
         "invalid_arg,error_type,error_regex",
@@ -2775,7 +2776,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ("proj_size", RuntimeError, r"Expected hidden\[0\] size"),
         ],
     )
-    def test_lstm_forward_args_check(self, input_kind, invalid_arg, error_type, error_regex):
+    def test_rnn_forward_args_check(
+        self, mode, input_kind, invalid_arg, error_type, error_regex
+    ):
+        if mode != "LSTM":
+            if invalid_arg in ("cell_size", "proj_size"):
+                self.skipTest(f"{invalid_arg} only applies to LSTM")
+            if invalid_arg.startswith("hidden"):
+                error_regex = "Expected hidden size"
         feature_size = 5 if invalid_arg == "input_size" else 4
         dtype = torch.double if invalid_arg == "input_dtype" else torch.float
         input = torch.randn(5, 3, feature_size, dtype=dtype)
@@ -2788,22 +2796,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         hx = None
         if invalid_arg == "hidden_layers":
-            hx = (torch.zeros(3, 3, 3), torch.zeros(3, 3, 3))
+            hx = torch.zeros(3, 3, 3)
         elif invalid_arg == "hidden_batch":
-            hx = (torch.zeros(2, 2, 3), torch.zeros(2, 2, 3))
+            hx = torch.zeros(2, 2, 3)
         elif invalid_arg == "hidden_batch_too_large":
-            hx = (torch.zeros(2, 4, 3), torch.zeros(2, 4, 3))
+            hx = torch.zeros(2, 4, 3)
         elif invalid_arg == "hidden_size":
-            hx = (torch.zeros(2, 3, 4), torch.zeros(2, 3, 3))
+            hx = torch.zeros(2, 3, 4)
         elif invalid_arg == "cell_size":
             hx = (torch.zeros(2, 3, 3), torch.zeros(2, 3, 4))
         elif invalid_arg == "proj_size":
             hx = (torch.zeros(2, 3, 3), torch.zeros(2, 3, 3))
+        if hx is not None and mode == "LSTM" and not isinstance(hx, tuple):
+            hx = (hx, hx)
 
-        proj_size = 2 if invalid_arg == "proj_size" else 0
-        lstm = nn.LSTM(4, 3, num_layers=2, proj_size=proj_size)
+        if mode == "LSTM":
+            proj_size = 2 if invalid_arg == "proj_size" else 0
+            rnn = nn.LSTM(4, 3, num_layers=2, proj_size=proj_size)
+        else:
+            rnn = getattr(nn, mode)(4, 3, num_layers=2)
         with self.assertRaisesRegex(error_type, error_regex):
-            lstm(input, hx)
+            rnn(input, hx)
 
     def test_cudnn_forward_exception(self):
         rnns = [
@@ -3069,23 +3082,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input_shape = correct_input_shape
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
-
-        for mode in rnn_modes:
-            # Packed input with unsorted lengths: the hidden state must be validated
-            # before it is permuted, so a too-large hidden batch is rejected instead of
-            # being silently truncated to the batch size by index_select.
-            input = torch.randn(correct_input_shape)
-            packed_input = rnn_utils.pack_padded_sequence(
-                input, [2, 6, 4, 3], enforce_sorted=False
-            )
-            hidden_shape = update_shape(correct_hidden_shape, 1, bad_size)
-            hidden = torch.randn(hidden_shape)
-            if mode == 'LSTM':
-                hidden = (hidden, hidden)
-            model = getattr(nn, mode)(input_size, hidden_size, num_layers)
-            self.assertRaisesRegex(
-                RuntimeError, "Expected hidden", lambda: model(packed_input, hidden)
-            )
 
     def test_projections_lstm_args_check(self):
         input_size = 3
