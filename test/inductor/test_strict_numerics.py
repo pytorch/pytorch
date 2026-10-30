@@ -353,6 +353,24 @@ class StrictNumericsCompileTest(TestCase):
                         reenable_op_overrides(enable_op_symbols="sum.dim_IntList")
                     torch._dynamo.reset()
 
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_erfcx_segments(self, device, dtype, numerics):
+        centers = (
+            400.0 / torch.arange(1, 101, dtype=torch.float64, device=device) - 4
+        ).to(dtype)
+        below = torch.nextafter(centers, torch.full_like(centers, -float("inf")))
+        above = torch.nextafter(centers, torch.full_like(centers, float("inf")))
+        x = torch.cat(
+            (centers, below, above, -centers, _min_max_specials(dtype, device))
+        )
+        actual = torch.compile(
+            torch.special.erfcx, fullgraph=True, options={"numerics": numerics}
+        )(x)
+        self.assertEqual(
+            actual.view(torch.int32), torch.special.erfcx(x).view(torch.int32)
+        )
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("lambd", (-0.5, 0.0, 0.3, float("inf"), float("nan")))
@@ -2124,14 +2142,12 @@ POINTWISE_XFAIL = frozenset(
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
-        ("special_erfcx", "float32"),
     }
 )
 
 BACKWARD_XFAIL = frozenset(
     {
         ("float_power", "float32"),
-        ("special_erfcx", "float32"),
     }
 )
 
@@ -2145,6 +2161,7 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "special_erfcx",
         "nn_functional_softshrink",
         "mvlgamma_mvlgamma_p_1",
         "mvlgamma_mvlgamma_p_3",
