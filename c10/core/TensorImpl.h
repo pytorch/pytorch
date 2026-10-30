@@ -258,12 +258,6 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
-  // Mode state that the Python CppFakeTensorMode reads and writes, mirroring
-  // the Python FakeTensorMode attributes of the same names.
-  uint64_t epoch_ = 0;
-  bool allow_scalar_outputs_ = false;
-  // Like Python's FakeTensorMode: static unless there is a shape env.
-  bool static_shapes_;
   // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access, read when
   // the mode is created; applied to each fake's storage in
   // set_fake_tensor_mode.
@@ -275,8 +269,7 @@ struct C10_API FakeTensorMode {
       bool allow_meta = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta),
-        static_shapes_(shape_env_ == nullptr) {}
+        allow_meta_(allow_meta) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor

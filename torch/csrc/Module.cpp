@@ -2955,21 +2955,9 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("shape_env"),
           py::arg("wrapper"))
       .def_readonly("allow_meta", &c10::FakeTensorMode::allow_meta_)
-      .def_readwrite("epoch", &c10::FakeTensorMode::epoch_)
-      .def_readwrite(
-          "allow_non_fake_inputs", &c10::FakeTensorMode::allow_non_fake_inputs_)
-      .def_readwrite(
-          "allow_scalar_outputs", &c10::FakeTensorMode::allow_scalar_outputs_)
-      .def_readwrite("static_shapes", &c10::FakeTensorMode::static_shapes_)
       .def_readwrite(
           "allow_unsafe_data_ptr_access",
           &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
-
-  // The Python wrapper of the C++ mode installed in TLS, or None.
-  py_module.def("_current_cpp_fake_tensor_mode", []() {
-    return torch::fake_tensor::getCppFakeTensorModePyObj(
-        c10::impl::FakeTensorModeTLS::get_state());
-  });
 
   // Turns a meta tensor into a C++ fake of mode on device, in place, like
   // Python's FakeTensorConverter.from_meta_and_device.
