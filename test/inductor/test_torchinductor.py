@@ -7024,6 +7024,23 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(RuntimeError, "not implemented"):
             fn(grad_output, x)
         with self.assertRaisesRegex(RuntimeError, "not implemented"):
+            fn(grad_output.to("meta"), x.to("meta"))
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+            torch.compile(fn, fullgraph=True)(grad_output, x)
+
+    @skip_if_mps  # MPS does not support float8 tensors.
+    @parametrize("dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_adaptive_avg_pool2d_backward_float8_dtype(self, dtype):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.ones(1, 1, 5, 5, device=self.device).to(dtype)
+        grad_output = torch.ones(1, 1, 3, 3, device=self.device).to(dtype)
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+            fn(grad_output, x)
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+            fn(grad_output.to("meta"), x.to("meta"))
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
             torch.compile(fn, fullgraph=True)(grad_output, x)
 
     @parametrize(

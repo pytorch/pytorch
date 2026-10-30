@@ -6549,19 +6549,12 @@ fallback_adaptive_avg_pool2d_backward = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d_backward, type_promotion_kind=None)
 def _adaptive_avg_pool2d_backward(grad_output, x):
-    def _fallback():
-        args, _ = require_dense(None, grad_output, x)
-        return fallback_adaptive_avg_pool2d_backward(*args)
-
     if not isinstance(grad_output, TensorBox):
         raise AssertionError("expected: isinstance(grad_output, TensorBox)")
     if not isinstance(x, TensorBox):
         raise AssertionError("expected: isinstance(x, TensorBox)")
     if len(x.get_size()) not in (3, 4):
         raise AssertionError("expected: len(x.get_size()) in (3, 4)")
-
-    if not x.get_dtype().is_floating_point:
-        return _fallback()
 
     grad_output.realize_hint()
 
@@ -6587,7 +6580,8 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
     window_size = h_window_size * w_window_size
     if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return _fallback()
+        args, _ = require_dense(None, grad_output, x)
+        return fallback_adaptive_avg_pool2d_backward(*args)
 
     # Only the unrolled overlap bounds need to be specialized.
     h_window_size = V.graph.sizevars.guard_int(h_window_size)
