@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 """Tests for strict numerics mode."""
 
+import math
 import os
 import subprocess
 import sys
@@ -2097,6 +2098,7 @@ POINTWISE_GEOMETRY = frozenset(
         "tril",
         "triu",
         "unravel_index",
+        "nn.functional.prelu",
     }
 )
 
@@ -2185,8 +2187,8 @@ def _substitute(t, y, n, parity=0):
         mask = torch.zeros(n, dtype=torch.bool, device=y.device)
         mask[parity::2] = True
         return mask
-    if t.is_floating_point() and t.numel() != 1:
-        return y
+    if (t.is_floating_point() or t.is_complex()) and t.numel() != 1:
+        return y.to(t.dtype)
     return t
 
 
@@ -2235,6 +2237,14 @@ POINTWISE_BOUNDARIES = {
     "acosh": (1,),
     "sinc": (0,),
     "nn.functional.relu": (0,),
+    "nn.functional.relu6": (0, 6),
+    "nn.functional.hardsigmoid": (-3, 3),
+    "nn.functional.hardshrink": (-0.5, 0.5),
+    "nn.functional.leaky_relu": (0,),
+    "nn.functional.elu": (0,),
+    "nn.functional.selu": (0,),
+    "nn.functional.celu": (0,),
+    "erfinv": (-1, 1),
     "nn.functional.hardswish": (-3, 3),
     "nn.functional.hardtanh": (-1, 1),
     "nn.functional.softshrink": (-0.5, 0.5),
@@ -2254,7 +2264,6 @@ POINTWISE_EDGE_NAMES = frozenset(POINTWISE_BOUNDARIES) | {
     "logit",
     "nn.functional.softplus",
 }
-POINTWISE_EDGE_OPS = [op for op in POINTWISE_OPS if op.name in POINTWISE_EDGE_NAMES]
 POINTWISE_EDGE_DTYPES = (*POINTWISE_DTYPES, torch.float64)
 
 
@@ -2281,7 +2290,12 @@ def _pointwise_grad_values(dtype, device):
         real_dtype = torch.empty((), dtype=dtype).real.dtype
         values = _pointwise_grad_values(real_dtype, device)
         zeros = torch.zeros_like(values)
-        return torch.cat((torch.complex(values, zeros), torch.complex(zeros, values)))
+        return torch.cat(
+            (
+                torch.stack((values, zeros), -1).view(dtype).flatten(),
+                torch.stack((zeros, values), -1).view(dtype).flatten(),
+            )
+        )
     return torch.cat(
         (_pointwise_subnormals(dtype).to(device), _min_max_specials(dtype, device))
     )
@@ -2309,18 +2323,10 @@ def _pointwise_boundary_values(boundaries, dtype, device):
     )
 
 
-def _pointwise_edge_calls(op, device, dtype, *, backward=False):
+def _pointwise_edge_calls(op, device, dtype):
     calls = []
 
     def add(label, inp, args=(), kwargs=None):
-        if backward:
-            # Cross every input tuple with every upstream-gradient encoding.
-            count = _pointwise_grad_values(dtype, "cpu").numel()
-            inp = inp.repeat_interleave(count)
-            args = tuple(
-                a.repeat_interleave(count) if isinstance(a, torch.Tensor) else a
-                for a in args
-            )
         calls.append((f"edge_{label}", inp, args, kwargs or {}))
 
     if op.name in POINTWISE_BOUNDARIES:
@@ -2366,6 +2372,34 @@ def _pointwise_edge_calls(op, device, dtype, *, backward=False):
         add("tensor_max", x, (None, lo))
         add("tensor_bounds", x, (lo, lo.flip(0)))
     return calls
+
+
+def _pointwise_edge_values(dtype):
+    if dtype == torch.bool:
+        return torch.tensor([False, True])
+    if dtype.is_complex:
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _pointwise_edge_values(real_dtype)
+        zeros = torch.zeros_like(values)
+        return torch.cat(
+            (
+                torch.stack((values, zeros), -1).view(dtype).flatten(),
+                torch.stack((zeros, values), -1).view(dtype).flatten(),
+            )
+        )
+    if dtype.is_floating_point:
+        limits = torch.finfo(dtype)
+        return torch.cat(
+            (
+                _pointwise_boundary_values((-2, -1, -0.5, 0, 0.5, 1, 2), dtype, "cpu"),
+                torch.tensor([limits.min, limits.max], dtype=dtype),
+            )
+        )
+    limits = torch.iinfo(dtype)
+    values = {limits.min, limits.min + 1, 0, 1, 2, limits.max - 1, limits.max}
+    if limits.min < 0:
+        values.add(-1)
+    return torch.tensor(sorted(values), dtype=dtype)
 
 
 def _diff_kind(a, b):
@@ -2683,7 +2717,10 @@ class PointwiseStrictNumericsTest(TestCase):
         )
 
     def _is_pointwise_output(self, inp, args, kwargs, out, op=None):
-        if op is not None and op.name in POINTWISE_EXTRA | POINTWISE_CONDITIONAL:
+        if (
+            op is not None
+            and op.name in POINTWISE_EXTRA | POINTWISE_CONDITIONAL | POINTWISE_GEOMETRY
+        ):
             return True
         shapes = [
             t.shape
@@ -2765,7 +2802,7 @@ class PointwiseStrictNumericsTest(TestCase):
         if op.name in POINTWISE_GEOMETRY | POINTWISE_CONDITIONAL:
             self._coverage_filter("raw_bits_require_original_geometry")
             return []
-        if op.name in BITPATTERN_SLOW:
+        if op.name in BITPATTERN_SLOW or "polynomial" in op.name:
             self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
             return []
         if dtype in (torch.float16, torch.bfloat16):
@@ -2774,6 +2811,18 @@ class PointwiseStrictNumericsTest(TestCase):
         elif dtype == torch.float32:
             x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=0)
             y = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=1)
+        elif dtype == torch.float64 or dtype.is_complex:
+            gen = torch.Generator(device=device).manual_seed(0)
+            bits = torch.randint(
+                0,
+                256,
+                (NUM_BITPATTERN_SAMPLES * dtype.itemsize,),
+                dtype=torch.uint8,
+                device=device,
+                generator=gen,
+            )
+            x = bits.view(dtype)
+            y = x.flip(0)
         else:
             self._coverage_filter("no_raw_bit_generator_for_dtype")
             return []
@@ -2964,16 +3013,240 @@ class PointwiseStrictNumericsTest(TestCase):
             "POINTWISE_XFAIL/NONFLOAT_XFAIL",
         )
 
-    @ops(POINTWISE_EDGE_OPS, allowed_dtypes=POINTWISE_EDGE_DTYPES)
+    @dtypes(torch.float32)
+    def test_small_shapes_receive_all_upstream_edges(self, device, dtype):
+        seen = []
+
+        class Observe(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                seen.append(grad[0].detach().clone())
+                return grad
+
+        class Op:
+            name, variant_test_name = "clone", ""
+            op = Observe.apply
+
+        x = torch.ones(5, dtype=dtype, device=device).requires_grad_()
+        with mock.patch(
+            "torch.compile", return_value=lambda inp, args, kwargs: Observe.apply(inp)
+        ):
+            mismatches = self._sweep_backward(
+                device,
+                Op(),
+                dtype,
+                POINTWISE_STRICT_CFG,
+                calls=[("edge_opinfo", x, (), {})],
+            )
+        self.assertFalse(mismatches)
+        self.assertTrue(
+            _outputs_equal(
+                torch.stack(seen[::2]), _pointwise_grad_values(dtype, device)
+            )
+        )
+
+    @dtypes(torch.float32)
+    def test_bcomplex_cast_upstream_edges(self, device, dtype):
+        output = torch.ones(5, dtype=dtype, device=device).to(torch.bcomplex32)
+        grads = list(self._upstream_grads([output], edge=True))
+        actual = torch.stack([grad[0][0] for grad in grads]).view(torch.bfloat16)
+        values = _pointwise_grad_values(torch.bfloat16, device)
+        zeros = torch.zeros_like(values)
+        expected = torch.cat(
+            (torch.stack((values, zeros), -1), torch.stack((zeros, values), -1))
+        ).flatten()
+        self.assertTrue(_outputs_equal(actual, expected))
+
+    @dtypes(torch.float32)
+    def test_repeated_input_grad(self, device, dtype):
+        x = torch.tensor([-2.0, -0.0, 1.0], device=device, dtype=dtype)
+
+        def fn(inp, args, kwargs):
+            return inp * args[0] + kwargs["same"]
+
+        _, grads = self._input_grads(fn, x, (x,), {"same": x}, torch.ones_like(x))
+        self.assertEqual(len(grads), 1)
+        self.assertEqual(grads[0], 2 * x + 1)
+
+    @dtypes(torch.int32, torch.uint8)
+    def test_integer_reverse_remainder_edges(self, device, dtype):
+        op = next(o for o in POINTWISE_OPS if o.name == "__rmod__")
+        calls = self._edge_calls(op, device, dtype)
+        self.assertTrue(calls)
+        for _, inp, args, kwargs in calls:
+            self.assertTrue(bool((inp != 0).all()))
+            cpu_args = tree_map(
+                lambda t: t.cpu() if isinstance(t, torch.Tensor) else t, args
+            )
+            _pointwise_op(op)(inp.cpu(), *cpu_args, **kwargs)
+
+    @dtypes(torch.float32)
+    def test_edge_samples_keep_valid_geometry(self, device, dtype):
+        for name in (
+            "outer",
+            "view_as_complex",
+            "nn.functional.binary_cross_entropy",
+            "nn.functional.batch_norm",
+        ):
+            op = next(o for o in POINTWISE_OPS if o.name == name)
+            calls = self._edge_calls(op, device, dtype, backward=True)
+            self.assertTrue(calls)
+            for _, inp, args, kwargs in calls:
+                with self.subTest(op=name):
+                    _pointwise_op(op)(inp, *args, **kwargs)
+                    if name == "nn.functional.binary_cross_entropy":
+                        self.assertTrue(bool(((inp >= 0) & (inp <= 1)).all()))
+                    elif name == "nn.functional.batch_norm":
+                        self.assertFalse(args[0].requires_grad)
+                        self.assertFalse(args[1].requires_grad)
+        values = _pointwise_edge_values(dtype)
+        self.assertTrue(bool((torch.abs(values) == torch.finfo(dtype).max).any()))
+        self.assertTrue(
+            bool(((values.abs() > 0) & (values.abs() < torch.finfo(dtype).tiny)).any())
+        )
+        self.assertTrue(bool(((values == 0) & torch.signbit(values)).any()))
+
+    def _edge_calls(self, op, device, dtype, *, backward=False):
+        calls = []
+        if op.name in POINTWISE_EDGE_NAMES and dtype in POINTWISE_EDGE_DTYPES:
+            calls += _pointwise_edge_calls(op, device, dtype)
+        samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
+        candidates = []
+        for inp, args, kwargs in self._build_calls(samples, dtype):
+            if call := self._pointwise_call(op, inp, args, kwargs):
+                tensors = [
+                    t for t in tree_leaves(call[0]) if isinstance(t, torch.Tensor)
+                ]
+                size = sum(t.numel() for t in tensors)
+                if 0 < size <= 1024:
+                    candidates.append((size, call))
+        if not candidates:
+            self._coverage_filter("no_nonempty_edge_shape")
+            return calls
+        _, (inp, args, kwargs) = max(candidates, key=lambda candidate: candidate[0])
+        tensors = [t for t in tree_leaves(inp) if isinstance(t, torch.Tensor)]
+        for leaf_index, tensor in enumerate(tensors):
+            if tensor.dtype != dtype or tensor.numel() == 0:
+                continue
+            values = _pointwise_edge_values(dtype)
+            if op.name == "nn.functional.binary_cross_entropy":
+                values = values[torch.isfinite(values) & (values >= 0) & (values <= 1)]
+            elif op.name == "nn.functional.one_hot":
+                classes = args[0] if args else kwargs["num_classes"]
+                values = torch.tensor([0, classes - 1], dtype=dtype)
+            elif op.name == "unravel_index":
+                maximum = min(math.prod(args[0]) - 1, torch.iinfo(dtype).max)
+                values = torch.tensor([0, 1, maximum - 1, maximum], dtype=dtype)
+            elif op.name == "__rmod__" and not (
+                dtype.is_floating_point or dtype.is_complex or dtype == torch.bool
+            ):
+                values = values[values != 0]
+            # Preserve the original shapes and non-input parameters. In
+            # particular, polynomial degrees and running variances stay valid.
+            for offset in range(0, values.numel(), tensor.numel()):
+                chunk = values[offset : offset + tensor.numel()]
+                chunk = chunk.repeat(
+                    (tensor.numel() + chunk.numel() - 1) // chunk.numel()
+                )
+                replacement = chunk[: tensor.numel()].reshape(tensor.shape).to(device)
+                if tensor.is_conj():
+                    replacement = replacement.conj()
+                if tensor.is_neg():
+                    replacement = torch._neg_view(replacement)
+                replacement.requires_grad_(tensor.requires_grad)
+                edge_input = tree_map(lambda t: replacement if t is tensor else t, inp)
+                edge_args = args
+                if (
+                    not dtype.is_floating_point
+                    and not dtype.is_complex
+                    and dtype != torch.bool
+                    and op.name in {"div", "floor_divide", "remainder", "fmod"}
+                ):
+                    # MIN / -1 is undefined for signed integer division.
+                    edge_args = tuple(
+                        torch.where(a == -1, torch.ones_like(a), a)
+                        if isinstance(a, torch.Tensor)
+                        else (1 if a == -1 else a)
+                        for a in args
+                    )
+                calls.append(
+                    (
+                        f"edge_opinfo_{leaf_index}_{offset}",
+                        edge_input,
+                        edge_args,
+                        kwargs,
+                    )
+                )
+        if op.name == "to":
+            x = _pointwise_edge_values(dtype).to(device)
+            for target_dtype in sorted(op.supported_dtypes("cuda"), key=str):
+                calls.append(
+                    (f"edge_cast_{_dtype_label(target_dtype)}", x, (target_dtype,), {})
+                )
+        if op.name == "resolve_conj" and dtype.is_complex:
+            calls += [
+                (
+                    "edge_conjugated",
+                    torch.tensor([1 + 2j, -1 - 2j], device=device, dtype=dtype).conj(),
+                    (),
+                    {},
+                )
+            ]
+        if op.name == "resolve_neg" and dtype != torch.bool:
+            calls += [
+                (
+                    "edge_negative_view",
+                    torch._neg_view(_pointwise_edge_values(dtype).to(device)),
+                    (),
+                    {},
+                )
+            ]
+        return calls
+
+    @ops(POINTWISE_OPS)
     def test_pointwise_edges(self, device, dtype, op):
-        calls = _pointwise_edge_calls(op, device, dtype)
+        calls = self._edge_calls(op, device, dtype)
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
         self.assertFalse(mismatches, f"{_op_id(op)} {dtype} edge outputs: {mismatches}")
+
+    def _upstream_grads(self, outputs, *, edge):
+        values = (
+            [_pointwise_grad_values(out.dtype, out.device) for out in outputs]
+            if edge
+            else []
+        )
+        count = max(v.numel() for v in values) if edge else 1
+        for index in range(count):
+            upstream = []
+            for output_index, output in enumerate(outputs):
+                if edge:
+                    v = values[output_index]
+                    grad = v[(index + output_index) % v.numel()].expand(output.shape)
+                else:
+                    gen = torch.Generator(device=output.device).manual_seed(
+                        output_index
+                    )
+                    grad = torch.randn(
+                        output.shape,
+                        generator=gen,
+                        device=output.device,
+                        dtype=output.dtype,
+                    )
+                    flat = grad.reshape(-1)
+                    if flat.numel() >= 4:
+                        flat[0], flat[1] = 0.0, -0.0
+                upstream.append(grad)
+            yield upstream
 
     def _input_grads(
         self, call_fn, inp, args, kwargs, grad_output, *, respect_requires_grad=False
     ):
         leaves = []
+        leaf_by_id = {}
 
         def leafify(t):
             if (
@@ -2981,9 +3254,11 @@ class PointwiseStrictNumericsTest(TestCase):
                 and (t.is_floating_point() or t.is_complex())
                 and (t.requires_grad or not respect_requires_grad)
             ):
-                leaf = t.detach().requires_grad_(True)
-                leaves.append(leaf)
-                return leaf
+                if id(t) not in leaf_by_id:
+                    leaf = t.detach().requires_grad_(True)
+                    leaves.append(leaf)
+                    leaf_by_id[id(t)] = leaf
+                return leaf_by_id[id(t)]
             return t
 
         inp2, args2, kwargs2 = tree_map(leafify, (inp, args, kwargs))
@@ -3035,85 +3310,65 @@ class PointwiseStrictNumericsTest(TestCase):
                 if not self._is_pointwise_output(inp, args, kwargs, probe, op):
                     self._coverage_filter("output_shape_not_pointwise")
                     continue
-                upstream = []
-                for output_index, output in enumerate(outputs):
-                    if tag.startswith("edge_"):
-                        values = _pointwise_grad_values(
-                            output.dtype, output.device
-                        ).roll(output_index)
-                        grad = values.repeat(
-                            (output.numel() + values.numel() - 1) // values.numel()
-                        )
-                        grad = grad[: output.numel()].reshape(output.shape)
-                    else:
-                        gen = torch.Generator(device=output.device).manual_seed(
-                            output_index
-                        )
-                        grad = torch.randn(
-                            output.shape,
-                            generator=gen,
-                            device=output.device,
-                            dtype=output.dtype,
-                        )
-                        flat = grad.reshape(-1)
-                        if flat.numel() >= 4:
-                            flat[0] = 0.0
-                            flat[1] = -0.0
-                    upstream.append(grad)
-                respect_requires_grad = tag == "ref" or tag == "sample"
-                _, eager_grads = self._input_grads(
-                    fn,
-                    inp,
-                    args,
-                    kwargs,
-                    upstream,
-                    respect_requires_grad=respect_requires_grad,
-                )
-                if eager_grads is None:
-                    self._coverage_filter("no_input_gradients")
-                    continue
-                _, comp_grads = self._input_grads(
-                    compiled,
-                    inp,
-                    args,
-                    kwargs,
-                    upstream,
-                    respect_requires_grad=respect_requires_grad,
-                )
-                tested += 1
-                if comp_grads is None:
-                    self._coverage_comparison(False, "shape")
-                    mismatches.append(
-                        (
-                            tag,
-                            idx,
-                            [
-                                tuple(t.shape)
-                                for t in tree_leaves(inp)
-                                if isinstance(t, torch.Tensor)
-                            ],
-                            kwargs,
-                            "shape",
-                        )
+                for upstream in self._upstream_grads(
+                    outputs, edge=tag.startswith("edge_")
+                ):
+                    respect_requires_grad = tag in ("ref", "sample") or tag.startswith(
+                        "edge_opinfo_"
                     )
-                    continue
-                equal = _outputs_equal(eager_grads, comp_grads)
-                kind = "" if equal else _diff_kind(eager_grads, comp_grads)
-                self._coverage_comparison(equal, kind)
-                if not equal:
-                    mismatches.append(
-                        (
-                            tag,
-                            idx,
-                            [
-                                tuple(t.shape)
-                                for t in tree_leaves(inp)
-                                if isinstance(t, torch.Tensor)
-                            ],
-                            kwargs,
-                            kind,
-                        )
+                    _, eager_grads = self._input_grads(
+                        fn,
+                        inp,
+                        args,
+                        kwargs,
+                        upstream,
+                        respect_requires_grad=respect_requires_grad,
                     )
+                    if eager_grads is None:
+                        self._coverage_filter("no_input_gradients")
+                        continue
+                    _, comp_grads = self._input_grads(
+                        compiled,
+                        inp,
+                        args,
+                        kwargs,
+                        upstream,
+                        respect_requires_grad=respect_requires_grad,
+                    )
+                    tested += 1
+                    if comp_grads is None:
+                        self._coverage_comparison(False, "shape")
+                        mismatches.append(
+                            (
+                                tag,
+                                idx,
+                                [
+                                    tuple(t.shape)
+                                    for t in tree_leaves(inp)
+                                    if isinstance(t, torch.Tensor)
+                                ],
+                                kwargs,
+                                "shape",
+                            )
+                        )
+                        continue
+                    equal = _outputs_equal(eager_grads, comp_grads)
+                    kind = "" if equal else _diff_kind(eager_grads, comp_grads)
+                    self._coverage_comparison(equal, kind)
+                    if not equal:
+                        mismatches.append(
+                            (
+                                tag,
+                                idx,
+                                [
+                                    tuple(t.shape)
+                                    for t in tree_leaves(inp)
+                                    if isinstance(t, torch.Tensor)
+                                ],
+                                kwargs,
+                                kind,
+                            )
+                        )
 
         if not mismatches:
             self._require_kernel(tested, "no differentiable sample", op)
@@ -3126,13 +3381,9 @@ class PointwiseStrictNumericsTest(TestCase):
             mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
         )
 
-    @ops(
-        [op for op in POINTWISE_EDGE_OPS if op.supports_autograd],
-        dtypes=OpDTypes.supported_backward,
-        allowed_dtypes=POINTWISE_EDGE_DTYPES,
-    )
+    @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
     def test_pointwise_edges_backward(self, device, dtype, op):
-        calls = _pointwise_edge_calls(op, device, dtype, backward=True)
+        calls = self._edge_calls(op, device, dtype, backward=True)
         mismatches = self._sweep_backward(
             device, op, dtype, POINTWISE_STRICT_CFG, calls=calls
         )
