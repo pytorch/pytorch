@@ -1641,6 +1641,15 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
       // we can check if these rows overlap. We can accomplish this by modding
       // our offset by the stride.
       auto offset_delta_mod = offset_delta % Meta::stride(x, 0);
+      if (offset_delta_mod < Meta::size(x, 1)) {
+        // definitely overlaps: row 0 of y starts inside a row of x
+        // Example:
+        //   base = torch.zeros(5, 10)
+        //   x = base[0:4, 0:5]: size=(4, 5), stride=(10, 1), offset=0
+        //   y = base[1:5, 2:5]: size=(4, 3), stride=(10, 1), offset=12
+        //   offset_delta_mod = 2 < 5: row 0 of y lies inside row 1 of x
+        return false;
+      }
       // Example:
       // 0 1 2 3
       // 9 10 11 12
