@@ -3659,6 +3659,8 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
         # Unbatched
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
+    yield SampleInput(make_arg((2, 3, 8, 8, 6), memory_format=torch.channels_last_3d), args=((5, 7, 4),))
+
 
 def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
