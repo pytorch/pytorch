@@ -19,7 +19,7 @@ from typing_extensions import Never
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
@@ -32,7 +32,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -603,12 +603,12 @@ def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
 
 
 class UserKernelHOPifier:
-    """Base of each DSL's HOPifier (e.g. TritonHOPifier), which turns a call to a user
-    kernel into a call to the DSL's mutation HOP.
+    """Base of each DSL's HOPifier (TritonHOPifier, CuteDSLHOPifier), which turns a
+    call to a user kernel into a call to the DSL's mutation HOP.
 
-    Each DSL has one subclass per capture environment: Dynamo, which works on
-    VariableTrackers and reports unsupported features as graph breaks, and tracing
-    (make_fx, non-strict export), which works on real or fake values.
+    Each DSL has one subclass per capture environment it supports: Dynamo, which
+    works on VariableTrackers and reports unsupported features as graph breaks, and
+    tracing (make_fx, non-strict export), which works on real or fake values.
     """
 
     def raise_unsupported(self, msg: str) -> Never:
@@ -616,3 +616,10 @@ class UserKernelHOPifier:
 
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
+
+
+def specialize_symbolic(arg: Any) -> Any:
+    # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+    if isinstance(arg, (SymInt, SymBool, SymFloat)):
+        return guard_scalar(arg)
+    return arg
