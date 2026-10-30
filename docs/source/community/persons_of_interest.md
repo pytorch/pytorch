@@ -363,6 +363,7 @@ See the [maintainer guide](maintainer_guide.md) for how to triage and review iss
 - Peter Sharpe ([peterdsharpe](https://github.com/peterdsharpe))
 - Ben Sprenger ([bsprenger](https://github.com/bsprenger))
 - Achintya Paningapalli ([theap06](https://github.com/theap06))
+- (emeritus) Vincent Moens ([vmoens](https://github.com/vmoens))
 
 ## Sunsetted Modules
 
