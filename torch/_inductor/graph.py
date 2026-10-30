@@ -3180,7 +3180,12 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        if config.triton.autotune_at_compile_time:
+        # Under compile-time autotuning the C++ wrapper's main code embeds no Triton
+        # source, so this block is the only place its module shows the kernels. The
+        # python wrapper defines them as code; for it the block is only the
+        # inductor_autotune_at_compile_time_code artifact and, with output_code at
+        # DEBUG, the file whose path generate_and_run_autotune_block logs.
+        if config.triton.autotune_at_compile_time and self.cpp_wrapper:
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
@@ -3207,6 +3212,13 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+            kernel_sources = self.wrapper_code.kernel_sources
+            if kernel_sources:
+                # write() keeps a file already at this path, e.g. a hand-edited copy;
+                # its defs must compile themselves.
+                with open(path) as f:
+                    if f.read() != wrapper_code.value:
+                        kernel_sources.clear()
 
             V.debug.output_code(path)
             V.debug.copy(os.path.splitext(path)[0] + ".debug")
@@ -3236,6 +3248,7 @@ class GraphLowering(torch.fx.Interpreter):
                     **self.torchbind_constants,
                     **self.opaque_value_type_classes,
                 },
+                kernel_sources=self.wrapper_code.kernel_sources,
             )
         self.cache_key = key
         self.cache_path = path

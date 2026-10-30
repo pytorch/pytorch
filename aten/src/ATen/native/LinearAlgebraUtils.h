@@ -4,6 +4,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
 #include <c10/util/strides.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -142,7 +143,7 @@ inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
  */
 inline int64_t batchCount(const Tensor& batched_matrices) {
   int64_t result = 1;
-  for (int64_t i = 0; i < batched_matrices.ndimension() - 2; i++) {
+  for (const auto i : c10::irange(batched_matrices.ndimension() - 2)) {
     result *= batched_matrices.size(i);
   }
   return result;
