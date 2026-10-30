@@ -4545,6 +4545,231 @@ torch.cuda.synchronize()
         g.instantiate()
         self.assertEqual(len(instantiated), 2)
 
+    def _memset_pass_available(self):
+        if not torch.cuda.graphs._memset_pass_supported():
+            raise unittest.SkipTest("cuda-bindings >= 13.2 not installed")
+
+    def _replay_event_names(self, g):
+        g.replay()
+        torch.cuda.synchronize()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA]
+        ) as prof:
+            g.replay()
+            torch.cuda.synchronize()
+        return [e.name for e in prof.events()]
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "memset-node pass is CUDA-only")
+    @parametrize("keep_graph", [False, True])
+    def test_graph_small_memset_nodes_rewritten_as_kernels(self, keep_graph):
+        # zero_() on a dense tensor records a cudaMemsetAsync, i.e. a memset
+        # node, which replays several microseconds slower than a kernel node
+        # for small buffers. The default capture-end pass rewrites those nodes
+        # into fill kernels. Each buffer is zeroed and then incremented, so the
+        # replayed value also proves the kernel node kept the memset's place in
+        # the dependency chain.
+        self._memset_pass_available()
+        bufs = [torch.ones(152, device="cuda") for _ in range(4)]  # 608 B each
+        # A misaligned, non-16-byte-multiple destination: a different cache key and the
+        # non-vectorized fill_ path.
+        backing = torch.ones(640, device="cuda", dtype=torch.uint8)
+        bufs.append(backing[3:608])  # 605 B at a 3-byte offset
+        large = torch.ones(1 << 16, device="cuda")  # 256 KiB, above the threshold
+
+        def capture(tensors):
+            g = torch.cuda.CUDAGraph(keep_graph=keep_graph)
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for b in tensors:
+                    b.zero_()
+                    b.add_(1)
+            torch.cuda.current_stream().wait_stream(s)
+            with torch.cuda.graph(g):
+                for b in tensors:
+                    b.zero_()
+                    b.add_(1)
+            return g
+
+        g = capture(bufs)
+        for b in bufs:
+            b.fill_(7)
+        names = self._replay_event_names(g)
+        self.assertFalse(any("Memset" in n for n in names), names)
+        self.assertTrue(any("fill" in n.lower() for n in names), names)
+        for b in bufs:
+            self.assertEqual(b, torch.ones_like(b))  # zero_ ran before add_
+
+        # A buffer above the threshold keeps its memset node.
+        g = capture([large])
+        large.fill_(7)
+        names = self._replay_event_names(g)
+        self.assertTrue(any("Memset" in n for n in names), names)
+        self.assertEqual(large, torch.ones_like(large))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "memset-node pass is CUDA-only")
+    def test_graph_memset_pass_cross_stream_dependencies(self):
+        # producer on stream A -> zero_ on stream B -> consumer on A: the rewritten
+        # node must keep both the incoming and the outgoing cross-stream edges.
+        self._memset_pass_available()
+        src = torch.ones(152, device="cuda")
+        buf = torch.ones(152, device="cuda")
+        out = torch.zeros(152, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        s_a = torch.cuda.Stream()
+        s_b = torch.cuda.Stream()
+        s_a.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s_a):
+            with torch.cuda.graph(g, stream=s_a):
+                src.mul_(2)  # producer
+                s_b.wait_stream(s_a)
+                with torch.cuda.stream(s_b):
+                    buf.zero_()  # memset on the side stream
+                s_a.wait_stream(s_b)
+                out.copy_(src + buf)  # consumer: 2 * src + 0
+        torch.cuda.current_stream().wait_stream(s_a)
+        src.fill_(1)
+        buf.fill_(5)
+        out.zero_()
+        names = self._replay_event_names(g)
+        self.assertFalse(any("Memset" in n for n in names), names)
+        # one replay in _replay_event_names ran before the profiled one: src doubled twice
+        self.assertEqual(out, torch.full_like(out, 4))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "memset-node pass is CUDA-only")
+    def test_graph_memset_pass_disabled_and_explicit(self):
+        # With the pass disabled the memset nodes stay; the explicit call rewrites them.
+        self._memset_pass_available()
+        bufs = [torch.ones(152, device="cuda") for _ in range(4)]
+
+        def capture():
+            g = torch.cuda.CUDAGraph(keep_graph=True)
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for b in bufs:
+                    b.zero_()
+            torch.cuda.current_stream().wait_stream(s)
+            with torch.cuda.graph(g):
+                for b in bufs:
+                    b.zero_()
+            return g
+
+        with patch.object(torch.cuda.graphs, "_memset_to_kernel_max_bytes", 0):
+            g = capture()
+            self.assertTrue(any("Memset" in n for n in self._replay_event_names(g)))
+            g = capture()
+            self.assertEqual(
+                torch.cuda.graphs._rewrite_small_memset_nodes(g, max_bytes=4096), 4
+            )
+            self.assertEqual(
+                torch.cuda.graphs._rewrite_small_memset_nodes(g, max_bytes=4096), 0
+            )
+            for b in bufs:
+                b.fill_(7)
+            names = self._replay_event_names(g)
+            self.assertFalse(any("Memset" in n for n in names), names)
+            for b in bufs:
+                self.assertEqual(b, torch.zeros_like(b))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "memset-node pass is CUDA-only")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_graph_memset_pass_second_device(self):
+        # The fill-kernel cache is keyed by device: a capture on cuda:1 must not reuse the
+        # kernel captured for cuda:0, and its side capture must run on cuda:1.
+        self._memset_pass_available()
+
+        def capture(dev):
+            with torch.cuda.device(dev):
+                bufs = [torch.ones(152, device=dev) for _ in range(4)]
+                g = torch.cuda.CUDAGraph()
+                # torch.cuda.graph's default capture stream is a process-wide stream on the
+                # device of the first capture; capture on an explicit stream of this device.
+                s = torch.cuda.Stream()
+                s.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s):
+                    for b in bufs:
+                        b.zero_()
+                        b.add_(1)
+                torch.cuda.current_stream().wait_stream(s)
+                with torch.cuda.graph(g, stream=s):
+                    for b in bufs:
+                        b.zero_()
+                        b.add_(1)
+                return g, bufs
+
+        g0, bufs0 = capture("cuda:0")  # fills the cache entry for this key on cuda:0
+        g1, bufs1 = capture("cuda:1")
+        for b in bufs0 + bufs1:
+            b.fill_(7)
+        with torch.cuda.device("cuda:1"):
+            names = self._replay_event_names(g1)
+        self.assertFalse(any("Memset" in n for n in names), names)
+        for b in bufs1:
+            self.assertEqual(b, torch.ones_like(b))
+        g0.replay()
+        torch.cuda.synchronize()
+        for b in bufs0:
+            self.assertEqual(b, torch.ones_like(b))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "memset-node pass is CUDA-only")
+    def test_graph_memset_pass_with_batch_mem_op_node(self):
+        # cuStreamWriteValue32 under capture records a BATCH_MEM_OP node, whose type the
+        # runtime cudaGraphNodeGetType cannot report; the pass must still run.
+        self._memset_pass_available()
+        from cuda.bindings import driver as drv
+
+        from torch.cuda._graph_annotations import _get_node_type
+
+        bufs = [torch.ones(152, device="cuda") for _ in range(4)]
+        flag = torch.zeros(1, device="cuda", dtype=torch.int32)
+
+        def body(stream):
+            for b in bufs:
+                b.zero_()
+            (err,) = drv.cuStreamWriteValue32(stream.cuda_stream, flag.data_ptr(), 1, 0)
+            if err != drv.CUresult.CUDA_SUCCESS:
+                self.skipTest(f"cuStreamWriteValue32 not available: {err}")
+
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            body(s)
+        torch.cuda.current_stream().wait_stream(s)
+        with torch.cuda.graph(g, stream=s):
+            body(s)
+        rt = torch.cuda.graphs._cuda_runtime
+        raw = g.raw_cuda_graph()
+        _, n = torch.cuda._utils._check_cuda_bindings(rt.cudaGraphGetNodes(raw, 0))
+        nodes, n = torch.cuda._utils._check_cuda_bindings(rt.cudaGraphGetNodes(raw, n))
+        types = {_get_node_type(nd) for nd in nodes[:n]}
+        self.assertIn(drv.CUgraphNodeType.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP, types)
+        self.assertNotIn(drv.CUgraphNodeType.CU_GRAPH_NODE_TYPE_MEMSET, types)
+        flag.zero_()
+        for b in bufs:
+            b.fill_(7)
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(flag.item(), 1)
+        for b in bufs:
+            self.assertEqual(b, torch.zeros_like(b))
+
     def _capture_trivial_graph(self):
         g = torch.cuda.CUDAGraph()
         x = torch.zeros(8, device="cuda")
