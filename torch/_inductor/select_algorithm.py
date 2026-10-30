@@ -2126,7 +2126,9 @@ class TritonTemplateKernel(TritonKernel):
     def codegen_kernel_benchmark(self, num_gb: float | None) -> IndentedBuffer:
         result = super().codegen_kernel_benchmark(num_gb)
         _, call_args, _, _ = self.args.python_argdefs()
-        result.writelines(["", "", f"arg_buffer_names = {tuple(call_args)!r}"])
+        result.writelines(
+            ["", "", f"arg_buffer_names = {tuple(map(str, call_args))!r}"]
+        )
         return result
 
     def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
@@ -4435,8 +4437,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # The pipelined autotuner benchmarks without input_gen_fns, which can IMA
         # TODO(jgong5): support multi-template on CPU C++ backend
-        if (input_gen_fns is not None and use_pipelined_autotuning()) or (
-            layout.device.type == "cpu" and config.cpu_backend != "triton"
+        if return_multi_template and (
+            (input_gen_fns is not None and use_pipelined_autotuning())
+            or (layout.device.type == "cpu" and config.cpu_backend != "triton")
         ):
             return_multi_template = False
 
