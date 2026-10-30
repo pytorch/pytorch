@@ -843,16 +843,18 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if expected_view:
             from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
                 _canonicalize_matrix_input,
+                _plan_matrix_input,
             )
 
+            matrix_layout = _plan_matrix_input(
+                data_hp, dim, square, swizzled, dual=False
+            )
             with patch.object(
                 torch.Tensor,
                 "contiguous",
                 side_effect=AssertionError("materialized input"),
             ):
-                canonical = _canonicalize_matrix_input(
-                    data_hp, dim, square, swizzled, dual=False
-                )
+                canonical = _canonicalize_matrix_input(data_hp, matrix_layout)
             self.assertEqual(canonical.input.data_ptr(), data_hp.data_ptr())
         swizzle_type = (
             SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE

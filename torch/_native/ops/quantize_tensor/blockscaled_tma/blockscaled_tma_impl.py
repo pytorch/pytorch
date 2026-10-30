@@ -10,6 +10,8 @@ from .blockscaled_tma_layout import (
     _BlockscaledTmaSpec,
     _build_blockscaled_tma_spec,
     _canonicalize_matrix_input,
+    _plan_blockscaled_tma_launch,
+    _plan_matrix_input,
     _restore_matrix_output,
     _SingleQuantDim,
 )
@@ -186,31 +188,27 @@ def _blockscaled_tma_impl_on_current_device(
     *,
     dual: bool,
 ) -> _BlockscaledTmaOutput:
-    canonical = _canonicalize_matrix_input(
-        input,
-        dim,
-        is_square_scaling,
-        is_scale_swizzled,
-        dual=dual,
-        check_launch_limits=True,
+    layout = _plan_matrix_input(
+        input, dim, is_square_scaling, is_scale_swizzled, dual=dual
     )
     spec = _build_blockscaled_tma_spec(
-        canonical.input,
-        dim=canonical.dim,
+        layout,
         dual=dual,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
+    plan = _plan_blockscaled_tma_launch(input, layout, spec)
+    canonical = _canonicalize_matrix_input(input, layout)
     input = canonical.input
     if input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
         input = input.clone()
-    launch = _prepare_blockscaled_tma_launch(input, spec, canonical.plan)
+    launch = _prepare_blockscaled_tma_launch(input, spec, plan)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
     if launch.plan is None:
         return _restore_matrix_output(
-            _format_blockscaled_tma_output(spec, launch), canonical
+            _format_blockscaled_tma_output(spec, launch), layout
         )
 
     fn = _compile_blockscaled_tma(
@@ -250,9 +248,7 @@ def _blockscaled_tma_impl_on_current_device(
         launch.plan.grid_m,
         launch.plan.grid_k,
     )
-    return _restore_matrix_output(
-        _format_blockscaled_tma_output(spec, launch), canonical
-    )
+    return _restore_matrix_output(_format_blockscaled_tma_output(spec, launch), layout)
 
 
 def _run_blockscaled_tma(
