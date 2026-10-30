@@ -64,7 +64,7 @@ class _FakeProcess:
 class TunableOpWorkerTest(TestCase):
     """The worker is a subprocess holding process-global TunableOp state, so the
     things worth pinning are which GPU it lands on and when it gets replaced.
-    Neither needs a GPU to check, and a GPU-only test would not run in CI."""
+    Neither needs a real device, so these run wherever the suite does."""
 
     hw_classification = HardwareClassification.GENERIC
 
