@@ -11,6 +11,7 @@ import keyword
 import logging
 import math
 import operator
+import pkgutil
 import re
 import traceback
 import types
@@ -710,6 +711,20 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
+def _import_torch_object(name: str) -> Any:
+    """
+    Import the object that a qualified name under torch refers to, or return
+    None. Only torch names are resolved so that loading a program never
+    imports modules outside of torch.
+    """
+    if not name.startswith("torch."):
+        return None
+    try:
+        return pkgutil.resolve_name(name)
+    except (ImportError, AttributeError, ValueError):
+        return None
+
+
 @final
 class GraphModuleSerializer(metaclass=Final):
     def __init__(
@@ -1016,42 +1031,14 @@ class GraphModuleSerializer(metaclass=Final):
                     is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
                 )
             else:
-                args = node.args
                 if node.target is torch._higher_order_ops.flat_apply:
-                    # flat_apply gets its function and input spec as TreeSpec
-                    # graph attributes, which the schema cannot hold. Save the
-                    # function by name and the input spec as a string instead.
-                    func, in_spec, *flat_args = args
-                    if not (
-                        isinstance(func, torch.fx.Node)
-                        and isinstance(func.target, str)
-                        and isinstance(in_spec, torch.fx.Node)
-                        and isinstance(in_spec.target, str)
-                    ):
-                        raise AssertionError(
-                            f"expected flat_apply func and in_spec to be get_attr nodes, got {func} and {in_spec}"
-                        )
-                    owner = node.graph.owning_module
-                    constant_func = pytree._retrieve_constant(
-                        getattr(owner, func.target)
-                    )
-                    func_name = self.serialize_operator(constant_func.func)
-                    # The deserializer only resolves names under torch, so fail
-                    # here rather than write a program that cannot be loaded.
-                    if not func_name.startswith("torch."):
-                        raise SerializeError(
-                            f"Cannot serialize flat_apply node {node.name}: its function "
-                            f"{func_name} is not part of torch and could not be loaded back"
-                        )
-                    args = (
-                        func_name,
-                        self.serialize_treespec(getattr(owner, in_spec.target)),
-                        *flat_args,
-                    )
+                    inputs = self.serialize_flat_apply_inputs(node)
+                else:
+                    inputs = self.serialize_hoo_inputs(node.args, node.kwargs)
                 ex_node = Node(
                     name=node.name,
                     target=self.serialize_operator(node.target),
-                    inputs=self.serialize_hoo_inputs(args, node.kwargs),
+                    inputs=inputs,
                     outputs=self.serialize_hoo_outputs(node),
                     metadata=self.serialize_metadata(node),
                     is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
@@ -1292,6 +1279,53 @@ class GraphModuleSerializer(metaclass=Final):
             ]
         )
         return inputs
+
+    def serialize_flat_apply_inputs(self, node: torch.fx.Node) -> list[NamedArgument]:
+        """
+        Export passes flat_apply its function and its input spec as TreeSpec
+        graph attributes, which the schema cannot hold. They are saved as the
+        first two inputs instead: the function as ``as_operator`` with its
+        qualified name, and the input spec as ``as_string`` with the
+        ``treespec_dumps`` encoding. The remaining inputs are saved as usual.
+        ``deserialize_flat_apply_inputs`` reverses this.
+        """
+        func, in_spec, *flat_args = node.args
+        owner = node.graph.owning_module
+        func_spec = in_spec_value = None
+        if isinstance(func, torch.fx.Node) and isinstance(func.target, str):
+            func_spec = getattr(owner, func.target)
+        if isinstance(in_spec, torch.fx.Node) and isinstance(in_spec.target, str):
+            in_spec_value = getattr(owner, in_spec.target)
+        if not (
+            isinstance(func_spec, pytree.TreeSpec)
+            and isinstance(in_spec_value, pytree.TreeSpec)
+        ):
+            raise SerializeError(
+                f"Cannot serialize flat_apply node {node.name}: expected its function "
+                "and input spec to be TreeSpec graph attributes"
+            )
+        constant_func = pytree._retrieve_constant(func_spec).func
+        func_name = ".".join(
+            getattr(constant_func, attr, "") for attr in ("__module__", "__qualname__")
+        )
+        if _import_torch_object(func_name) is not constant_func:
+            raise SerializeError(
+                f"Cannot serialize flat_apply node {node.name}: its function "
+                f"{func_name} cannot be imported from torch, so it could not be loaded back"
+            )
+        return [
+            NamedArgument(
+                name="",
+                arg=Argument.create(as_operator=func_name),
+                kind=ArgumentKind.POSITIONAL,
+            ),
+            NamedArgument(
+                name="",
+                arg=Argument.create(as_string=self.serialize_treespec(in_spec_value)),
+                kind=ArgumentKind.POSITIONAL,
+            ),
+            *self.serialize_hoo_inputs(flat_args, node.kwargs),
+        ]
 
     def is_inductor_sym_int_arg(self, arg) -> bool:
         # This is a special branch for handling SymInt args in inductor's
@@ -2737,9 +2771,10 @@ class GraphModuleDeserializer(metaclass=Final):
                 "deserialize nyi for torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional"
             )
         elif isinstance(target, torch._ops.HigherOrderOperator):
-            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             if target is torch._higher_order_ops.flat_apply:
-                args = self.deserialize_flat_apply_specs(serialized_node.name, args)
+                args, kwargs = self.deserialize_flat_apply_inputs(serialized_node)
+            else:
+                args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             metadata = self.deserialize_metadata(serialized_node.metadata)
             for x in (*args, *kwargs.values()):
                 if isinstance(x, torch.fx.Node) and x.op == "get_attr":
@@ -3152,29 +3187,36 @@ class GraphModuleDeserializer(metaclass=Final):
                 kwargs[input_.name] = self.deserialize_input(input_.arg)
         return (tuple(args), kwargs)
 
-    def deserialize_flat_apply_specs(self, name: str | None, args: tuple) -> tuple:
+    def deserialize_flat_apply_inputs(self, serialized_node: Node):
         """
-        Turn the function name and input spec string saved for flat_apply back
-        into TreeSpec graph attributes.
+        Reverse of ``serialize_flat_apply_inputs``: import the function, load
+        the input spec, and add both back to the graph as TreeSpec attributes.
         """
-        func_name, in_spec, *flat_args = args
-        func = self.deserialize_operator(func_name)
-        if isinstance(func, str):
+        func_input, in_spec_input, *flat_inputs = serialized_node.inputs
+        func_name = func_input.arg.as_operator
+        func = _import_torch_object(func_name)
+        if func is None:
             raise SerializeError(
-                f"Could not find function {func_name} used by flat_apply node {name}"
+                f"Could not import function {func_name} used by flat_apply node "
+                f"{serialized_node.name}"
             )
         specs = {
             "func_spec": func_to_graphable(func)[1],
-            "in_spec": treespec_loads(in_spec),
+            "in_spec": treespec_loads(in_spec_input.arg.as_string),
         }
         spec_nodes = []
         for suffix, spec in specs.items():
-            attr_name = f"{name}_{suffix}"
+            attr_name = base_name = f"{serialized_node.name or 'flat_apply'}_{suffix}"
+            i = 0
+            while hasattr(self.module, attr_name):
+                i += 1
+                attr_name = f"{base_name}_{i}"
             setattr(self.module, attr_name, spec)
             spec_nodes.append(
                 self.graph.create_node("get_attr", attr_name, name=attr_name)
             )
-        return (*spec_nodes, *flat_args)
+        args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
+        return (*spec_nodes, *args), kwargs
 
     def deserialize_input(self, inp: Argument) -> Any:
         value = inp.value

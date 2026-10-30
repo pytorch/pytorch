@@ -7,6 +7,9 @@ with test_sym_bool)
 import copy
 import io
 import math
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -2716,30 +2719,68 @@ class TestPredispatchSerialization(TestCase):
         self.assertTrue(torch.allclose(exp_out, actual_out))
 
     def test_predispatch_vmap_index_serialize_roundtrip(self):
-        """Test that indexing inside vmap, recorded as flat_apply, survives serialization round-trip."""
+        """Test that indexing inside vmap, recorded as flat_apply, can be saved and loaded in a new process."""
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
         class IndexInVmap(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("base", torch.arange(10) * 3)
-
-            def forward(self, indices):
+            def forward(self, types):
+                q = torch.arange(types.shape[1])
+                rows = torch.vmap(
+                    torch.vmap(
+                        lambda i, j: types[0, i] & types[0, j], in_dims=(None, 0)
+                    ),
+                    in_dims=(0, None),
+                )
                 with TransformGetItemToIndex():
-                    return torch.vmap(lambda i: self.base[i])(indices)
+                    return rows(q, q)
 
         m = IndexInVmap()
-        inp = (torch.tensor([0, 3, 7, 9]),)
+        inp = (torch.tensor([[True, False, True, True]]),)
+        expected = m(*inp)
         ep = export(m, inp, strict=False)
-        self.assertIn("flat_apply", str(ep.graph))
+        flat_apply_nodes = [
+            n for n in ep.graph.nodes if n.target is torch.ops.higher_order.flat_apply
+        ]
+        self.assertEqual(len(flat_apply_nodes), 2)
 
-        buffer = io.BytesIO()
-        torch.export.save(ep, buffer)
-        buffer.seek(0)
-        loaded_ep = torch.export.load(buffer)
+        with TemporaryFileName(suffix=".pt2") as path:
+            torch.export.save(ep, path)
+            loaded_ep = torch.export.load(path)
+            self.assertEqual(expected, loaded_ep.module()(*inp))
+            torch.export.save(loaded_ep, io.BytesIO())
 
-        self.assertIn("flat_apply", str(loaded_ep.graph))
-        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+            # A new process has not imported the modules that flat_apply uses.
+            script = (
+                "import torch;"
+                f"ep = torch.export.load(r'{path}');"
+                "print(ep.module()(torch.tensor([[True, False, True, True]])).tolist())"
+            )
+            out = subprocess.check_output(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                text=True,
+            )
+        self.assertEqual(out.strip().splitlines()[-1], str(expected.tolist()))
+
+    def test_predispatch_flat_apply_non_torch_function_raises(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class LocalTwoTensor(TwoTensor):
+            pass
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                )
+
+            def forward(self, x):
+                return (x + LocalTwoTensor(x, x) + self.buffer).a
+
+        ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+        with self.assertRaisesRegex(SerializeError, "cannot be imported from torch"):
+            torch.export.save(ep, io.BytesIO())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
