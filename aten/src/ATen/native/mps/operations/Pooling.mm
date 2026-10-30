@@ -1105,30 +1105,7 @@ static Tensor& adaptive_avg_pool_out_mps_impl(const Tensor& input,
                                               Tensor& output,
                                               const int32_t pooling_dims,
                                               const std::string& op_name) {
-  TORCH_CHECK(output_size.size() == static_cast<size_t>(pooling_dims), op_name, ": output_size must be ", pooling_dims);
-  const auto ndim = input.dim();
-  TORCH_CHECK(ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
-              op_name,
-              "(): Expected ",
-              pooling_dims + 1,
-              "D or ",
-              pooling_dims + 2,
-              "D tensor, but got ",
-              input.sizes());
-  for (const auto i : c10::irange(ndim - pooling_dims, ndim)) {
-    TORCH_CHECK(input.size(i) > 0,
-                op_name,
-                "(): Expected input to have non-zero size for non-batch dimensions, but input has sizes ",
-                input.sizes(),
-                " with dimension ",
-                i,
-                " being empty");
-  }
-  TORCH_CHECK(input.dtype() == output.dtype(),
-              "expected dtype ",
-              input.dtype(),
-              " for `output` but got dtype ",
-              output.dtype());
+  adaptive_avg_pool_check(input, output, output_size, pooling_dims, (op_name + "()").c_str());
   auto output_shape = input.sizes().vec();
   std::copy(output_size.begin(), output_size.end(), output_shape.end() - pooling_dims);
   // Match CPU/CUDA and meta kernels: only 2D preserves channels last
@@ -1147,34 +1124,7 @@ static Tensor& adaptive_avg_pool_backward_out_mps_impl(const Tensor& grad_output
                                                        Tensor& grad_input,
                                                        const int32_t pooling_dims,
                                                        const std::string& op_name) {
-  adaptive_pool_empty_output_check(grad_output, op_name.c_str());
-  const auto ndim = input.dim();
-  TORCH_CHECK(ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
-              op_name,
-              "(): Expected ",
-              pooling_dims + 1,
-              "D or ",
-              pooling_dims + 2,
-              "D tensor, but got ",
-              input.sizes());
-  TORCH_CHECK(ndim == grad_output.dim(),
-              op_name,
-              ": Expected dimensions ",
-              ndim,
-              " for `grad_output` but got dimensions ",
-              grad_output.dim());
-  TORCH_CHECK(input.dtype() == grad_output.dtype(),
-              op_name,
-              ": Expected dtype ",
-              input.dtype(),
-              " for `grad_output` but got dtype ",
-              grad_output.dtype());
-  TORCH_CHECK(input.dtype() == grad_input.dtype(),
-              op_name,
-              ": Expected dtype ",
-              input.dtype(),
-              " for `grad_input` but got dtype ",
-              grad_input.dtype());
+  adaptive_avg_pool_backward_check(grad_input, grad_output, input, pooling_dims, (op_name + "()").c_str());
   TORCH_CHECK_NOT_IMPLEMENTED(
       isFloatingType(input.scalar_type()), "\"", op_name, "\" not implemented for '", input.scalar_type(), "'");
   grad_input.resize_(input.sizes(), pooling_dims == 2 ? input.suggest_memory_format() : MemoryFormat::Contiguous);
