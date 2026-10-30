@@ -669,10 +669,9 @@ class TunableopModeValidationTest(TestCase):
             with self.subTest(mode=mode, var=var):
                 is_mode = getattr(tunableop, f"is_{mode}_mode")
                 # Second pass must never warn: once per mode and variable.
-                for expect in (
-                    self.assertLogs if warns else self.assertNoLogs,
-                    self.assertNoLogs,
-                ):
+                for first_pass in (True, False):
+                    warn_now = warns and first_pass
+                    expect = self.assertLogs if warn_now else self.assertNoLogs
                     with (
                         inductor_config.patch({"cuda.autotune_tunableop_mode": mode}),
                         mock.patch("torch.cuda.is_available", return_value=True),
@@ -680,7 +679,7 @@ class TunableopModeValidationTest(TestCase):
                         expect(tunableop.log, level="WARNING") as logs,
                     ):
                         self.assertTrue(is_mode())
-                    if expect is self.assertLogs:
+                    if warn_now:
                         self.assertTrue(any(var in m for m in logs.output))
 
     def test_mode_is_case_normalized(self):
