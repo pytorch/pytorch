@@ -64,6 +64,7 @@ from ..source import (
     LocalSource,
     Source,
     TypeDictSource,
+    TypeMROSource,
     TypeSource,
 )
 from ..utils import (
@@ -471,6 +472,15 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__base__")
         return VariableTracker.build(tx, fn.__base__, source)
 
+    def _type_get_mro(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and TypeMROSource(self.source)
+        return VariableTracker.build(tx, fn.__mro__, source)
+
     def _type_get_flags(
         self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
     ) -> "VariableTracker | None":
@@ -480,7 +490,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
+    tp_getset = {
+        "__bases__": GetSet(_type_get_bases, unmodeled_setter),
+        "__mro__": GetSet(_type_get_mro, readonly_setter),
+    }
     tp_members = {
         "__base__": Member(_type_get_base, readonly_setter),
         "__flags__": Member(_type_get_flags, readonly_setter),

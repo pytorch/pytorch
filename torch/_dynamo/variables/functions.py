@@ -993,6 +993,16 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
             tx.output._emit_debugger_breakpoint = True
             return variables.ConstantVariable.create(None)
+        elif self.fn is typing.get_type_hints:
+            hints = self._maybe_get_evaluated_type_hints(tx, args, kwargs)
+            if hints is not None:
+                return hints
+        elif self.fn is typing.get_origin and not kwargs and len(args) == 1:
+            arg = args[0]
+            if arg.is_python_constant():
+                origin = typing.get_origin(arg.as_python_constant())
+                if origin is typing.Union:
+                    return variables.TypingVariable(origin)
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -1144,6 +1154,81 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     rest,
                     tree_map_kwargs,
                 )
+
+    def _maybe_get_evaluated_type_hints(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if kwargs or len(args) != 1:
+            return None
+
+        func = args[0]
+        if type(func) is NestedUserFunctionVariable:
+            if func.wrapped_fn is not None:
+                return None
+            if func.dict_vt is not None:
+                if func.dict_vt.contains("__wrapped__"):
+                    return None
+                if func.dict_vt.contains("__no_type_check__"):
+                    no_type_check = func.dict_vt.getitem("__no_type_check__")
+                    if (
+                        not no_type_check.is_python_constant()
+                        or no_type_check.as_python_constant()
+                    ):
+                        return None
+        elif type(func) is UserFunctionVariable:
+            if func.source is None:
+                return None
+            function_dict = func.get_dict_vt(tx)
+            dict_source = AttrSource(func.source, "__dict__")
+            for name in ("__wrapped__", "__no_type_check__"):
+                if function_dict.contains(name):
+                    return None
+                install_guard(
+                    dict_source.make_guard(
+                        functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+                    )
+                )
+        else:
+            return None
+
+        annotations = func._get_annotations(tx)
+        if (
+            not isinstance(annotations, variables.ConstDictVariable)
+            or not annotations.items
+        ):
+            return None
+
+        # get_type_hints copies the annotation mapping and resolves every value.
+        # For plain classes and unions, resolution is already complete, so we
+        # can preserve those values without reading or materializing __globals__.
+        annotations.install_dict_keys_match_guard()
+        items: dict[VariableTracker, VariableTracker] = {}
+        for key, value in annotations.items.items():
+            key = key.vt
+            if not key.is_python_constant() or not value.is_python_constant():
+                return None
+            key_value = key.as_python_constant()
+            annotation = value.as_python_constant()
+            if not isinstance(key_value, str):
+                return None
+
+            if isinstance(annotation, type):
+                pass
+            else:
+                origin = typing.get_origin(annotation)
+                if origin is not typing.Union and origin is not types.UnionType:
+                    return None
+                union_args = typing.get_args(annotation)
+                if not union_args or not all(
+                    isinstance(arg, type) for arg in union_args
+                ):
+                    return None
+            items[key] = value
+
+        return variables.ConstDictVariable(items, mutation_type=ValueMutationNew())
 
     def _is_tree_map_function(self) -> bool:
         return (
