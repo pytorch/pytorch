@@ -135,7 +135,7 @@
 # /aten/src/ATen/native/SpectralOpsUtils.h
 # /test/test_spectral_ops.py
 # label: module: linear algebra, module: floatx (formerly float8)
-# owner: @drisspg @slayton58
+# owner: @drisspg @slayton58 @vkuzo
 # /aten/src/ATen/native/ScaledBlas.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.h
