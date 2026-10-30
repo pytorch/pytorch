@@ -7510,6 +7510,22 @@ class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
         )
 
 
+class FunctionTestsXpuOnly(torch._dynamo.test_case.TestCase):
+    """Tests XPU-only device properties unavailable on other accelerators."""
+
+    hw_classification = HardwareClassification.XPU
+
+    def test_get_device_properties_tensor_device(self, device):
+        def fn(a):
+            x = a.to(device)
+            prop = torch.xpu.get_device_properties(x.device)
+            return x + prop.max_compute_units
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_frame_count=1
+        )
+
+
 class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -9168,9 +9184,16 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, expected)
 
 
-_FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)
+_FUNCTION_DEVICE_TEST_BASES = (
+    FunctionTestsCudaOnly,
+    FunctionTestsXpuOnly,
+    FunctionTestsDevice,
+)
 
 instantiate_device_type_tests(FunctionTestsCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    FunctionTestsXpuOnly, globals(), only_for="xpu", allow_xpu=True
+)
 instantiate_device_type_tests(
     FunctionTestsDevice, globals(), except_for="cpu", allow_xpu=True
 )
