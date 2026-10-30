@@ -964,7 +964,15 @@ class _BlockscaledTma:
 def _make_dynamic_matrix_fake(
     dtype: type[cutlass.Numeric], is_batched: bool
 ) -> cute.Tensor:
-    """Match a 16-byte-aligned row-major tensor with a dynamic, 16-divisible K."""
+    r"""_make_dynamic_matrix_fake(dtype, is_batched) -> cute.Tensor
+
+    Match a 16-byte-aligned matrix with a stride-1, 16-divisible inner axis.
+    For batched matrices, ``_blockscaled_tma_impl_on_current_device`` permutes
+    canonical (B0, rows, B1, cols) operands with ``permute(1, 3, 2, 0)``.
+    The fake matches (rows, cols, B1, B0), with stride 1 along cols and
+    16-divisible strides elsewhere. For the input this is (M, K, B1, B0);
+    the kernel reads the batch count from ``mInput.shape[2] * mInput.shape[3]``.
+    """
     if is_batched:
         return cute.runtime.make_fake_tensor(
             dtype,
