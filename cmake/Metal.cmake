@@ -39,7 +39,7 @@ function(metal_to_metallib_h SHADER)
     cmake_path(APPEND_STRING SHADER_HDR "_metallib.h")
 
     add_custom_command(COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${SHADER_ABSOLUTE} ${SHADER_HDR}
-                       DEPENDS ${SHADER_ABSOLUTE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py
+                       DEPENDS ${SHADER_ABSOLUTE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${METAL_HEADER_DEPS}
                        OUTPUT ${SHADER_HDR}
                        COMMENT "Generating metallib wrapper header for ${SHADER}"
                        VERBATIM)
@@ -53,16 +53,34 @@ set(BFLOAT_METAL_CODE "
     ptr[idx] += 1;
   }
 ")
-set(LAMBDA_METAL_CODE "
+# Probes what the Metal 4.0 pass actually needs, rather than the language
+# standard alone. Two things drifted apart before: the pass compiles
+# METAL_40_SHADERS with -std=metal4.0 -mmacos-version-min=26.2, and
+# some SDKs accept that standard while not providing the cooperative-tensor
+# input accessors MppAttention.h calls. A language-only probe then passes and
+# Attention_40.air fails to build.
+#
+# So probe both, with the flags the build uses:
+#   * a lambda returning a deduced type, as Convolution.metal does
+#   * the MPP instantiation from MppAttention.h, half inputs, float accumulator
+set(METAL_40_PROBE_CODE "
+#include <metal_stdlib>
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
   kernel void test(device float* ptr,
                    uint idx [[thread_position_in_grid]]) {
     auto fn = [](float x) { return x + 1.0; };
     ptr[idx] = fn(ptr[idx]);
+    constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+        16, 32, 16, false, false, true,
+        mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
+    mpp::tensor_ops::matmul2d<desc, metal::execution_simdgroup> gemm_op;
+    auto ct_a = gemm_op.template get_left_input_cooperative_tensor<half, half, float>();
+    ptr[idx] += ct_a[0];
   }
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
-    execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
+    execute_process(COMMAND xcrun metal -std=metal3.2 bfloat_inc.metal
                     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
                     OUTPUT_VARIABLE XCRUN_OUTPUT
                     ERROR_VARIABLE XCRUN_OUTPUT
@@ -75,8 +93,8 @@ if(NOT CAN_COMPILE_METAL_FOUND)
         set(CAN_COMPILE_METAL NO CACHE BOOL "Host can compile metal shaders")
     endif()
     if(CAN_COMPILE_METAL)
-        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/lambda_test.metal" "${LAMBDA_METAL_CODE}")
-        execute_process(COMMAND xcrun metal -std=metal4.0 -c lambda_test.metal -o /dev/null
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/metal_40_probe.metal" "${METAL_40_PROBE_CODE}")
+        execute_process(COMMAND xcrun metal -std=metal4.0 -mmacos-version-min=26.2 -c metal_40_probe.metal -o /dev/null
                         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
                         OUTPUT_VARIABLE XCRUN_OUTPUT
                         ERROR_VARIABLE XCRUN_OUTPUT
@@ -92,6 +110,37 @@ if(NOT CAN_COMPILE_METAL_FOUND)
         set(CAN_COMPILE_METAL_40 NO CACHE BOOL "Host can compile Metal 4.0 shaders" FORCE)
     endif()
     set(CAN_COMPILE_METAL_FOUND YES CACHE INTERNAL "Run check for shader compiler")
+endif()
+
+# Metal 4.1 (macOS 27) adds native fp8 formats, which MPP matmul2d accepts as operands
+set(METAL_41_PROBE_CODE "
+#include <metal_stdlib>
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+  using namespace metal;
+  kernel void test(device uchar* a, device float* ptr) {
+    using fp8_tensor = tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline>;
+    fp8_tensor ta(a, dextents<int32_t, 2>(16, 16));
+    constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(16, 16);
+    mpp::tensor_ops::matmul2d<desc, execution_simdgroup> op;
+    auto acc = op.get_destination_cooperative_tensor<fp8_tensor, fp8_tensor, float>();
+    op.run(ta, ta, acc);
+    ptr[0] = acc[0];
+  }
+")
+if(NOT DEFINED CAN_COMPILE_METAL_41)
+    set(CAN_COMPILE_METAL_41 NO)
+    if(CAN_COMPILE_METAL_40)
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/metal_41_probe.metal" "${METAL_41_PROBE_CODE}")
+        execute_process(COMMAND xcrun metal -std=metal4.1 -mmacos-version-min=27.0 -c metal_41_probe.metal -o /dev/null
+                        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+                        OUTPUT_QUIET ERROR_QUIET
+                        RESULT_VARIABLE XCRUN_RC)
+        if(${XCRUN_RC} EQUAL 0)
+            set(CAN_COMPILE_METAL_41 YES)
+        endif()
+    endif()
+    message(STATUS "Metal toolchain supports Metal 4.1: ${CAN_COMPILE_METAL_41}")
+    set(CAN_COMPILE_METAL_41 ${CAN_COMPILE_METAL_41} CACHE BOOL "Host can compile Metal 4.1 shaders")
 endif()
 
 if(NOT USE_PYTORCH_METAL)

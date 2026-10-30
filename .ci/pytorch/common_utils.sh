@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -205,6 +205,7 @@ function install_fbgemm() {
   local build_variant=$1
 
   local fbgemm_commit
+  # fbgemm pin is the v1.5.0-rc3 tag commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
@@ -240,14 +241,7 @@ function install_fbgemm() {
     # the CUID hash, giving each object a distinct __hip_cuid. Inline (not exported) and
     # scoped to the ROCm build so it does not affect the PyTorch build (already built).
     if [[ "${build_variant}" == "rocm" ]]; then
-      # The inductor-periodic ROCm benchmark job runs its tests only on MI350
-      # (gfx950), so build fbgemm for that single arch instead of the image's
-      # multi-arch default to cut build time.
-      if [[ "${GITHUB_WORKFLOW}" == "inductor-periodic" ]]; then
-        SCCACHE_RECACHE=1 PYTORCH_ROCM_ARCH="gfx950" python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
-      else
-        SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
-      fi
+      SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
     else
       python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
     fi
@@ -270,6 +264,7 @@ function install_fbgemm() {
 
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
+  # torchrec pin is the release/v1.4.0 branch head (untagged)
   torchrec_commit=$(get_pinned_commit torchrec)
 
   pip_uninstall torchrec-nightly
@@ -311,36 +306,10 @@ function install_torchrec_and_fbgemm() {
   fi
 }
 
-function clone_pytorch_xla() {
-  if [[ ! -d ./xla ]]; then
-    git clone --recursive --quiet https://github.com/pytorch/xla.git
-    pushd xla
-    # pin the xla hash so that we don't get broken by changes to xla
-    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
-    git submodule sync
-    git submodule update --init --recursive
-    popd
-  fi
-}
-
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
-}
-
-function install_torchcomms() {
-  local commit
-  commit=$(get_pinned_commit torchcomms)
-  export USE_GLOO=1
-  export USE_NCCLX=0
-  export USE_TRANSPORT=0
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    export USE_NCCL=1
-  else
-    export USE_NCCL=0
-  fi
-  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
 function install_spmd_types() {
@@ -351,74 +320,73 @@ function install_spmd_types() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  # b17 adds aux_scalars; CUDA 13 wheels are behind the cu13 extra.
+  local flash_attn_package=flash-attn-4==4.0.0b31
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
-    pip_install "flash-attn-4[cu13]==4.0.0b17"
-  else
-    pip_install flash-attn-4==4.0.0b17
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # flash-attn-4 pulls quack unpinned; newer quack needs cutlass._mlir_helpers,
-  # absent from the gated cutlass-dsl 4.5.2. Pin quack to the SHA torch vendors
-  # (torch/_vendor/quack), which uses cutlass._mlir and works with 4.5.2. See #188477.
-  pip_install "git+https://github.com/Dao-AILab/quack.git@99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
+  # FA4 and QuACK do not pin CuTeDSL, so install the pinned version first.
+  install_cutlass_dsl
+  pip_install \
+    "$flash_attn_package" \
+    quack-kernels==0.6.5 \
+    apache-tvm-ffi==0.1.12
   echo "FlashAttention 4 installation complete."
 }
 
 function install_cutlass_dsl() {
-  # cutlass-dsl requires Python >= 3.12
-  local py_version
-  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
-    return 0
+  local cutlass_dsl_package=nvidia-cutlass-dsl==4.8.0
+  if [[
+    "${DESIRED_CUDA:-}" == cu13* ||
+    "${DESIRED_CUDA:-}" == 13.* ||
+    "${CUDA_VERSION:-}" == 13.* ||
+    "${BUILD_ENVIRONMENT:-}" == *cuda13*
+  ]]; then
+    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.8.0"
   fi
 
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install nvidia-cutlass-dsl==4.5.2 apache-tvm-ffi==0.1.11
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
   echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_flydsl() {
+  echo "Installing FlyDSL from PyPI..."
+  # Require the published platform wheel instead of attempting an unsupported source build.
+  pip_install --only-binary=:all: flydsl==0.3.4.1
+  echo "FlyDSL installation complete."
 }
 
 function install_nvmath() {
   echo "Installing nvmath-python from PyPI..."
-  pip_install nvmath-python
+  pip_install nvmath-python==0.9.0
   # nvmath-python upgrades numpy to 2.x; realign scipy to a matching build. See #189034.
   pip_install "scipy==1.13.1"
   echo "nvmath-python installation complete."
 }
 
-function install_cutlass_api() {
-  # cutlass-api requires Python >= 3.12
+function install_cutlass_operators() {
+  # cutlass-operators requires Python >= 3.10
   local py_version
   py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS API install: requires Python >= 3.12, have $py_version"
+  if [[ "$(echo -e "3.10\n$py_version" | sort -V | head -n1)" != "3.10" ]]; then
+    echo "Skipping CUTLASS Operators install: requires Python >= 3.10, have $py_version"
     return 0
   fi
 
-  echo "Installing CUTLASS API from Github..."
+  echo "Installing CUTLASS Operators from PyPI..."
 
   # Install CuTeDSL dependency first
   install_cutlass_dsl
 
-  # Grab latest til we have a pinned commit
-  local cutlass_commit
-  cutlass_commit=$(git ls-remote https://github.com/NVIDIA/cutlass.git refs/heads/cutlass_api | cut -f1)
+  # Skip [torch] extra so pip does not pull PyPI torch over the CI build.
+  # Pin 0.2.0: Operator.get_workspace_size returns AllocationRequirement
+  # (size_bytes) and CompiledArtifact requires compiled_for.
+  pip_install nvidia-cutlass-operators==0.3.0
 
-  rm -rf cutlass-build
-  git clone --depth 1 -b cutlass_api https://github.com/NVIDIA/cutlass.git cutlass-build
-
-  pushd cutlass-build
-  git checkout "${cutlass_commit}"
-
-  # Install cutlass_api with torch extras
-  pip_install "python/cutlass_api[torch]"
-  popd
-
-  rm -rf cutlass-build
-  echo "CUTLASS API installation complete."
+  echo "CUTLASS Operators installation complete."
 }
 
 function print_sccache_stats() {

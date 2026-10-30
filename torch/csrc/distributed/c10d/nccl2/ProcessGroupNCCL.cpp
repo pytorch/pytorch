@@ -11,10 +11,10 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
 
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
@@ -25,7 +25,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
 namespace c10d::nccl2 {
 
@@ -43,6 +42,13 @@ void checkSameDtype(
   for (const auto& tensor : tensors) {
     checkSameDtype(reference, tensor);
   }
+}
+
+// Stock ProcessGroupNCCL's "<pg_desc>:<pg_uid>"; NCCLX telemetry joins on it.
+[[maybe_unused]] std::string defaultCommName(
+    const std::string& desc,
+    const std::string& name) {
+  return desc.empty() ? name : c10::str(desc, ':', name);
 }
 
 } // namespace
@@ -85,11 +91,110 @@ void waitForNcclCompletion(
   }
 }
 
+void waitForNcclChildComm(
+    NcclApi& nccl_api,
+    ncclComm_t parent_comm,
+    ncclComm_t* child_comm,
+    ncclResult_t status,
+    bool expect_child,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  const auto remaining = [&] {
+    const auto now = std::chrono::steady_clock::now();
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        now < deadline,
+        operation,
+        " timed out after ",
+        timeout.count(),
+        " ms");
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - now);
+  };
+  try {
+    // A nonblocking split/shrink returns ncclSuccess while the child is still
+    // initializing; its failure is only reported via the parent's async error.
+    waitForNcclCompletion(
+        nccl_api,
+        parent_comm,
+        status == ncclSuccess ? ncclInProgress : status,
+        remaining(),
+        operation);
+    if (!expect_child) {
+      return;
+    }
+
+    while (*child_comm == nullptr) {
+      remaining();
+      std::this_thread::yield();
+    }
+
+    ncclResult_t child_status{};
+    auto query_status = nccl_api.commGetAsyncError(*child_comm, &child_status);
+    if (query_status != ncclSuccess) {
+      throw NCCLException(
+          nccl_api,
+          fmt::format("{} child async error query failed", operation),
+          query_status,
+          *child_comm);
+    }
+    waitForNcclCompletion(
+        nccl_api, *child_comm, child_status, remaining(), operation);
+  } catch (...) {
+    const auto abortComm = [&](ncclComm_t comm, std::string_view description) {
+      try {
+        waitForNcclCompletion(
+            nccl_api, comm, nccl_api.commAbort(comm), timeout, description);
+      } catch (const std::exception& error) {
+        LOG(ERROR) << error.what();
+      }
+    };
+    if (status == ncclSuccess || status == ncclInProgress) {
+      abortComm(parent_comm, "Failed to abort parent NCCL communicator");
+    }
+    if (*child_comm != nullptr) {
+      abortComm(
+          std::exchange(*child_comm, nullptr),
+          "Failed to abort child NCCL communicator");
+    }
+    throw;
+  }
+}
+
 void ProcessGroupNCCL::waitForNcclOperation(
     ncclResult_t status,
     std::chrono::milliseconds timeout,
     std::string_view operation) {
-  waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
+  // A launch that returned ncclInProgress and then failed or timed out has no
+  // Work for the watchdog to track, and may still enqueue its kernel later.
+  // Revoke so that kernel cannot block the stream forever and getError()
+  // reports the failure. Immediate errors (e.g. invalid arguments) leave the
+  // comm usable. Without reconfigure or blocking wait the watchdog owns
+  // teardown, so leave the comm to it.
+  const bool revokeOnFailure = status == ncclInProgress &&
+      (options_c10d_->enable_reconfigure || blocking_wait_);
+  const int64_t uuid = reconfigure_uuid_;
+  auto onFailure = [&](WorkNCCL::WorkStatus workStatus) {
+    if (!revokeOnFailure) {
+      return;
+    }
+    try {
+      handleBlockingWaitFailure(workStatus, uuid);
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "Failed to tear down after " << operation
+                          << " launch failure: " << e.what();
+    }
+  };
+  try {
+    waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
+  } catch (const NCCLException&) {
+    onFailure(WorkNCCL::WorkStatus::ERROR);
+    throw;
+  } catch (const c10::DistBackendError&) {
+    onFailure(WorkNCCL::WorkStatus::TIMEDOUT);
+    throw;
+  }
 }
 
 ncclResult_t NCCLException::getResult() const noexcept {
@@ -142,11 +247,12 @@ void ProcessGroupNCCL::init(at::Device device) {
   TC_LOG(INFO, this) << "Initializing ProcessGroupNCCL for device: " << device;
   device_ = device;
 
-  if (init_state_ == InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL already initialized");
-  } else if (init_state_ == InitializationState::FINALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL already finalized");
-  }
+  TORCH_CHECK(
+      init_state_ != InitializationState::INITIALIZED,
+      "ProcessGroupNCCL already initialized");
+  TORCH_CHECK(
+      init_state_ != InitializationState::FINALIZED,
+      "ProcessGroupNCCL already finalized");
 
   if (!nccl_api_) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
@@ -179,22 +285,37 @@ void ProcessGroupNCCL::init(at::Device device) {
     device_ = bootstrap->getDevice();
 
     if (nccl_comm_ == nullptr) {
-      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->config);
+      nccl_comm_ = bootstrap->createNcclComm(name_, commConfig());
     }
   }
 
   initNcclResources();
 
   init_state_ = InitializationState::INITIALIZED;
-  TracingGuard tracingGuard(name_, comm_size_, "init", rank_);
+  TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized for rank: " << rank_;
+}
+
+ncclConfig_t ProcessGroupNCCL::commConfig() {
+  ncclConfig_t config = options_c10d_->config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (config.commName != nullptr) {
+    return config;
+  }
+  if (comm_name_.empty()) {
+    comm_name_ = defaultCommName(getGroupDesc(), name_);
+  }
+  config.commName = comm_name_.c_str();
+#endif
+  return config;
 }
 
 void ProcessGroupNCCL::initNcclResources() {
   c10::cuda::CUDAGuard gpuGuard(device_);
 
-  is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
+  is_high_priority_stream_ = options_c10d_->is_high_priority_stream ||
+      getCvarBool(::c10d::TORCH_NCCL_HIGH_PRIORITY, false);
 
   if (!internal_stream_) {
     internal_stream_.emplace(
@@ -204,8 +325,6 @@ void ProcessGroupNCCL::initNcclResources() {
   if (!dependency_event_) {
     dependency_event_.emplace(cudaEventDisableTiming);
   }
-
-  max_event_pool_size_ = kDefaultMaxEventPoolSize;
 
   NCCL_CHECK(
       nccl_api_,
@@ -219,7 +338,7 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
-  if (!shutdown_) {
+  if (!blocking_wait_ && !shutdown_) {
     timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
   }
 
@@ -236,9 +355,27 @@ void ProcessGroupNCCL::initFromComm(
   nccl_comm_ = comm;
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
-  TracingGuard tracingGuard(name_, comm_size_, "init", rank_);
+  TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized from split for rank: "
                      << rank_;
+}
+
+bool ProcessGroupNCCL::isInitialized() {
+  return init_state_ == InitializationState::INITIALIZED;
+}
+
+void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
+  checkInitialized();
+  TORCH_CHECK(
+      device == device_,
+      "ProcessGroupNCCL is bound to device ",
+      device_,
+      " but split was requested on ",
+      device);
+  auto opts = Options::create(options_c10d_->is_high_priority_stream);
+  opts->timeout = options_c10d_->timeout;
+  opts->config = cloneNcclConfig(options_c10d_->config);
+  split(store_, {}, opts);
 }
 
 c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
@@ -267,16 +404,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
       ncclOpts != nullptr,
       "ProcessGroupNCCL::split: opts is not a nccl2 ProcessGroupNCCL::Options");
 
-  // ncclCommSplit is collective over the parent communicator, so the parent
-  // must be initialized before we split. All parent ranks call split(), so a
-  // lazy bootstrap here stays in lockstep. Resolve a device the same way the
-  // lazy collective path does.
-  if (init_state_ != InitializationState::INITIALIZED) {
-    at::Device dev = getBoundDeviceId().has_value()
-        ? getBoundDeviceId().value()
-        : at::Device(at::kCUDA, at::cuda::current_device());
-    ensureInitialized(dev);
-  }
+  checkInitialized();
   checkAndAbortIfTimedOutOrError();
 
   // Determine this rank's color and its rank within the child communicator.
@@ -291,11 +419,17 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
     newRank = static_cast<int>(std::distance(ranks.begin(), it));
   }
 
-  const std::string& name = ncclOpts->group_name;
   ncclConfig_t config =
       newRank == -1 ? ncclOpts->config : cloneNcclConfig(ncclOpts->config);
+  [[maybe_unused]] bool defaultName = false;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name.c_str();
+  if (newRank != -1 && config.commName == nullptr) {
+    // NCCL keeps the pointer for the child comm's lifetime, so leak it as the
+    // NCCLConfig pybind setter does.
+    config.commName = strdup(
+        defaultCommName(ncclOpts->group_desc, ncclOpts->group_name).c_str());
+    defaultName = true;
+  }
 #endif
 
   // Collective on the parent comm: every parent rank calls commSplit exactly
@@ -303,11 +437,25 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   c10::cuda::CUDAGuard gpuGuard(device_);
   ncclComm_t new_comm = nullptr;
   const int key = newRank >= 0 ? newRank : getRank();
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->commSplit(nccl_comm_, color, key, &new_comm, &config),
-      "NCCL split failed");
+  auto splitStatus =
+      nccl_api_->commSplit(nccl_comm_, color, key, &new_comm, &config);
+  try {
+    waitForNcclChildComm(
+        *nccl_api_,
+        nccl_comm_,
+        &new_comm,
+        splitStatus,
+        newRank != -1,
+        ncclOpts->timeout,
+        "NCCL split failed");
+  } catch (...) {
+    comm_state_ = CommState::ERROR;
+    // The failed call may have aborted the parent; drop its symmetric-memory
+    // registration while nccl_comm_ still names it.
+    retireComm();
+    nccl_comm_ = nullptr;
+    throw;
+  }
 
   if (newRank == -1) {
     // Non-member: no child communicator.
@@ -317,8 +465,34 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (defaultName) {
+    // Keep the default out of the child's Options: splitGroup and shrink clone
+    // them, and a grandchild must compute its own name, not inherit this one.
+    childOpts->config.commName = nullptr;
+  }
+#endif
+  // Do not inherit enable_reconfigure: reconfigure() performs blocking
+  // rendezvous on this shared Store connection.
   childOpts->group_name = ncclOpts->group_name;
   childOpts->group_desc = ncclOpts->group_desc;
+
+  // The child's membership in world-rank terms, as stock's split() records it.
+  // nccl2 never reads this itself; its one consumer is FlightRecorderHook,
+  // which otherwise falls back to identity ranks. Map through this group's own
+  // map, not the passed-in Options': an empty map means "spans the world in
+  // rank order", and a merged group inherits its parent's shorter map, so
+  // treat anything too short the same way instead of indexing out of bounds.
+  const auto& parentRanks = options_c10d_->global_ranks_in_group;
+  const bool parentSpansWorld =
+      parentRanks.size() < static_cast<size_t>(getSize());
+  std::vector<uint64_t> childRanks;
+  childRanks.reserve(ranks.size());
+  for (int r : ranks) {
+    childRanks.push_back(
+        parentSpansWorld ? static_cast<uint64_t>(r) : parentRanks[r]);
+  }
+  childOpts->global_ranks_in_group = std::move(childRanks);
 
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
@@ -401,38 +575,37 @@ std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
 }
 
 void ProcessGroupNCCL::finalize() {
-  if (init_state_ == InitializationState::UNINITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL not initialized");
-  } else if (init_state_ == InitializationState::FINALIZED) {
-    throw std::runtime_error("ProcessGroupNCCL already finalized");
-  }
+  TORCH_CHECK(
+      init_state_ != InitializationState::UNINITIALIZED,
+      "ProcessGroupNCCL not initialized");
+  TORCH_CHECK(
+      init_state_ != InitializationState::FINALIZED,
+      "ProcessGroupNCCL already finalized");
   init_state_ = InitializationState::FINALIZED;
 
   // Stop the watchdog first: draining the work queue below may surface a
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
+  drainRetiredGraphWork();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
 
-  if (work_status == WorkNCCL::WorkStatus::NOT_STARTED ||
-      work_status == WorkNCCL::WorkStatus::INPROGRESS) {
-    throw std::runtime_error(
-        "WorkQ finalize returned in progress or not started state");
-  }
+  TORCH_CHECK(
+      work_status != WorkNCCL::WorkStatus::NOT_STARTED &&
+          work_status != WorkNCCL::WorkStatus::INPROGRESS,
+      "WorkQ finalize returned in progress or not started state");
 
   // Update comm_state_ based on the work status
   if (work_status == WorkNCCL::WorkStatus::TIMEDOUT) {
     comm_state_ = CommState::TIMEOUT;
     abortNcclComm();
-    throw std::runtime_error("Work timed out during finalize");
+    TORCH_CHECK(false, "Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
-    if (!nccl_comm_) {
-      throw std::runtime_error(
-          "NCCL communicator was aborted after a previous error");
-    }
+    TORCH_CHECK(
+        nccl_comm_, "NCCL communicator was aborted after a previous error");
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -442,16 +615,23 @@ void ProcessGroupNCCL::finalize() {
     NCCLException ncclException(
         *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
     abortNcclComm();
+    // The constructor reads the communicator for getLastError(), and
+    // abortNcclComm() has just set nccl_comm_ to nullptr, so the exception has
+    // to be built first. A check macro would raise before the cleanup ran.
+    // @allow-raw-throw: abortNcclComm() nulls the comm it reads
     throw std::move(ncclException);
   }
 
-  // Clean up event pool
-  {
-    std::lock_guard<std::mutex> lock(event_pool_mutex_);
-    while (!event_pool_.empty()) {
-      event_pool_.pop();
+  if (memPool_) {
+    try {
+      deregisterMemPool(memPool_.get());
+    } catch (const std::exception& error) {
+      TC_LOG(ERROR, this) << "Failed to deregister tensor allocation pool: "
+                          << error.what();
     }
   }
+
+  event_pool_->clear();
 
   barrier_buffer_.clear();
 
@@ -509,14 +689,64 @@ void ProcessGroupNCCL::stopWatchdog() {
 void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   // Never terminate the process in reconfigurable mode: callers fall back to
   // revoke + throw so the failure can be handled by reconfiguring.
-  if (!abort_process_on_timeout_or_error_ ||
+  if (!SHOULD_TEAR_DOWN(async_error_handling_) ||
       options_c10d_->enable_reconfigure) {
     return;
   }
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
+  const auto waitMs =
+      getCvarInt(::c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000);
+  TC_LOG(ERROR, this)
+      << "Waiting " << waitMs
+      << "ms for health check and flight recorder dump before aborting";
+  // NOLINTNEXTLINE(facebook-hte-BadCall-sleep_for)
+  std::this_thread::sleep_for(std::chrono::milliseconds(waitMs));
   ::abort();
+}
+
+void ProcessGroupNCCL::handleWatchdogFailure(const std::string& reason) {
+  if (options_c10d_->enable_reconfigure) {
+    revokeNcclComm();
+    return;
+  }
+
+  if (SHOULD_CLEAN_UP(async_error_handling_)) {
+    if (timeout_thread_.joinable() &&
+        std::this_thread::get_id() == timeout_thread_.get_id()) {
+      shutdown_ = true;
+      timeout_cv_.notify_all();
+    } else {
+      stopWatchdog();
+    }
+    try {
+      abortNcclComm();
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "Failed to clean up NCCL communicator after "
+                          << reason << ": " << e.what();
+      abortProcess(reason);
+      return;
+    }
+  }
+  abortProcess(reason);
+}
+
+void ProcessGroupNCCL::handleBlockingWaitFailure(
+    WorkNCCL::WorkStatus status,
+    int64_t reconfigure_uuid) {
+  std::lock_guard reconfigureLock(reconfigure_mutex_);
+  if (reconfigure_uuid_ != reconfigure_uuid) {
+    return;
+  }
+  comm_state_ = status == WorkNCCL::WorkStatus::TIMEDOUT ? CommState::TIMEOUT
+                                                         : CommState::ERROR;
+  if (options_c10d_->enable_reconfigure) {
+    revokeNcclComm();
+  } else {
+    runAbortHooks();
+    abortNcclComm();
+  }
 }
 
 void ProcessGroupNCCL::revokeNcclComm() {
@@ -524,6 +754,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   // observe the same timeout and attempt a revoke. Run the teardown (abort
   // hooks, memory hook detach, commRevoke) at most once per communicator
   // generation. revoked_ is reset on reconfigure.
+  std::lock_guard revokeLock(revoke_mutex_);
   if (revoked_.exchange(true)) {
     return;
   }
@@ -532,10 +763,19 @@ void ProcessGroupNCCL::revokeNcclComm() {
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
-    // Best-effort: this may run on the timeout watchdog thread, so log instead
-    // of throwing on failure (the communicator is already being torn down).
-    NCCL_CHECK_IGNORE(
-        nccl_api_, nccl_api_->commRevoke(nccl_comm_), "NCCL Revoke failed");
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm_,
+          nccl_api_->commRevoke(nccl_comm_),
+          options_c10d_->timeout,
+          "NCCL Revoke failed");
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "commRevoke failed or did not complete within "
+                          << options_c10d_->timeout.count() << "ms on rank "
+                          << rank_ << "; continuing teardown (best-effort): "
+                          << e.what();
+    }
   }
 }
 
@@ -564,7 +804,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
-  TracingGuard tracingGuard(name_, comm_size_, "send", dst, tensor, tensor);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "send", dst, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -622,7 +863,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
-  TracingGuard tracingGuard(name_, comm_size_, "recv", src, tensor, tensor);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "recv", src, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -672,9 +914,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
     std::chrono::milliseconds timeout) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
-  if (ops.empty()) {
-    throw std::runtime_error("Cannot issue empty batch operation");
-  }
+  TORCH_CHECK(!ops.empty(), "Cannot issue empty batch operation");
 
   // Collect input and output tensors for work tracking
   std::vector<at::Tensor> input_tensors;
@@ -691,7 +931,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
       ensureTensorContiguous(tensor);
       output_tensors.push_back(tensor);
     } else {
-      throw std::runtime_error("Unknown op type");
+      TORCH_CHECK(false, "Unknown op type");
     }
   }
 
@@ -700,6 +940,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
       comm_size_,
       "batch_op_issue",
       rank_,
+      sequence_number_,
       input_tensors,
       output_tensors);
 
@@ -765,14 +1006,15 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
     at::Tensor& tensor,
     int root,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "broadcast", root, tensor, tensor);
+      name_, comm_size_, "broadcast", root, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -790,7 +1032,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
           getNcclDataType(tensor),
           root,
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL Broadcast failed");
 
@@ -807,14 +1050,15 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
     at::Tensor& tensor,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "all_reduce", rank_, tensor, tensor);
+      name_, comm_size_, "all_reduce", rank_, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -833,7 +1077,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           dataType,
           getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL AllReduce failed");
 
@@ -851,13 +1096,15 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
     int root,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
 
-  TracingGuard tracingGuard(name_, comm_size_, "reduce", root, tensor, tensor);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "reduce", root, sequence_number_, tensor, tensor);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -877,7 +1124,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           getNcclReduceOp(op, nccl_comm_, tensor),
           root,
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL Reduce failed");
 
@@ -894,13 +1142,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
     const std::vector<at::Tensor>& tensor_list,
     const at::Tensor& tensor,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
-  if (tensor_list.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "tensor_list size must equal comm_size for all_gather");
-  }
+  TORCH_CHECK(
+      tensor_list.size() == static_cast<size_t>(comm_size_),
+      "tensor_list size must equal comm_size for all_gather");
 
   // Ensure input tensor is contiguous
   ensureTensorContiguous(tensor);
@@ -934,7 +1182,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "all_gather", rank_, tensor_list, {tensor});
+      name_,
+      comm_size_,
+      "all_gather",
+      rank_,
+      sequence_number_,
+      tensor_list,
+      {tensor});
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -968,7 +1222,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
               getNcclDataType(local_outputs[i]),
               i,
               nccl_comm_,
-              stream),
+              stream,
+              native_config),
           "NCCL Broadcast failed in all_gather");
     }
   } catch (...) {
@@ -999,7 +1254,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1008,13 +1264,18 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   checkTensorDevice(input);
   checkSameDtype(input, output);
 
-  if (output.numel() != input.numel() * comm_size_) {
-    throw std::runtime_error(
-        "Output tensor size must be input_size * comm_size for allGatherSingleImpl");
-  }
+  TORCH_CHECK(
+      output.numel() == input.numel() * comm_size_,
+      "Output tensor size must be input_size * comm_size for allGatherSingleImpl");
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "allGatherSingleImpl", rank_, input, output);
+      name_,
+      comm_size_,
+      "allGatherSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1030,7 +1291,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
           input.numel(),
           getNcclDataType(input),
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL AllGather failed");
 
@@ -1047,15 +1309,15 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
     const std::vector<at::Tensor>& input_list,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
 
-  if (input_list.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "input_list size must equal comm_size for reduce_scatter");
-  }
+  TORCH_CHECK(
+      input_list.size() == static_cast<size_t>(comm_size_),
+      "input_list size must equal comm_size for reduce_scatter");
 
   // Check that all input tensors are contiguous.
   for (const auto& t : input_list) {
@@ -1070,7 +1332,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   checkSameDtype(output, input_list);
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "reduce_scatter", rank_, input_list, {output});
+      name_,
+      comm_size_,
+      "reduce_scatter",
+      rank_,
+      sequence_number_,
+      input_list,
+      {output});
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1099,7 +1367,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 getNcclReduceOp(op, nccl_comm_, input_list[i]),
                 i,
                 nccl_comm_,
-                stream),
+                stream,
+                native_config),
             "NCCL Reduce failed in reduce_scatter");
       } else {
         // Other ranks contribute to the reduction
@@ -1114,7 +1383,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 getNcclReduceOp(op, nccl_comm_, input_list[i]),
                 i,
                 nccl_comm_,
-                stream),
+                stream,
+                native_config),
             "NCCL Reduce failed in reduce_scatter");
       }
     }
@@ -1138,7 +1408,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
     const at::Tensor& input,
     const ::c10d::ReduceOp& op,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1147,13 +1418,18 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
   checkTensorDevice(input);
   checkSameDtype(input, output);
 
-  if (input.numel() != output.numel() * comm_size_) {
-    throw std::runtime_error(
-        "Input tensor size must be output_size * comm_size for reduceScatterSingleImpl");
-  }
+  TORCH_CHECK(
+      input.numel() == output.numel() * comm_size_,
+      "Input tensor size must be output_size * comm_size for reduceScatterSingleImpl");
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "reduceScatterSingleImpl", rank_, input, output);
+      name_,
+      comm_size_,
+      "reduceScatterSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1172,7 +1448,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           dataType,
           getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL ReduceScatter failed");
 
@@ -1189,7 +1466,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1198,18 +1476,22 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
   checkTensorDevice(input);
   checkSameDtype(input, output);
 
-  if (input.numel() != output.numel()) {
-    throw std::runtime_error(
-        "Input and output tensors must have same size for allToAllSingleImpl");
-  }
+  TORCH_CHECK(
+      input.numel() == output.numel(),
+      "Input and output tensors must have same size for allToAllSingleImpl");
 
-  if (input.numel() % comm_size_ != 0) {
-    throw std::runtime_error(
-        "Tensor size must be divisible by comm_size for allToAllSingleImpl");
-  }
+  TORCH_CHECK(
+      input.numel() % comm_size_ == 0,
+      "Tensor size must be divisible by comm_size for allToAllSingleImpl");
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "allToAllSingleImpl", rank_, input, output);
+      name_,
+      comm_size_,
+      "allToAllSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1230,7 +1512,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
           chunk_size,
           data_type,
           nccl_comm_,
-          stream),
+          stream,
+          native_config),
       timeout,
       "NCCL AllToAll failed");
 #else
@@ -1291,15 +1574,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   checkSameDtype(input, output);
 
   // Validate split sizes vectors
-  if (input_split_sizes.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "input_split_sizes length must equal comm_size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      input_split_sizes.size() == static_cast<size_t>(comm_size_),
+      "input_split_sizes length must equal comm_size for all_to_all_v_single");
 
-  if (output_split_sizes.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "output_split_sizes length must equal comm_size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      output_split_sizes.size() == static_cast<size_t>(comm_size_),
+      "output_split_sizes length must equal comm_size for all_to_all_v_single");
 
   // Validate that split sizes sum does not exceed tensor dimensions
   uint64_t input_total = 0;
@@ -1309,18 +1590,22 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
     output_total += output_split_sizes[i];
   }
 
-  if (input_total > static_cast<uint64_t>(input.size(0))) {
-    throw std::runtime_error(
-        "Sum of input_split_sizes exceeds input tensor size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      input_total <= static_cast<uint64_t>(input.size(0)),
+      "Sum of input_split_sizes exceeds input tensor size for all_to_all_v_single");
 
-  if (output_total > static_cast<uint64_t>(output.size(0))) {
-    throw std::runtime_error(
-        "Sum of output_split_sizes exceeds output tensor size for all_to_all_v_single");
-  }
+  TORCH_CHECK(
+      output_total <= static_cast<uint64_t>(output.size(0)),
+      "Sum of output_split_sizes exceeds output tensor size for all_to_all_v_single");
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "all_to_all_v_single", rank_, input, output);
+      name_,
+      comm_size_,
+      "all_to_all_v_single",
+      rank_,
+      sequence_number_,
+      input,
+      output);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1414,11 +1699,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
   checkAndAbortIfTimedOutOrError();
   checkTensorsDevice(output_tensor_list);
   checkTensorsDevice(input_tensor_list);
-  if (output_tensor_list.size() != static_cast<size_t>(comm_size_) ||
-      input_tensor_list.size() != static_cast<size_t>(comm_size_)) {
-    throw std::runtime_error(
-        "Tensor list sizes must equal comm_size for all_to_all");
-  }
+  TORCH_CHECK(
+      output_tensor_list.size() == static_cast<size_t>(comm_size_) &&
+          input_tensor_list.size() == static_cast<size_t>(comm_size_),
+      "Tensor list sizes must equal comm_size for all_to_all");
 
   // Validate all tensors
   for (int i = 0; i < comm_size_; ++i) {
@@ -1433,6 +1717,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
       comm_size_,
       "all_to_all",
       rank_,
+      sequence_number_,
       input_tensor_list,
       output_tensor_list);
 
@@ -1511,14 +1796,15 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
         c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
   }
 
-  TracingGuard tracingGuard(name_, comm_size_, "barrier", rank_);
+  TracingGuard tracingGuard(
+      name_, comm_size_, "barrier", rank_, sequence_number_);
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   auto work = createWork(stream, timeout);
 
   // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
   // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
-  work->hostBlocking_ = !async_op;
+  work->setHostBlocking(!async_op);
 
   // Record start event before NCCL operation
   work->recordStart("barrier");
@@ -1559,23 +1845,27 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
 
   // Only the root rank needs valid input tensors
   if (rank_ == root) {
-    if (input_tensor_list.size() != static_cast<size_t>(comm_size_)) {
-      throw std::runtime_error(
-          "input_tensor_list size must equal comm_size for scatter");
-    }
+    TORCH_CHECK(
+        input_tensor_list.size() == static_cast<size_t>(comm_size_),
+        "input_tensor_list size must equal comm_size for scatter");
 
     for (const auto& t : input_tensor_list) {
       ensureTensorContiguous(t);
       checkSameDtype(output_tensor, t);
-      if (t.numel() != output_tensor.numel()) {
-        throw std::runtime_error(
-            "All input tensors must have same size as output tensor");
-      }
+      TORCH_CHECK(
+          t.numel() == output_tensor.numel(),
+          "All input tensors must have same size as output tensor");
     }
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "scatter", root, input_tensor_list, {output_tensor});
+      name_,
+      comm_size_,
+      "scatter",
+      root,
+      sequence_number_,
+      input_tensor_list,
+      {output_tensor});
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1665,7 +1955,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     const at::Tensor& input_tensor,
     int root,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    bool contiguous_output,
+    const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(input_tensor);
@@ -1674,23 +1966,27 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
 
   // Only the root rank needs valid output tensors
   if (rank_ == root) {
-    if (output_tensor_list.size() != static_cast<size_t>(comm_size_)) {
-      throw std::runtime_error(
-          "output_tensor_list size must equal comm_size for gather");
-    }
+    TORCH_CHECK(
+        output_tensor_list.size() == static_cast<size_t>(comm_size_),
+        "output_tensor_list size must equal comm_size for gather");
 
     for (const auto& t : output_tensor_list) {
       ensureTensorContiguous(t);
       checkSameDtype(input_tensor, t);
-      if (t.numel() != input_tensor.numel()) {
-        throw std::runtime_error(
-            "All output tensors must have same size as input tensor");
-      }
+      TORCH_CHECK(
+          t.numel() == input_tensor.numel(),
+          "All output tensors must have same size as input tensor");
     }
   }
 
   TracingGuard tracingGuard(
-      name_, comm_size_, "gather", root, {input_tensor}, output_tensor_list);
+      name_,
+      comm_size_,
+      "gather",
+      root,
+      sequence_number_,
+      {input_tensor},
+      output_tensor_list);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1703,6 +1999,30 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
 
   // Record start event before NCCL operations
   work->recordStart("gather");
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+  if (contiguous_output) {
+    void* recvbuff =
+        rank_ == root ? output_tensor_list.front().data_ptr() : nullptr;
+    waitForNcclOperation(
+        nccl_api_->gather(
+            input_tensor.data_ptr(),
+            recvbuff,
+            input_tensor.numel(),
+            getNcclDataType(input_tensor),
+            root,
+            nccl_comm_,
+            stream,
+            native_config),
+        timeout,
+        "NCCL Gather failed");
+    work->recordEnd();
+    enqueueWork(work, stream);
+    return work;
+  }
+#else
+  std::ignore = std::tie(contiguous_output, native_config);
+#endif
 
   if (rank_ == root) {
     // Root receives from all ranks (except itself)

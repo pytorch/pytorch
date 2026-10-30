@@ -2,6 +2,7 @@
 #include <ATen/native/TensorFactories.h>
 
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/ExpandUtils.h>
@@ -187,7 +188,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       (a.scalar_type() == kFloat || a.scalar_type() == kDouble ||
        a.scalar_type() == kHalf) &&
           (b.scalar_type() == kFloat || b.scalar_type() == kDouble ||
@@ -1456,7 +1457,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
           }
         });
 
-    for (int64_t i = 0; i < n - 1; i++) {
+    for (const auto i : c10::irange(n - 1)) {
       // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
       int64_t z = generator->random() % (n - i);
       scalar_t save = r__data[i * r__stride_0];
@@ -1473,7 +1474,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   // start seeing the skew
   // use no-initialization Fischer-Yates variant
   // https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_.22inside-out.22_algorithm
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     int64_t z = static_cast<int64_t>(generator->random64() % (i + 1));
     r__data[i * r__stride_0] = i;
     r__data[i * r__stride_0] = r__data[z * r__stride_0];
@@ -1733,7 +1734,8 @@ Tensor zeros_symint(
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
   for (const auto& dim_size : size) {
-    TORCH_CHECK(dim_size >= 0, "zeros: Dimension size must be non-negative.");
+    TORCH_SYM_CHECK(
+        dim_size.sym_ge(0), "zeros: Dimension size must be non-negative.");
   }
   Layout layout_ = layout.value_or(Layout::Strided);
   if (at::sparse_csr::is_sparse_compressed(layout_)) {

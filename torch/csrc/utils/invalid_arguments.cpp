@@ -2,6 +2,7 @@
 
 #include <torch/csrc/utils/python_strings.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -175,7 +176,7 @@ std::pair<Option, std::string> _parseOption(
   /// XXX: this is a hack only for the out arg in TensorMethods
   auto out_pos = printable_option.find('#');
   if (out_pos != std::string::npos) {
-    if (kwargs.count("out") > 0) {
+    if (kwargs.contains("out")) {
       std::string kwonly_part = printable_option.substr(out_pos + 1);
       printable_option.erase(out_pos);
       printable_option += "*, ";
@@ -231,7 +232,7 @@ bool _argcountMatch(
   auto num_expected = option.arguments.size();
   auto num_got = arguments.size() + kwargs.size();
   // Note: variadic functions don't accept kwargs, so it's ok
-  if (option.has_out && kwargs.count("out") == 0)
+  if (option.has_out && !kwargs.contains("out"))
     num_expected--;
   return num_got == num_expected ||
       (option.is_variadic && num_got > num_expected);
@@ -337,7 +338,7 @@ std::vector<std::string> _tryMatchKwargs(
   std::vector<std::string> unmatched;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int64_t start_idx = option.arguments.size() - kwargs.size();
-  if (option.has_out && kwargs.count("out") == 0)
+  if (option.has_out && !kwargs.contains("out"))
     start_idx--;
   if (start_idx < 0)
     start_idx = 0;
@@ -361,7 +362,10 @@ std::string format_invalid_args(
     PyObject* given_args,
     PyObject* given_kwargs,
     const std::string& function_name,
-    const std::vector<std::string>& options) {
+    const std::vector<std::string>& options,
+    const std::vector<std::string>& mismatch_reasons) {
+  TORCH_INTERNAL_ASSERT(
+      mismatch_reasons.empty() || mismatch_reasons.size() == options.size());
   std::vector<PyObject*> args;
   std::unordered_map<std::string, PyObject*> kwargs;
   std::string error_msg;
@@ -392,7 +396,7 @@ std::string format_invalid_args(
     auto& option = pair.first;
     auto& option_str = pair.second;
     std::vector<std::string> unmatched_kwargs;
-    if (has_kwargs)
+    if (has_kwargs && mismatch_reasons.empty())
       unmatched_kwargs = _tryMatchKwargs(option, kwargs);
     if (!unmatched_kwargs.empty()) {
       error_msg += "got unrecognized keyword arguments: ";
@@ -401,7 +405,7 @@ std::string format_invalid_args(
       error_msg.erase(error_msg.length() - 2);
     } else {
       error_msg += "got ";
-      if (_argcountMatch(option, args, kwargs)) {
+      if (mismatch_reasons.empty() && _argcountMatch(option, args, kwargs)) {
         error_msg += _formattedArgDesc(option, args, kwargs);
       } else {
         error_msg += _argDesc(args, kwargs);
@@ -413,14 +417,20 @@ std::string format_invalid_args(
     error_msg += "got ";
     error_msg += _argDesc(args, kwargs);
     error_msg += ", but expected one of:\n";
-    for (auto& option_str : options) {
-      auto pair = _parseOption(option_str, kwargs);
+    for (const auto i : c10::irange(options.size())) {
+      auto pair = _parseOption(options[i], kwargs);
       auto& option = pair.first;
       auto& printable_option_str = pair.second;
       error_msg += " * ";
       error_msg += printable_option_str;
       error_msg += '\n';
-      if (_argcountMatch(option, args, kwargs)) {
+      if (!mismatch_reasons.empty()) {
+        if (!mismatch_reasons[i].empty()) {
+          error_msg += "      didn't match because: ";
+          error_msg += mismatch_reasons[i];
+          error_msg += '\n';
+        }
+      } else if (_argcountMatch(option, args, kwargs)) {
         std::vector<std::string> unmatched_kwargs;
         if (has_kwargs)
           unmatched_kwargs = _tryMatchKwargs(option, kwargs);

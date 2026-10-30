@@ -40,20 +40,16 @@ std::pair<std::string, std::string> getSpecDetails(
     case torch::_export::InputSpec::Tag::PARAMETER:
       return std::make_pair(
           inputSpec.get_parameter().get_arg().get_name(), "PARAMETER");
-      break;
     case torch::_export::InputSpec::Tag::BUFFER:
       return std::make_pair(
           inputSpec.get_buffer().get_arg().get_name(), "BUFFER");
-      break;
     case torch::_export::InputSpec::Tag::TENSOR_CONSTANT:
       return std::make_pair(
           inputSpec.get_tensor_constant().get_arg().get_name(),
           "TENSOR_CONSTANT");
-      break;
     case torch::_export::InputSpec::Tag::CUSTOM_OBJ:
       return std::make_pair(
           inputSpec.get_custom_obj().get_arg().get_name(), "CUSTOM_OBJ");
-      break;
     case torch::_export::InputSpec::Tag::USER_INPUT:
       if (inputSpec.get_user_input().get_arg().tag() ==
           torch::_export::Argument::Tag::AS_TENSOR) {
@@ -69,11 +65,9 @@ std::pair<std::string, std::string> getSpecDetails(
       } else {
         TORCH_CHECK(false, "Unsupported USER_INPUT argument type.");
       }
-      break;
     case torch::_export::InputSpec::Tag::CONSTANT_INPUT:
       return std::make_pair(
           inputSpec.get_constant_input().get_name(), "CONSTANT_INPUT");
-      break;
     case torch::_export::InputSpec::Tag::TOKEN:
       TORCH_CHECK(false, "Token inputs not implemented yet.");
     default:
@@ -158,7 +152,7 @@ void checkOutputNames(
   }
 
   for (const auto& name : validNames) {
-    if (graphNames.find(name) == graphNames.end()) {
+    if (!graphNames.contains(name)) {
       std::string errorMsg = fmt::format(
           "Error: Value name difference detected between graph signature and graph nodes:\n"
           "Signature value names:\n[{}]\n"
@@ -319,7 +313,6 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
       }
       default:
         TORCH_CHECK(false, "Unknown InputSpec tag encountered.");
-        break;
     }
   }
 

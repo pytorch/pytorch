@@ -13,6 +13,7 @@ CPython behavioral gaps.
 
 import collections
 import operator
+import sys
 import types
 import typing
 import unittest
@@ -30,10 +31,17 @@ from torch._library.opaque_object import (
     MemberType,
     register_custom_class,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton
 
 
 class GetItemTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _compile(self, fn, *args):
         return torch.compile(fn, backend="eager", fullgraph=True)(*args)
 
@@ -776,25 +784,6 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, c), compiled(x, c))
 
-    # --- TritonKernelVariable ---
-
-    @unittest.skipUnless(HAS_GPU and HAS_CUDA_AND_TRITON, "requires gpu and triton")
-    def test_triton_kernel_getitem_grid(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        def fn(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements // 256,)
-            bound = operator.getitem(add_kernel, grid)
-            bound(x, y, output, n_elements, BLOCK_SIZE=256)
-            return output
-
-        x = torch.randn(256, device="cuda")
-        y = torch.randn(256, device="cuda")
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, y), compiled(x, y))
-
     # ===================================================================
     # CPython behavioral gaps — expectedFailure until implemented
     # ===================================================================
@@ -838,6 +827,20 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_str_subscript_symbolic_index(self):
+        # A non-constant key must fall through to the generic "unsupported
+        # subscript" graph break, not leak AsPythonConstantNotImplementedError.
+        def fn(t):
+            i = t.item()
+            torch._check(i >= 0)
+            torch._check(i < 3)
+            return "abc"[i]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "does not yet support subscripting 'str'"
+        ):
+            self._compile(fn, torch.tensor(1))
 
     # ===================================================================
     # Explicit __getitem__ dunder call path tests
@@ -1123,10 +1126,11 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             try:
                 list(IterNoNext())
             except TypeError as exc:
-                return str(exc) == "iter() returned non-iterator of type 'IterNoNext'"
-            return False
+                return str(exc)
 
-        self.assertEqual(fn(), self._compile(fn))
+        out = self._compile(fn)
+        self.assertTrue(type(out) is str)
+        self.assertEqual(fn(), out)
 
     def test_list_constructor_rejects_keywords(self):
         def fn():
@@ -1195,10 +1199,12 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             try:
                 tuple(IterNoNext())
             except TypeError as exc:
-                return str(exc) == "iter() returned non-iterator of type 'IterNoNext'"
+                return str(exc)
             return False
 
-        self.assertEqual(fn(), self._compile(fn))
+        out = self._compile(fn)
+        self.assertTrue(type(out) is str)
+        self.assertEqual(fn(), out)
 
     def test_tuple_constructor_rejects_keywords(self):
         def fn():
@@ -1302,10 +1308,76 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
                 lambda msg: f"{msg}\n{cls.__name__} must override sq_item_impl",
             )
 
+    # tests for python_qualified_name (exposed via __iter__ error messages in python 3.15+)
+    @unittest.skipIf(
+        sys.version_info < (3, 15), "Error messages in < 3.15 don't have module name"
+    )
+    def test_qualname_custom_mod(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+            __module__ = "test_mod"
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(
+            self._compile(fn),
+            "test_mod.GetItemTests.test_qualname_custom_mod.<locals>.IterNoNext.__iter__() must return an iterator, not test_mod.GetItemTests.test_qualname_custom_mod.<locals>.IterNoNext",
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 15), "Error messages in < 3.15 don't have module name"
+    )
+    def test_qualname_custom_mod_builtins(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+            __module__ = "builtins"
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(
+            self._compile(fn),
+            "GetItemTests.test_qualname_custom_mod_builtins.<locals>.IterNoNext.__iter__() must return an iterator, not GetItemTests.test_qualname_custom_mod_builtins.<locals>.IterNoNext",
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 15), "Error messages in < 3.15 don't have module name"
+    )
+    def test_qualname_custom_mod_main(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+            __module__ = "__main__"
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc)
+
+        self.assertEqual(
+            self._compile(fn),
+            "GetItemTests.test_qualname_custom_mod_main.<locals>.IterNoNext.__iter__() must return an iterator, not GetItemTests.test_qualname_custom_mod_main.<locals>.IterNoNext",
+        )
+
 
 class SetDelItemTests(torch._dynamo.test_case.TestCase):
     """Tests for call_setitem / call_delitem: operator.setitem / operator.delitem
     dispatch (also the STORE_SUBSCR / DELETE_SUBSCR bytecode paths)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _compile(self, fn, *args):
         return torch.compile(fn, backend="eager", fullgraph=True)(*args)
@@ -1387,6 +1459,31 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
 
         result = self._compile(fn, torch.zeros(1))
         self.assertIn("cannot delete array elements", result)
+
+
+class GetItemAcceleratorTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @onlyAccelerator
+    def test_triton_kernel_getitem_grid(self, device):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def fn(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = (n_elements // 256,)
+            bound = operator.getitem(add_kernel, grid)
+            bound(x, y, output, n_elements, BLOCK_SIZE=256)
+            return output
+
+        x = torch.randn(256, device=device)
+        y = torch.randn(256, device=device)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, y), compiled(x, y))
+
+
+instantiate_device_type_tests(GetItemAcceleratorTests, globals())
 
 
 if __name__ == "__main__":

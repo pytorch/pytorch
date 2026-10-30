@@ -1,12 +1,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
+#include <algorithm>
 #include <tuple>
 #include <type_traits>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
@@ -678,8 +680,6 @@ blockReduceGammaBetaBackwardsHelper(
     const T* __restrict__ X,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db,
     T_ACC &dg_sum,
     T_ACC &db_sum
 ) {
@@ -747,8 +747,6 @@ blockReduceGammaBetaBackwardsWithChecks(
     const T* __restrict__ X,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db,
     T_ACC &dg_sum,
     T_ACC &db_sum
 ) {
@@ -758,10 +756,10 @@ blockReduceGammaBetaBackwardsWithChecks(
     int64_t M_end = M_start + rows_per_block_y - 1;
     if (!check_y || M_end < M) {
       blockReduceGammaBetaBackwardsHelper<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, check_x, false, rms_norm>
-      (M_start, M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+      (M_start, M, N, dY, X, mean, rstd, dg_sum, db_sum);
     } else {
       blockReduceGammaBetaBackwardsHelper<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, check_x, true, rms_norm>
-      (M_start, M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+      (M_start, M, N, dY, X, mean, rstd, dg_sum, db_sum);
     }
   }
 }
@@ -784,7 +782,9 @@ blockReduceGammaBetaBackwardsWithChecks(
 // case we don't need to check for boundary conditions which can provide
 // a further speedup by not needing instructions to check for edge cases
 // and not needing predicate registers.
-template <typename T, typename T_ACC,
+// T_OUT is the type of dg/db: T for final gradients, T_ACC for the per-block
+// partial sums of the huge-M path so they are not rounded before the final sum.
+template <typename T, typename T_ACC, typename T_OUT,
 unsigned int block_dim_x, unsigned int block_dim_y,
 unsigned int rows_per_block_y,
 bool skip_block_reduction,
@@ -801,8 +801,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
     const T* __restrict__ X,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db) {
+    T_OUT* __restrict__ dg,
+    T_OUT* __restrict__ db) {
 
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
@@ -821,7 +821,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // can skip boundary condition checks that waste instruction issue slots.
     blockReduceGammaBetaBackwardsWithChecks
           <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, false, rms_norm>
-          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+          (M, N, dY, X, mean, rstd, dg_sum, db_sum);
   } else {
     // In the general case we need to check boundary conditions in the M
     // dimension. However, we can still avoid boundary checks in the N dimension
@@ -829,11 +829,11 @@ __launch_bounds__(block_dim_x * block_dim_y)
     if (blockIdx.x * block_dim_x + block_dim_x - 1 < N) {
       blockReduceGammaBetaBackwardsWithChecks
           <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, true, rms_norm>
-          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+          (M, N, dY, X, mean, rstd, dg_sum, db_sum);
     } else {
       blockReduceGammaBetaBackwardsWithChecks
           <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, true, rms_norm>
-          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+          (M, N, dY, X, mean, rstd, dg_sum, db_sum);
     }
   }
 
@@ -905,7 +905,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
   }
 }
 
-template<typename T, typename T_ACC,
+template<typename T, typename T_ACC, typename T_OUT,
 int block_dim_x, int block_dim_y,
 int rows_per_block_y,
 bool skip_block_reduction,
@@ -922,10 +922,10 @@ void LaunchAndCheckGammaBetaBackwardKernel(
   const T_ACC* rstd_data,
   int64_t M,
   int64_t N,
-  T* dgamma_data,
-  T* dbeta_data) {
+  T_OUT* dgamma_data,
+  T_OUT* dbeta_data) {
 if (aligned_grid) {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, true, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, T_OUT, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, true, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -936,7 +936,7 @@ if (aligned_grid) {
             dgamma_data,
             dbeta_data);
   } else {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, false, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, T_OUT, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, false, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -977,15 +977,23 @@ void ConfigureAndLaunchGammaBetaBackwardKernel(
   if constexpr (block_dim_y == 1) {
     // There is only 1 y-thread per column.
     // The accumulated result is the full per column sum; skip the block reduction.
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, T, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   } else {
     // block_dim_y > 1: multiple y-threads working on each column.
     // Need to perform block reduction to get the final result.
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, T, block_dim_x, block_dim_y, rows_per_block_y, false, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   }
 
+}
+
+// We have a situation where M >> N and N is small: parallelizing gamma/beta
+// backward across the M dimension in a separate kernel (below) pays off vs.
+// the single fused-tile kernel. Shared by LaunchGammaBetaBackwardCUDAKernel's
+// internal check and its ROCm caller so the two conditions cannot diverge.
+inline bool ShouldUseHugeMGammaBetaBackwardKernel(int64_t M, int64_t N, int block_dim_x, int sm_count) {
+  return M > 64 * 1024 && N / block_dim_x < sm_count / 2;
 }
 
 // Accept block_dim_x as a template parameter so ROCm can dispatch launch
@@ -1002,13 +1010,13 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor* dbeta,
     cudaStream_t cuda_stream) {
   const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  if (M > 64 * 1024 && N / block_dim_x < sm_count / 2) {
+  if (ShouldUseHugeMGammaBetaBackwardKernel(M, N, block_dim_x, sm_count)) {
     // We have a situation where M >> N and N is small.
     // In this case we can speed up the computation by parallelizing in the M dimension.
     // We launch multiple blocks in the y-dimension, and compute partial sums for the
     // gradient in the first pass (skip_block_reduction=true). Then we do a .sum(0) to
     // do a final reduction.
-    // Although we launch 2 kernels, we can get up to a 10x speedup for large M.
+    // Although we launch extra kernels, we can get up to a 10x speedup for large M.
     constexpr int block_dim_y = 1;
     constexpr int rows_per_block_y = 32;
     bool aligned_grid = (M % rows_per_block_y == 0) && (N % block_dim_x == 0);
@@ -1021,27 +1029,31 @@ void LaunchGammaBetaBackwardCUDAKernel(
     blocks.y = std::min<unsigned int>(max_grid_size / blocks.x, blocks.y);
     Tensor dgamma_blocks;
     Tensor dbeta_blocks;
-    T * dgamma_blocks_ptr = nullptr;
-    T * dbeta_blocks_ptr = nullptr;
+    T_ACC * dgamma_blocks_ptr = nullptr;
+    T_ACC * dbeta_blocks_ptr = nullptr;
+    // The kernel writes N columns per row via dg[thread_y * N + thread_x];
+    // dgamma->size(-1) is only the last normalized dim, and is 0 for an
+    // undefined tensor. Partials stay in T_ACC: rounding them to a reduced
+    // precision T loses cancellation between blocks and can overflow fp16.
+    constexpr auto acc_dtype = c10::CppTypeToScalarType<T_ACC>::value;
     if (dgamma->defined()) {
-      auto options = dgamma->options();
-      dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
-      dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
+      dgamma_blocks = at::empty({blocks.y * threads.y, N}, dgamma->options().dtype(acc_dtype));
+      dgamma_blocks_ptr = dgamma_blocks.data_ptr<T_ACC>();
     }
     if (dbeta->defined() && !rms_norm) {
-      auto options = dbeta->options();
-      dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
-      dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
+      dbeta_blocks = at::empty({blocks.y * threads.y, N}, dbeta->options().dtype(acc_dtype));
+      dbeta_blocks_ptr = dbeta_blocks.data_ptr<T_ACC>();
     }
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
+    // sum(0) is flat {N}; the gradient itself may be multi-dim.
     if (dgamma_blocks.defined()) {
-      *dgamma = dgamma_blocks.sum(0);
+      *dgamma = dgamma_blocks.sum(0).view_as(*dgamma).to(dgamma->scalar_type());
     }
     if constexpr (!rms_norm){
       if (dbeta_blocks.defined()) {
-        *dbeta = dbeta_blocks.sum(0);
+        *dbeta = dbeta_blocks.sum(0).view_as(*dbeta).to(dbeta->scalar_type());
       }
     }
   } else {
@@ -1091,7 +1103,14 @@ void launch_vectorized_layer_norm_kernel(
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
-    const dim3 threads(warp_size, num_threads() / warp_size, 1);
+    // Only N / vec_size threads have a vector to read. For narrow rows (e.g. per-head
+    // q/k norms) launch just enough warps to cover them, instead of idle warps that
+    // still take part in the cross-warp reduction.
+    int threads_y = num_threads() / warp_size;
+    while (threads_y > 1 && (threads_y / 2) * warp_size >= N / vec_size) {
+      threads_y /= 2;
+    }
+    const dim3 threads(warp_size, threads_y, 1);
     dim3 blocks(M);
 
 #ifdef USE_ROCM
@@ -1120,10 +1139,10 @@ void launch_vectorized_layer_norm_kernel(
     T* Y_data2 = Y_data;
 
     while (remaining > 0) {
-      X_data2 += N * blocks.x;
+      X_data2 += static_cast<int64_t>(N) * blocks.x;
       mean_data2 += blocks.x;
       rstd_data2 += blocks.x;
-      Y_data2 += N * blocks.x;
+      Y_data2 += static_cast<int64_t>(N) * blocks.x;
 
       blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
 
@@ -1273,17 +1292,23 @@ void cuLoadWriteStridedInputs(
       if (i2<N) {
         T curr_input = static_cast<T>(input[load_idx]);
         T curr_dout = static_cast<T>(dout[load_idx]);
-        warp_buf1[write_idx] = curr_dout;
+        if constexpr (!rms_norm) {
+          warp_buf1[write_idx] = curr_dout;
+        }
         warp_buf2[write_idx] = curr_dout * (curr_input - curr_mean) * curr_rstd;
       } else {
-        warp_buf1[write_idx] = T(0);
+        if constexpr (!rms_norm) {
+          warp_buf1[write_idx] = T(0);
+        }
         warp_buf2[write_idx] = T(0);
       }
     }
   } else {
     for (int k = 0;  k < blockDim.y;  ++k) {
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
-      warp_buf1[write_idx] = T(0);
+      if constexpr (!rms_norm) {
+        warp_buf1[write_idx] = T(0);
+      }
       warp_buf2[write_idx] = T(0);
     }
   }
@@ -1320,7 +1345,9 @@ void cuLoadAddStridedInputs(
       if (i2<N) {
         T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
         T_ACC curr_dout = static_cast<T_ACC>(dout[load_idx]);
-        warp_buf1[write_idx] += curr_dout;
+        if constexpr (!rms_norm) {
+          warp_buf1[write_idx] += curr_dout;
+        }
         warp_buf2[write_idx] += curr_dout * (curr_input - curr_mean) * curr_rstd;
       }
     }
@@ -1365,10 +1392,14 @@ void cuComputePartGradGammaBeta(
     for (int k = 0;  k < blockDim.y;  ++k) {
       int row1 = threadIdx.y + k*blockDim.y;
       int idx1 = row1*row_stride + threadIdx.x;
-      acc1 += warp_buf1[idx1];
+      if constexpr (!rms_norm) {
+        acc1 += warp_buf1[idx1];
+      }
       acc2 += warp_buf2[idx1];
     }
-    warp_buf1[threadIdx.y*row_stride+threadIdx.x] = acc1;
+    if constexpr (!rms_norm) {
+      warp_buf1[threadIdx.y*row_stride+threadIdx.x] = acc1;
+    }
     warp_buf2[threadIdx.y*row_stride+threadIdx.x] = acc2;
     __syncthreads();
     // sum all warps
@@ -1378,7 +1409,9 @@ void cuComputePartGradGammaBeta(
         int row2 = threadIdx.y + offset;
         int idx1 = row1*row_stride + threadIdx.x;
         int idx2 = row2*row_stride + threadIdx.x;
-        warp_buf1[idx1] += warp_buf1[idx2];
+        if constexpr (!rms_norm) {
+          warp_buf1[idx1] += warp_buf1[idx2];
+        }
         warp_buf2[idx1] += warp_buf2[idx2];
       }
       __syncthreads();
@@ -1389,7 +1422,9 @@ void cuComputePartGradGammaBeta(
       int row2 = threadIdx.y + 1;
       int idx1 = row1*row_stride + threadIdx.x;
       int idx2 = row2*row_stride + threadIdx.x;
-      part_grad_beta[blockIdx.y*N+i2] = warp_buf1[idx1] + warp_buf1[idx2];
+      if constexpr (!rms_norm) {
+        part_grad_beta[blockIdx.y*N+i2] = warp_buf1[idx1] + warp_buf1[idx2];
+      }
       part_grad_gamma[blockIdx.y*N+i2] = warp_buf2[idx1] + warp_buf2[idx2];
     }
 }
@@ -1414,7 +1449,12 @@ void cuComputeGradGammaBeta(
     T_ACC sum_gamma = T_ACC(0);
     T_ACC sum_beta = T_ACC(0);
     const T_ACC* part_grad_gamma_ptr = part_grad_gamma + threadIdx.y * num_warp_reductions * N + i2;
-    const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * N + i2;
+    // part_grad_beta is nullptr when rms_norm (see LaunchTwoPassGammaBetaBackwardCUDAKernel),
+    // so only form the offset pointer when it will actually be dereferenced below.
+    const T_ACC* part_grad_beta_ptr = nullptr;
+    if constexpr (!rms_norm) {
+      part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * N + i2;
+    }
 
     if (i2 < N) {
         for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
@@ -1457,6 +1497,60 @@ void cuComputeGradGammaBeta(
           }
       }
     }
+}
+
+// Two-pass gamma/beta backward: cuComputePartGradGammaBeta reduces
+// dgamma/dbeta partial sums across part_size row-blocks, then
+// cuComputeGradGammaBeta finishes the reduction across those partial sums.
+template <typename T, typename T_ACC, bool rms_norm>
+void LaunchTwoPassGammaBetaBackwardCUDAKernel(
+    const T* dY_data,
+    const Tensor& X,
+    const T_ACC* mean_data,
+    const T_ACC* rstd_data,
+    int64_t M,
+    int64_t N,
+    int warp_size,
+    Tensor* dgamma,
+    Tensor* dbeta,
+    cudaStream_t cuda_stream) {
+  const T* X_data = X.const_data_ptr<T>();
+  T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
+  T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+  const int part_size = warp_size;
+  const dim3 threads2(warp_size, 4, 1);
+  const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
+  const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
+  const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
+  const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
+
+  const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
+  Tensor part_grad_gamma = at::empty({part_size, N}, X.options().dtype(part_grad_dtype));
+  // part_grad_beta is only meaningful for the layer_norm (non-rms) backward:
+  // cuComputeGradGammaBeta discards it under if constexpr (!rms_norm), so
+  // skip allocating and writing it entirely when rms_norm is true.
+  T_ACC* part_grad_beta_data = nullptr;
+  Tensor part_grad_beta;
+  if constexpr (!rms_norm) {
+    part_grad_beta = at::native::empty_like(part_grad_gamma);
+    part_grad_beta_data = part_grad_beta.template data_ptr<T_ACC>();
+  }
+
+  cuComputePartGradGammaBeta<T, T_ACC, rms_norm><<<blocks2, threads2, nshared2, cuda_stream>>>(
+      dY_data, X_data, M, N, mean_data, rstd_data,
+      part_grad_gamma.template data_ptr<T_ACC>(),
+      part_grad_beta_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
+  const dim3 blocks3((N + threads3.x - 1) / threads3.x, 1, 1);
+  const int nshared3 = threads3.x * threads3.y * sizeof(T_ACC);
+
+  cuComputeGradGammaBeta<T, T_ACC, rms_norm><<<blocks3, threads3, nshared3, cuda_stream>>>(
+      part_grad_gamma.template data_ptr<T_ACC>(),
+      part_grad_beta_data,
+      part_size, M, N, dgamma_data, dbeta_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename T, typename T_ACC, bool rms_norm> __global__
@@ -1625,6 +1719,10 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
+    // One thread per vec_size elements, rounded up to whole warps because BlockReduceSum reduces warp by warp; the
+    // extra threads in the last warp add zeros. Keep nshared sized for num_threads(), not threads_per_row: after the
+    // reduction, thread 0 writes buf[1], which would be past the end of a one-warp block's single slot.
+    const int threads_per_row = std::min<int64_t>(at::round_up<int64_t>(at::ceil_div<int64_t>(N, vec_size), warp_size), num_threads());
 #ifdef USE_ROCM
     if (M >= 32768) {
       const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
@@ -1647,7 +1745,7 @@ void LayerNormBackwardKernelImplInternal(
     } else {
       const dim3 blocks(M);
       int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
-      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, threads_per_row, nshared, cuda_stream>>>(dY_data,
       X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -1662,11 +1760,11 @@ void LayerNormBackwardKernelImplInternal(
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
     if (bAlignedBuffers && bTargetDataTypes && bVectorSizeMultiple) {
-      layer_norm_grad_input_kernel_vectorized<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel_vectorized<T, T_ACC, rms_norm><<<blocks, threads_per_row, nshared, cuda_stream>>>(dY_data,
           X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, threads_per_row, nshared, cuda_stream>>>(dY_data,
           X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -1694,21 +1792,37 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      // Use the optimized tiled kernel adapted for the current warp size.
-      // This replaces the legacy two-pass cuComputePartGradGammaBeta +
-      // cuComputeGradGammaBeta approach with a single-pass tiled reduction
-      // that has coalesced memory access and adaptive tile sizing.
-      if (warp_size == 64) {
-        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
-          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
-      } else if (warp_size == 32) {
-        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
-          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+      // Hoisted above the dispatch below: an unexpected warp size must be
+      // caught regardless of which path (tiled or two-pass) M would route to.
+      TORCH_INTERNAL_ASSERT(
+          warp_size == 32 || warp_size == 64,
+          "Unexpected ROCm warp size: ",
+          warp_size);
+      // Below this M the single-pass tiled kernel still wins on ROCm; above it
+      // the two-pass kernel's M-parallel reduction more than pays for the
+      // extra launch and the part_grad round trip. Bracketed by benchmarks on
+      // MI350X: every measured tiled win is at M <= 1024, every measured
+      // two-pass win at M >= 4096.
+      constexpr int64_t kGammaBetaTwoPassMinM = 2048;
+      // LaunchGammaBetaBackwardCUDAKernel also special-cases M >> N (huge M,
+      // small N), which stays on the tiled M-parallel path regardless of the
+      // bound above.
+      const bool use_tiled_kernel = M < kGammaBetaTwoPassMinM ||
+          ShouldUseHugeMGammaBetaBackwardKernel(M, N, warp_size, sm_count);
+      if (use_tiled_kernel) {
+        // Single-pass tiled reduction with coalesced memory access and
+        // adaptive tile sizing, dispatched on the current warp size.
+        if (warp_size == 64) {
+          LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
+            dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+        } else {
+          LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
+            dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+        }
       } else {
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Unexpected ROCm warp size: ",
-            warp_size);
+        LaunchTwoPassGammaBetaBackwardCUDAKernel<T, T_ACC, rms_norm>(
+            dY_data, X, mean_data, rstd_data, M, N, warp_size, dgamma, dbeta, cuda_stream);
       }
     }
 #else

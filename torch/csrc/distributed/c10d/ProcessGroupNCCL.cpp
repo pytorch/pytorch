@@ -5,14 +5,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
-#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -115,7 +112,12 @@ ncclRedOpRAII getNcclReduceOp(
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
         case ncclBfloat16:
-          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
+          // The scalar type must match the reduction datatype: NCCL reads
+          // ncclTypeSize(dataType) bytes from the factor. Using float here
+          // made NCCL read the low 2 bytes of a 4-byte float (zero for any
+          // power-of-two host scalar such as FSDP2's 1/factor), silently
+          // zeroing the reduction, and rejected bfloat16 device factors.
+          return unpackPreMulSum<at::BFloat16, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
@@ -129,16 +131,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
@@ -987,10 +985,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       (dist_debug_level_ >= DebugLevel::Detail);
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug);
-  if (getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false)) {
-    TORCH_WARN_ONCE(
-        "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
-  }
   showSerializationWarning_ =
       getCvarBool(TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, true);
 
@@ -1132,9 +1126,13 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
   auto comm = getNCCLComm(key);
-  if (comm == nullptr) {
-    LOG(ERROR) << logPrefix()
-               << "No parent communicator exists for nocolor split";
+  // Must match the parent-comm check in initNCCLComm: without a healthy parent
+  // comm, members create the child via a fresh init instead of ncclCommSplit,
+  // so there is no collective split to join.
+  if (comm == nullptr || comm->isAborted()) {
+    LOG(INFO) << logPrefix()
+              << "No healthy parent communicator, skipping nocolor split";
+    return;
   }
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 }
@@ -1359,8 +1357,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   // only participate in one group.
   // This value must be non-negative int32 and all ranks are.
   ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
+  // eagerConnectSingleDevice() initializes the child from ncclCommSplit before
+  // returning, so split does not need a separate Store connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store->clone(), groupRank, ranks.size(), ncclOpts);
+      store, groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
   // We need to set the desc here so that when eager init the nccl, we can
   // propagate desc to the nccl comm.
@@ -1377,6 +1377,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
     const int& size) {
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+  // Unlike split(), merge returns an uninitialized child. Its first collective
+  // may block in broadcastUniqueNCCLID() while holding the Store connection,
+  // so preserve an independent connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
@@ -1560,10 +1563,16 @@ void ProcessGroupNCCL::shutdown() {
   // Flush all collectives
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Since NCCL 2.31, ncclCommFinalize ends with a barrier among the comm's
+    // host-local ranks. Ranks can hold different comms (e.g. lazily created
+    // 2-rank P2P comms) and iterate this map in different orders, so finalize
+    // them in one group to let NCCL progress them concurrently.
+    C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
       ncclComm->finalize();
     }
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), std::nullopt);
   }
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
   // timeout is reach, this will throw an exception.
@@ -1608,11 +1617,12 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
   // would silently wipe the successor's entry.
+  // ROCm retires through the comm's pre-invalidate hook; see initNCCLComm.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
@@ -1996,7 +2006,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -2117,6 +2127,7 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
   pg_ = pg;
   heartbeat_ = 1ULL;
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
+  tearDownOnTimeout_ = getCvarBool(TORCH_NCCL_TEARDOWN_ON_TIMEOUT, false);
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (pg_->dist_debug_level_ >= DebugLevel::Detail);
@@ -2125,6 +2136,7 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
   if (pg_->getUid() == 0) {
     LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
               << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+              << ", TORCH_NCCL_TEARDOWN_ON_TIMEOUT: " << tearDownOnTimeout_
               << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
               << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
   }
@@ -2185,8 +2197,9 @@ void ProcessGroupNCCL::Watchdog::run() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
-      if (C10_LIKELY(rethrowCUDAErrors_) ||
-          std::string(e.what()).find("CUDA Error") != std::string::npos) {
+      // CUDA errors are gated by `rethrowCUDAErrors_` and timeout exceptions
+      // are gated by `rethrowTimeoutException_`.
+      if (rethrowCUDAErrors_ || rethrowTimeoutException_) {
         // TODO(whc) clean up the rethrow - why is it stored in a class var
         // and rethrown?
         watchDogException_ =
@@ -2428,7 +2441,13 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
           // rank
           pg_->abortComms();
         }
-        // Throw exception
+        // The flag tells the try/catch in Watchdog::run() to rethrow a timeout
+        // exception even when rethrowCUDAErrors_ is false. We only set the flag
+        // if handleException() is guaranteed to throw below, so the catch never
+        // sees a stale true. TORCH_NCCL_TEARDOWN_ON_TIMEOUT gates the whole
+        // thing and is off by default while this rolls out.
+        rethrowTimeoutException_ = tearDownOnTimeout_ && timedout &&
+            SHOULD_TEAR_DOWN(pg_->asyncErrorHandling_);
         work.handleException(pg_->asyncErrorHandling_);
       }
 
@@ -2966,7 +2985,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3005,7 +3024,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,
@@ -3072,11 +3091,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // reset log prefix to include group_desc
   logPrefix_ = createLogPrefix();
 
-#ifdef NCCL_COMM_DESCRIPTION
-  // Pass process group name and description to NCCL communicator
-  std::string commDesc = pg_desc_ + ':' + pg_uid_;
-  options_->config.commDesc = strdup(commDesc.c_str());
-#endif // NCCL_COMM_DESCRIPTION
+#ifdef NCCL_HAS_COMM_NAME
+  // Pass process group description and name to the NCCL communicator so the
+  // NCCL profiler (and NCCL Inspector) can recover the group semantics without
+  // scanning Python frames. NCCL config has no commDesc field, so use commName.
+  if (options_->config.commName == nullptr) {
+    std::string commName = pg_desc_ + ':' + pg_uid_;
+    options_->config.commName = strdup(commName.c_str());
+  }
+#endif // NCCL_HAS_COMM_NAME
 
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
@@ -3301,11 +3324,37 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
-    // Unregistered in ~ProcessGroupNCCL.
-    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        getGroupUid(), ncclComm->getNcclComm());
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT. Only the
+    // collective comm is published: a lazily created 2-rank send/recv comm
+    // would otherwise replace it under the same group uid. On CUDA,
+    // ~ProcessGroupNCCL unregisters it unless it was already aborted or
+    // destroyed.
+    if (!singleP2POp) {
+#ifdef USE_ROCM
+      // Register and install the retire hook as one step under the comm's own
+      // lock, which abort() and destroy() also take, so an invalidation cannot
+      // land in between. The pair is captured because abort() nulls the
+      // handle, and the generation tells our entry apart from a successor's at
+      // the same address.
+      NCCLComm::LockType commLock(ncclComm->mutex_);
+      if (!ncclComm->aborted_) {
+        auto& devCommManager =
+            c10d::symmetric_memory::NCCLDevCommManager::get(device);
+        ncclComm_t registeredComm = ncclComm->getNcclComm();
+        devCommManager.register_comm(getGroupUid(), registeredComm);
+        const uint64_t generation =
+            devCommManager.get_comm_generation(getGroupUid(), registeredComm);
+        ncclComm->preInvalidateHook_ =
+            [device, groupUid = getGroupUid(), registeredComm, generation]() {
+              c10d::symmetric_memory::NCCLDevCommManager::get(device)
+                  .unregister_comm(groupUid, registeredComm, generation);
+            };
+      }
+#else
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+          getGroupUid(), ncclComm->getNcclComm());
+#endif
+    }
 #endif
   }
 
@@ -3673,7 +3722,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
 
   // Record end after ncclGroupEnd
-  // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   work->ncclEndEvent_->record(ncclStream);
 
   if (enqueue) {
@@ -4130,8 +4178,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
-  // avoidRecordStreams_ note:
-  // send, recv, and irecv should be ok with avoidRecordStreams,
+  // stashing note:
+  // send, recv, and irecv should be ok with stashing,
   // However, for isend, I don't think the API requires the user
   // to wait() on the returned handle, so ProcessGroupNCCL can't know
   // when it's safe to release the input back to the allocator,
@@ -4626,7 +4674,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return allreduce_impl(tensor, "nccl:all_reduce", opts);
 }
 
@@ -4659,7 +4707,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return collectiveCoalesced(
       tensors,
       tensors,
@@ -4716,7 +4764,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   const auto root = opts.rootRank + opts.rootTensor;
   bool nanCheck = (root == rank_);
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return collective(
       tensor,
       tensor,
@@ -4811,7 +4859,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return collective(
       tensor,
       tensor,
@@ -4935,7 +4983,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         },
         [](at::cuda::CUDAStream& ncclStream,
            c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-          // avoidRecordStreams_ note: We actually don't need to stash anything
+          // stashing note: We actually don't need to stash anything
           // here.
           //  - inputTensors is stashed onto work->stashed_for_allocator_safety_
           //    in collective().
@@ -5074,17 +5122,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          // TODO: remove once upstream NCCL is fixed
-          // https://github.com/pytorch/pytorch/issues/168092
-          if (this->getSize() == 1) {
-            at::cuda::CUDAStreamGuard guard(stream);
-            output.flatten().copy_(input.flatten(), true);
-            return ncclSuccess;
-          }
-
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+          // All-reduce avoids #168092 while preserving PreMulSum for one rank.
+          // Direct calls preserve lazy binding of weak NCCL symbols.
+          if (this->getSize() == 1) {
+            return ncclAllReduce(
+                input.data_ptr(),
+                output.data_ptr(),
+                output.numel(),
+                ncclDataType,
+                ncclReduceOp,
+                comm,
+                stream.stream());
+          }
+#endif
           return ncclReduceScatter(
               input.data_ptr(),
               output.data_ptr(),
@@ -5174,7 +5228,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // stashing note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
   // know that the NCCL stream will join back to the "current" stream right
   // after this op. So we might just as well keep the stream ownership of the
@@ -5191,17 +5245,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        // TODO: remove once upstream NCCL is fixed
-        // https://github.com/pytorch/pytorch/issues/168092
-        if (this->getSize() == 1) {
-          at::cuda::CUDAStreamGuard guard(stream);
-          output.flatten().copy_(input.flatten(), true);
-          return ncclSuccess;
-        }
-
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
+        if (this->getSize() == 1) {
+          return ncclAllReduce(
+              input.data_ptr(),
+              output.data_ptr(),
+              output.numel(),
+              ncclDataType,
+              ncclReduceOp,
+              comm,
+              stream.stream());
+        }
+#endif
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
@@ -5251,17 +5310,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        // TODO: remove once upstream NCCL is fixed
-        // https://github.com/pytorch/pytorch/issues/168092
-        if (this->getSize() == 1) {
-          at::cuda::CUDAStreamGuard guard(stream);
-          output.flatten().copy_(input.flatten(), true);
-          return ncclSuccess;
-        }
-
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
+        if (this->getSize() == 1) {
+          return ncclAllReduce(
+              input.data_ptr(),
+              output.data_ptr(),
+              output.numel(),
+              ncclDataType,
+              ncclReduceOp,
+              comm,
+              stream.stream());
+        }
+#endif
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
@@ -5403,7 +5467,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         this->getSize(), // worldSize
         opts.asyncOp); // is asynchronized op
 
-    // avoidRecordStreams_ note: collective() will stash inputTensors and
+    // stashing note: collective() will stash inputTensors and
     // outputTensors.
     return collective(
         inputTensor,
@@ -5439,7 +5503,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         this->getSize(), // worldSize
         opts.asyncOp); // is asynchronized op
 
-    // avoidRecordStreams_ note: collective() will stash inputTensors and
+    // stashing note: collective() will stash inputTensors and
     // outputTensors.
     return collective(
         inputTensor,
@@ -5708,7 +5772,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash inputTensors and
+  // stashing note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
@@ -5874,7 +5938,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash outputTensors and
+  // stashing note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
   const auto root = opts.rootRank;
   bool nanCheck = (rank_ == root);
@@ -5945,7 +6009,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // stashing note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
   // know that the NCCL stream will join back to the "current" stream right
   // after this op. So we might just as well keep the stream ownership of the

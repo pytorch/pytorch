@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Pool.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -24,26 +24,26 @@ bool ceil_mode) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
-  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kW = kernel_size.size() == 1 ? kH : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
+  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
 
   // NB: stride default is not expressible as an integer constant, so we accept
   // empty stride for this case
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
-  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "max_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = c10::checked_convert<int>(padding[0], "int");
-  const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
+  const int padH = c10::safe_conv<int>(padding[0], "padding");
+  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
 
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
     "max_pool2d: dilation must be either a single int, or a tuple of two ints");
-  const int dilationH = c10::checked_convert<int>(dilation[0], "int");
-  const int dilationW = dilation.size() == 1 ? dilationH : c10::checked_convert<int>(dilation[1], "int");
+  const int dilationH = c10::safe_conv<int>(dilation[0], "dilation");
+  const int dilationW = dilation.size() == 1 ? dilationH : c10::safe_conv<int>(dilation[1], "dilation");
 
   const auto memory_format = input.suggest_memory_format();
   if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -97,26 +97,26 @@ const Tensor& indices) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
-  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kW = kernel_size.size() == 1 ? kH : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
+  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
 
   // NB: stride default is not expressible as an integer constant, so we accept
   // empty stride for this case
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
-  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "max_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = c10::checked_convert<int>(padding[0], "int");
-  const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
+  const int padH = c10::safe_conv<int>(padding[0], "padding");
+  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
 
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
     "max_pool2d: dilation must be either a single int, or a tuple of two ints");
-  const int dilationH = c10::checked_convert<int>(dilation[0], "int");
-  const int dilationW = dilation.size() == 1 ? dilationH : c10::checked_convert<int>(dilation[1], "int");
+  const int dilationH = c10::safe_conv<int>(dilation[0], "dilation");
+  const int dilationW = dilation.size() == 1 ? dilationH : c10::safe_conv<int>(dilation[1], "dilation");
 
   TORCH_CHECK(input.dtype() == gradOutput.dtype(),
     "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());
@@ -141,7 +141,7 @@ const Tensor& indices) {
   const int64_t outputHeight_for_shape_check = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth_for_shape_check = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_backward_shape_check(
+  pool2d_backward_shape_check(
     input,
     gradOutput,
     indices,
@@ -167,18 +167,18 @@ bool ceil_mode,
 const Tensor& output,
 const Tensor& indices) {
 
-  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kW = kernel_size.size() == 1 ? kH : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
+  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
 
-  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
 
-  const int padH = c10::checked_convert<int>(padding[0], "int");
-  const int padW = padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
+  const int padH = c10::safe_conv<int>(padding[0], "padding");
+  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
 
-  const int dilationH = c10::checked_convert<int>(dilation[0], "int");
-  const int dilationW = dilation.size() == 1 ? dilationH : c10::checked_convert<int>(dilation[1], "int");
+  const int dilationH = c10::safe_conv<int>(dilation[0], "dilation");
+  const int dilationW = dilation.size() == 1 ? dilationH : c10::safe_conv<int>(dilation[1], "dilation");
 
   max_pool2d_kernel(
       kCPU, output, indices, input,

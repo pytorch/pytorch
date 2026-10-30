@@ -27,7 +27,7 @@ constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32Elemen
 
 namespace {
 template <typename T>
-constexpr int IntegerLog2(T n, int p = 0) {
+consteval int IntegerLog2(T n, int p = 0) {
   return (n <= 1) ? p : IntegerLog2(n / 2, p + 1);
 }
 } // namespace
@@ -165,7 +165,8 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 #endif // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 
 #if COMPILER_SUPPORTS_BF16_TARGET
-#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
+// Add BF16 without dropping translation-unit features such as SVE.
+#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("+bf16")))
 
 TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void
 dot_with_fp32_arith_main_inner_loop_bfdot(

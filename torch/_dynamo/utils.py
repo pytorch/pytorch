@@ -34,6 +34,7 @@ import math
 import operator
 import os
 import re
+import struct
 import sys
 import textwrap
 import threading
@@ -41,13 +42,13 @@ import time
 import traceback
 import types
 import typing
+import unicodedata
 import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
-from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
@@ -74,6 +75,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
@@ -93,6 +95,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from . import config
 from .graph_utils import _get_flat_args
 
 
@@ -128,8 +131,6 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
-
-    from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
@@ -552,7 +553,7 @@ class CompileEventLogger:
 
     @staticmethod
     def add_to_set(
-        event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: object
     ) -> None:
         """
         Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
@@ -587,7 +588,7 @@ class CompileEventLogger:
     @staticmethod
     def add_to_set_toplevel(
         key: str,
-        value: Any,
+        value: object,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ) -> None:
         """
@@ -720,6 +721,45 @@ def compile_time_record_function(name: str) -> Generator[Any, None, None]:
             rf.__exit__(None, None, None)
     else:
         yield
+
+
+# Global rather than the thread-local this file uses for other depth counters
+# (see _dynamo_timed_tls): gc.set_threshold is process-wide, so a per-thread
+# depth would let a second thread save the already-raised value as its
+# "original" and restore that permanently when it exits.
+_gc_threshold_lock = threading.Lock()
+_gc_threshold_depth = 0
+_gc_threshold_saved: tuple[int, int, int] | None = None
+
+
+@contextlib.contextmanager
+def deferred_full_gc() -> Generator[None, None, None]:
+    """Raise the gen2 GC threshold for the duration of a compile.
+
+    See config.gc_gen2_threshold_during_compile. Reentrant: nested compiles share
+    the outermost adjustment, and the original thresholds are restored once the
+    outermost one finishes.
+    """
+    global _gc_threshold_depth, _gc_threshold_saved
+    threshold = config.gc_gen2_threshold_during_compile
+    if threshold is None:
+        yield
+        return
+    with _gc_threshold_lock:
+        if _gc_threshold_depth == 0:
+            _gc_threshold_saved = gc.get_threshold()
+            gen0, gen1, gen2 = _gc_threshold_saved
+            # Never lower a threshold the caller already raised past ours.
+            gc.set_threshold(gen0, gen1, max(gen2, threshold))
+        _gc_threshold_depth += 1
+    try:
+        yield
+    finally:
+        with _gc_threshold_lock:
+            _gc_threshold_depth -= 1
+            if _gc_threshold_depth == 0 and _gc_threshold_saved is not None:
+                gc.set_threshold(*_gc_threshold_saved)
+                _gc_threshold_saved = None
 
 
 @contextmanager
@@ -862,7 +902,7 @@ def dynamo_timed(
                 runtime_context = get_runtime_metrics_context()
                 runtime_context.increment(dynamo_compile_column_us, duration_us)
                 if is_outer_event:
-                    extra = {
+                    extra: dict[str, object] = {
                         "compile_id": compile_id,
                         "is_runtime": True,
                         "is_forward": not is_backward,
@@ -1203,6 +1243,45 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
+def constant_bits(value: Any, /) -> bytes | None:
+    if type(value) is float:
+        return struct.pack(">d", value)
+    if type(value) is complex:
+        return struct.pack(">dd", value.real, value.imag)
+    return None
+
+
+def constants_identical(a: Any, b: Any, /) -> bool:
+    """Value-identity comparison for specialized constants. Python float eq is
+    not value-identity: nan != nan while -0.0 == 0.0, so compare float and
+    complex values by IEEE-754 bit pattern, recursively through containers."""
+    bits = constant_bits(a)
+    if type(a) is type(b) and bits is not None:
+        return bits == constant_bits(b)
+
+    if type(a) is type(b) and type(a) in (list, tuple, torch.Size):
+        if a is b:
+            return True
+        return len(a) == len(b) and all(constants_identical(x, y) for x, y in zip(a, b))
+
+    if type(a) is type(b) and type(a) in (set, frozenset):
+        if a is b:
+            return True
+        if len(a) != len(b):
+            return False
+        remaining = list(b)
+        for x in a:
+            for i, y in enumerate(remaining):
+                if constants_identical(x, y):
+                    remaining.pop(i)
+                    break
+            else:
+                return False
+        return True
+
+    return a == b
+
+
 _builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
@@ -1289,37 +1368,53 @@ def is_numpy_float_type(value: object) -> bool:
     )
 
 
-_unpack_fast_types_cache: tuple[type, ...] | None = None
-
-
+@functools.cache
 def _unpack_fast_types() -> tuple[type, ...]:
     # Builtin iterables whose elements we can get directly via
     # unpack_var_sequence, skipping the generic iter/getiter/iternext protocol
-    # (a bottleneck for large iterables). Built lazily since `variables` is a
+    # (a bottleneck for large iterables). Cached lazily since `variables` is a
     # circular import at module load.
-    global _unpack_fast_types_cache
-    if _unpack_fast_types_cache is None:
-        from . import variables
+    from . import variables
 
-        _unpack_fast_types_cache = (
-            variables.ConstDictVariable,
-            variables.DictViewVariable,
-            variables.MappingProxyVariable,
-            variables.DequeVariable,
-            variables.ListVariable,
-            variables.ListIteratorVariable,
-            variables.RangeVariable,
-            variables.SetVariable,
-            variables.TensorVariable,
-            variables.TupleVariable,
-        )
-    return _unpack_fast_types_cache
+    return (
+        variables.ConstDictVariable,
+        variables.DequeIteratorVariable,
+        variables.DequeReverseIteratorVariable,
+        variables.DequeVariable,
+        variables.DictItemsVariable,
+        variables.DictKeySetVariable,
+        variables.DictKeysVariable,
+        variables.DictValuesVariable,
+        variables.DunderDictVariable,
+        variables.FakeItemVariable,
+        variables.FrozensetVariable,
+        variables.ListIteratorVariable,
+        variables.ListReverseIteratorVariable,
+        variables.ListVariable,
+        variables.MappingProxyVariable,
+        variables.NNModuleHooksDictVariable,
+        variables.NumpyNdarrayVariable,
+        variables.OrderedDictVariable,
+        variables.OrderedSetVariable,
+        variables.RangeVariable,
+        variables.SetVariable,
+        variables.SizeVariable,
+        variables.TensorVariable,
+        variables.TensorWithTFOverrideVariable,
+        variables.TupleIteratorVariable,
+        variables.TupleVariable,
+        variables.UnspecializedPythonVariable,
+    )
 
 
 def unpack_iterable(
     tx: InstructionTranslatorBase, iterable: VariableTracker
 ) -> list[VariableTracker]:
-    if isinstance(iterable, _unpack_fast_types()):
+    # Realize first: istype is exact, so a lazy wrapper would otherwise miss
+    # the fast path (and a subclass VT stays excluded since its exact type is
+    # not in _unpack_fast_types).
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         # unpack_var_sequence returns a fresh list, so hand it back directly:
         # no generator, no per-element callback, single allocation.
         return iterable.unpack_var_sequence(tx)
@@ -1342,14 +1437,20 @@ def lazily_unpack(
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
-    if isinstance(iterable, _unpack_fast_types()):
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    disable_ngb = config.patch(nested_graph_breaks=False)
     while True:
         try:
-            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            # This host-side iteration has no resumable frame. Compute the item
+            # before yielding so the config patch does not leak to the caller.
+            with disable_ngb:
+                item = pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            yield item
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -1399,7 +1500,7 @@ _FuncTypes: TypeAlias = (
 
 
 def is_function_or_wrapper(
-    value: Any,
+    value: object,
 ) -> TypeIs[_FuncTypes | torch._ops.OpOverloadPacket | torch._ops.OpOverload]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
@@ -1407,7 +1508,7 @@ def is_function_or_wrapper(
 
 
 def is_function(
-    value: Any,
+    value: object,
 ) -> TypeIs[_FuncTypes]:
     return isinstance(
         value,
@@ -1441,7 +1542,7 @@ cmp_name_to_op_str_mapping = {
 
 
 def is_wrapper_or_member_descriptor(
-    value: Any,
+    value: object,
 ) -> TypeIs[
     types.GetSetDescriptorType
     | types.MethodDescriptorType
@@ -1493,14 +1594,14 @@ def unwrap_with_attr_name_if_wrapper(fn: Any) -> tuple[Any, str | None]:
     return fn, attr_name
 
 
-def is_numpy_ndarray(value: Any) -> TypeGuard[np.ndarray]:  # type: ignore[type-arg]
+def is_numpy_ndarray(value: object) -> TypeGuard[np.ndarray]:  # type: ignore[type-arg]
     if not np:
         return False
 
     return istype(value, np.ndarray)
 
 
-def istensor(obj: Any) -> bool:
+def istensor(obj: object) -> bool:
     """Check of obj is a tensor"""
     tensor_list: tuple[type, ...] = (
         torch.Tensor,
@@ -1511,7 +1612,7 @@ def istensor(obj: Any) -> bool:
     return istype(obj, tensor_list)
 
 
-def is_lazy_module(mod: Any) -> bool:
+def is_lazy_module(mod: object) -> bool:
     return isinstance(mod, LazyModuleMixin)
 
 
@@ -1534,6 +1635,12 @@ def make_cell(val: Any = None) -> types.CellType:
             f"Expected f.__closure__ to have exactly 1 element, got {len(f.__closure__)}"
         )
     return f.__closure__[0]
+
+
+def clear_cell(cell: types.CellType) -> None:
+    """Empty `cell` regardless of its current state (replays DELETE_DEREF)."""
+    cell.cell_contents = None
+    del cell.cell_contents
 
 
 def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -1681,7 +1788,7 @@ class CompilationMetrics:
     functorch_config: str | None = None
 
     @classmethod
-    def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
+    def create(cls, metrics: dict[str, object]) -> CompilationMetrics:
         """
         Factory method to create a CompilationMetrics from a dict of fields.
         Includes the logic to add legacy fields and any pre-processing, e.g.,
@@ -1694,8 +1801,8 @@ class CompilationMetrics:
         def us_to_ms(metric: int | None) -> int | None:
             return metric // 1000 if metric is not None else None
 
-        def collection_to_str(metric: Any | None) -> str | None:
-            def safe_str(item: Any) -> str:
+        def collection_to_str(metric: object | None) -> str | None:
+            def safe_str(item: object) -> str:
                 try:
                     return str(item)
                 except Exception:
@@ -1709,41 +1816,47 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
-        def collection_to_json_str(metric: Any | None) -> str | None:
+        def collection_to_json_str(metric: object | None) -> str | None:
             if metric is None:
                 return None
             try:
-                return json.dumps(list(metric))
+                return json.dumps(list(cast("Iterable[object]", metric)))
             except Exception:
                 return "<unknown>"
 
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
         legacy_metrics = {
-            "start_time": us_to_s(metrics.get("start_time_us")),
+            "start_time": us_to_s(cast("int | None", metrics.get("start_time_us"))),
             "entire_frame_compile_time_s": us_to_s(
-                metrics.get("dynamo_cumulative_compile_time_us")
+                cast("int | None", metrics.get("dynamo_cumulative_compile_time_us"))
             ),
             "backend_compile_time_s": us_to_s(
-                metrics.get("aot_autograd_cumulative_compile_time_us")
+                cast(
+                    "int | None",
+                    metrics.get("aot_autograd_cumulative_compile_time_us"),
+                )
             ),
             "inductor_compile_time_s": us_to_s(
-                metrics.get("inductor_cumulative_compile_time_us")
+                cast("int | None", metrics.get("inductor_cumulative_compile_time_us"))
             ),
             "code_gen_time_s": us_to_s(
-                metrics.get("inductor_code_gen_cumulative_compile_time_us")
+                cast(
+                    "int | None",
+                    metrics.get("inductor_code_gen_cumulative_compile_time_us"),
+                )
             ),
             "remote_cache_time_saved_s": us_to_s(
-                metrics.get("distributed_ephemeral_timeout_us")
+                cast("int | None", metrics.get("distributed_ephemeral_timeout_us"))
             ),
             "remote_fx_graph_cache_get_time_ms": us_to_ms(
-                metrics.get("remote_fx_graph_cache_get_time_us")
+                cast("int | None", metrics.get("remote_fx_graph_cache_get_time_us"))
             ),
             "remote_fx_graph_cache_put_time_ms": us_to_ms(
-                metrics.get("remote_fx_graph_cache_put_time_us")
+                cast("int | None", metrics.get("remote_fx_graph_cache_put_time_us"))
             ),
             "structured_logging_overhead_s": us_to_s(
-                metrics.get("structured_logging_overhead_us")
+                cast("int | None", metrics.get("structured_logging_overhead_us"))
             ),
         }
 
@@ -1964,7 +2077,7 @@ def _functorch_config_for_logging() -> str | None:
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
-    metrics: dict[str, Any],
+    metrics: dict[str, object],
     exc_type: type[BaseException] | None,
     exc_value: BaseException | None,
 ) -> None:
@@ -1983,7 +2096,7 @@ def record_compilation_metrics(
 
     # Populate the compile_id from the metrics context if it's set. Otherwise,
     # look for it in the current compile context.
-    compile_id = metrics.get("compile_id")
+    compile_id = cast("CompileId | None", metrics.get("compile_id"))
     if not compile_id:
         compile_id = torch._guards.CompileContext.current_compile_id()
 
@@ -2490,8 +2603,9 @@ class CleanupHook:
             CleanupManager.count -= 1
         # Hooks fire when the owning code object is collected, which can happen
         # after something else has taken over this name -- CompilePackage.install()
-        # reinstalls precompiled state under names a pre-reset compile still
-        # owns. Only clean up while nothing has claimed the name out from under us.
+        # rebinds one a pre-reset compile still owns, and an aot_compile load claims
+        # a builtins-dict key while leaving the binding as it is. Only clean up
+        # while nothing has claimed the name out from under us.
         key = (id(self.scope), self.name)
         if _cleanup_owners.pop(key, None) is not self.token:
             return
@@ -2511,11 +2625,12 @@ class CleanupHook:
         return CleanupHook(scope, name, token)
 
     @staticmethod
-    def disown(scope: dict[str, Any], name: str) -> None:
+    def disown(scope: dict[str, Any], name: str) -> bool:
         """Invalidate whichever hook currently owns (scope, name), so that if
         its code object outlives this call, firing later is a no-op instead of
-        deleting a binding something else has since taken over."""
-        _cleanup_owners.pop((id(scope), name), None)
+        deleting a binding something else has since taken over. Returns whether
+        a hook owned it."""
+        return _cleanup_owners.pop((id(scope), name), None) is not None
 
 
 class CleanupManager(ExactWeakKeyDictionary):
@@ -2564,6 +2679,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -2730,7 +2846,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
 
 
 def is_jit_model(
-    model0: Any,
+    model0: object,
 ) -> TypeIs[
     torch.jit._trace.TopLevelTracedModule
     | torch.jit._script.RecursiveScriptModule
@@ -2890,17 +3006,6 @@ def timed(
 
 def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bool:
     return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
-
-
-@lru_cache(32)
-def rot_n_helper(n: int) -> Callable[..., Any]:
-    if n <= 1:
-        raise AssertionError(f"Expected n > 1, got {n}")
-    vars = [f"v{i}" for i in range(n)]
-    rotated = reversed(vars[-1:] + vars[:-1])
-    fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
-    fn.__name__ = f"rot_{n}_helper"
-    return fn
 
 
 common_constant_types: set[type] = {
@@ -3098,12 +3203,19 @@ range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 deque_iterator = type(iter(collections.deque()))
 deque_rev_iterator = type(reversed(collections.deque()))
+list_reverseiterator = type(reversed([]))
+list_reverseiterator_len = list_reverseiterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
     method
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
+}
+# defaultdict adds __init__/__repr__/__missing__/copy on top of dict's; a
+# defaultdict subclass inherits both, so UDOV slot delegation needs the union.
+defaultdict_methods = dict_methods | {
+    method for method in collections.defaultdict.__dict__.values() if callable(method)
 }
 set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
@@ -3149,7 +3261,13 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
     if not isinstance(obj, dict):
         raise AssertionError(f"Expected obj to be a dict, got {type(obj)}")
     if istype(obj, (dict, OrderedDict)):
-        return obj.items()
+        # Snapshot into a list rather than returning the live items view. Callers
+        # consume this lazily while building VariableTrackers, and when obj is a
+        # frame-globals dict Dynamo may add or drop its own generated globals
+        # (e.g. __compiled_fn / __resume_at, removed by a CleanupHook firing at
+        # GC time) on that same dict mid-iteration, which a live view would turn
+        # into "dictionary changed size during iteration".
+        return list(obj.items())
     elif isinstance(obj, OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
@@ -3187,6 +3305,15 @@ def product(it: Iterable[T]) -> int:
 def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def list_reverseiterator_backing_list(it: Any) -> list[Any]:
+    return it.__reduce__()[1][0]
+
+
+def list_reverseiterator_setstate(it: Any, it_index: int) -> Any:
+    it.__setstate__(it_index)
+    return it
 
 
 def dataclass_fields(cls: Any) -> Any:
@@ -3428,7 +3555,7 @@ def iter_contains(
 
 
 def key_is_id(
-    k: Any,
+    k: object,
 ) -> TypeIs[torch.Tensor | torch.nn.Module | MethodWrapperType]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
@@ -3483,7 +3610,7 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException
 
 
-def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
+def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: object) -> str:
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
     # where multiple torch.compile invocations reuse the same global name,
@@ -3789,7 +3916,7 @@ def same(
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500
+                        fp64_ref.numel() < 1000
                     ):
                         multiplier = 8.0
                     elif (
@@ -4088,6 +4215,30 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def _tensor_device_types(tree: Any) -> frozenset[str]:
+    return frozenset(
+        t.device.type for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)
+    ) - {"meta"}
+
+
+def _records_graph_break_ops(tx: InstructionTranslatorBase) -> bool:
+    package = tx.output.package
+    return package is not None and package.records_graph_break_ops
+
+
+def _record_graph_break_op(
+    tx: InstructionTranslatorBase, record: Callable[[Any], object]
+) -> None:
+    """Calls ``record`` with the capture package, if it records graph-break ops. A
+    failure only drops the record, so the graph break or error being handled stands."""
+    if not _records_graph_break_ops(tx):
+        return
+    try:
+        record(tx.output.package)
+    except Exception:
+        log.debug("precompile: dropped a graph-break op record", exc_info=True)
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4181,6 +4332,15 @@ def _get_fake_value_impl(
             for arg in args
         )
 
+    def record_op(failed_op: object = None) -> None:
+        # The op graph-breaks, then runs eagerly on its inputs' devices.
+        _record_graph_break_op(
+            tx,
+            lambda p: p.add_graph_break_op(
+                node.target, failed_op, _tensor_device_types((args, kwargs))
+            ),
+        )
+
     try:
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
@@ -4188,13 +4348,26 @@ def _get_fake_value_impl(
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
-    except Unsupported:
+    except Unsupported as e:
+        # run_node and wrap_fake_exception graph-break on these.
+        fake_failures = (NotImplementedError, UnsupportedFakeTensorException)
+        if isinstance(e.__cause__, fake_failures):
+            record_op()
         raise
     except RuntimeError as e:
         cause: BaseException = e
         if e.__cause__ is not None:
             cause = e.__cause__
 
+        graph_break_causes = (
+            torch._subclasses.fake_tensor.DataDependentOutputException,
+            torch._subclasses.fake_tensor.DynamicOutputShapeException,
+            torch._subclasses.fake_tensor.UnsupportedOperatorException,
+        )
+        if isinstance(cause, graph_break_causes):
+            # These graph-break below; so do the TypeError and pending fake impl
+            # branches.
+            record_op(cause.func)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -4297,6 +4470,7 @@ def _get_fake_value_impl(
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
+            record_op()
             unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
@@ -4321,6 +4495,7 @@ def _get_fake_value_impl(
             # so do NOT wrap it as a hard TorchRuntimeError.
             # NB: gated on a pending _abstract_fn mutation so a genuinely
             # unregistered op still hard-errors below with actionable guidance.
+            record_op()
             unimplemented(
                 gb_type="Custom op missing fake impl during tracing",
                 context=f"{node.target}",
@@ -4402,7 +4577,7 @@ def run_node(
 
     with set_current_node(node):
 
-        def make_error_message(e: Any) -> str:
+        def make_error_message(e: object) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
                 + repr(e)
@@ -4861,12 +5036,14 @@ class numpy_operator_wrapper(Generic[_P, R]):
         if kwargs:
             raise AssertionError(f"Expected no kwargs, got {kwargs}")
 
-        # pyrefly: ignore [bad-assignment]
-        args = (
-            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
-        )
-        out = self.op(*args)
-        return numpy_to_tensor(out)
+        with torch._C.DisableTorchFunction():
+            # pyrefly: ignore [bad-assignment]
+            args = (
+                tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in args
+            )
+            out = self.op(*args)
+            return numpy_to_tensor(out)
 
 
 @functools.lru_cache(maxsize=1)
@@ -5037,6 +5214,9 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     return compile_supported
 
 
+is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
+
+
 # The following 3.11 source code functions are adapted from
 # https://github.com/python/cpython/blob/v3.11.4/Lib/traceback.py
 # in order to output source code corresponding to bytecode in 3.11+.
@@ -5051,6 +5231,28 @@ def _fix_offset(str: str, offset: int) -> int:
     """
     as_utf8 = str.encode("utf-8")
     return len(as_utf8[:offset].decode("utf-8", errors="replace"))
+
+
+def _expand_source_and_marker(source: str, marker: str) -> tuple[str, str]:
+    expanded_source: list[str] = []
+    expanded_marker: list[str] = []
+    column = 0
+    for index, char in enumerate(source):
+        if char == "\t":
+            width = 8 - column % 8
+            expanded_source.append(" " * width)
+        elif unicodedata.category(char) in {"Mn", "Me", "Cf"}:
+            # Combining marks, variation selectors, and format characters
+            # render in zero columns.
+            width = 0
+            expanded_source.append(char)
+        else:
+            width = 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+            expanded_source.append(char)
+        if index < len(marker):
+            expanded_marker.append(marker[index] * width)
+        column += width
+    return "".join(expanded_source), "".join(expanded_marker)
 
 
 @dataclasses.dataclass
@@ -5071,9 +5273,6 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         - for indexing, the location of the brackets.
     `segment` is expected to be a valid Python expression
     """
-    if sys.version_info < (3, 11):
-        raise AssertionError(f"Python >= 3.11 required, got {sys.version_info}")
-
     import ast
 
     tree: Any | None = None
@@ -5219,6 +5418,23 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
     return None
 
 
+def _is_expression_range(
+    source_lines: list[str], col_offset: int, end_col_offset: int
+) -> bool:
+    import ast
+
+    first = source_lines[0][_fix_offset(source_lines[0], col_offset) :]
+    last = source_lines[-1][: _fix_offset(source_lines[-1], end_col_offset)]
+    # Wrap in parentheses so continuation lines, comments, and indentation
+    # inside a multiline expression do not trip the parser.
+    segment = "\n".join([first, *source_lines[1:-1], last])
+    try:
+        ast.parse(f"({segment}\n)", mode="eval")
+    except SyntaxError:
+        return False
+    return True
+
+
 def format_source_range(
     filename: str,
     lineno: int | None,
@@ -5240,11 +5456,24 @@ def format_source_range(
         return ""
 
     if (
+        end_lineno is not None
+        and end_lineno != lineno
+        and col_offset is not None
+        and end_col_offset is not None
+        and not _is_expression_range(source_lines, col_offset, end_col_offset)
+    ):
+        # Python 3.11 gives statement-level instructions such as FOR_ITER a
+        # range spanning the whole statement body. Only multiline expressions
+        # are rendered as ranges.
+        return source_lines[0]
+
+    if (
         sys.version_info >= (3, 13)
         and end_lineno is not None
         and end_lineno != lineno
         and col_offset is not None
         and end_col_offset is not None
+        and not any("\t" in line for line in source_lines)
     ):
         # Keep single-line ranges on Dynamo's manual path. The stdlib traceback
         # formatter is useful for multiline spans on 3.13+, but for single-line
@@ -5331,6 +5560,7 @@ def format_source_range(
 
     result = ""
     for line, marker in zip(source_lines, markers):
+        line, marker = _expand_source_and_marker(line, marker)
         result += line + "\n"
         result += marker + "\n"
     return result
@@ -5411,6 +5641,59 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:
+    return type.__dict__["__dict__"].__get__(cls, type(cls))
+
+
+def get_type_mro_no_user_code(cls: type) -> tuple[type, ...]:
+    return type.__dict__["__mro__"].__get__(cls, type(cls))
+
+
+def iter_mro_static_dicts(cls: type) -> Iterator[tuple[type, Mapping[str, object]]]:
+    """Yield MRO classes and dictionaries without invoking metaclass hooks."""
+    for base in get_type_mro_no_user_code(cls):
+        yield base, get_type_dict_no_user_code(base)
+
+
+def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
+    """Yield MRO definitions without invoking custom metaclass hooks."""
+    for _, namespace in iter_mro_static_dicts(cls):
+        if name in namespace:
+            yield namespace[name]
+
+
+def find_bound_builtin_method_descriptor(value: object) -> object | None:
+    if not isinstance(value, types.BuiltinMethodType):
+        return None
+
+    receiver = value.__self__
+    receiver_is_type = issubclass(type(receiver), type)
+    owner = cast(type, receiver if receiver_is_type else type(receiver))
+    for descriptor in iter_mro_static_attrs(owner, value.__name__):
+        if type(descriptor) not in (
+            types.BuiltinFunctionType,
+            types.ClassMethodDescriptorType,
+            types.MethodDescriptorType,
+        ):
+            continue
+        descriptor_get = getattr(descriptor, "__get__", None)
+        if descriptor_get is None:
+            if descriptor is value:
+                return descriptor
+            continue
+        try:
+            rebound = (
+                descriptor_get(None, receiver)
+                if receiver_is_type
+                else descriptor_get(receiver, owner)
+            )
+        except (AttributeError, TypeError):
+            continue
+        if rebound == value:
+            return descriptor
+    return None
+
+
 def is_torch_class(cls: type) -> bool:
     """Check if cls is defined in torch or a torch submodule.
 
@@ -5420,8 +5703,10 @@ def is_torch_class(cls: type) -> bool:
     inplace-view-on-input-tensor detection. This helper identifies classes
     whose descriptors should take that path instead of descriptor VTs.
     """
-    module = getattr(cls, "__module__", None)
-    return module is not None and (module == "torch" or module.startswith("torch."))
+    module = type.__dict__["__module__"].__get__(cls, type(cls))
+    return type(module) is str and (
+        module == "torch" or str.startswith(module, "torch.")
+    )
 
 
 def is_torch_function_object(value: object) -> bool:
@@ -5694,8 +5979,17 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
-def get_current_stream(device: torch.device) -> torch.Stream:
-    return torch.accelerator.current_stream(device)
+@contextmanager
+def temporarily_clear_torch_function_mode_stack() -> Iterator[None]:
+    """Temporarily clear and restore the torch function mode stack."""
+    stack = get_torch_function_mode_stack()
+    # Guard filtering may intentionally allow this to differ from the
+    # compile-time mode stack, so preserve the live stack without asserting.
+    clear_torch_function_mode_stack()
+    try:
+        yield
+    finally:
+        set_torch_function_mode_stack(stack)
 
 
 # call from C dynamo in order to inspect values in pdb
@@ -5777,12 +6071,6 @@ class FrameState(enum.Enum):
     FRAME_EXECUTING = 0
     FRAME_COMPLETED = 1
     FRAME_CLEARED = 4
-
-
-class PySendResult(enum.Enum):
-    PYGEN_RETURN = 0
-    PYGEN_ERROR = -1
-    PYGEN_NEXT = 1
 
 
 class CompileTimeInstructionCounter:
@@ -5931,7 +6219,6 @@ def _is_tensorify_enabled() -> bool:
     return justknobs_check("pytorch/compiler:tensorify_python_scalars")
 
 
-@torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (
         torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
@@ -5942,9 +6229,31 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     return cm
 
 
-@torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# skip_code the two marker fns above: they are called from compiled bytecode
+# (behind PyCodegen's profiler gate) with the eval-frame callback active, so they
+# must not be traced. skip_code makes the eval-frame hook skip the frame via a
+# static flag with no per-call disable wrapper. Skip recursively (SKIP frame AND
+# callees) so nothing in the marker's dynamic extent is ever traced -- the same
+# guarantee the old @torch._disable_dynamo gave, but for free: unlike a disable
+# wrapper the recursive skip is just a flag with no per-call cost, so there is no
+# reason to leave callees traceable. The C set_code_exec_strategy is used directly
+# because torch._dynamo.disable / .skip cannot be imported at utils import time
+# (circular import).
+_pregraph_marker_skip = torch._C._dynamo.eval_frame._FrameExecStrategy(
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
+    torch._C._dynamo.eval_frame._FrameAction.SKIP,
+)
+torch._C._dynamo.eval_frame.set_code_exec_strategy(
+    record_pregraph_bytecode_enter.__code__, _pregraph_marker_skip
+)
+torch._C._dynamo.eval_frame.set_code_exec_strategy(
+    record_pregraph_bytecode_exit.__code__, _pregraph_marker_skip
+)
+del _pregraph_marker_skip
 
 
 # Active `torch._dynamo.override_cudagraphs` override, set/restored at RUNTIME by
@@ -5989,6 +6298,10 @@ def is_pybind11_enum_member(value: object) -> bool:
     a C++ function returning an enum may construct a new Python wrapper), so
     we check by name membership rather than identity.
     """
+    # A class is never a member. For a Python Enum class, type(value) is
+    # EnumType, whose __members__ is a property object, not a mapping.
+    if isinstance(value, type):
+        return False
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
@@ -5998,7 +6311,8 @@ def is_pybind11_enum_member(value: object) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslatorBase, f: Callable[..., Any]
+    tx: InstructionTranslatorBase,
+    f: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
@@ -6007,11 +6321,11 @@ def _make_inlined(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
         from torch._dynamo.trace_rules import _force_inline
-        from torch._dynamo.variables.functions import UserFunctionVariable
+        from torch._dynamo.variables.builder import SourcelessBuilder
 
         with _force_inline():
             return tx.inline_user_function_return(
-                UserFunctionVariable(f),
+                SourcelessBuilder.create_internal_user_function(f),
                 list(args),
                 dict(kwargs),
             )

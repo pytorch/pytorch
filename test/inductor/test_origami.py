@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import logging
 import os
+import statistics
 import unittest
 from collections.abc import Callable
 from unittest import mock
@@ -8,6 +9,7 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.heuristics.template import triton as triton_heuristics
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
@@ -28,10 +30,14 @@ if not DO_PERF_TEST:
 ORIGAMI_TOPK_VALUES = [5, 10]  # topk configs to test
 ORIGAMI_COMPILE_TOPK = 2  # topk for compilation tests
 PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
+BENCH_WARMUP = 100  # warmup iterations for perf benchmarks
+BENCH_REP = 500  # measurement iterations for perf benchmarks
+BENCH_ROUNDS = 5  # independent rounds; median is used to suppress outliers
 # NOTE: Do NOT hardcode device-specific values (device name, SM count, memory, etc).
 # Use torch.cuda.get_device_properties() to query actual device capabilities.
 
 IS_ROCM = torch.version.hip is not None
+
 
 try:
     import origami
@@ -62,6 +68,13 @@ def tearDownModule():
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
 @unittest.skipIf(not IS_ROCM, "Origami integration is ROCm-only")
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
+@unittest.skipIf(
+    HAS_ORIGAMI
+    and config.max_autotune
+    and config.rocm.origami
+    and triton_heuristics.origami is None,
+    "The installed rocm-origami does not support this ROCm version",
+)
 @unittest.skipIf(
     not (config.max_autotune and config.rocm.origami),
     "Requires both max_autotune and origami to be enabled. "
@@ -188,11 +201,31 @@ class TestOrigami(TestCase):
                 self.assertGreater(default_case["topk_calls"], 0)
 
             with self.subTest(op_name=op_name, search_space="EXHAUSTIVE"):
-                exhaustive_case = self._compile_with_config(
-                    op_name,
-                    self._origami_exhaustive_config(),
-                    size=256,
+                # Stub get_exhaustive_mm_configs to return a 2-config generator
+                # so the EXHAUSTIVE compile finishes in seconds. The assertion
+                # only checks that select_topk_configs is NOT called (origami
+                # is bypassed when search_space is EXHAUSTIVE).
+                from functools import partial
+
+                from torch._inductor.heuristics.template.triton import (
+                    ROCmConfigHeuristic,
                 )
+
+                _two_configs = ROCmConfigHeuristic().exhaustive_configs[:2]
+
+                def _stub_exhaustive(self):
+                    return partial(self.preprocess_mm_configs, configs=_two_configs)
+
+                with mock.patch.object(
+                    ROCmConfigHeuristic,
+                    "get_exhaustive_mm_configs",
+                    _stub_exhaustive,
+                ):
+                    exhaustive_case = self._compile_with_config(
+                        op_name,
+                        self._origami_exhaustive_config(),
+                        size=256,
+                    )
                 self.assertEqual(exhaustive_case["topk_calls"], 0)
 
     def test_origami_reduces_compile_work_vs_regular_max_autotune(self):
@@ -221,6 +254,20 @@ class TestOrigami(TestCase):
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
+    def _benchmark_median(self, compiled, args):
+        """Run BENCH_ROUNDS independent benchmarks and return the median.
+
+        A single benchmark() call on a shared machine can vary by +/-5-8%.
+        Taking the median of several rounds suppresses transient noise.
+        """
+        samples = [
+            benchmarker.benchmark(
+                compiled, args, {}, warmup=BENCH_WARMUP, rep=BENCH_REP
+            )
+            for _ in range(BENCH_ROUNDS)
+        ]
+        return statistics.median(samples)
+
     @unittest.skipIf(
         not DO_PERF_TEST,
         "Perf test not enabled; set DO_PERF_TEST=1 to enable runtime perf benchmarks",
@@ -241,19 +288,13 @@ class TestOrigami(TestCase):
                             size=size,
                         )
 
-                        origami_runtime_ms = benchmarker.benchmark(
+                        origami_runtime_ms = self._benchmark_median(
                             origami_case["compiled"],
                             origami_case["args"],
-                            {},
-                            warmup=50,
-                            rep=200,
                         )
-                        max_autotune_runtime_ms = benchmarker.benchmark(
+                        max_autotune_runtime_ms = self._benchmark_median(
                             max_autotune_case["compiled"],
                             max_autotune_case["args"],
-                            {},
-                            warmup=50,
-                            rep=200,
                         )
 
                         runtime_ratio = (
@@ -492,7 +533,7 @@ class TestOrigami(TestCase):
         snippet = (
             "import os, torch\n"
             "from torch._inductor import config\n"
-            "from torch._inductor.template_heuristics import triton as th\n"
+            "from torch._inductor.heuristics.template import triton as th\n"
             "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') == '0', 'env var not set to 0'\n"
             "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
             "# Even after flipping the config knob mid-process, origami stays None\n"
@@ -520,11 +561,13 @@ class TestOrigami(TestCase):
 
 
 @unittest.skipIf(
-    HAS_GPU_AND_TRITON and IS_ROCM, "Skipped on ROCm where origami is available"
+    HAS_GPU_AND_TRITON and IS_ROCM,
+    "Skipped on ROCm where origami is available",
 )
 class TestOrigamiSkippedOnNonROCm(TestCase):
-    """Test that origami is properly skipped on non-ROCm devices (CUDA/CPU).
+    """Test that origami is properly skipped on unsupported environments.
 
+    Covers non-ROCm hardware (CUDA/CPU) where origami is not available.
     These tests verify that:
     1. origami configuration does not cause errors when disabled
     2. origami.select_topk_configs is not called on non-ROCm hardware
@@ -635,6 +678,31 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
                 compiled = torch.compile(test_fn, dynamic=False)
                 result = compiled(a, b)
                 torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-5)
+
+
+class TestOrigamiPackageVersionGate(TestCase):
+    """_origami_package_supported() decides whether the installed rocm-origami
+    works with the ROCm the build targets. No GPU or origami package needed."""
+
+    def test_package_version_gate(self):
+        from torch._inductor.heuristics.template.triton import (
+            _origami_package_supported,
+        )
+
+        cases = [
+            ((7, 2), "0.0.2", True),
+            ((10, 0), "0.0.2", False),
+            ((10, 1), "0.0.3", True),
+            ((10, 1), "0.0.4rc1", True),
+            ((10, 1), "0.0.3.dev1", False),
+            ((10, 1), "not-a-version", False),
+        ]
+        for rocm_version, package_version, expected in cases:
+            with self.subTest(rocm=rocm_version, package=package_version):
+                self.assertEqual(
+                    _origami_package_supported(rocm_version, package_version),
+                    expected,
+                )
 
 
 if __name__ == "__main__":

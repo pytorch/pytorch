@@ -3,11 +3,12 @@ import collections
 import copy
 import dataclasses
 import functools
+import importlib
 import inspect
 import itertools
 import logging
 import operator
-import threading
+import types
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -19,19 +20,28 @@ import sympy
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
-from torch._C import _dispatch_keys, DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode, register_fake
-from torch._ops import HigherOrderOperator
-from torch._prims_common import clone_preserve_strides
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
+from torch._C import DispatchKey
+from torch._higher_order_ops.user_kernel_hop import (
+    functional_hop_dense,
+    functional_hop_fake,
+    functionalize_functional_hop,
+    functionalize_mutation_hop,
+    KernelSideTable,
+    register_user_kernel_hop_dispatch,
+    store_non_graphable_args,
+    trace_user_kernel_wrapper,
+    UserKernelHOPifier,
+    UserKernelWrapperHOP,
 )
+from torch._higher_order_ops.utils import register_fake
+
+# Re-exported: MTIA's cpu_dispatch / dtype_conversion dispatch modes and the APS memory
+# estimator import it from this module.
+from torch._prims_common import clone_preserve_strides  # noqa: F401
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
-from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 if TYPE_CHECKING:
@@ -41,6 +51,7 @@ if TYPE_CHECKING:
     )
 
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.base import VariableTracker
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._guards import Source
@@ -83,10 +94,11 @@ TMAExperimentalMetadata = tuple[
 ]
 
 # e.g. for host-side Triton TMA API call ``TensorDescriptor.from_tensor(ptr, [32, 64])``
-# the metadata will look like ``("stable", ([32, 64],))``
+# the metadata will look like
+# ``("stable", ([32, 64], "triton.tools.tensor_descriptor", "TensorDescriptor"))``
 TMAStableMetadata = tuple[
     str,  # type of TMA ("experimental" or "stable")
-    tuple[list[IntLikeType],],  # block_shape
+    tuple[list[IntLikeType], str, str],  # block_shape, module, class
 ]
 
 
@@ -110,18 +122,226 @@ def maybe_unpack_tma_experimental_metadata(
 
 def create_tma_stable_metadata(
     block_shape: list[IntLikeType],
+    descriptor_module: str,
+    descriptor_class: str,
 ) -> TMAStableMetadata:
-    return ("stable", (block_shape,))
+    return ("stable", (block_shape, descriptor_module, descriptor_class))
 
 
 def maybe_unpack_tma_stable_metadata(
     tma_meta: TMAExperimentalMetadata | TMAStableMetadata,
-) -> tuple[list[IntLikeType]] | None:
+) -> tuple[list[IntLikeType], str, str] | None:
     if not tma_meta or len(tma_meta) != 2:
         return None
     if tma_meta[0] == "stable":
         return tma_meta[1]  # type: ignore[return-value]
     return None
+
+
+def get_importable_tma_descriptor_path(
+    descriptor_type: type[Any],
+) -> tuple[str, str] | None:
+    module_name = descriptor_type.__module__
+    class_name = descriptor_type.__name__
+    if module_name == "__main__":
+        return None
+    try:
+        resolved = getattr(importlib.import_module(module_name), class_name)
+    except (AttributeError, ImportError):
+        return None
+    return (module_name, class_name) if resolved is descriptor_type else None
+
+
+def get_tma_descriptor_factory_signature(
+    factory: Callable[..., Any],
+) -> inspect.Signature:
+    """Inspect Python parameters and defaults without wrapper/signature metadata."""
+    function = factory.__func__ if isinstance(factory, types.MethodType) else factory
+    if not isinstance(function, types.FunctionType):
+        raise TypeError("TMA descriptor factory must be a Python function")
+    function_copy = types.FunctionType(
+        function.__code__,
+        function.__globals__,
+        function.__name__,
+        function.__defaults__,
+        function.__closure__,
+    )
+    function_copy.__kwdefaults__ = function.__kwdefaults__
+    if isinstance(factory, types.MethodType):
+        return inspect.signature(types.MethodType(function_copy, factory.__self__))
+    return inspect.signature(function_copy)
+
+
+def bind_tma_descriptor_factory_call(
+    factory: Callable[..., Any],
+    args: list["VariableTracker"],
+    kwargs: dict[str, "VariableTracker"],
+) -> tuple["VariableTracker", "VariableTracker", list[tuple[str, int | None]]] | None:
+    """Validate a call and locate supplied defaults for guarding.
+
+    Bound-method signatures omit cls, so default indices are computed from
+    that signature even though __defaults__ belongs to the underlying function.
+    """
+    from torch._dynamo.utils import constants_identical
+
+    parameter = inspect.Parameter
+    positional = (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    variadic = (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
+    arg_names = ("tensor", "block_shape")
+    canonical_call = len(args) <= 2 and set(kwargs) == set(arg_names[len(args) :])
+    tensor = block_shape = None
+    try:
+        signature = get_tma_descriptor_factory_signature(factory)
+        parameters = list(signature.parameters.values())
+        bound = signature.bind(*args, **kwargs).arguments
+        forwarding_factory = False
+        if canonical_call:
+            tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
+            block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+            forwarding_factory = all(
+                param.kind in variadic
+                or (
+                    index < 2
+                    and param.kind in positional
+                    and bound.get(param.name) is (tensor, block_shape)[index]
+                )
+                for index, param in enumerate(parameters)
+            )
+        if not forwarding_factory:
+            if len(parameters) < 2 or not all(
+                param.kind in positional and param.name in bound
+                for param in parameters[:2]
+            ):
+                return None
+            tensor, block_shape = (bound[param.name] for param in parameters[:2])
+        if tensor is None or block_shape is None or not tensor.is_tensor():
+            return None
+        signature.bind(tensor, block_shape)
+    except (TypeError, ValueError):
+        return None
+
+    if forwarding_factory:
+        return tensor, block_shape, []
+
+    supplied_options = [
+        (index, param)
+        for index, param in enumerate(parameters[2:], 2)
+        if param.name in bound
+    ]
+    function = factory.__func__ if isinstance(factory, types.MethodType) else factory
+    if supplied_options and (
+        hasattr(function, "__wrapped__")
+        or getattr(function, "__signature__", None) is not None
+    ):
+        return None
+
+    scalar_types = (str, bool, int, float, complex, bytes, type(None))
+    if any(
+        param.kind not in (*positional, parameter.KEYWORD_ONLY)
+        or type(param.default) not in scalar_types
+        or not bound[param.name].is_python_constant()
+        or type(bound[param.name].as_python_constant()) is not type(param.default)
+        or not constants_identical(
+            bound[param.name].as_python_constant(), param.default
+        )
+        for _, param in supplied_options
+    ):
+        return None
+
+    positional_count = sum(param.kind in positional for param in parameters)
+    default_offset = positional_count - len(function.__defaults__ or ())
+    supplied_defaults = []
+    for index, param in supplied_options:
+        default_index = (
+            None if param.kind == parameter.KEYWORD_ONLY else index - default_offset
+        )
+        supplied_defaults.append((param.name, default_index))
+    return tensor, block_shape, supplied_defaults
+
+
+def _validate_host_tma_descriptor_factory(arg: Any) -> None:
+    try:
+        signature = get_tma_descriptor_factory_signature(type(arg).from_tensor)
+        bound = signature.bind(arg.base, list(arg.block_shape))
+    except (TypeError, ValueError):
+        raise RuntimeError(
+            "TMA descriptor must be reconstructible with from_tensor(base, block_shape)"
+        ) from None
+
+    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    if any(
+        param.name not in bound.arguments
+        and param.kind not in variadic
+        and param.name not in ("padding", "round_f32_to_tf32")
+        for param in signature.parameters.values()
+    ):
+        raise RuntimeError("TMA descriptor factory has unsupported optional arguments")
+
+    bound.apply_defaults()
+    padding = bound.arguments.get("padding", "zero")
+    rounding = bound.arguments.get("round_f32_to_tf32", False)
+    if padding != arg.padding or rounding != getattr(arg, "round_f32_to_tf32", False):
+        raise RuntimeError(
+            "TMA descriptor factory defaults do not reproduce the captured descriptor"
+        )
+
+
+def maybe_unpack_host_tma_descriptor(
+    arg: object,
+) -> tuple[Tensor, TMAStableMetadata] | None:
+    """Split a host-side (stable API) TMA descriptor into its base tensor and the
+    metadata needed to rebuild it downstream. Returns None for non-descriptor args.
+
+    Only descriptors equivalent to their class's ``from_tensor(base, block_shape)``
+    can be represented: the metadata carries the block shape and class identity,
+    so shape/strides must match the base tensor and factory defaults must match.
+    Optional factory arguments must use the supported padding and rounding names.
+    """
+    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+    if not has_triton_tensor_descriptor_host_tma():
+        return None
+
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    if not isinstance(arg, TensorDescriptor):
+        return None
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def matches(actual: Sequence[IntLikeType], expected: Sequence[IntLikeType]) -> bool:
+        # Sizes may be symbolic, so compare without installing guards.
+        return len(actual) == len(expected) and all(
+            a is b or statically_known_true(a == b) for a, b in zip(actual, expected)
+        )
+
+    base = arg.base
+    if (
+        not matches(arg.shape, base.shape)
+        or not matches(arg.strides, base.stride())
+        or arg.padding != "zero"
+        or getattr(arg, "round_f32_to_tf32", False)
+    ):
+        raise RuntimeError(
+            "Only TMA descriptors built by TensorDescriptor.from_tensor() with the "
+            "default padding and rounding can be traced; the descriptor's "
+            "shape/strides must match its base tensor because only the block shape is "
+            "carried through the graph."
+        )
+
+    descriptor_type = type(arg)
+    descriptor_path = get_importable_tma_descriptor_path(descriptor_type)
+    if descriptor_path is None:
+        raise RuntimeError("TMA descriptor class must be importable")
+
+    _validate_host_tma_descriptor_factory(arg)
+
+    descriptor_module, descriptor_class = descriptor_path
+    return base, create_tma_stable_metadata(
+        list(arg.block_shape),
+        descriptor_module,
+        descriptor_class,
+    )
 
 
 # TMADescriptorMetadata maps kernel parameter names to the metadata that allows
@@ -144,60 +364,27 @@ TMADescriptorMetadata = dict[
 # Kernel Side Table
 
 
-# We cannot put Triton Kernels into the FX graph as the graph nodes
-# do not support arbitrary functions.
-# Use a side table.
-# We use two dicts so that fetching both the kernel and id are O(1)
-class KernelSideTable:
-    id_to_kernel: dict[int, "TritonKernelType"] = {}
-    kernel_to_id: dict["TritonKernelType", int] = {}
-    constant_args: dict[int, dict[str, Any]] = {}
-    lock = threading.Lock()
-
-    # Returns index on the table
-    def add_kernel(self, kernel: "TritonKernelType") -> int:
-        with self.lock:
-            if kernel in self.kernel_to_id:
-                return self.kernel_to_id[kernel]
-
-            idx = len(self.id_to_kernel)
-            self.id_to_kernel[idx] = kernel
-            self.kernel_to_id[kernel] = idx
-            return idx
-
-    # Returns the triton kernel at the given index
-    def get_kernel(self, idx: int) -> "TritonKernelType":
-        # No need to lock here as fetching from dict is atomic
-        if idx not in self.id_to_kernel:
-            raise AssertionError(f"Kernel index {idx} not found in id_to_kernel")
-        return self.id_to_kernel[idx]
-
-    # Not every constant arg can be added to the graph. Use this side table
-    # for constant args.
-    def add_constant_args(self, args: dict[str, Any]) -> int:
-        with self.lock:
-            idx = len(self.constant_args)
-            self.constant_args[idx] = args
-            return idx
-
-    # Returns the constant args
-    def get_constant_args(self, idx: int) -> dict[str, Any]:
-        # No need to lock here as fetching from dict is atomic
-        if idx not in self.constant_args:
-            raise AssertionError(
-                f"Constant args index {idx} not found in constant_args"
-            )
-        return self.constant_args[idx]
-
-    # Resets the table (only meant to be used in unit tests)
-    # This is only safe assuming single threaded execution
-    def reset_table(self) -> None:
-        self.id_to_kernel = {}
-        self.kernel_to_id = {}
-        self.constant_args = {}
+# The side table class is shared with the other user-kernel DSLs; each DSL owns an
+# instance, so their kernel indices never collide.
+kernel_side_table: "KernelSideTable[TritonKernelType]" = KernelSideTable()
 
 
-kernel_side_table = KernelSideTable()
+# Before Triton 3.2 (https://github.com/triton-lang/triton/pull/5083), Autotuner
+# stored these as argument indices in reset_idx and restore_idx.
+def get_reset_to_zero_args(kernel: "TritonAutotunerType") -> list[str]:
+    if hasattr(kernel, "reset_idx"):
+        # pyrefly: ignore [missing-attribute]
+        return [kernel.fn.arg_names[i] for i in kernel.reset_idx]
+    # pyrefly: ignore [missing-attribute]
+    return list(kernel.reset_to_zero)
+
+
+def get_restore_value_args(kernel: "TritonAutotunerType") -> list[str]:
+    if hasattr(kernel, "restore_idx"):
+        # pyrefly: ignore [missing-attribute]
+        return [kernel.fn.arg_names[i] for i in kernel.restore_idx]
+    # pyrefly: ignore [missing-attribute]
+    return list(kernel.restore_value)
 
 
 ###############################################################################
@@ -309,9 +496,10 @@ def generate_ttir(
                 tma_descriptor_metadata.get(name, None)
             )
         ) is not None:
-            from triton.tools.tensor_descriptor import TensorDescriptor
-
-            block_shape = stable_meta[0]
+            block_shape, descriptor_module, descriptor_class = stable_meta
+            descriptor_type = getattr(
+                importlib.import_module(descriptor_module), descriptor_class
+            )
             with torch._C._DisableTorchDispatch():
                 # need 16-byte aligned strides
                 elements_per_dim = max(1, 16 // a.dtype.itemsize)
@@ -319,14 +507,14 @@ def generate_ttir(
                     [elements_per_dim] * len(block_shape), dtype=a.dtype
                 )
 
-            ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
+            ordered_args[name] = descriptor_type.from_tensor(base_tensor, block_shape)
         elif is_fake_tensor(a) or isinstance(a, torch._inductor.ir.TensorBox):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
             ordered_args[name] = a
 
-    def is_stable_tensor_descriptor_arg(arg: Any) -> bool:
+    def is_stable_tensor_descriptor_arg(arg: object) -> bool:
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -334,7 +522,7 @@ def generate_ttir(
                 return True
         return False
 
-    def _is_constexpr_or_none(name: str, arg: Any) -> bool:
+    def _is_constexpr_or_none(name: str, arg: object) -> bool:
         param_idx = kernel.arg_names.index(name)
         return kernel.params[param_idx].is_constexpr or arg is None
 
@@ -351,15 +539,16 @@ def generate_ttir(
     # whereas `constexpr` are inlined, and None are excluded. We both preserve
     # scalars and tensors as this matters for "odd" ordering,
     # eg. [tensor, scalar, tensor].
-    def get_arg_names(name: str, arg: Any) -> list[str]:
+    def get_arg_names(name: str, arg: object) -> list[str]:
         if _is_constexpr_or_none(name, arg):
             return []
 
         if is_stable_tensor_descriptor_arg(arg):
-            stable_meta = maybe_unpack_tma_stable_metadata(
-                tma_descriptor_metadata[name]
-            )
-            if stable_meta is None:
+            if (
+                stable_meta := maybe_unpack_tma_stable_metadata(
+                    tma_descriptor_metadata[name]
+                )
+            ) is None:
                 raise AssertionError(f"Failed to unpack stable TMA metadata for {name}")
             block_shape = stable_meta[0]
             tensor_rank = len(block_shape)
@@ -558,6 +747,7 @@ def ttir_to_functions(
     )
     region_id_to_block_ids: dict[int, list[int]] = defaultdict(list)
     block_id_to_block_arg_ids: dict[int, list[int]] = {}
+    warp_specialize_partition_block_args: dict[int, list[list[int]]] = defaultdict(list)
     replacements: dict[int, Intermediate | Param] = {}
     reindex_map: dict[int, int] = {}
     next_fake_intermediate = 0
@@ -640,7 +830,18 @@ def ttir_to_functions(
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
         elif child_block_ids:
-            if name in {"scf.if", "scf.for", "scf.while", "tt.reduce", "tt.scan"}:
+            structured_region_ops = {
+                "scf.if",
+                "scf.for",
+                "scf.while",
+                "tt.reduce",
+                "tt.scan",
+            }
+            supported_region_ops = structured_region_ops | {
+                "ttg.warp_specialize",
+                "ttg.warp_specialize.partitions",
+            }
+            if name in supported_region_ops:
                 # for blocked ops: inline the enclosed ops into
                 # the parent block + rewire the last op in each
                 # child block to return the block result
@@ -676,11 +877,7 @@ def ttir_to_functions(
                         for idx in block_id_to_block_arg_ids[block_id]:
                             next_fake_intermediate -= 1
                             replacements[idx] = Intermediate(next_fake_intermediate)
-                    else:
-                        if name not in ("tt.reduce", "tt.scan"):
-                            raise AssertionError(
-                                f"Expected op name to be 'tt.reduce' or 'tt.scan', got {name}"
-                            )
+                    elif name in ("tt.reduce", "tt.scan"):
                         # wire the block arguments to the op arguments
                         num_operands = len(operand_ids)
                         block_arg_ids = block_id_to_block_arg_ids[block_id]
@@ -697,6 +894,38 @@ def ttir_to_functions(
                             replacements[idx] = Intermediate(
                                 operand_ids[i % num_operands]
                             )
+                    elif name == "ttg.warp_specialize.partitions":
+                        block_arg_ids = block_id_to_block_arg_ids[block_id]
+                        # Beta puts explicit captures on this container; stable
+                        # puts them on the enclosing ttg.warp_specialize.
+                        if operand_ids and len(block_arg_ids) != len(operand_ids):
+                            raise RuntimeError(
+                                "Cannot map explicit captures for "
+                                "ttg.warp_specialize.partitions: "
+                                f"{len(block_arg_ids)} block arguments for "
+                                f"{len(operand_ids)} operands"
+                            )
+                        if operand_ids:
+                            for idx, operand_id in zip(block_arg_ids, operand_ids):
+                                replacements[idx] = Intermediate(operand_id)
+                        elif block_arg_ids:
+                            warp_specialize_partition_block_args[
+                                parent_block_id
+                            ].append(block_arg_ids)
+                    else:
+                        block_arg_groups = [block_id_to_block_arg_ids[block_id]]
+                        block_arg_groups.extend(
+                            warp_specialize_partition_block_args.pop(block_id, [])
+                        )
+                        for block_arg_ids in block_arg_groups:
+                            if len(block_arg_ids) not in (0, len(operand_ids)):
+                                raise RuntimeError(
+                                    "Cannot map block arguments for region op "
+                                    f"{name}: {len(block_arg_ids)} block arguments "
+                                    f"for {len(operand_ids)} operands"
+                                )
+                            for idx, operand_id in zip(block_arg_ids, operand_ids):
+                                replacements[idx] = Intermediate(operand_id)
 
                     if block_id in op_stack:
                         block_ops = op_stack.pop(block_id)
@@ -705,7 +934,13 @@ def ttir_to_functions(
                         last_ret, last_ops = block_ops.popitem()
                         if all(
                             op.name
-                            in ("scf.yield", "tt.reduce.return", "tt.scan.return")
+                            in (
+                                "scf.yield",
+                                "tt.reduce.return",
+                                "tt.scan.return",
+                                "ttg.warp_yield",
+                                "ttg.warp_return",
+                            )
                             for op in last_ops
                         ):
                             # if last_ops are all return ops, treat them separately
@@ -718,8 +953,23 @@ def ttir_to_functions(
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
 
+                if name not in structured_region_ops:
+                    return_ops = [
+                        op for op in return_ops if len(op.args) == len(result_ids)
+                    ]
+                    if result_ids and not return_ops:
+                        raise RuntimeError(
+                            f"Cannot map results for region op {name}: no region "
+                            "terminator returns the expected number of values"
+                        )
+
                 if return_ops and all(
-                    (op.name == "scf.yield" and len(result_ids) == len(op.args))
+                    (
+                        len(result_ids) == len(op.args)
+                        and (
+                            op.name == "scf.yield" or name not in structured_region_ops
+                        )
+                    )
                     for op in return_ops
                 ):
                     # [Note: scf.yield fix-up]
@@ -923,6 +1173,11 @@ def first_arg(op: Op) -> list[int]:
     return [0]
 
 
+def first_two_args(op: Op) -> list[int]:
+    """Cover descriptor positions with and without an optional multicast target."""
+    return list(range(min(2, len(op.args))))
+
+
 @dataclasses.dataclass(frozen=True)
 class _KernelAccessOpInfo:
     read_indexes: ReadWriteIndexes | None = None
@@ -949,6 +1204,20 @@ _KERNEL_ACCESS_OPS: dict[str, _KernelAccessOpInfo] = {
     "tt.load": _KernelAccessOpInfo(read_indexes=first_arg),
     "tt.load_tensor_descriptor": _KernelAccessOpInfo(read_indexes=first_arg),
     "tt.descriptor_load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.descriptor_reduce": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "tt.descriptor_scatter": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.descriptor_gather": _KernelAccessOpInfo(read_indexes=first_arg),
+    "ttng.async_tma_copy_global_to_local": _KernelAccessOpInfo(
+        read_indexes=first_two_args
+    ),
+    "ttng.async_tma_copy_local_to_global": _KernelAccessOpInfo(write_indexes=first_arg),
+    "ttng.async_tma_reduce": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "ttng.async_tma_scatter": _KernelAccessOpInfo(write_indexes=first_arg),
+    "ttng.async_tma_gather": _KernelAccessOpInfo(read_indexes=first_arg),
     "tt.elementwise_inline_asm": _KernelAccessOpInfo(ignore_if=lambda op: op.is_pure),
 }
 
@@ -1324,23 +1593,8 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
 # Triton Kernel Wrappers
 
 
-class _TritonKernelWrapper(HigherOrderOperator):
-    def _get_overloaded_args(
-        self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[Tensor, ...]:
-        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
-        triton_kwargs = kwargs.get("kwargs")
-        if isinstance(triton_kwargs, dict):
-            overloaded_args.extend(
-                arg
-                for arg in triton_kwargs.values()
-                if isinstance(arg, Tensor) and _dispatch_keys(arg).has("Python")
-            )
-        return tuple(overloaded_args)
-
-
 # Used for wrapping a Triton Kernel
-class TritonKernelWrapperMutation(_TritonKernelWrapper):
+class TritonKernelWrapperMutation(UserKernelWrapperHOP):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
@@ -1371,7 +1625,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 
 # Used for wrapping a Triton Kernel in a functional manner
-class TritonKernelWrapperFunctional(_TritonKernelWrapper):
+class TritonKernelWrapperFunctional(UserKernelWrapperHOP):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=True)
 
@@ -1384,6 +1638,7 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
         launch_kwargs: tuple[str, ...] | None = None,
+        tensor_bases: dict[str, Tensor] | None = None,
     ) -> dict[str, Any]:
         hop_kwargs: dict[str, Any] = {
             "kernel_idx": kernel_idx,
@@ -1393,6 +1648,8 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
             "kwargs": kwargs,
             "tensors_to_clone": tensors_to_clone,
         }
+        if tensor_bases:
+            hop_kwargs["tensor_bases"] = tensor_bases
         if launch_kwargs:
             hop_kwargs["launch_kwargs"] = launch_kwargs
 
@@ -1468,11 +1725,12 @@ def triton_kernel_wrapper_mutation_dense(
                     raise AssertionError(
                         f"Failed to unpack stable TMA metadata for key {k}"
                     )
-                from triton.tools.tensor_descriptor import TensorDescriptor
+                block_shape, descriptor_module, descriptor_class = stable_meta
+                descriptor_type = getattr(
+                    importlib.import_module(descriptor_module), descriptor_class
+                )
 
-                block_shape = stable_meta[0]
-
-                kwargs[k] = TensorDescriptor.from_tensor(tensor, block_shape)
+                kwargs[k] = descriptor_type.from_tensor(tensor, block_shape)
 
     # move as many positional arguments from dicts to args as we
     # can to circumvent the bug with the kwargs and pre_/post_hook:
@@ -1537,28 +1795,24 @@ def _(
     return None
 
 
-def trace_triton_kernel_wrapper(
-    proxy_mode: ProxyTorchDispatchMode,
-    func_overload: Callable[..., Any],
-    node_args: dict[str, Any],
-) -> dict[str, Any] | None:
-    with disable_proxy_modes_tracing():
-        out = func_overload(**node_args)
-
-    proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
-        node_args,
-    )
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func_overload,
-        (),
-        proxy_args,
-        name=func_overload.__name__ + "_proxy",
-    )
-
-    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-    return ret
+def _triton_hop_kwargs(
+    kernel_idx: int,
+    constant_args_idx: int,
+    grid: list["TritonGridType"],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    launch_kwargs: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """The Triton HOP arguments that the shared helpers pass through unchanged
+    (everything but kwargs, tensors_to_clone and tensor_bases)."""
+    hop_kwargs: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "grid": grid,
+        "tma_descriptor_metadata": tma_descriptor_metadata,
+    }
+    if launch_kwargs:
+        hop_kwargs["launch_kwargs"] = launch_kwargs
+    return hop_kwargs
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
@@ -1582,7 +1836,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
 
-    trace_triton_kernel_wrapper(
+    trace_user_kernel_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
         node_args,
@@ -1621,45 +1875,22 @@ def triton_kernel_wrapper_mutation_functionalize(
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+    functionalize_mutation_hop(
+        ctx,
+        triton_kernel_wrapper_functional,
+        lambda unwrapped_kwargs: get_mutated_tensors(
+            kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+        ),
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
     )
-    with ctx.redispatch_to_next():
-        functional_kwargs: dict[str, Any] = {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "tma_descriptor_metadata": tma_descriptor_metadata,
-            "kwargs": unwrapped_kwargs,
-            "tensors_to_clone": tensors_to_clone,
-        }
-        if launch_kwargs:
-            functional_kwargs["launch_kwargs"] = launch_kwargs
-        unwrapped_outputs = triton_kernel_wrapper_functional(**functional_kwargs)
-
-    if not set(unwrapped_outputs.keys()).issubset(set(kwargs.keys())):
-        raise AssertionError(
-            f"Output keys {set(unwrapped_outputs.keys())} not subset of input keys {set(kwargs.keys())}"
-        )
-    for key, output_arg in unwrapped_outputs.items():
-        if not isinstance(output_arg, Tensor):
-            continue
-        input_arg = kwargs[key]
-        if not isinstance(input_arg, Tensor):
-            raise AssertionError(
-                f"Expected input_arg for key {key} to be a Tensor, got {type(input_arg)}"
-            )
-
-        ctx.replace(input_arg, output_arg)
-        # indicate that above replace is hidden from autograd
-        ctx.mark_mutation_hidden_from_autograd(input_arg)
-        ctx.commit_update(input_arg)
-        ctx.sync(input_arg)
     return None
 
 
@@ -1673,26 +1904,18 @@ def triton_kernel_wrapper_functional_dense(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
+    tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
-    kwargs = {
-        key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
-        for key, val in kwargs.items()
-    }
-    mutation_kwargs: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-        "kwargs": kwargs,
-    }
-    if launch_kwargs:
-        mutation_kwargs["launch_kwargs"] = launch_kwargs
-    triton_kernel_wrapper_mutation(**mutation_kwargs)
-    return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
+    return functional_hop_dense(
+        triton_kernel_wrapper_mutation,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
 
 
 @register_fake(triton_kernel_wrapper_functional, skip_cache=True)
@@ -1705,16 +1928,11 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
+    tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
-    return {
-        key: clone_preserve_strides(val)
-        for key, val in kwargs.items()
-        if key in tensors_to_clone
-    }
+    return functional_hop_fake(
+        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+    )
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
@@ -1728,6 +1946,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
+    tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
     node_args: dict[str, Any] = {
         "kernel_idx": kernel_idx,
@@ -1737,16 +1956,18 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
         "kwargs": kwargs,
         "tensors_to_clone": tensors_to_clone,
     }
+    if tensor_bases:
+        node_args["tensor_bases"] = tensor_bases
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
 
-    ret = trace_triton_kernel_wrapper(
+    ret = trace_user_kernel_wrapper(
         mode,
         triton_kernel_wrapper_functional,
         node_args,
     )
     if ret is None:
-        raise AssertionError("trace_triton_kernel_wrapper returned None")
+        raise AssertionError("trace_user_kernel_wrapper returned None")
     return ret
 
 
@@ -1760,52 +1981,31 @@ def triton_kernel_wrapper_functional_functionalize(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
+    tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
-    with ctx.redispatch_to_next():
-        functional_kwargs: dict[str, Any] = {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "tma_descriptor_metadata": tma_descriptor_metadata,
-            "kwargs": unwrapped_kwargs,
-            "tensors_to_clone": tensors_to_clone,
-        }
-        if launch_kwargs:
-            functional_kwargs["launch_kwargs"] = launch_kwargs
-        outputs = triton_kernel_wrapper_functional(**functional_kwargs)
-        return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
+    return functionalize_functional_hop(
+        ctx,
+        triton_kernel_wrapper_functional,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
 
 
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.ADInplaceOrView)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.BackendSelect)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCUDA)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCPU)
-
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.ADInplaceOrView)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.BackendSelect)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
-
-# Adds SAC support for triton ops
-redirect_to_mode(triton_kernel_wrapper_mutation, _CachingTorchDispatchMode)
-redirect_to_mode(triton_kernel_wrapper_mutation, _CachedTorchDispatchMode)
+register_user_kernel_hop_dispatch(
+    triton_kernel_wrapper_mutation, triton_kernel_wrapper_functional
+)
 
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
 
 
-class TritonHOPifier:
+class TritonHOPifier(UserKernelHOPifier):
     """Orchestrator for converting a user-defined triton kernel into a call
     to the triton_kernel_wrapper_mutation HOP.
 
@@ -1825,14 +2025,17 @@ class TritonHOPifier:
     TritonHOPifier is an abstract class that can be overridden by its subclasses.
     """
 
-    def raise_unsupported(self, msg: str) -> Never:
+    def is_callable(self, maybe_callable: object) -> bool:
         raise NotImplementedError("abstract method")
 
-    def is_callable(self, maybe_callable: Any) -> bool:
-        raise NotImplementedError("abstract method")
-
-    def get_value(self, val: Any) -> Any:
-        raise NotImplementedError("abstract method")
+    @staticmethod
+    def get_kernel_source(
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+    ) -> "Source | None":
+        kernel_source = getattr(variable, "kernel_source", None)
+        if kernel_source is None:
+            kernel_source = getattr(variable, "source", None)
+        return kernel_source
 
     def call_grid(  # type: ignore[no-untyped-def]
         self,
@@ -1964,7 +2167,7 @@ class TritonHOPifier:
             # The call to get_first_attr is to maintain backward-compatibility.
 
             def defaults_ok(
-                attr: str, alternates: tuple[str, ...], values: tuple[Any, ...]
+                attr: str, alternates: tuple[str, ...], values: tuple[object, ...]
             ) -> bool:
                 if attr not in defaults:
                     return True
@@ -2008,15 +2211,6 @@ class TritonHOPifier:
                 self.raise_unsupported(
                     "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
                 )
-
-    @staticmethod
-    def get_kernel_source(
-        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
-    ) -> "Source | None":
-        kernel_source = getattr(variable, "kernel_source", None)
-        if kernel_source is None:
-            kernel_source = getattr(variable, "source", None)
-        return kernel_source
 
     def recreate_variable(
         self,
@@ -2169,10 +2363,14 @@ class TritonHOPifier:
             prune_configs_by = {
                 "perf_model": variable.kernel.perf_model,
                 "early_config_prune": variable.kernel.early_config_prune,
-                "configs_top_k": variable.kernel.configs_top_k,
+                "top_k": variable.kernel.configs_top_k,
             }
             new_kernel = autotune(
-                configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                configs=new_configs,
+                key=[],
+                prune_configs_by=prune_configs_by,
+                reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                restore_value=get_restore_value_args(variable.kernel),
             )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
@@ -2211,11 +2409,15 @@ class TritonHOPifier:
                 prune_configs_by = {
                     "perf_model": variable.kernel.perf_model,
                     "early_config_prune": variable.kernel.early_config_prune,
-                    "configs_top_k": variable.kernel.configs_top_k,
+                    "top_k": variable.kernel.configs_top_k,
                 }
 
                 new_kernel = autotune(
-                    configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                    configs=new_configs,
+                    key=[],
+                    prune_configs_by=prune_configs_by,
+                    reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                    restore_value=get_restore_value_args(variable.kernel),
                 )(variable.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
@@ -2265,11 +2467,15 @@ class TritonHOPifier:
                     prune_configs_by = {
                         "perf_model": variable.kernel.perf_model,
                         "early_config_prune": variable.kernel.early_config_prune,
-                        "configs_top_k": variable.kernel.configs_top_k,
+                        "top_k": variable.kernel.configs_top_k,
                     }
 
                     new_kernel = autotune(
-                        configs=new_configs, prune_configs_by=prune_configs_by, key=[]
+                        configs=new_configs,
+                        prune_configs_by=prune_configs_by,
+                        key=[],
+                        reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                        restore_value=get_restore_value_args(variable.kernel),
                     )(variable.kernel.fn)
                     new_var = self.recreate_variable(
                         variable,
@@ -2333,7 +2539,12 @@ class TritonHOPifier:
 
             # after pruning the configs, create a new autotuner object with
             # these configs and recurse.
-            new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
+            new_kernel = autotune(
+                configs=pruned_configs,
+                key=[],
+                reset_to_zero=get_reset_to_zero_args(variable.kernel),
+                restore_value=get_restore_value_args(variable.kernel),
+            )(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = self.recreate_variable(
@@ -2354,6 +2565,13 @@ class TritonHOPifier:
             config_kwarg_names = set().union(
                 *(set(config.kwargs) for config in variable.kernel.configs)
             )
+            # Eager Triton launches with config.all_kwargs(), which includes a
+            # set maxnreg, so a launch kwarg maxnreg is a duplicate there too.
+            if any(
+                getattr(config, "maxnreg", None) is not None
+                for config in variable.kernel.configs
+            ):
+                config_kwarg_names.add("maxnreg")
             config_conflicts = sorted(set(launch_kwargs) & config_kwarg_names)
             if config_conflicts:
                 self.raise_unsupported(
@@ -2457,7 +2675,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
         raise RuntimeError(msg)
 
-    def is_callable(self, maybe_callable: Any) -> bool:
+    def is_callable(self, maybe_callable: object) -> bool:
         return callable(maybe_callable)
 
     def get_value(self, val: Any) -> Any:
@@ -2533,20 +2751,9 @@ class TracingTritonHOPifier(TritonHOPifier):
         Some args cannot be stored in the FX graph.
         Put them in the side table.
         """
+        return store_non_graphable_args(kernel_side_table, combined_args)
 
-        def is_graphable(val: Any) -> bool:
-            return isinstance(val, (fx.node.base_types, fx.Node))
-
-        non_graphable_args = {
-            k: v for k, v in combined_args.items() if not is_graphable(v)
-        }
-        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
-
-        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
-
-        return graphable_args, constant_args_idx
-
-    def is_dynamic_backend_option(self, value: Any) -> bool:
+    def is_dynamic_backend_option(self, value: object) -> bool:
         # Backend options are compile-time values. In proxy tracing, a value can
         # be a Proxy/Node directly or be nested inside a tuple/list option such
         # as backend_option=(sym_size,). Reject those unless the name is later
@@ -2583,6 +2790,21 @@ class TracingTritonHOPifier(TritonHOPifier):
                 f"Expected TraceableTritonKernelWrapper, got {type(variable)}"
             )
 
+        # Only tensors can be passed as non-const args in the fx graph, so replace
+        # host-side TMA descriptors with their base tensors and carry the descriptor
+        # metadata alongside, mirroring what Dynamo does. Without this the descriptor
+        # would be stashed as an opaque constant arg and downstream consumers (TTIR
+        # generation, Inductor codegen) would not recognize it as a TMA descriptor.
+        combined_args = dict(combined_args)
+        tma_descriptor_metadata: TMADescriptorMetadata = {}
+        for k in list(combined_args.keys()):
+            if (
+                unpacked := maybe_unpack_host_tma_descriptor(combined_args[k])
+            ) is not None:
+                tensor, metadata = unpacked
+                combined_args[k] = tensor
+                tma_descriptor_metadata[k] = metadata
+
         graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
@@ -2609,9 +2831,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             kernel_idx=variable.kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grids,  # type: ignore[arg-type]
-            # TMA descriptor capturing not yet
-            # supported in non-dynamo tracing
-            tma_descriptor_metadata={},
+            tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=graphable_args,
             launch_kwargs=launch_kwargs,
         )

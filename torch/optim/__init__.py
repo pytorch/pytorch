@@ -12,6 +12,9 @@ from torch.optim._muon import Muon as Muon
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
 )
+from torch.optim._utils import (
+    preserve_state_dtype_on_load as preserve_state_dtype_on_load,
+)
 from torch.optim.adadelta import Adadelta as Adadelta
 from torch.optim.adagrad import Adagrad as Adagrad
 from torch.optim.adam import Adam as Adam
@@ -28,8 +31,12 @@ from torch.optim.sgd import SGD as SGD
 from torch.optim.sparse_adam import SparseAdam as SparseAdam
 
 
+from torch.optim import functional as functional  # usort: skip
+
+
 Adafactor.__module__ = "torch.optim"
 Muon.__module__ = "torch.optim"
+preserve_state_dtype_on_load.__module__ = "torch.optim"
 swap_in_optimizer_params_and_state.__module__ = "torch.optim"
 
 
@@ -56,11 +63,13 @@ __all__ = [
     "Adamax",
     "AdamW",
     "ASGD",
+    "functional",
     "LBFGS",
     "lr_scheduler",
     "Muon",
     "NAdam",
     "Optimizer",
+    "preserve_state_dtype_on_load",
     "RAdam",
     "RMSprop",
     "Rprop",

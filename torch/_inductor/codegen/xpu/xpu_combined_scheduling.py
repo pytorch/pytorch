@@ -24,7 +24,8 @@ if TYPE_CHECKING:
     import torch
     from torch.utils._ordered_set import OrderedSet
 
-    from ..common import BackendFeature
+    from ..common import BackendFeature, Kernel
+    from ..multi_kernel import MultiKernel
 
     _IntLike: TypeAlias = int | Expr
 
@@ -46,6 +47,9 @@ class XPUCombinedScheduling(BaseScheduling):
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
+
+    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+        return self._triton_scheduling.has_sub_parent_epilogue(nodes)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
@@ -98,10 +102,12 @@ class XPUCombinedScheduling(BaseScheduling):
     def codegen_mix_order_reduction(self, node):
         return self._triton_scheduling.codegen_mix_order_reduction(node)
 
-    def codegen_nested_reduction(self, node):
-        return self._triton_scheduling.codegen_nested_reduction(node)
+    def codegen_staged_reduction(self, node):
+        return self._triton_scheduling.codegen_staged_reduction(node)
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self) -> None:

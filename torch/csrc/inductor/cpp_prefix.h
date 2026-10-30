@@ -79,6 +79,25 @@ struct IsVecType<at::vec::VectorizedN<T, N>> : std::true_type {};
 
 template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
+
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VecMask<src_t, src_n>& mask) {
+  return mask.template cast<dst_t, dst_n>();
+}
+
+template <typename dst_t, int dst_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::Vectorized<bool>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(
+      at::vec::VectorizedN<bool, 1>(mask));
+}
+
+template <typename dst_t, int dst_n, int src_n>
+inline at::vec::VecMask<dst_t, dst_n> inductor_vec_mask_cast(
+    const at::vec::VectorizedN<bool, src_n>& mask) {
+  return at::vec::VecMask<dst_t, dst_n>::from(mask);
+}
 #endif
 
 template <typename T>
@@ -354,28 +373,16 @@ inline at::vec::VecMask<float, 1> min_masked_reduce(
   return at::vec::VecMask<float, 1>::set(a, out, tail_size);
 }
 
-// Signed-zero aware vectorized minimum/maximum used by inductor-generated
-// kernels so that compiled results follow IEEE 754 semantics for +/- zero
-// ties (minimum(-0., +0.) == -0. and maximum(-0., +0.) == +0.). The plain
-// comparisons inside at::vec::minimum/maximum treat the two zeros as equal,
-// which can drop the sign bit of the result.
-//
-// These are emitted only when torch._inductor.config.cpp.strict_signed_zero
-// is enabled; the default keeps the previous compare-based behavior.
-//
-// For floating point types, a == b with differing bit patterns happens only
-// for +/- zero, and when the bit patterns are identical the bitwise fixup is
-// a no-op, so a plain equality mask suffices here. NaN lanes compare unequal
-// and stay untouched, preserving propagation. at::vec::is_floating_point_v is
-// used instead of the std trait because it also covers at::Half/at::BFloat16.
+// Match eager CPU elementwise min/max: equal operands keep the first value,
+// including its zero sign. Equal nonzero floats have identical bits; NaNs
+// compare unequal and retain the propagation from at::vec::minimum/maximum.
+// The ATen trait also covers at::Half and at::BFloat16.
 template <typename V>
 inline V min_preserve_signbit_vec(const V& a, const V& b) {
   auto result = at::vec::minimum(a, b);
   using T = typename V::value_type;
   if constexpr (at::vec::is_floating_point_v<T>) {
-    // For +/- zero ties the result sign must be negative, which is exactly
-    // the bitwise OR of the two values.
-    result = V::blendv(result, a | b, a == b);
+    result = V::blendv(result, a, a == b);
   }
   return result;
 }
@@ -385,9 +392,7 @@ inline V max_preserve_signbit_vec(const V& a, const V& b) {
   auto result = at::vec::maximum(a, b);
   using T = typename V::value_type;
   if constexpr (at::vec::is_floating_point_v<T>) {
-    // For +/- zero ties the result sign must be positive, which is exactly
-    // the bitwise AND of the two values.
-    result = V::blendv(result, a & b, a == b);
+    result = V::blendv(result, a, a == b);
   }
   return result;
 }
@@ -1020,17 +1025,7 @@ inline scalar_t max_preserve_signbit(scalar_t a, scalar_t b) {
   if (at::_isnan(a)) {
     return a;
   }
-  if constexpr (std::is_integral_v<scalar_t>) {
-    return a > b ? a : b;
-  } else {
-    // IEEE 754: maximum(-0., +0.) is +0., but plain `>` treats the two
-    // zeros as equal and may drop the sign bit of the result. For equal
-    // operands with identical bits either operand is the answer.
-    if (a == b) {
-      return std::signbit(static_cast<double>(a)) ? b : a;
-    }
-    return a > b ? a : b;
-  }
+  return a >= b ? a : b;
 }
 
 template <typename scalar_t>
@@ -1038,15 +1033,7 @@ inline scalar_t min_preserve_signbit(scalar_t a, scalar_t b) {
   if (at::_isnan(a)) {
     return a;
   }
-  if constexpr (std::is_integral_v<scalar_t>) {
-    return a < b ? a : b;
-  } else {
-    // IEEE 754: minimum(-0., +0.) is -0.
-    if (a == b) {
-      return std::signbit(static_cast<double>(a)) ? a : b;
-    }
-    return a < b ? a : b;
-  }
+  return a <= b ? a : b;
 }
 
 constexpr float uint32_to_uniform_float(uint32_t value) {

@@ -7,6 +7,7 @@
 #include <torch/headeronly/util/Float8_e4m3fnuz.h>
 #include <torch/headeronly/util/Float8_e5m2.h>
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
@@ -92,6 +93,13 @@ TEST(TestDtype, TestFloat8_e8m0fnu) {
   ASSERT_FALSE(a.isnan());
 }
 
+TEST(TestDtype, TestFloat8_e5m3fnu) {
+  torch::headeronly::Float8_e5m3fnu a = 1.0f;
+  ASSERT_EQ(a.x, 0x78);
+  ASSERT_FALSE(a.isnan());
+  ASSERT_EQ(static_cast<float>(a), 1.0f);
+}
+
 TEST(TestDtype, TestFloat4) {
   // not much you can do with this type, just make sure it compiles
   torch::headeronly::Float4_e2m1fn_x2 a(5);
@@ -134,6 +142,39 @@ TEST(TestDtype, TestComplexFloat) {
   EXPECT_EQ(a - b, sub);
   EXPECT_EQ(a * b, mul);
   EXPECT_EQ(a / b, div);
+}
+
+TEST(TestDtype, TestIsComplex) {
+  using torch::headeronly::is_complex;
+  static_assert(is_complex<torch::headeronly::complex<float>>::value);
+  static_assert(is_complex<torch::headeronly::complex<double>>::value);
+  static_assert(is_complex<std::complex<float>>::value);
+  static_assert(is_complex<std::complex<double>>::value);
+  static_assert(!is_complex<float>::value);
+  static_assert(!is_complex<torch::headeronly::Half>::value);
+  static_assert(!is_complex<torch::headeronly::BFloat16>::value);
+}
+
+TEST(TestDtype, TestScalarValueType) {
+  using torch::headeronly::scalar_value_type;
+  using cf = torch::headeronly::complex<float>;
+  static_assert(std::is_same_v<scalar_value_type<cf>::type, float>);
+  static_assert(
+      std::is_same_v<scalar_value_type<std::complex<double>>::type, double>);
+  // identity for non-complex types
+  static_assert(std::is_same_v<scalar_value_type<float>::type, float>);
+  using h = torch::headeronly::Half;
+  static_assert(std::is_same_v<scalar_value_type<h>::type, h>);
+}
+
+TEST(TestDtype, TestComplexNumericLimitsAndIsnan) {
+  using cf = torch::headeronly::complex<float>;
+  EXPECT_TRUE(std::numeric_limits<cf>::is_specialized);
+  EXPECT_EQ(std::numeric_limits<cf>::max(), std::numeric_limits<float>::max());
+
+  EXPECT_FALSE(std::isnan(cf(1.0f, 2.0f)));
+  EXPECT_TRUE(std::isnan(cf(std::nan(""), 2.0f)));
+  EXPECT_TRUE(std::isnan(cf(1.0f, std::nan(""))));
 }
 
 TEST(TestDtype, TestQuintsQintsAndBits) {
@@ -201,6 +242,7 @@ TEST(TestDtype, TestScalarType) {
       ScalarType::Float8_e8m0fnu,
       ScalarType::Float4_e2m1fn_x2,
       ScalarType::BComplex32,
+      ScalarType::Float8_e5m3fnu,
       ScalarType::Undefined,
   };
   for (int8_t i = 0; i < static_cast<int8_t>(torch::headeronly::NumScalarTypes);

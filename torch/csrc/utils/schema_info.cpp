@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/utils/schema_info.h>
 
 namespace torch::utils {
@@ -18,7 +19,7 @@ void SchemaInfo::addArgumentValues(
       value_list.size() <= schema_.arguments().size(),
       "Schema does not have enough arguments for value list");
 
-  for (size_t i = 0; i < value_list.size(); i++) {
+  for (const auto i : c10::irange(value_list.size())) {
     if (value_list[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       value_map_[schema_.arguments()[i].name()] = *value_list[i];
@@ -77,20 +78,20 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
             });
 
         bool special_case = (is_training_op != training_ops.end()) &&
-            is_training_op->second.count(
+            is_training_op->second.contains(
                 this->schema_.arguments()[aliasing_index].name());
         if (special_case) {
           bool has_training = (hasInputArgumentNamed("training") &&
-                               !value_map_.count("training")) ||
-              (value_map_.count("training") &&
+                               !value_map_.contains("training")) ||
+              (value_map_.contains("training") &&
                value_map_.at("training").toBool());
-          bool has_train =
-              (hasInputArgumentNamed("train") && !value_map_.count("train")) ||
-              (value_map_.count("train") && value_map_.at("train").toBool());
+          bool has_train = (hasInputArgumentNamed("train") &&
+                            !value_map_.contains("train")) ||
+              (value_map_.contains("train") && value_map_.at("train").toBool());
           bool has_use_input_stats =
               (hasInputArgumentNamed("use_input_stats") &&
-               !value_map_.count("use_input_stats")) ||
-              (value_map_.count("use_input_stats") &&
+               !value_map_.contains("use_input_stats")) ||
+              (value_map_.contains("use_input_stats") &&
                value_map_.at("use_input_stats").toBool());
           return has_training || has_train || has_use_input_stats;
         } else {
@@ -115,7 +116,7 @@ bool SchemaInfo::is_mutable(std::string_view name) {
 bool SchemaInfo::is_nondeterministic() const {
   static const c10::FunctionSchema dropout_schema = torch::jit::parseSchema(
       "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-  if (dropout_schema == schema_ && value_map_.count("train") &&
+  if (dropout_schema == schema_ && value_map_.contains("train") &&
       !value_map_.at("train").toBool()) {
     return false;
   }
@@ -159,27 +160,27 @@ bool SchemaInfo::may_alias(
     generateAliasMaps();
   }
   bool wildcard_alias_check =
-      wildcardSet().count(lhs) && wildcardSet().count(rhs);
+      wildcardSet().contains(lhs) && wildcardSet().contains(rhs);
   if (wildcard_alias_check) {
     return true;
   }
 
   if (lhs.type == c10::SchemaArgType::input &&
       rhs.type == c10::SchemaArgType::input) {
-    return input_alias_map_[lhs.index].count(rhs.index);
+    return input_alias_map_[lhs.index].contains(rhs.index);
   } else if (
       lhs.type == c10::SchemaArgType::output &&
       rhs.type == c10::SchemaArgType::output) {
     for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
-      if (output_alias_map_[rhs.index].count(lhs_alias_input)) {
+      if (output_alias_map_[rhs.index].contains(lhs_alias_input)) {
         return true;
       }
     }
     return false;
   } else if (lhs.type == c10::SchemaArgType::output) {
-    return output_alias_map_[lhs.index].count(rhs.index);
+    return output_alias_map_[lhs.index].contains(rhs.index);
   } else {
-    return output_alias_map_[rhs.index].count(lhs.index);
+    return output_alias_map_[rhs.index].contains(lhs.index);
   }
 }
 
@@ -212,8 +213,8 @@ bool SchemaInfo::mayContainAliasImpl(
           schema_.getCorrectList(rhs.type)[rhs.index].type());
   bool types_can_alias =
       schema_.canAliasTypeSetsAlias(lhsContainedAliasTypeSet, rhsAliasTypeSet);
-  return types_can_alias && containerSet().count(lhs) &&
-      wildcardSet().count(rhs);
+  return types_can_alias && containerSet().contains(lhs) &&
+      wildcardSet().contains(rhs);
 }
 
 void SchemaInfo::ensureConservativity(
@@ -223,7 +224,7 @@ void SchemaInfo::ensureConservativity(
   for (size_t i = 0; i < arguments_list.size(); i++) {
     if (arguments_list[i].alias_info()) {
       for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
-        if (duplicates.count(set)) {
+        if (duplicates.contains(set)) {
           wildcard_set_.insert({type, i});
         }
       }
@@ -322,7 +323,7 @@ void SchemaInfo::initSchemaInfo() {
                                        arguments_list,
                                    c10::SchemaArgType type) {
     std::unordered_set<at::Symbol> seen;
-    for (size_t i = 0; i < arguments_list.size(); i++) {
+    for (const auto i : c10::irange(arguments_list.size())) {
       const c10::Argument& argument = arguments_list[i];
       if (argument.alias_info()) {
         if (argument.alias_info()->isWildcardAfter()) {
@@ -333,7 +334,7 @@ void SchemaInfo::initSchemaInfo() {
           // on schemas with more than one argument within arguments_list that
           // shares an alias set.
           for (const auto& set : argument.alias_info()->afterSets()) {
-            if (seen.count(set)) {
+            if (seen.contains(set)) {
               TORCH_WARN(
                   set.toQualString(),
                   " appears twice in same argument list which will make aliasing checks more conservative.");
@@ -386,15 +387,15 @@ void SchemaInfo::generateAliasMaps() {
       if (i == j) {
         input_alias_map_[i].insert(i);
       } else if (
-          value_map_.count(schema_.arguments()[i].name()) &&
-          value_map_.count(schema_.arguments()[j].name())) {
+          value_map_.contains(schema_.arguments()[i].name()) &&
+          value_map_.contains(schema_.arguments()[j].name())) {
         if (value_map_[schema_.arguments()[i].name()].isAliasOf(
                 value_map_[schema_.arguments()[j].name()])) {
           input_alias_map_[i].insert(j);
           input_alias_map_[j].insert(i);
-          if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
+          if (wildcard_set_.contains({c10::SchemaArgType::input, i})) {
             wildcard_set_.insert({c10::SchemaArgType::input, j});
-          } else if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
+          } else if (wildcard_set_.contains({c10::SchemaArgType::input, j})) {
             wildcard_set_.insert({c10::SchemaArgType::input, i});
           }
         }
@@ -410,12 +411,12 @@ void SchemaInfo::generateAliasMaps() {
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     for (size_t j = 0; j < schema_.arguments().size(); j++) {
       // if they are already aliasing, there is no way one contains the other
-      if (!input_alias_map_[i].count(j) &&
-          value_map_.count(schema_.arguments()[i].name()) &&
-          value_map_.count(schema_.arguments()[j].name())) {
+      if (!input_alias_map_[i].contains(j) &&
+          value_map_.contains(schema_.arguments()[i].name()) &&
+          value_map_.contains(schema_.arguments()[j].name())) {
         c10::IValue::HashAliasedIValues subValues;
         value_map_[schema_.arguments()[i].name()].getSubValues(subValues);
-        if (subValues.count(value_map_[schema_.arguments()[j].name()])) {
+        if (subValues.contains(value_map_[schema_.arguments()[j].name()])) {
           wildcard_set_.insert({c10::SchemaArgType::input, j});
         }
       }
@@ -428,7 +429,7 @@ void SchemaInfo::generateAliasMaps() {
       if (schema_.may_alias(
               {c10::SchemaArgType::input, i},
               {c10::SchemaArgType::output, j})) {
-        if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
+        if (wildcard_set_.contains({c10::SchemaArgType::input, i})) {
           wildcard_set_.insert({c10::SchemaArgType::output, j});
         }
         output_alias_map_[j].insert(

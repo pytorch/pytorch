@@ -2,13 +2,14 @@
 
 import sys
 import unittest
+import unittest.mock
 from datetime import timedelta
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch._C._distributed_c10d import FakeProcessGroup
+from torch._C._distributed_c10d import FakeWork
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import Shard
@@ -29,7 +30,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
-from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -61,6 +62,152 @@ class TestFakePG(TestCase):
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
 
+    def test_compile_sync_pg_stays_fake(self):
+        # One real rank under a fake default group sized to a larger world must not
+        # attempt a gloo rendezvous with ranks that do not exist.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            # A fake world needs no gloo, even where the build has none.
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+        ):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+            self.assertEqual(pg.size(), 16)
+
+    def test_compile_sync_pg_stays_fake_for_a_device_qualified_backend(self):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        dist.init_process_group(
+            backend="cpu:fake", rank=0, world_size=16, store=FakeStore()
+        )
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+        ):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+
+    @parametrize(
+        "config,gloo_available,expected",
+        [
+            ("cuda:fake", True, "fake"),
+            ("cuda:fake", False, "fake"),
+            ("cpu:fake,cuda:fake", True, "fake"),
+            ("cpu:fake,cuda:fake", False, "fake"),
+            # One real device backend means real peers: sync over gloo.
+            ("cpu:gloo,cuda:fake", True, "gloo"),
+            ("cpu:gloo,cuda:fake", False, None),
+            ("cpu:fake,cuda:nccl", True, "gloo"),
+            ("cpu:fake,cuda:nccl", False, None),
+        ],
+    )
+    def test_compile_sync_backend_needs_every_device_backend_fake(
+        self, config, gloo_available, expected
+    ):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        with (
+            unittest.mock.patch.object(dist, "get_backend_config", return_value=config),
+            unittest.mock.patch.object(
+                dist, "is_gloo_available", return_value=gloo_available
+            ),
+        ):
+            backends = dynamo_distributed._default_device_backends()
+            backend = dynamo_distributed._compile_sync_backend(backends)
+        self.assertEqual(backend, expected)
+
+    @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
+    @parametrize("fake_options", [False, True])
+    def test_compile_sync_pg_over_a_fake_cpu_backend(self, fake_options):
+        # The CPU backend is fake and does not keep the configured timeout, even
+        # when given options of its own; the cuda backend keeps it.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        timeout = timedelta(minutes=5)
+        dist.init_process_group(
+            backend="cpu:fake,cuda:gloo",
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            timeout=timeout,
+            pg_options=FakeProcessGroup.Options() if fake_options else None,
+        )
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            pg = dynamo_distributed.get_compile_sync_pg()
+            self.assertEqual(dist.get_backend(pg), dist.Backend.GLOO)
+            backend = pg._get_backend(torch.device("cpu"))
+            self.assertEqual(backend.options._timeout, timeout)
+
+    def test_cache_sync_primes_the_fake_group_without_gloo(self):
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch import config as functorch_config
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(dist, "is_gloo_available", return_value=False),
+            functorch_config.patch(
+                _sync_cache_decision_cross_ranks=False, _sync_decision_cross_ranks=True
+            ),
+        ):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            pg = dynamo_distributed._COMPILE_SYNC_PG
+            self.assertIsNotNone(pg)
+            self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
+            # Once the group exists, later syncs do not look at the backends again.
+            with unittest.mock.patch.object(
+                dynamo_distributed, "_compile_sync_backend"
+            ) as backend:
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            backend.assert_not_called()
+
+    def test_compile_sync_decisions_stay_local(self):
+        # Over a fake world, the compile time syncs return this rank's own
+        # decisions instead of waiting on ranks that do not exist.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch import config as functorch_config
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        dist.init_process_group(backend="fake", rank=0, world_size=16)
+        with unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None):
+            with functorch_config.patch(_sync_cache_decision_cross_ranks=True):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+                self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.empty(4)
+            reduced = graph.call_function(
+                torch.ops._c10d_functional.all_reduce.default, (x, "sum", "0")
+            )
+            reduced.meta["val"] = torch.empty(4)
+            graph.output(reduced)
+            self.assertEqual(_sync_decision_cross_ranks(graph, [x]), [x])
+            self.assertEqual(
+                _sync_decision_cross_ranks(graph, [x, reduced]), [x, reduced]
+            )
+
+    @unittest.skipIf(not dist.is_gloo_available(), "requires gloo")
+    def test_debug_detail_keeps_backend_alive(self):
+        # DETAIL wraps the backend in _ProcessGroupWrapper, which must keep the
+        # Python backend object alive.
+        self.addCleanup(dist.set_debug_level, dist.get_debug_level())
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+        wrapper = dist.get_backend_impl(device=torch.device("cpu"))
+        self.assertIsInstance(wrapper.wrapped_pg, FakeProcessGroup)
+        self.assertEqual(wrapper.wrapped_pg.name(), "fake")
+
     def test_set_timeout(self):
         # FakeProcessGroup used to inherit Backend's default set_timeout, which
         # raised "does not support setting timeout". Setting a timeout is a
@@ -83,6 +230,99 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=42))
+
+    def test_c10d_alias(self):
+        alias = torch._C._distributed_c10d.FakeProcessGroup
+        self.assertIs(alias, FakeProcessGroup)
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            torch._C._distributed_c10d.NoSuchAttribute
+
+        # External users build a group from the alias without init_process_group.
+        backend = alias._create_internal(0, 2)
+        group = dist.ProcessGroup(FakeStore(), 0, 2)
+        cpu = torch.device("cpu")
+        group._register_backend(cpu, dist.ProcessGroup.BackendType.CUSTOM, backend)
+        group._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        tensor = torch.ones(2)
+        group.allreduce(tensor).wait()
+        self.assertEqual(tensor, torch.ones(2))
+
+    def test_split_group_options(self):
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
+        parent = dist.distributed_c10d._get_default_group()
+        cpu = torch.device("cpu")
+        self.assertIsNone(parent.split_group([1, 2], device_types=[cpu]))
+
+        # The parent has no options, so C++ passes base options to split().
+        pg = parent.split_group([0, 1], device_types=[cpu])
+        self.assertEqual(dist.get_backend_impl(pg, cpu).options.fake_option, 0)
+
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+        pg = parent.split_group([0, 1], opts=opts, device_types=[cpu])
+        options = dist.get_backend_impl(pg, cpu).options
+        self.assertIsNot(options, opts)
+        self.assertEqual(options.fake_option, 42)
+
+    def test_convenience_overloads(self):
+        # Python overrides must keep BackendBase's pybind convenience overloads.
+        opts = FakeProcessGroup.Options()
+        opts.simulate_uniform_ranks = True
+        pg = FakeProcessGroup._create_internal(1, 2, opts)
+        t = torch.ones(3)
+        outputs = [torch.zeros(3), torch.zeros(3)]
+        pg.allgather(outputs, t).wait()
+        self.assertEqual(outputs, [t, t])
+        outputs = [torch.zeros(3), torch.zeros(3)]
+        pg.gather(outputs, t, 1).wait()
+        self.assertEqual(outputs, [t, t])
+        output = torch.zeros(3)
+        pg.scatter(output, [t, t], 1).wait()
+        self.assertEqual(output, t)
+
+        x = torch.ones(3)
+        pg.allreduce(x).wait()
+        self.assertIsInstance(pg.allreduce([x]), FakeWork)
+        pg.allreduce([x], dist.ReduceOp.MAX).wait()
+        pg.reduce(x, 1, dist.ReduceOp.SUM).wait()
+        pg.broadcast(x, 0).wait()
+        self.assertEqual(x, torch.full((3,), 8.0))
+        pg.reduce_scatter(output, [t, x], op=dist.ReduceOp.MAX).wait()
+        self.assertEqual(output, x)
+
+        for bad in (
+            lambda: pg.allreduce([1, 2]),
+            lambda: pg.allgather([[t, t]], [[t]]),
+            lambda: pg.scatter([t], [t]),
+        ):
+            with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+                bad()
+
+    def test_split_options(self):
+        parent_opts = FakeProcessGroup.Options()
+        parent_opts.fake_option = 7
+        pg = FakeProcessGroup._create_internal(0, 2, parent_opts)
+        # Base options, as C++ passes for an options-less parent, inherit the
+        # fake fields.
+        opts = dist.BackendBase.Options("fake")
+        opts.group_name = "child"
+        child = pg.split(FakeStore(), [1, 0], opts)
+        self.assertEqual((child.rank(), child.size()), (1, 2))
+        options = child.options
+        self.assertIsNot(options, parent_opts)
+        self.assertEqual((options.fake_option, options.group_name), (7, "child"))
+
+        class OtherOptions(dist.BackendBase.Options):
+            pass
+
+        other = OtherOptions("other")
+        with self.assertRaisesRegex(TypeError, "must be FakeProcessGroup.Options"):
+            FakeProcessGroup._create_internal(0, 2, other)
+        for opts in (other, dist.BackendBase.Options("gloo")):
+            with self.assertRaisesRegex(
+                RuntimeError, "not a FakeProcessGroup::Options"
+            ):
+                pg.split(FakeStore(), [0, 1], opts)
 
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -462,14 +702,14 @@ class TestFakePG(TestCase):
         self.assertEqual(out_tensor, in_tensor)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_repeat(self, rank):
+    def test_alltoall_base_output_larger_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Slot 1 (size 6) is larger than the input buffer (size 4),
-        # so the input is repeated to fill it.
+        # out_tensor is larger than in_tensor, values are first
+        # filled with in_tensor then zeros
         in_tensor = torch.arange(4.0).reshape(4, 1)
-        out_tensor = torch.empty(8, 1)
+        out_tensor = torch.full((8, 1), -1.0)
         dist.all_to_all_single(
             out_tensor,
             in_tensor,
@@ -477,17 +717,17 @@ class TestFakePG(TestCase):
             input_split_sizes=[1, 3],
         )
         expected = torch.tensor(
-            [[0.0], [1.0], [0.0], [1.0], [2.0], [3.0], [0.0], [1.0]]
+            [[0.0], [1.0], [2.0], [3.0], [0.0], [0.0], [0.0], [0.0]]
         )
         self.assertEqual(out_tensor, expected)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_truncate(self, rank):
+    def test_alltoall_base_output_smaller_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Each output slot is smaller than the input buffer, so input is
-        # truncated to slot size.
+        # out_tensor is smaller than in_tensor, values are first
+        # filled with values of in_tensor.
         in_tensor = torch.arange(8.0).reshape(8, 1)
         out_tensor = torch.empty(4, 1)
         dist.all_to_all_single(
@@ -496,8 +736,67 @@ class TestFakePG(TestCase):
             output_split_sizes=[1, 3],
             input_split_sizes=[4, 4],
         )
-        expected = torch.tensor([[0.0], [0.0], [1.0], [2.0]])
+        expected = torch.tensor([[0.0], [1.0], [2.0], [3.0]])
         self.assertEqual(out_tensor, expected)
+
+    def test_alltoall_base_empty_output_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[],
+            input_split_sizes=[2, 2],
+        )
+        self.assertEqual(out_tensor, in_tensor)
+
+    def test_alltoall_base_empty_input_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_equal_split_numel_mismatch(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, torch.arange(4.0).reshape(4, 1))
+
+    def test_alltoall_base_flat_copy_equal_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(2, 2)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
+
+    def test_alltoall_base_flat_copy_explicit_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(2, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[2, 2],
+            input_split_sizes=[1, 1],
+        )
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
 
     def test_alltoall_base_split_size_validation(self):
         store = FakeStore()
@@ -528,17 +827,56 @@ class TestFakePG(TestCase):
                 input_split_sizes=[2, 2],
             )
 
-    def test_alltoall_base_empty_input_with_output(self):
+    def test_alltoall_base_zero_sized_input(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        with self.assertRaisesRegex(RuntimeError, "inputBuffer is empty"):
-            dist.all_to_all_single(
-                torch.empty(2, 1),
-                torch.empty(0, 1),
-                output_split_sizes=[1, 1],
-                input_split_sizes=[0, 0],
-            )
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[0, 0],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_zero_sized_output(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.empty(0, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.arange(4.0).reshape(4, 1),
+            output_split_sizes=[0, 0],
+            input_split_sizes=[0, 4],
+        )
+        self.assertEqual(out_tensor, torch.empty_like(out_tensor))
+
+    @parametrize("noncontiguous_buffer", ["input", "output"])
+    def test_alltoall_base_requires_contiguous(self, noncontiguous_buffer):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 2)
+        if noncontiguous_buffer == "input":
+            in_tensor = torch.arange(8.0).reshape(2, 4).t()
+        else:
+            out_tensor = torch.empty(2, 4).t()
+
+        with self.assertRaisesRegex(RuntimeError, "tensor must be contiguous"):
+            dist.all_to_all_single(out_tensor, in_tensor)
+
+    def test_alltoall_base_channels_last(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(32.0).reshape(2, 2, 2, 4)
+        in_tensor = in_tensor.contiguous(memory_format=torch.channels_last)
+        out_tensor = torch.empty_like(in_tensor)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor)
 
     def test_alltoall_list_size_validation(self):
         store = FakeStore()
@@ -585,8 +923,6 @@ class TestFakePG(TestCase):
         dist.destroy_process_group()
 
         # Test with error_on_collective=True
-        from torch._C._distributed_c10d import FakeProcessGroup
-
         options = FakeProcessGroup.Options()
         options.error_on_collective = True
 
@@ -613,6 +949,29 @@ class TestFakePG(TestCase):
         ):
             dist.broadcast(tensor, src=0)
 
+        pg = dist.get_backend_impl(device=torch.device("cpu"))
+        t = torch.ones(2)
+        for op in (
+            lambda: pg.allreduce_sparse([t]),
+            lambda: pg.allreduce_coalesced([t]),
+            lambda: pg.reduce([t]),
+            lambda: pg.all_gather_single(torch.ones(4), t),
+            lambda: pg.allgather_coalesced([[t, t]], [t]),
+            lambda: pg.all_gather_single_coalesced([torch.ones(4)], [t]),
+            lambda: pg.gather([[t, t]], [t]),
+            lambda: pg.scatter([t], [[t, t]]),
+            lambda: pg.reduce_scatter([t], [[t, t]]),
+            lambda: pg.reduce_scatter_single(t, torch.ones(4)),
+            lambda: pg.reduce_scatter_single_coalesced([t], [torch.ones(4)]),
+            lambda: pg.all_to_all_single(t, t, [], []),
+            lambda: pg.alltoall([t, t], [t, t]),
+            lambda: (pg.start_coalescing(), pg.end_coalescing()),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "FakeProcessGroup collective operation error"
+            ):
+                op()
+
         with self.assertRaisesRegex(
             RuntimeError, "FakeProcessGroup collective operation error"
         ):
@@ -625,7 +984,9 @@ class TestFakePG(TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        with self.assertRaisesRegex(TypeError, r"No constructor defined"):
+        with self.assertRaisesRegex(
+            TypeError, r"FakeProcessGroup cannot be constructed directly"
+        ):
             fake_pg = FakeProcessGroup(rank=0, world_size=3)
 
             with SimpleTensorMode():
@@ -739,6 +1100,11 @@ class TestFakePG(TestCase):
         inputs = [torch.ones(3, 3)]
         with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
+
+        pg = dist.get_backend_impl(device=torch.device("cpu"))
+        outputs = [torch.empty(4), torch.empty(4)]
+        with self.assertRaisesRegex(RuntimeError, "lists to have the same length"):
+            pg.all_gather_single_coalesced(outputs, [torch.ones(2)])
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -928,7 +1294,522 @@ class TestFakePG(TestCase):
         self.assertEqual(pg_name, expected)
 
 
+class TestFakePGUniformRanks(TestCase):
+    """Tests for Options.simulate_uniform_ranks.
+
+    See NOTE [FakeProcessGroup uniform-rank simulation]. The contract is that
+    the group behaves as if every rank held data identical to this one, which
+    makes every collective well defined from local inputs alone.
+    """
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _init(self, rank, world_size):
+        opts = FakeProcessGroup.Options()
+        opts.simulate_uniform_ranks = True
+        dist.init_process_group(
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=FakeStore(),
+            pg_options=opts,
+        )
+        return dist.distributed_c10d._get_default_group()._get_backend(
+            torch.device("cpu")
+        )
+
+    def test_option_defaults_to_off(self):
+        """Existing behavior must be untouched unless the flag is set."""
+        opts = FakeProcessGroup.Options()
+        self.assertFalse(opts.simulate_uniform_ranks)
+        with self.assertRaises(AttributeError):
+            opts.simulate_uniform_rank = True
+
+    def test_create_internal_uses_fresh_default_options(self):
+        first = FakeProcessGroup._create_internal(0, world_size=2)
+        second = FakeProcessGroup._create_internal(0, world_size=2)
+
+        self.assertIsNot(first.options, second.options)
+        first.options.simulate_uniform_ranks = True
+        self.assertFalse(second.options.simulate_uniform_ranks)
+
+    def test_create_internal_preserves_explicit_none_options(self):
+        backend = FakeProcessGroup._create_internal(0, world_size=2, options=None)
+
+        self.assertIsNone(backend.options)
+
+    def test_new_group_inherits_uniform_rank_simulation(self):
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 17
+        opts.simulate_uniform_ranks = True
+        dist.init_process_group(
+            backend="cuda:fake",
+            rank=0,
+            world_size=2,
+            store=FakeStore(),
+            pg_options=opts,
+        )
+
+        process_group = dist.new_group(ranks=[0, 1], backend="fake")
+        self.assertIsInstance(process_group, dist.ProcessGroup)
+        backend = process_group._get_backend(torch.device("cpu"))
+        self.assertIsInstance(backend, FakeProcessGroup)
+        self.assertTrue(backend.options.simulate_uniform_ranks)
+        self.assertEqual(backend.options.fake_option, 0)
+
+        backend.options.simulate_uniform_ranks = False
+        self.assertTrue(opts.simulate_uniform_ranks)
+
+    def test_split_group_inherits_uniform_rank_simulation(self):
+        self._init(rank=0, world_size=2)
+        parent = dist.distributed_c10d._get_default_group()
+
+        process_group = parent.split_group([0, 1], device_types=[torch.device("cpu")])
+
+        self.assertIsInstance(process_group, dist.ProcessGroup)
+        backend = process_group._get_backend(torch.device("cpu"))
+        self.assertIsInstance(backend, FakeProcessGroup)
+        self.assertTrue(backend.options.simulate_uniform_ranks)
+
+    def test_allreduce_sum_scales_by_world_size(self):
+        """Summing world_size identical tensors multiplies by world_size."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.ones(3)
+
+        pg.allreduce([tensor]).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 4.0))
+
+    def test_allreduce_avg_is_identity(self):
+        """Averaging identical values leaves them unchanged."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 7.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.AVG
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 7.0))
+
+    def test_allreduce_product_raises_to_the_world_size(self):
+        """Multiplying world_size identical tensors is exponentiation."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 2.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PRODUCT
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 16.0))
+
+    def test_sparse_allreduce_sum_scales_values(self):
+        """Sparse SUM scales the stored values without changing sparsity."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.sparse_coo_tensor(
+            torch.tensor([[0, 2]]), torch.tensor([2.0, 3.0]), size=(4,)
+        ).coalesce()
+
+        work = pg.allreduce_sparse([tensor])
+        work.wait()
+
+        expected = torch.tensor([8.0, 0.0, 12.0, 0.0])
+        self.assertEqual(tensor.to_dense(), expected)
+        self.assertEqual(work.result()[0].to_dense(), expected)
+
+    def test_sparse_allreduce_product_raises(self):
+        """Sparse PRODUCT remains unsupported under uniform-rank simulation."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.sparse_coo_tensor(
+            torch.tensor([[0, 2]]), torch.tensor([2.0, 3.0]), size=(4,)
+        ).coalesce()
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PRODUCT
+
+        with self.assertRaisesRegex(
+            RuntimeError, "allreduce_sparse does not support PRODUCT"
+        ):
+            pg.allreduce_sparse([tensor], opts)
+
+    def test_allreduce_premul_sum_applies_factor_then_scales(self):
+        """PREMUL_SUM sums factor * x over every rank."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 3.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PREMUL_SUM(0.5)
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 6.0))
+
+    def test_allreduce_premul_sum_accepts_a_tensor_factor(self):
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 3.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PREMUL_SUM(torch.tensor(0.5))
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 6.0))
+
+    def test_allreduce_premul_sum_rejects_integral_tensors(self):
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.ones(3, dtype=torch.int64)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PREMUL_SUM(0.5)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "requires a floating point or complex tensor"
+        ):
+            pg.allreduce([tensor], opts)
+
+    def test_allreduce_premul_sum_requires_a_factor(self):
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.ones(3)
+        opts = dist.AllreduceOptions()
+        reduce_op = dist.ReduceOp(dist.ReduceOp.SUM)
+        reduce_op.op = dist.ReduceOp.PREMUL_SUM
+        opts.reduceOp = reduce_op
+
+        with self.assertRaisesRegex(RuntimeError, "without its scaling factor"):
+            pg.allreduce([tensor], opts)
+
+    @parametrize("op", [dist.ReduceOp.BAND, dist.ReduceOp.BOR])
+    def test_allreduce_bitwise_and_or_are_identity(self, op):
+        """AND and OR are idempotent, so equal operands reduce to themselves."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = op
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.tensor([0b1100, 0b1010], dtype=torch.int32))
+
+    @parametrize("world_size,expected", [(4, [0, 0]), (3, [0b1100, 0b1010])])
+    def test_allreduce_bitwise_xor_cancels_in_pairs(self, world_size, expected):
+        """XOR over equal operands depends only on the parity of world_size."""
+        pg = self._init(rank=0, world_size=world_size)
+        tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.BXOR
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.tensor(expected, dtype=torch.int32))
+
+    def test_reduce_scatter_sum_scales_the_local_chunk(self):
+        """Each rank keeps its own chunk, scaled by the number of ranks."""
+        pg = self._init(rank=2, world_size=4)
+        output = torch.empty(1)
+
+        pg.reduce_scatter_single(output, torch.tensor([1.0, 2.0, 3.0, 4.0])).wait()
+
+        # chunk[2] is 3.0, summed across 4 identical ranks.
+        self.assertEqual(output.item(), 12.0)
+
+    def test_all_gather_replicates_local_input(self):
+        """Unchanged by the flag: every slot already held the local value."""
+        pg = self._init(rank=1, world_size=3)
+        output = torch.empty(6)
+
+        pg.all_gather_single(output, torch.tensor([5.0, 6.0])).wait()
+
+        for chunk in output.chunk(3):
+            self.assertEqual(chunk, torch.tensor([5.0, 6.0]))
+
+    def test_all_to_all_single_preserves_split_structure(self):
+        """The regression that motivated the flag.
+
+        A caller that reshapes all-to-all output by [world_size, per_rank]
+        needs every slot filled with a full-size segment. The default
+        approximation copies a prefix and zeroes the rest, which yields the
+        wrong element count once splits are uneven.
+        """
+        world_size = 4
+        pg = self._init(rank=1, world_size=world_size)
+        # Each rank sends 2 elements to every peer, so it receives 2 from each.
+        send = torch.tensor([10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0])
+        recv = torch.empty(8)
+
+        pg.all_to_all_single(recv, send, [2] * world_size, [2] * world_size).wait()
+
+        # Every peer sends us the segment it would send to rank 1, and under
+        # the uniform contract that is our own split at index 1.
+        for slot in recv.chunk(world_size):
+            self.assertEqual(slot, torch.tensor([20.0, 21.0]))
+
+    def test_all_to_all_single_uses_equal_default_splits(self):
+        self._init(rank=1, world_size=2)
+        send = torch.tensor([10.0, 11.0, 20.0, 21.0])
+        recv = torch.empty_like(send)
+
+        dist.all_to_all_single(recv, send)
+
+        self.assertEqual(recv, torch.tensor([20.0, 21.0, 20.0, 21.0]))
+
+    def test_all_to_all_single_fills_a_2d_buffer(self):
+        """Split sizes count rows along dim 0, not elements.
+
+        A 2-D buffer with explicit splits has to be written in full: narrowing
+        the flat view by the raw split value would write one element per slot
+        instead of one row, leaving the rest of the buffer untouched.
+        """
+        pg = self._init(rank=1, world_size=4)
+        output = torch.empty(4, 8)
+        input_tensor = torch.arange(32.0).reshape(4, 8)
+
+        pg.all_to_all_single(output, input_tensor, [1] * 4, [1] * 4).wait()
+
+        # Row 1 is what this rank would send to a peer in its own position, so
+        # under the uniform contract every slot receives it.
+        expected = input_tensor[1].expand(4, 8)
+        self.assertEqual(output, expected)
+
+    def test_all_to_all_single_reshapes_like_torchrec(self):
+        """Output must survive a [world_size, per_rank] view."""
+        world_size = 16
+        per_rank = 8
+        pg = self._init(rank=0, world_size=world_size)
+        send = torch.arange(world_size * per_rank, dtype=torch.float)
+        recv = torch.empty(world_size * per_rank)
+
+        pg.all_to_all_single(
+            recv, send, [per_rank] * world_size, [per_rank] * world_size
+        ).wait()
+
+        # This view is what KeyedJaggedTensor.dist_init performs; under the
+        # default approximation the element count does not line up.
+        self.assertEqual(recv.view(world_size, per_rank).shape, (world_size, per_rank))
+
+    def test_alltoall_list_form_uses_our_own_entry(self):
+        """Every peer sends what it would send to our position."""
+        pg = self._init(rank=2, world_size=3)
+        inputs = [torch.full((2,), float(i)) for i in range(3)]
+        outputs = [torch.empty(2) for _ in range(3)]
+
+        pg.alltoall(outputs, inputs).wait()
+
+        for output in outputs:
+            self.assertEqual(output, torch.full((2,), 2.0))
+
+    def test_alltoall_tiles_and_truncates_mismatched_slots(self):
+        """The list form lets each slot have its own shape.
+
+        Unlike all_to_all_single there is no size equality to lean on, so a
+        slot wider than our contribution is tiled and a narrower one is cut
+        short. Both must be written in full; a partial write would leave the
+        tail holding whatever the caller's buffer already contained.
+        """
+        pg = self._init(rank=0, world_size=2)
+        inputs = [torch.tensor([1.0, 2.0, 3.0]), torch.tensor([7.0, 8.0, 9.0])]
+        wide = torch.full((7,), -1.0)
+        narrow = torch.full((2,), -1.0)
+
+        pg.alltoall([wide, narrow], inputs).wait()
+
+        self.assertEqual(wide, torch.tensor([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0]))
+        self.assertEqual(narrow, torch.tensor([1.0, 2.0]))
+
+    def test_all_to_all_single_fills_asymmetric_slots(self):
+        """The output shape the caller declared is the one it gets.
+
+        Strict uniformity would force every output split to equal the input
+        split at our own index, and rejecting anything else was tried: it
+        breaks callers that declare asymmetric splits or a receive-only rank.
+        Each slot is tiled or truncated to the width it asked for instead.
+        """
+        pg = self._init(rank=1, world_size=2)
+        # Input split 1 is our segment, so every slot is filled from [1, 2, 3].
+        send = torch.arange(4.0)
+        recv = torch.empty(8)
+
+        pg.all_to_all_single(recv, send, [2, 6], [1, 3]).wait()
+
+        self.assertEqual(recv, torch.tensor([1.0, 2.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0]))
+
+    def test_all_to_all_single_zero_fills_a_receive_only_rank(self):
+        self._init(rank=0, world_size=2)
+        send = torch.tensor([7.0])
+        recv = torch.full((2,), -1.0)
+
+        dist.all_to_all_single(
+            recv,
+            send,
+            output_split_sizes=[1, 1],
+            input_split_sizes=[0, 1],
+        )
+
+        self.assertEqual(recv, torch.zeros(2))
+
+    @parametrize("noncontiguous_buffer", ["input", "output"])
+    def test_alltoall_rejects_noncontiguous_tensors(self, noncontiguous_buffer):
+        pg = self._init(rank=0, world_size=1)
+        inputs = [torch.arange(4.0).reshape(2, 2)]
+        outputs = [torch.empty(2, 2)]
+        if noncontiguous_buffer == "input":
+            inputs[0] = inputs[0].t()
+        else:
+            outputs[0] = outputs[0].t()
+
+        with self.assertRaisesRegex(
+            RuntimeError, f"{noncontiguous_buffer} tensor must be contiguous"
+        ):
+            pg.alltoall(outputs, inputs)
+
+    @parametrize("rank,expected", [(0, 4.0), (1, 1.0)])
+    def test_reduce_writes_only_the_root(self, rank, expected):
+        """Real backends leave every non-root tensor unspecified."""
+        pg = self._init(rank=rank, world_size=4)
+        tensor = torch.ones(3)
+        opts = dist.ReduceOptions()
+        opts.rootRank = 0
+
+        pg.reduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), expected))
+
+    def test_allreduce_coalesced_scales_every_tensor(self):
+        """Each tensor in the batch is reduced independently."""
+        pg = self._init(rank=0, world_size=3)
+        tensors = [torch.ones(2), torch.full((3,), 2.0)]
+
+        pg.allreduce_coalesced(tensors).wait()
+
+        self.assertEqual(tensors[0], torch.full((2,), 3.0))
+        self.assertEqual(tensors[1], torch.full((3,), 6.0))
+
+    def test_reduce_scatter_list_form_scales_our_entry(self):
+        """We keep the input at our own index, summed over the world."""
+        pg = self._init(rank=2, world_size=4)
+        output = torch.empty(2)
+        inputs = [[torch.full((2,), float(r)) for r in range(4)]]
+
+        pg.reduce_scatter([output], inputs).wait()
+
+        self.assertEqual(output, torch.full((2,), 8.0))
+
+    def test_reduce_scatter_single_coalesced_scales_each_output(self):
+        """Every buffer in the batch keeps its own chunk, scaled."""
+        pg = self._init(rank=1, world_size=2)
+        outputs = [torch.empty(2), torch.empty(1)]
+        inputs = [torch.tensor([1.0, 2.0, 3.0, 4.0]), torch.tensor([5.0, 6.0])]
+
+        pg.reduce_scatter_single_coalesced(outputs, inputs).wait()
+
+        self.assertEqual(outputs[0], torch.tensor([6.0, 8.0]))
+        self.assertEqual(outputs[1], torch.tensor([12.0]))
+
+    @parametrize("op", [dist.ReduceOp.SUM, dist.ReduceOp.PRODUCT])
+    def test_bool_sum_and_product_are_identity(self, op):
+        """Bool has no in-place form of the scaling the other dtypes use.
+
+        Under c10d's nonzero-is-true convention both reductions leave equal
+        bools alone, so take that branch rather than raise where a real
+        backend succeeds.
+        """
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.tensor([True, False])
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = op
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.tensor([True, False]))
+
+    def test_result_carries_the_reduced_tensor(self):
+        """async_op callers read the output through Work.result()."""
+        pg = self._init(rank=0, world_size=2)
+        tensor = torch.ones(2)
+
+        work = pg.allreduce([tensor])
+        work.wait()
+
+        self.assertEqual(work.result()[0], torch.full((2,), 2.0))
+
+    def test_get_future_carries_collective_output(self):
+        pg = self._init(rank=0, world_size=2)
+        output = torch.empty(4)
+
+        work = pg.all_gather_single(output, torch.tensor([3.0, 4.0]))
+
+        self.assertEqual(
+            work.get_future().value()[0], torch.tensor([3.0, 4.0, 3.0, 4.0])
+        )
+
+    def test_result_still_raises_without_the_flag(self):
+        """Work::result() errors by default and must keep doing so.
+
+        Nothing outside simulate_uniform_ranks records an output, so returning
+        an empty list here would turn a diagnosable failure into a silent one.
+        """
+        pg = FakeProcessGroup._create_internal(0, world_size=2)
+
+        work = pg.allreduce([torch.ones(2)])
+
+        with self.assertRaisesRegex(RuntimeError, "recorded no output"):
+            work.result()
+
+    def test_uniform_writes_leave_the_version_counter(self):
+        """Several in-place ops per collective, still no bump. See NOTE
+        [FakeProcessGroup output version counters]."""
+        self._init(rank=0, world_size=4)
+        out = torch.ones(2)
+        dist.all_reduce(out)
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(2)
+        dist.reduce_scatter_tensor(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(8)
+        dist.all_to_all_single(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+
+
+class TestFakePGVersionCounter(TestCase):
+    """Fake collectives move output version counters as NCCL does. See NOTE
+    [FakeProcessGroup output version counters]."""
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_output_versions_match_nccl(self):
+        # NCCL writes these from its own kernels: no bump.
+        out = torch.zeros(8)
+        dist.all_gather_into_tensor(out, torch.ones(2))
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(2)
+        dist.reduce_scatter_tensor(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+        out = torch.zeros(8)
+        dist.all_to_all_single(out, torch.ones(8))
+        self.assertEqual(out._version, 0)
+
+        # NCCL fills these with copy_: bump. Peers' gather slots arrive by ncclRecv.
+        outs = [torch.zeros(2) for _ in range(4)]
+        dist.all_gather(outs, torch.ones(2))
+        self.assertEqual([o._version for o in outs], [1, 1, 1, 1])
+        outs = [torch.zeros(2) for _ in range(4)]
+        dist.gather(torch.ones(2), outs, dst=0)
+        self.assertEqual([o._version for o in outs], [1, 0, 0, 0])
+
+    def test_tensor_saved_for_backward_survives_all_gather_into_it(self):
+        weights = torch.zeros(8)
+        x = torch.ones(8, requires_grad=True)
+        loss = (x * weights).sum()  # mul saves `weights` for backward
+        dist.all_gather_into_tensor(weights, torch.ones(2))
+        loss.backward()
+        self.assertEqual(x.grad, weights)
+
+
 instantiate_parametrized_tests(TestFakePG)
+instantiate_parametrized_tests(TestFakePGUniformRanks)
 
 if __name__ == "__main__":
     run_tests()

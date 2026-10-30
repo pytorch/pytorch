@@ -9,6 +9,7 @@
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
@@ -29,8 +30,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_prod_native.h>
 #include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -569,7 +568,7 @@ static void addmm_out_sparse_csr_native_cpu(
               for (index_t h = irow_start; h < irow_end; ++h) {
                 index_t i_start = csr_accessor[h];
                 index_t i_end = csr_accessor[h + 1];
-                for (index_t i = i_start; i < i_end; i++) {
+                for (const auto i : c10::irange(i_start, i_end)) {
                   scalar_t val = values_accessor[i];
                   index_t col = col_indices_accessor[i];
                   at::native::cpublas::axpy<scalar_t>(
@@ -594,15 +593,7 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
-  // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
-  // TODO: remove code duplication and unify code
-  sparse::impl::_check_dim(mat1, 2, "mat1");
-  sparse::impl::_check_dim(mat2, 2, "mat2");
-
-  TORCH_CHECK(
-      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "addmm");
 
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
@@ -989,8 +980,11 @@ Tensor& add_out_sparse_compressed_cpu(
       return out;
     }
 
-    at::native::resize_as_sparse_compressed_(out, self);
-    sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    // out is resized in place, so operate on clones of any input aliasing it.
+    const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
+    const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
+    at::native::resize_as_sparse_compressed_(out, self_);
+    sparse::impl::cpu::add_out_sparse_csr(self_, other_, alpha, out);
   }
   return out;
 }
@@ -1192,7 +1186,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     index_t* row_map_ptr = row_map.data_ptr<index_t>();
     int64_t nnz = 0;
     new_crow_indices_ptr[0] = 0;
-    for(int64_t i=0; i<nrows; i++) {
+    for(const auto i : c10::irange(nrows)) {
       if (crow_indices_ptr[i] != crow_indices_ptr[i + 1]) {
         row_map_ptr[i] = nnz;
         nnz++;
@@ -1218,7 +1212,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
               i_end = crow_indices_ptr[h+1];
               if (i_start != i_end) {
                 acc_t res = static_cast<acc_t>(values_ptr[i_start]);
-                for (index_t i = i_start + 1; i < i_end; i++) {
+                for (const auto i : c10::irange(i_start + 1, i_end)) {
                   res = rop(res, static_cast<acc_t>(values_ptr[i]));
                 }
                 new_values_acc_ptr[row_map_ptr[h]] = res;
@@ -1267,7 +1261,7 @@ In [4]: %timeit torch.sum(t.values())
                                        rop.identity(),
                                        [&](int64_t i_start, int64_t i_end, scalar_t identity) {
                                          acc_t res = acc_t(identity);
-                                         for (int64_t i=i_start; i<i_end; i++) {
+                                         for (const auto i : c10::irange(i_start, i_end)) {
                                            acc_t val = acc_t(values_ptr[i]);
                                            res = rop(res, val);
                                          }
