@@ -385,12 +385,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
     int32_t non_blocking);
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-// torch._foreach_copy_: copies each src tensor into the dst tensor at the same
-// index; dst_len must equal src_len. On CUDA the copies fuse into one kernel
-// only when all tensors share a device, the dst tensors share a dtype, the src
-// tensors share a dtype, and each dst matches its src's sizes and strides;
-// otherwise each tensor is copied separately, so callers group their lists.
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_foreach_copy_(
+// torch._foreach_copy_(dst, src, non_blocking) on non-empty lists of equal
+// length, with its semantics, including which lists the device kernel fuses.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__foreach_copy_(
     const AtenTensorHandle* dst,
     int64_t dst_len,
     const AtenTensorHandle* src,
@@ -656,21 +653,23 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 // torch.cuda.graph's: no warm-up, synchronization or tensor lifetime
 // management. capture_begin and capture_end use the current stream, which
 // must be on the pool's device; replay uses the current stream of the
-// capture's device. A graph captures once.
-// capture_begin fails under the cudaMallocAsync allocator backend, where
-// CUDAGraph ignores the pool, allows only one capture at a time in the
-// process, and aborts when a failed capture's tensors are freed. Callers must:
-// - capture on a cudaStreamNonBlocking stream;
-// - end every capture whose capture_begin succeeded with capture_end, on its
-//   thread and stream, before deleting the graph, also when the captured work
-//   failed. On ROCm, a stream whose capture was invalidated rejects work
-//   until the next capture begins;
+// capture's device. A graph captures once. capture_begin fails on ROCm, which
+// isn't supported yet, see https://github.com/ROCm/rocm-systems/issues/12677,
+// and create_cuda_mem_pool fails under the cudaMallocAsync allocator backend,
+// where CUDAGraph ignores the pool and allows one capture at a time.
+// Callers must:
+// - capture on a cudaStreamNonBlocking stream that no other thread uses while
+//   the capture is open;
+// - call capture_end exactly once for each capture_begin that succeeded, on
+//   its thread and stream, before deleting the graph, also when the captured
+//   work failed;
 // - use a pool and its graphs from one thread at a time, capture into a pool
 //   one graph at a time, and use a new pool once every graph that began a
 //   capture into it is deleted;
-// - not delete a pool while the thread's current stream on its device is
-//   capturing, which delete_cuda_mem_pool rejects, or while any global-mode
-//   capture is open, which makes freeing the pool's memory abort;
+// - not delete a pool while the thread has a capture open, on any stream or
+//   device, or while any thread has a global-mode capture open, which makes
+//   freeing the pool's memory abort; delete_cuda_mem_pool rejects only the
+//   case where the thread's current stream on the pool's device captures;
 // - not overlap replays of graphs sharing a pool, and use a replay's outputs
 //   before replaying another graph of the pool, unless replaying in capture
 //   order;
@@ -678,13 +677,7 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 //   random number work run on the same device: a replay advances the
 //   device's generator without taking its lock;
 // - order earlier work on the capture stream before a replay on another
-//   stream, and wait for a graph's replays before deleting it;
-// - on ROCm, keep synchronous HIP copies and memsets out of the process
-//   while a capture is open: HIP fails them and invalidates every open
-//   capture, see https://github.com/ROCm/rocm-systems/issues/12677. Creating
-//   a hipBLASLt handle makes such a call and then ends or hangs the process;
-//   capture_begin and a thread's first hipBLASLt use, e.g. an eager matmul
-//   or convolution, can create one.
+//   stream, and wait for a graph's replays before deleting it.
 struct CUDAMemPoolOpaque;
 using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
 

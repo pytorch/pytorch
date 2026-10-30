@@ -110,7 +110,6 @@ includes = [
     "tools/autograd/templates/python_variable_methods.cpp",
     "torch/csrc/stable/*",
     "test/cpp/c10d/*",
-    "test/cpp/shim/test_cuda_graph.cpp",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
