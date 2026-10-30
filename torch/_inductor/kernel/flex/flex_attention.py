@@ -18,7 +18,15 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
-from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ... import config
+from ...ir import (
+    ComputedBuffer,
+    ExternKernel,
+    FixedLayout,
+    StorageBox,
+    TensorBox,
+    TritonTemplateBuffer,
+)
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
@@ -59,6 +67,10 @@ from .flex_flash_attention import (
 )
 from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
 from .flex_flydsl_backward import create_flydsl_flex_attention_backward_kernel
+from .flex_rocm_backward_autotune import (
+    prepare_backward_benchmark_requests,
+    RocmBackwardChoiceCaller,
+)
 
 
 if TYPE_CHECKING:
@@ -1262,11 +1274,6 @@ def flex_attention_backward(*args, **kwargs):
         )[0]
         == "gfx950"
     )
-    backward_template = (
-        rocm_backward.flex_attention_backward_template
-        if is_gfx950
-        else flex_attention_backward_template
-    )
     for conf in configs:
         # Performance tuning
         # Triton heuristics
@@ -1379,6 +1386,11 @@ def flex_attention_backward(*args, **kwargs):
             bool(score_mod_other_buffers or mask_mod_other_buffers),
         )
 
+        backward_template = (
+            rocm_backward.flex_attention_backward_template
+            if rocm_backward._use_rocm_backward_template(is_gfx950, cur_kernel_options)
+            else flex_attention_backward_template
+        )
         backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=bwd_input_nodes,
@@ -1417,6 +1429,7 @@ def flex_attention_backward(*args, **kwargs):
             split_dkdv = rocm_plan.split_dkdv
             dkdv_layout = rocm_plan.dkdv_layout
 
+    fused_choices = tuple(choices)
     choices, separate_dq = _append_flex_attention_backward_choices(
         choices,
         configs,
@@ -1429,6 +1442,31 @@ def flex_attention_backward(*args, **kwargs):
         mutated_inputs=bwd_mutated_inputs,
         split_available=bool(dkdv_choices and dq_choices),
     )
+
+    if (
+        config.max_autotune
+        and is_gfx950
+        and len(choices) == len(fused_choices)
+        and all(actual is default for actual, default in zip(choices, fused_choices))
+    ):
+        rocm_backward.append_backward_autotune_choices(
+            choices,
+            bwd_input_nodes,
+            cur_kernel_options=original_kernel_options,
+            user_kernel_options=user_kernel_options,
+            rocm_requests=rocm_requests,
+            out=out,
+            backend=backend,
+            fw_graph=fw_graph.graph_module,
+            mask_graph=mask_graph.graph_module,
+            block_mask=block_mask,
+            grad_logsumexp=grad_logsumexp,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            bwd_subgraphs=bwd_subgraphs,
+            dkdv_layout=dkdv_layout,
+            layout_grad_query=layout_grad_query,
+        )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1465,8 +1503,21 @@ def flex_attention_backward(*args, **kwargs):
         choices = dkdv_choices
         inputs_for_autotuning = dkdv_input_nodes
 
-    broadcasted_grad_key, _ = autotune_select_algorithm(
-        "flex_attention_backward",
+    autotune_name = "flex_attention_backward"
+    if any(isinstance(choice, RocmBackwardChoiceCaller) for choice in choices):
+        input_gen_fns.update(
+            prepare_backward_benchmark_requests(
+                choices,
+                bwd_input_nodes,
+                causal=rocm_backward._is_rocm_simple_causal_mask_graph(
+                    mask_graph.graph_module
+                ),
+            )
+        )
+        autotune_name = "flex_attention_backward_rocm_autotune"
+
+    broadcasted_grad_key, backward_choice = autotune_select_algorithm(
+        autotune_name,
         choices,
         # Autotuning materializes benchmark tensors. Scalar shape captures stay
         # in subgraph_inps below for dependency tracking and codegen.
@@ -1482,6 +1533,20 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key.data.data.subgraph_outs = get_bwd_subgraph_outputs(
         fw_subgraph_buffer, mask_graph_buffer, joint_outputs
     )
+
+    if isinstance(backward_choice, RocmBackwardChoiceCaller):
+        grad_query = backward_choice.output_grad_query()
+        dq_buffer = grad_query.data
+        if not isinstance(dq_buffer, StorageBox) or not isinstance(
+            dq_buffer.data, TritonTemplateBuffer
+        ):
+            raise AssertionError("Expected a Triton template buffer for dQ")
+        dq_buffer.data.subgraph_inps = list(mask_mod_other_buffers)
+        dq_buffer.data.subgraph_outs = [
+            *get_bwd_subgraph_outputs(
+                fw_subgraph_buffer, mask_graph_buffer, joint_outputs
+            )
+        ]
 
     if separate_dq:
         if dq_input_nodes is None:

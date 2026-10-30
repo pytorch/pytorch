@@ -8,7 +8,9 @@ from typing import Any
 import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
+from torch.utils._ordered_set import OrderedSet
 
+from ... import config
 from ...ir import FixedLayout
 from ...lowering import empty_strided
 from ...select_algorithm import SymbolicGridFn, TritonTemplate
@@ -210,6 +212,18 @@ def _get_rocm_backward_config_options(options, *, is_gfx950):
         enabled = cur_kernel_options.get(option, False)
         cur_kernel_options[option] = is_gfx950 and enabled
     return cur_kernel_options
+
+
+def _use_rocm_backward_template(is_gfx950, kernel_options):
+    return is_gfx950 and any(
+        kernel_options.get(option, False)
+        for option in (
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "ROCM_D256_PANEL_DOTS",
+            "ROCM_XCD_SNAKE",
+        )
+    )
 
 
 def _select_rocm_d128_query_tile_outer_options(
@@ -658,6 +672,211 @@ def _get_rocm_backward_auto_profile(
             elif dtype == torch.float32:
                 options["bwd_ROCM_D128_FP32_BALANCED64_COVERAGE"] = True
     return options
+
+
+def _get_rocm_backward_autotune_options(
+    user_kernel_options,
+    kernel_options,
+    input_nodes,
+    out,
+    *,
+    backend,
+    is_gfx950,
+    score_is_trivial,
+    has_captures,
+    mask_is_causal,
+    mask_is_scalar_true,
+    block_mask_is_default,
+    grad_logsumexp_is_none,
+):
+    """Return legal split candidates independently of the measured default profiles."""
+    if (
+        is_gfx950 is not True
+        or backend not in ("AUTO", "TRITON")
+        or score_is_trivial is not True
+        or has_captures is not False
+        or grad_logsumexp_is_none is not True
+        or len(input_nodes) != 16
+        or kernel_options.get("USE_TMA", False) is not False
+        or kernel_options.get("PRESCALE_QK") is not False
+        or kernel_options.get("num_consumer_groups", 0)
+    ):
+        return []
+    for name in user_kernel_options:
+        if name.startswith("fwd_"):
+            continue
+        name = name.removeprefix("bwd_")
+        if name.startswith("ROCM_") or name in (
+            "XCD_REMAP",
+            "BLOCK_M1",
+            "BLOCK_N1",
+            "BLOCK_M2",
+            "BLOCK_N2",
+            "num_warps",
+            "num_stages",
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+            "num_consumer_groups",
+            "waves_per_simd",
+            "llvm_fn_attrs",
+        ):
+            return []
+    query, key, value = input_nodes[:3]
+    if any(
+        tensor is None or len(tensor.get_size()) != 4 for tensor in (query, key, value)
+    ):
+        return []
+    sizevars = V.graph.sizevars
+    dimension = next(
+        (
+            dim
+            for dim in (128, 256)
+            if sizevars.statically_known_equals(query.get_size()[3], dim)
+        ),
+        None,
+    )
+    if dimension is None:
+        return []
+    batch, heads, query_length, _ = query.get_size()
+    kv_heads, kv_length = key.get_size()[1:3]
+    if (
+        not all(
+            sizevars.statically_known_gt(size, 0)
+            for size in (batch, heads, query_length, kv_heads, kv_length)
+        )
+        or not all(
+            sizevars.statically_known_multiple_of(length, 128)
+            for length in (query_length, kv_length)
+        )
+        or kernel_options.get("IS_DIVISIBLE") is not True
+        or kernel_options.get("SAFE_HEAD_DIM") is not True
+        or type(kernel_options.get("SM_SCALE")) not in (int, float)
+        or kernel_options.get("SM_SCALE") != 1 / math.sqrt(dimension)
+        or not all(
+            kernel_options.get(name) is not None
+            and sizevars.statically_known_equals(kernel_options[name], dimension)
+            for name in (
+                "QK_HEAD_DIM",
+                "V_HEAD_DIM",
+                "QK_HEAD_DIM_ROUNDED",
+                "V_HEAD_DIM_ROUNDED",
+            )
+        )
+    ):
+        return []
+    gqa = 8 if dimension == 128 else kernel_options.get("GQA_SHARED_HEADS")
+    if gqa is None or not any(
+        sizevars.statically_known_equals(gqa, ratio)
+        for ratio in ((8,) if dimension == 128 else (1, 4))
+    ):
+        return []
+    if not sizevars.statically_known_equals(heads, kv_heads * gqa):
+        return []
+    causal = dimension == 128 and mask_is_causal is True
+    if causal:
+        if (
+            kernel_options.get("HAS_FULL_BLOCKS") is not True
+            or not sizevars.statically_known_equals(query_length, kv_length)
+            or not all(
+                kernel_options.get(name) is not None
+                and sizevars.statically_known_equals(kernel_options[name], 128)
+                for name in ("SPARSE_Q_BLOCK_SIZE", "SPARSE_KV_BLOCK_SIZE")
+            )
+        ):
+            return []
+    elif (
+        mask_is_scalar_true is not True
+        or block_mask_is_default is not True
+        or kernel_options.get("HAS_FULL_BLOCKS") is not False
+        or not all(
+            kernel_options.get(name) is not None
+            and sizevars.statically_known_equals(
+                kernel_options[name], _LARGE_SPARSE_BLOCK_SIZE
+            )
+            for name in ("SPARSE_Q_BLOCK_SIZE", "SPARSE_KV_BLOCK_SIZE")
+        )
+    ):
+        return []
+    device = query.get_device()
+    if getattr(device, "type", None) != "cuda":
+        return []
+    query_shape = (batch, heads, query_length, dimension)
+    kv_shape = (batch, kv_heads, kv_length, dimension)
+    stats_shape = (batch, heads, query_length)
+    operands: list[tuple[Any, tuple[Any, ...], torch.dtype]] = [
+        (query, query_shape, torch.bfloat16),
+        (key, kv_shape, torch.bfloat16),
+        (value, kv_shape, torch.bfloat16),
+        (input_nodes[3], stats_shape, torch.float32),
+        (input_nodes[4], stats_shape, torch.float32),
+        (input_nodes[5], query_shape, torch.bfloat16),
+        (out, query_shape, torch.bfloat16),
+    ]
+    if causal:
+        blocks = query_length // 128
+        operands.extend(
+            (
+                tensor,
+                (1, 1, blocks) if index % 2 == 0 else (1, 1, blocks, blocks),
+                torch.int32,
+            )
+            for index, tensor in enumerate(input_nodes[8:])
+        )
+    else:
+        operands.extend(
+            (tensor, (1, 1, 1) if index % 2 == 0 else (1, 1, 1, 1), torch.int32)
+            for index, tensor in enumerate(input_nodes[8:12])
+        )
+        operands.extend((tensor, (0,), torch.float32) for tensor in input_nodes[12:])
+    for tensor, shape, dtype in operands:
+        if (
+            tensor is None
+            or tensor.get_dtype() != dtype
+            or tensor.get_device() != device
+            or len(tensor.get_size()) != len(shape)
+            or len(tensor.get_stride()) != len(shape)
+            or not all(
+                sizevars.statically_known_equals(actual, expected)
+                for actual, expected in zip(tensor.get_size(), shape)
+            )
+        ):
+            return []
+        stride = 1
+        for size, actual in zip(reversed(shape), reversed(tensor.get_stride())):
+            if not sizevars.statically_known_equals(actual, stride):
+                return []
+            stride *= size
+    options = _get_rocm_backward_config_options(kernel_options, is_gfx950=True)
+    options.update(
+        USE_TMA=False,
+        ROCM_SEPARATE_DQ=True,
+        ROCM_EARLY_DP=True,
+        ROCM_D256_PANEL_DOTS=dimension == 256,
+        ROCM_XCD_SNAKE=False,
+        ROCM_D128_GQA_QUERY_TILE_OUTER=False,
+        ROCM_GQA_SPLIT_DKDV=False,
+        num_warps=4,
+        num_stages=2,
+        matrix_instr_nonkdim=0,
+        waves_per_eu=0,
+        kpack=1,
+    )
+    tiles = (32, 128, 128, 32) if dimension == 128 else (16, 64, 128, 32)
+    options.update(zip(("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2"), tiles))
+    if not _use_rocm_separate_dq(
+        True,
+        query,
+        key,
+        value,
+        options,
+        score_is_trivial,
+        has_captures,
+        mask_is_scalar_true=mask_is_scalar_true,
+        block_mask_is_default=block_mask_is_default,
+    ):
+        return []
+    return [dict(options, XCD_REMAP=remap) for remap in (False, True)]
 
 
 def _use_rocm_d256_panel_dots(
@@ -2264,7 +2483,9 @@ def flex_attention_backward_grid(
 flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward_rocm",
     grid=flex_attention_backward_grid,
-    source=load_flex_template("flex_backwards_rocm") + load_flex_template("utilities"),
+    source=load_flex_template("flex_backwards_rocm")
+    + load_flex_template("flex_backwards")
+    + load_flex_template("utilities"),
     always_freeze_layout=True,
 )
 
@@ -2299,6 +2520,8 @@ def create_backward_plan(
     bwd_subgraphs,
     dkdv_layout,
     layout_grad_query,
+    candidate_options=None,
+    profile_candidate=False,
 ):
     r"""Create gfx950 backward phase choices after device dispatch."""
     query, key, value, logsumexp, _, grad_out = bwd_input_nodes[:6]
@@ -2314,27 +2537,34 @@ def create_backward_plan(
     partial_grad_value = None
     dkdv_options = None
     split_dkdv = False
-    auto_options = _get_rocm_backward_auto_profile(
-        user_kernel_options,
-        cur_kernel_options,
-        bwd_input_nodes,
-        out,
-        backend=backend,
-        is_gfx950=is_gfx950,
-        single_config=single_config,
-        score_is_trivial=is_trivial_score_graph(fw_graph),
-        has_captures=bool(score_mod_other_buffers or mask_mod_other_buffers),
-        mask_is_causal=_is_rocm_simple_causal_mask_graph(mask_graph),
-        mask_is_scalar_true=_is_rocm_scalar_true_mask_graph(mask_graph),
-        block_mask_is_default=_is_rocm_default_block_mask(block_mask, query, key),
-        grad_logsumexp_is_none=grad_logsumexp is None,
-    )
-    active_rocm_requests = rocm_requests
-    if auto_options is not None:
-        active_rocm_requests = _normalize_rocm_backward_options(auto_options)
-        cur_kernel_options = _get_rocm_backward_config_options(
-            auto_options, is_gfx950=is_gfx950
+    auto_options = None
+    if candidate_options is None and not config.max_autotune:
+        auto_options = _get_rocm_backward_auto_profile(
+            user_kernel_options,
+            cur_kernel_options,
+            bwd_input_nodes,
+            out,
+            backend=backend,
+            is_gfx950=is_gfx950,
+            single_config=single_config,
+            score_is_trivial=is_trivial_score_graph(fw_graph),
+            has_captures=bool(score_mod_other_buffers or mask_mod_other_buffers),
+            mask_is_causal=_is_rocm_simple_causal_mask_graph(mask_graph),
+            mask_is_scalar_true=_is_rocm_scalar_true_mask_graph(mask_graph),
+            block_mask_is_default=_is_rocm_default_block_mask(block_mask, query, key),
+            grad_logsumexp_is_none=grad_logsumexp is None,
         )
+    active_rocm_requests = rocm_requests
+    selected_options = (
+        candidate_options if candidate_options is not None else auto_options
+    )
+    if selected_options is not None:
+        selected_options = selected_options.copy()
+        active_rocm_requests = _normalize_rocm_backward_options(selected_options)
+        cur_kernel_options = _get_rocm_backward_config_options(
+            selected_options, is_gfx950=is_gfx950
+        )
+        single_config = True
 
     fp32_balanced64_pilot = single_config and _use_rocm_d128_fp32_balanced64_coverage(
         is_gfx950,
@@ -2450,7 +2680,7 @@ def create_backward_plan(
             mask_is_scalar_true=_is_rocm_scalar_true_mask_graph(mask_graph),
             block_mask_is_default=_is_rocm_default_block_mask(block_mask, query, key),
             grad_logsumexp_is_none=grad_logsumexp is None,
-            is_automatic=auto_options is not None,
+            is_automatic=auto_options is not None or profile_candidate is True,
         )
         if split_dkdv:
             gqa_splits = (
@@ -2507,3 +2737,99 @@ def create_backward_plan(
         split_dkdv=split_dkdv,
         dkdv_layout=dkdv_layout,
     )
+
+
+def append_backward_autotune_choices(
+    choices,
+    bwd_input_nodes,
+    *,
+    cur_kernel_options,
+    user_kernel_options,
+    rocm_requests,
+    out,
+    backend,
+    fw_graph,
+    mask_graph,
+    block_mask,
+    grad_logsumexp,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    bwd_subgraphs,
+    dkdv_layout,
+    layout_grad_query,
+):
+    """Append complete split candidates while retaining the fused candidates."""
+    from .flex_rocm_backward_autotune import RocmBackwardChoiceCaller
+
+    query, key = bwd_input_nodes[:2]
+    kernel_options = _get_rocm_backward_config_options(
+        cur_kernel_options, is_gfx950=True
+    )
+    kernel_options.setdefault("USE_TMA", False)
+    kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", block_mask[14])
+    kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", block_mask[15])
+    kernel_options.setdefault("ROCM_D256_PANEL_DOTS", False)
+    kernel_options.setdefault("ROCM_XCD_SNAKE", False)
+    kernel_options.setdefault("ROCM_D128_GQA_QUERY_TILE_OUTER", False)
+    semantics = dict(
+        backend=backend,
+        is_gfx950=True,
+        score_is_trivial=is_trivial_score_graph(fw_graph),
+        has_captures=bool(score_mod_other_buffers or mask_mod_other_buffers),
+        mask_is_causal=_is_rocm_simple_causal_mask_graph(mask_graph),
+        mask_is_scalar_true=_is_rocm_scalar_true_mask_graph(mask_graph),
+        block_mask_is_default=_is_rocm_default_block_mask(block_mask, query, key),
+        grad_logsumexp_is_none=grad_logsumexp is None,
+    )
+    candidates = [
+        (options, False)
+        for options in _get_rocm_backward_autotune_options(
+            user_kernel_options,
+            kernel_options,
+            bwd_input_nodes,
+            out,
+            **semantics,
+        )
+    ]
+    profile = _get_rocm_backward_auto_profile(
+        user_kernel_options,
+        kernel_options,
+        bwd_input_nodes,
+        out,
+        single_config=True,
+        **semantics,
+    )
+    if profile is not None and not profile.get("ROCM_GQA_SPLIT_DKDV", False):
+        candidates.append((profile, True))
+    seen = OrderedSet([choice.hash_key() for choice in choices])
+    for options, profile_candidate in candidates:
+        plan = create_backward_plan(
+            bwd_input_nodes,
+            cur_kernel_options=kernel_options,
+            user_kernel_options=user_kernel_options,
+            rocm_requests=rocm_requests,
+            out=out,
+            backend=backend,
+            single_config=True,
+            fw_graph=fw_graph,
+            mask_graph=mask_graph,
+            block_mask=block_mask,
+            grad_logsumexp=grad_logsumexp,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            bwd_subgraphs=bwd_subgraphs,
+            dkdv_layout=dkdv_layout,
+            layout_grad_query=layout_grad_query,
+            candidate_options=options,
+            profile_candidate=profile_candidate,
+        )
+        if plan.split_dkdv or plan.partial_grad_value is not None:
+            continue
+        for dkdv in plan.dkdv_choices:
+            for dq in plan.dq_choices:
+                choice = RocmBackwardChoiceCaller(bwd_input_nodes, dkdv, dq)
+                choice_key = choice.hash_key()
+                if choice_key not in seen:
+                    choices.append(choice)
+                    seen.add(choice_key)
+    return choices

@@ -737,11 +737,11 @@ class TestTritonHeuristics(TestCase):
         with (
             patch.object(torch.version, "hip", hip_version),
             patch(
-                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                "torch._inductor.utils.tlx_only_hip_options",
                 return_value=tlx_options,
             ),
             patch(
-                "torch._inductor.runtime.triton_heuristics.tlx_only_cuda_options",
+                "torch._inductor.utils.tlx_only_cuda_options",
                 return_value=(),
             ),
             patch(

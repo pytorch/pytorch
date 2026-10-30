@@ -1,12 +1,39 @@
 # ROCm backward implementation
 
 `flex_rocm_backward.py` owns gfx950 profile selection, eligibility checks, and separate backward phase configuration.
-`templates/flex_backwards_rocm.py.jinja` contains the ROCm kernel variants.
-Other hardware uses `templates/flex_backwards.py.jinja`.
+`templates/flex_backwards.py.jinja` contains the common backward body.
+Its extension points use the common implementation unless an override is defined.
+`templates/flex_backwards_rocm.py.jinja` defines ROCm overrides and additional helpers.
+The ROCm template combines these overrides with the common body.
+Updates to shared code therefore reach both templates.
+Changed operations still require review of the corresponding ROCm overrides.
+
+Unoptimized candidates use the generic template and grid, including gfx950 opt-out and unsupported inputs.
+Explicit fused optimizations use the ROCm template only while their validated options remain enabled.
+Qualified split paths use the ROCm template for their separate phases.
 Both templates use `templates/utilities.py.jinja` for checked loads and sparse-block offsets.
 
 The controls below are internal implementation details for tests and tuning.
 Use `BACKEND` and `bwd_ROCM_SEPARATE_DQ=False` through `FlexKernelOptions` for backend selection and automatic-profile opt-out.
+
+With `max_autotune`, legal BF16 D128 and D256 split plans compete with the fused candidates.
+Candidate eligibility permits different positive batch sizes and sequence lengths divisible by 128.
+D128 supports GQA8 with a default dense mask or a simple causal mask.
+D256 supports GQA1 or GQA4 with the default dense mask.
+The existing layout, dtype, mask, and option guards still apply.
+The measured default profile table does not restrict these candidates.
+Existing measured profiles also provide split candidates within their validated input limits.
+These candidates retain their measured phase configurations.
+Plans that require partial-gradient workspace and reductions remain excluded from this candidate pool.
+
+Each split candidate benchmarks dK/dV and dQ in one launch sequence.
+The tuner compares that sequence with the retained fused candidates.
+Every candidate shares the same Delta computation outside this comparison.
+These candidates require no partial-gradient workspace or reduction.
+Subprocess benchmarks reconstruct the same sparse metadata as in-process benchmarks.
+Simple causal candidates use diagonal partial blocks and triangular full blocks during benchmarking.
+Explicit backward controls and custom backward choice pools retain their existing behavior.
+The measured default profiles still apply outside `max_autotune`.
 
 Automatic FP16 D64 selection uses four owners per KV head with FP32 dK/dV partials.
 The reducer adds these partials before dK scaling and the final FP16 conversion.
@@ -62,8 +89,8 @@ In the tables below, tiles mean `(BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2)`.
 | D128 FP16 coverage | FP16 | 128 | `(4, 64, 8, 2048/4096)`, `(2, 64, 8, 2048/4096)`, `(1, 64, 8, 4096)` | `(32, 128, 128, 32)` | 4 / 2 |
 | D128 FP32 coverage | FP32 | 128 | `(1/2/4, 64, 8, 2048/4096)` | `(16, 64, 64, 16)` | 4 / 1 |
 
-Split selection requires one backward configuration.
-Additional autotuning configurations disable these split paths.
+Explicit split selection requires one backward configuration.
+The split autotune candidates above also support multiple fused configurations.
 The backward choices hook uses the fused kernel interface.
 When the hook changes its candidate pool, fused choices take precedence over split execution.
 Explicit D96 and D192 panel requests require `matrix_instr_nonkdim=0`, `waves_per_eu=0`, and `kpack=1`.

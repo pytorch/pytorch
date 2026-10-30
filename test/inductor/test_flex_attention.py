@@ -31,7 +31,7 @@ from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_kernels
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -625,6 +625,69 @@ def _tdm_operand(name, stride, size=(2, 4, 128, 64), offset=0, dtype=torch.float
 # Host-side gate logic. Device capability is mocked, so these are not ROCm-only:
 # running them on CUDA and XPU builds is what keeps the gate honest there too.
 class TestFlexAttentionROCmOptions(InductorTestCase):
+    @common_utils.parametrize("is_gfx950", (False, True))
+    @common_utils.parametrize("enabled", (False, True))
+    @common_utils.parametrize(
+        "option",
+        (
+            None,
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "ROCM_D256_PANEL_DOTS",
+            "ROCM_XCD_SNAKE",
+            "ROCM_SEPARATE_DQ",
+        ),
+    )
+    def test_backward_template_selection(self, is_gfx950, enabled, option):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_backward_template,
+        )
+
+        options = {} if option is None else {option: enabled}
+        self.assertEqual(
+            _use_rocm_backward_template(is_gfx950, options),
+            is_gfx950 and enabled and option not in (None, "ROCM_SEPARATE_DQ"),
+        )
+
+    @common_utils.parametrize("early_dp", (False, True))
+    def test_backward_templates_share_subgraph_hooks(self, early_dp):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        _, _, options = self._backward_auto_profile_inputs()
+        options = flex_kernel_mod.rocm_backward._get_rocm_backward_config_options(
+            options, is_gfx950=True
+        )
+        options.update(
+            ROCM_EARLY_DP=early_dp,
+            ROCM_D256_PANEL_DOTS=False,
+            ROCM_XCD_SNAKE=False,
+        )
+        calls = []
+        callbacks = dict(
+            def_kernel=lambda *args: "def backward_kernel():",
+            gen_argdefs=lambda: "shared_args",
+            gen_defines=lambda: "",
+            size=lambda name, index: 512,
+            stride=lambda name, index=None: "(1, 1, 1, 1)" if index is None else 1,
+            store_output=lambda *args, **kwargs: "pass",
+            modification=lambda **kwargs: calls.append(kwargs) or "pass",
+        )
+        generic = flex_kernel_mod.flex_attention_backward_template.template.render(
+            **options, **callbacks
+        )
+        generic_calls = list(calls)
+        calls.clear()
+        rocm = flex_kernel_mod.rocm_backward.flex_attention_backward_template.template.render(
+            **options, **callbacks
+        )
+        self.assertTrue(generic_calls)
+        self.assertEqual(calls, generic_calls)
+        boundary_mask = (
+            'tl.where(offs_m1[None, :] < Q_LEN, post_mod_scores, float("-inf"))'
+        )
+        for source in (generic, rocm):
+            self.assertIn(boundary_mask, source)
+
     def test_backward_public_options(self):
         from torch.nn.attention.flex_attention import (
             _KernelOptionsWithInternals,
@@ -709,9 +772,12 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         )
         return nodes, out, options
 
-    def _backward_auto_profile(self, nodes, out, options, user_options=None, **flags):
+    def _backward_auto_profile(
+        self, nodes, out, options, user_options=None, *, autotune=False, **flags
+    ):
         from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_auto_profile,
+            _get_rocm_backward_autotune_options,
             _is_rocm_scalar_true_mask_graph,
             _is_rocm_simple_causal_mask_graph,
         )
@@ -743,8 +809,12 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
             grad_logsumexp_is_none=True,
         )
         defaults.update(flags)
+        select_options = _get_rocm_backward_auto_profile
+        if autotune:
+            defaults.pop("single_config")
+            select_options = _get_rocm_backward_autotune_options
         with V.set_graph_handler(_tdm_graph()):
-            return _get_rocm_backward_auto_profile(
+            return select_options(
                 {
                     "PRESCALE_QK": False,
                     "ROWS_GUARANTEED_SAFE": False,
@@ -760,6 +830,492 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
                 out,
                 **defaults,
             )
+
+    @common_utils.parametrize(
+        "dim,heads,kv_heads,mask",
+        (
+            (128, 8, 1, "causal"),
+            (128, 8, 1, "dense"),
+            (256, 4, 1, "dense"),
+            (256, 4, 4, "dense"),
+        ),
+    )
+    @common_utils.parametrize("length", (1024, 8192))
+    def test_backward_autotune_nearby_shapes(self, dim, heads, kv_heads, mask, length):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16,
+            batch=3,
+            length=length,
+            dim=dim,
+            heads=heads,
+            kv_heads=kv_heads,
+        )
+        flags = {}
+        if dim == 128 and mask == "dense":
+            dense_nodes, _, dense_options = self._backward_auto_profile_inputs(dim=256)
+            nodes[8:] = dense_nodes[8:]
+            sparse_options = (
+                "HAS_FULL_BLOCKS",
+                "SPARSE_Q_BLOCK_SIZE",
+                "SPARSE_KV_BLOCK_SIZE",
+            )
+            for name in sparse_options:
+                options[name] = dense_options[name]
+            flags.update(
+                mask_is_causal=False,
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+            )
+        original = dict(options)
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+        candidates = self._backward_auto_profile(
+            nodes, out, options, autotune=True, **flags
+        )
+        self.assertEqual(options, original)
+        self.assertEqual(len(candidates), 2)
+        remaps = {candidate["XCD_REMAP"] for candidate in candidates}
+        self.assertEqual(remaps, {False, True})
+        for candidate in candidates:
+            self.assertIs(candidate["ROCM_SEPARATE_DQ"], True)
+            self.assertIs(candidate["ROCM_EARLY_DP"], True)
+            self.assertIs(candidate["ROCM_D256_PANEL_DOTS"], dim == 256)
+
+    @common_utils.parametrize("dim", (128, 256))
+    @common_utils.parametrize(
+        "case",
+        (
+            "architecture",
+            "backend",
+            "score",
+            "capture",
+            "mask",
+            "grad_lse",
+            "scale",
+            "prescale",
+            "tma",
+            "dtype",
+            "stride",
+            "length",
+            "gqa",
+        ),
+    )
+    def test_backward_autotune_fallback(self, dim, case):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16,
+            batch=3,
+            length=8192 if case != "length" else 8193,
+            dim=dim,
+            heads=8 if dim == 128 else 4,
+            kv_heads=1,
+        )
+        flags = {
+            "architecture": dict(is_gfx950=False),
+            "backend": dict(backend="FLASH"),
+            "score": dict(score_is_trivial=False),
+            "capture": dict(has_captures=True),
+            "mask": dict(mask_is_causal=False, mask_is_scalar_true=False),
+            "grad_lse": dict(grad_logsumexp_is_none=False),
+        }
+        if case == "scale":
+            options["SM_SCALE"] = 0.0
+        elif case == "prescale":
+            options["PRESCALE_QK"] = True
+        elif case == "tma":
+            options["USE_TMA"] = True
+        elif case == "gqa":
+            options["GQA_SHARED_HEADS"] = 2
+        elif case in ("dtype", "stride"):
+            stride = list(nodes[0].get_stride())
+            if case == "stride":
+                stride[-1] = 2
+            nodes[0] = _tdm_operand(
+                "invalid_autotune_query",
+                stride,
+                size=nodes[0].get_size(),
+                dtype=torch.float16 if case == "dtype" else torch.bfloat16,
+            )
+        self.assertEqual(
+            self._backward_auto_profile(
+                nodes, out, options, autotune=True, **flags.get(case, {})
+            ),
+            [],
+        )
+
+    @common_utils.parametrize(
+        "dtype,batch,dim,heads,kv_heads",
+        (
+            (torch.float16, 2, 128, 64, 8),
+            (torch.float32, 1, 128, 64, 8),
+            (torch.bfloat16, 2, 96, 8, 2),
+            (torch.bfloat16, 4, 96, 21, 21),
+            (torch.bfloat16, 2, 192, 8, 2),
+        ),
+    )
+    @config.patch(max_autotune=True)
+    def test_backward_autotune_measured_profile_phases(
+        self, dtype, batch, dim, heads, kv_heads
+    ):
+        from torch._inductor.kernel.flex import flex_rocm_backward as rocm
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            dtype, batch=batch, length=2048, dim=dim, heads=heads, kv_heads=kv_heads
+        )
+        profile = self._backward_auto_profile(nodes, out, options)
+        self.assertIsNotNone(profile)
+        original_profile = dict(profile)
+        fw = torch.fx.Graph()
+        fw.output(fw.placeholder("score"))
+        mask = torch.fx.Graph()
+        indices = [mask.placeholder(name) for name in ("b", "h", "q", "kv")]
+        mask.output(
+            mask.call_function(torch.ops.aten.ge.Tensor, (indices[2], indices[3]))
+            if dim == 128
+            else mask.call_function(
+                torch.ops.aten.full.default, ([], True), {"dtype": torch.bool}
+            )
+        )
+        block_mask = [
+            1,
+            1,
+            nodes[8],
+            nodes[9],
+            None,
+            None,
+            nodes[10],
+            nodes[11],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            options["SPARSE_Q_BLOCK_SIZE"],
+            options["SPARSE_KV_BLOCK_SIZE"],
+        ]
+        requests = rocm._normalize_rocm_backward_options(dict(options))
+        with (
+            V.set_graph_handler(_tdm_graph()),
+            mock.patch.object(
+                rocm.flex_attention_backward_template, "maybe_append_choice"
+            ) as append,
+        ):
+            rocm.create_backward_plan(
+                nodes,
+                cur_kernel_options=options,
+                user_kernel_options={},
+                rocm_requests=requests,
+                out=out,
+                backend="TRITON",
+                single_config=False,
+                fw_graph=torch.fx.GraphModule({}, fw),
+                mask_graph=torch.fx.GraphModule({}, mask),
+                block_mask=block_mask,
+                grad_logsumexp=None,
+                score_mod_other_buffers=(),
+                mask_mod_other_buffers=(),
+                bwd_subgraphs=[],
+                dkdv_layout=nodes[1].get_layout(),
+                layout_grad_query=out.get_layout(),
+                candidate_options=profile,
+                profile_candidate=True,
+            )
+        self.assertEqual(profile, original_profile)
+        self.assertEqual(append.call_count, 2)
+        dkdv, dq = [call.kwargs for call in append.call_args_list]
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        if dim == 128:
+            self.assertIs(dq["ROCM_D128_REVERSE_DQ_ROWS"], True)
+        elif dim == 96:
+            self.assertIs(dq["ROCM_D96_DQ_UNROLL2"], heads == 21)
+            if heads == 8:
+                self.assertEqual((dkdv["BLOCK_N1"], dkdv["num_stages"]), (32, 1))
+        else:
+            self.assertIs(dq["ROCM_D192_DQ_EARLY_DP"], True)
+
+    @common_utils.parametrize(
+        "profile_kind", ("valid", "workspace", "gqa", "duplicate")
+    )
+    def test_backward_autotune_profile_registration(self, profile_kind):
+        from torch._inductor.kernel.flex import (
+            flex_rocm_backward as rocm,
+            flex_rocm_backward_autotune as autotune,
+        )
+        from torch._inductor.virtualized import V
+
+        class Choice:
+            def __init__(self, key):
+                self.key = key
+
+            def hash_key(self):
+                return self.key
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch=3, length=1024, heads=8, kv_heads=1
+        )
+        fw = torch.fx.Graph()
+        fw.output(fw.placeholder("score"))
+        mask = torch.fx.Graph()
+        indices = [mask.placeholder(name) for name in ("b", "h", "q", "kv")]
+        mask.output(
+            mask.call_function(torch.ops.aten.ge.Tensor, (indices[2], indices[3]))
+        )
+        block_mask = [None] * 14 + [128, 128]
+        block_mask[:2] = [1, 1]
+        profile = {"candidate": "profile", "ROCM_GQA_SPLIT_DKDV": profile_kind == "gqa"}
+        stock = Choice("stock")
+        choices = [stock]
+
+        def create_plan(*args, candidate_options, profile_candidate, **kwargs):
+            self.assertEqual(profile_candidate, candidate_options is profile)
+            key = candidate_options["candidate"]
+            if profile_kind == "duplicate":
+                key = "broad"
+            return types.SimpleNamespace(
+                split_dkdv=False,
+                partial_grad_value=object()
+                if profile_candidate and profile_kind == "workspace"
+                else None,
+                dkdv_choices=[Choice(key)],
+                dq_choices=[Choice("dq")],
+            )
+
+        def combine(inputs, dkdv, dq):
+            self.assertIs(inputs, nodes)
+            return Choice("split_" + dkdv.key)
+
+        with (
+            V.set_graph_handler(_tdm_graph()),
+            mock.patch.object(
+                rocm,
+                "_get_rocm_backward_autotune_options",
+                return_value=[{"candidate": "broad"}],
+            ),
+            mock.patch.object(
+                rocm, "_get_rocm_backward_auto_profile", return_value=profile
+            ) as select_profile,
+            mock.patch.object(
+                rocm, "create_backward_plan", side_effect=create_plan
+            ) as plans,
+            mock.patch.object(
+                autotune, "RocmBackwardChoiceCaller", side_effect=combine
+            ),
+        ):
+            result = rocm.append_backward_autotune_choices(
+                choices,
+                nodes,
+                cur_kernel_options=options,
+                user_kernel_options={},
+                rocm_requests=rocm._normalize_rocm_backward_options(dict(options)),
+                out=out,
+                backend="TRITON",
+                fw_graph=torch.fx.GraphModule({}, fw),
+                mask_graph=torch.fx.GraphModule({}, mask),
+                block_mask=block_mask,
+                grad_logsumexp=None,
+                score_mod_other_buffers=(),
+                mask_mod_other_buffers=(),
+                bwd_subgraphs=[],
+                dkdv_layout=nodes[1].get_layout(),
+                layout_grad_query=out.get_layout(),
+            )
+        self.assertIs(result, choices)
+        self.assertIs(choices[0], stock)
+        self.assertEqual(
+            [choice.hash_key() for choice in choices],
+            ["stock", "split_broad", "split_profile"]
+            if profile_kind == "valid"
+            else ["stock", "split_broad"],
+        )
+        self.assertIs(select_profile.call_args.kwargs["single_config"], True)
+        self.assertEqual(
+            [call.kwargs["profile_candidate"] for call in plans.call_args_list],
+            [False] if profile_kind == "gqa" else [False, True],
+        )
+
+    @common_utils.parametrize("prefix", ("", "bwd_", "fwd_"))
+    @common_utils.parametrize(
+        "option",
+        (
+            "ROCM_SEPARATE_DQ",
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "BLOCK_M1",
+            "BLOCK_N1",
+            "BLOCK_M2",
+            "BLOCK_N2",
+            "num_warps",
+            "num_stages",
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+        ),
+    )
+    def test_backward_autotune_option_scope(self, prefix, option):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch=3, length=8192, heads=8, kv_heads=1
+        )
+        user_options = {prefix + option: False if option.startswith("ROCM_") else 1}
+        original = dict(user_options)
+        candidates = self._backward_auto_profile(
+            nodes, out, options, user_options, autotune=True
+        )
+        self.assertEqual(user_options, original)
+        self.assertEqual(len(candidates), 2 if prefix == "fwd_" else 0)
+
+    def test_backward_split_benchmark_complete_plan(self):
+        import pickle
+
+        from torch._inductor.autotune_process import TensorMeta, TritonBenchmarkRequest
+        from torch._inductor.kernel.flex.flex_rocm_backward_autotune import (
+            RocmBackwardBenchmarkRequest,
+        )
+
+        metadata = [
+            TensorMeta(torch.device("cpu"), torch.float32, (2,), (1,), 0, name)
+            for name in ("query", "grad_query", "grad_value")
+        ]
+        children = []
+        for name, inputs, output in (
+            ("dkdv", [metadata[0], metadata[2]], metadata[2]),
+            ("dq", [metadata[2], metadata[0]], metadata[1]),
+        ):
+            children.append(
+                TritonBenchmarkRequest(
+                    kernel_name=name,
+                    input_tensor_meta=inputs,
+                    output_tensor_meta=output,
+                    extra_args=(),
+                    module_path=name,
+                    module_cache_key=name,
+                    num_stages=2,
+                    num_warps=4,
+                )
+            )
+        request = pickle.loads(
+            pickle.dumps(RocmBackwardBenchmarkRequest(metadata, *children, 1))
+        )
+        query, grad_query, grad_value = torch.ones(2), torch.zeros(2), torch.zeros(2)
+        output = torch.empty(2)
+        events = []
+
+        def dkdv_run(query, grad_value, *, out):
+            self.assertIs(out, output)
+
+            def run():
+                events.append("dkdv")
+                grad_value.copy_(query * 2)
+                out.copy_(grad_value)
+
+            return run
+
+        def dq_run(grad_value, query, *, out):
+            self.assertIs(out, grad_query)
+
+            def run():
+                events.append("dq")
+                out.copy_(grad_value + query)
+
+            return run
+
+        def measure(run, *inputs, out):
+            self.assertEqual(events, [])
+            run()
+            return 7.0
+
+        with (
+            mock.patch.object(request.dkdv, "make_run_fn", side_effect=dkdv_run),
+            mock.patch.object(request.dq, "make_run_fn", side_effect=dq_run),
+            mock.patch.object(
+                request, "benchmark_run_fn", side_effect=measure
+            ) as benchmark,
+            mock.patch.object(
+                request.dkdv,
+                "benchmark",
+                side_effect=AssertionError("Unexpected child timing"),
+            ),
+            mock.patch.object(
+                request.dq,
+                "benchmark",
+                side_effect=AssertionError("Unexpected child timing"),
+            ),
+            mock.patch.object(request.dkdv, "cleanup_run_fn"),
+            mock.patch.object(request.dq, "cleanup_run_fn"),
+        ):
+            elapsed = request.benchmark(query, grad_query, grad_value, out=output)
+        self.assertEqual(elapsed, 7.0)
+        self.assertEqual(benchmark.call_count, 1)
+        self.assertEqual(events, ["dkdv", "dq"])
+        self.assertEqual(output, torch.full((2,), 2.0))
+        self.assertEqual(grad_query, torch.full((2,), 3.0))
+
+    @common_utils.parametrize("dim,causal", ((128, False), (256, False), (128, True)))
+    def test_backward_split_benchmark_sparse_inputs(self, dim, causal):
+        import pickle
+
+        from torch._inductor.autotune_process import TensorMeta, TritonBenchmarkRequest
+        from torch._inductor.ir import Buffer, FixedLayout
+        from torch._inductor.kernel.flex.flex_rocm_backward_autotune import (
+            prepare_backward_benchmark_requests,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, _, _ = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch=3, length=512 if causal else 8192, dim=dim
+        )
+        for index in range(8, 16):
+            node = nodes[index]
+            nodes[index] = Buffer(
+                name=node.get_name(),
+                layout=FixedLayout(
+                    torch.device("cpu"),
+                    node.get_dtype(),
+                    node.get_size(),
+                    node.get_stride(),
+                ),
+            )
+        with V.set_graph_handler(_tdm_graph()):
+            metadata = TensorMeta.from_irnodes(nodes[8:])
+            request = TritonBenchmarkRequest(
+                kernel_name="sparse_probe",
+                input_tensor_meta=metadata,
+                output_tensor_meta=metadata[0],
+                extra_args=(),
+                module_path="sparse_probe",
+                module_cache_key="sparse_probe",
+                num_stages=2,
+                num_warps=4,
+            )
+            generators = prepare_backward_benchmark_requests(
+                [types.SimpleNamespace(bmreq=request)], nodes, causal=causal
+            )
+        restored = pickle.loads(pickle.dumps(request))
+        self.assertEqual(set(generators), set(range(8, 16)))
+        causal_values = (
+            (1, 1, 1, 1),
+            ((0, 0, 0, 0), (1, 1, 1, 1), (2, 2, 2, 2), (3, 3, 3, 3)),
+            (1, 1, 1, 1),
+            ((0, 0, 0, 0), (1, 1, 1, 1), (2, 2, 2, 2), (3, 3, 3, 3)),
+            (0, 1, 2, 3),
+            ((0, 1, 2, 3), (0, 1, 2, 3), (0, 1, 2, 3), (0, 1, 2, 3)),
+            (3, 2, 1, 0),
+            ((1, 2, 3, 3), (2, 3, 3, 3), (3, 3, 3, 3), (3, 3, 3, 3)),
+        )
+        for index, meta in enumerate(restored.input_tensor_meta):
+            tensor = meta.to_tensor()
+            if causal:
+                expected = torch.tensor(causal_values[index], dtype=meta.dtype).reshape(
+                    meta.sizes
+                )
+            elif index % 2 == 0:
+                width = restored.input_tensor_meta[index + 1].sizes[-1]
+                expected = torch.full(meta.sizes, width, dtype=meta.dtype)
+            else:
+                expected = torch.arange(meta.sizes[-1], dtype=meta.dtype).expand(
+                    meta.sizes
+                )
+            self.assertEqual(tensor, expected)
+            self.assertEqual(generators[index + 8](nodes[index + 8]), tensor)
 
     @common_utils.parametrize(
         "dtype,batch,length,dim,heads,kv_heads",
@@ -8356,6 +8912,55 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             device, torch.bfloat16, 64, 64, "dense", True, True, arch="gfx942"
         )
 
+    @contextmanager
+    def _observe_gfx950_backward_templates(self, callback=None):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        generic = flex_kernel_mod.flex_attention_backward_template
+        rocm = flex_kernel_mod.rocm_backward.flex_attention_backward_template
+        originals = {
+            template: template.maybe_append_choice for template in (generic, rocm)
+        }
+
+        def append(template, *args, **kwargs):
+            specialized = kwargs.get("ROCM_BWD_PHASE", 0) != 0 or any(
+                kwargs.get(option, False)
+                for option in (
+                    "ROCM_EARLY_DP",
+                    "XCD_REMAP",
+                    "ROCM_D256_PANEL_DOTS",
+                    "ROCM_XCD_SNAKE",
+                )
+            )
+            self.assertIs(template, rocm if specialized else generic)
+            original = originals[template]
+            if callback is not None:
+                return callback(original, *args, **kwargs)
+            return original(*args, **kwargs)
+
+        observed = mock.Mock(side_effect=append)
+        with contextlib.ExitStack() as stack:
+            for template in (generic, rocm):
+                stack.enter_context(
+                    mock.patch.object(
+                        template,
+                        "maybe_append_choice",
+                        side_effect=functools.partial(observed, template),
+                    )
+                )
+            yield observed
+
+    def _gfx950_backward_constants(self, parsed):
+        import ast
+
+        return {
+            node.target.id: node.value.value
+            for node in ast.walk(parsed)
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+        }
+
     def _run_gfx950_backward_options(
         self, device, dtype, qk_dim, v_dim, mask, early_dp, xcd_remap, *, arch="gfx950"
     ):
@@ -8418,18 +9023,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             architecture_patch = mock.patch.object(
                 flex_kernel_mod, "torch", lowering_torch
             )
-        backward_template = (
-            flex_kernel_mod.rocm_backward.flex_attention_backward_template
-            if arch == "gfx950"
-            else flex_kernel_mod.flex_attention_backward_template
-        )
         with (
             architecture_patch,
-            mock.patch.object(
-                backward_template,
-                "maybe_append_choice",
-                wraps=backward_template.maybe_append_choice,
-            ) as choices,
+            self._observe_gfx950_backward_templates() as choices,
         ):
             out = torch.compile(attention, fullgraph=True)(q, k, v)
             gradients = torch.autograd.grad(out, inputs, grad_out)
@@ -8501,8 +9097,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     def _run_gfx950_d256_xcd_snake(self, device, gqa, q_len, kv_len, scale, capture):
         import re
-
-        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
 
         if (
             not torch.version.hip
@@ -8606,9 +9200,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
                     choices = []
-                    original_append = flex_kernel_mod.rocm_backward.flex_attention_backward_template.maybe_append_choice
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choices.append(
                             (
                                 kwargs["ROCM_XCD_SNAKE"],
@@ -8635,12 +9228,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                             out, inputs, do, retain_graph=True
                         )
 
-                    with mock.patch.object(
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template,
-                        "maybe_append_choice",
-                        side_effect=append_choice,
-                    ):
-                        (out, gradients), code = run_and_get_code(invoke)
+                    with self._observe_gfx950_backward_templates(append_choice):
+                        (out, gradients), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     active = requested and capture == "none"
                     self.assertEqual(choices, [(active, 0, 1, (32, 64, 64, 64), 4, 1)])
@@ -8907,14 +9498,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
 
-        template = flex_kernel_mod.rocm_backward.flex_attention_backward_template
-        original_append, original_select = (
-            template.maybe_append_choice,
-            flex_kernel_mod.autotune_select_algorithm,
-        )
+        original_select = flex_kernel_mod.autotune_select_algorithm
         choice_metadata, selected = {}, []
 
-        def append_choice(*args, **kwargs):
+        def append_choice(original_append, *args, **kwargs):
             choices = kwargs["choices"]
             count = len(choices)
             result = original_append(*args, **kwargs)
@@ -8933,9 +9520,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return result
 
         with (
-            mock.patch.object(
-                template, "maybe_append_choice", wraps=append_choice
-            ) as choices,
+            self._observe_gfx950_backward_templates(append_choice) as choices,
             mock.patch.object(
                 flex_kernel_mod, "autotune_select_algorithm", wraps=select_algorithm
             ),
@@ -9212,14 +9797,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 for do in grad_outputs
             )
             controls.append((default_out, default_gradients))
-        template = flex_kernel_mod.rocm_backward.flex_attention_backward_template
-        original_append, original_select = (
-            template.maybe_append_choice,
-            flex_kernel_mod.autotune_select_algorithm,
-        )
+        original_select = flex_kernel_mod.autotune_select_algorithm
         choice_metadata, selected = {}, []
 
-        def append_choice(*args, **kwargs):
+        def append_choice(original_append, *args, **kwargs):
             choices, count = kwargs["choices"], len(kwargs["choices"])
             result = original_append(*args, **kwargs)
             for choice in choices[count:]:
@@ -9236,9 +9817,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return result
 
         with (
-            mock.patch.object(
-                template, "maybe_append_choice", wraps=append_choice
-            ) as choices,
+            self._observe_gfx950_backward_templates(append_choice) as choices,
             mock.patch.object(
                 flex_kernel_mod, "autotune_select_algorithm", wraps=select_algorithm
             ),
@@ -9520,17 +10099,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             architecture_patch = mock.patch.object(
                 flex_kernel_mod, "torch", lowering_torch
             )
-        template = (
-            flex_kernel_mod.flex_attention_backward_template
-            if fallback == "architecture"
-            else flex_kernel_mod.rocm_backward.flex_attention_backward_template
-        )
-        original_append = template.maybe_append_choice
         original_select = flex_kernel_mod.autotune_select_algorithm
         choice_phases = {}
         selected_phases = []
 
-        def append_choice(*args, **kwargs):
+        def append_choice(original_append, *args, **kwargs):
             choices = kwargs["choices"]
             original_count = len(choices)
             result = original_append(*args, **kwargs)
@@ -9547,9 +10120,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         with (
             architecture_patch,
-            mock.patch.object(
-                template, "maybe_append_choice", wraps=append_choice
-            ) as choices,
+            self._observe_gfx950_backward_templates(append_choice) as choices,
             mock.patch.object(
                 flex_kernel_mod, "autotune_select_algorithm", wraps=select_algorithm
             ) as selections,
@@ -11231,6 +11802,144 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ):
             out_mixed = (compiled_fn(q, k, v, _identity)).mean()
             out_mixed.backward()
+
+    @supported_platform
+    @common_utils.parametrize(
+        "dtype,batch,dim,length,heads,kv_heads,mask",
+        (
+            (torch.bfloat16, 3, 128, 1024, 8, 1, "causal"),
+            (torch.bfloat16, 3, 128, 1024, 8, 1, "dense"),
+            (torch.bfloat16, 3, 256, 8192, 4, 1, "dense"),
+            (torch.bfloat16, 4, 64, 4096, 64, 8, "dense"),
+            (torch.float16, 2, 128, 2048, 64, 8, "causal"),
+            (torch.float32, 1, 128, 2048, 64, 8, "causal"),
+            (torch.bfloat16, 2, 96, 2048, 8, 2, "dense"),
+            (torch.bfloat16, 2, 192, 2048, 8, 2, "dense"),
+        ),
+    )
+    @config.patch(
+        fx_graph_cache=False,
+        max_autotune=True,
+        max_autotune_gemm=False,
+        compile_threads=1,
+        emulate_precision_casts=False,
+    )
+    def test_gfx950_backward_max_autotune_candidates(
+        self, device, dtype, batch, dim, length, heads, kv_heads, mask
+    ):
+        from torch._functorch import config as aot_config
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.heuristics.template.triton import FlexBwDConfig
+        from torch._inductor.kernel.flex.flex_rocm_backward_autotune import (
+            RocmBackwardChoiceCaller,
+        )
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        generator = torch.Generator(device=device).manual_seed(20261029)
+        inputs = tuple(
+            (
+                torch.randn(
+                    (batch, count, length, dim),
+                    device=device,
+                    dtype=dtype,
+                    generator=generator,
+                )
+                * 0.5
+            ).requires_grad_()
+            for count in (heads, kv_heads, kv_heads)
+        )
+        grad_out = (
+            torch.randn(
+                inputs[0].shape,
+                device=device,
+                dtype=dtype,
+                generator=generator,
+            )
+            * 0.25
+        )
+        block_mask = (
+            create_block_mask(
+                lambda b, h, q, kv: q >= kv,
+                None,
+                None,
+                length,
+                length,
+                device=device,
+            )
+            if mask == "causal"
+            else None
+        )
+
+        def attention(query, key, value):
+            return flex_attention(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                enable_gqa=True,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+
+        original_fwd_configs = InductorChoices.get_flex_attention_fwd_configs
+
+        def fwd_configs(handler, *args, **kwargs):
+            return original_fwd_configs(handler, *args, **kwargs)[:1]
+
+        results = []
+        for force_split in (False, True):
+            torch._dynamo.reset()
+            measured = []
+
+            def select(handler, best, timings):
+                split = [
+                    choice
+                    for choice in timings
+                    if isinstance(choice, RocmBackwardChoiceCaller)
+                ]
+                if not split:
+                    return best
+                stock = [choice for choice in timings if choice not in split]
+                self.assertTrue(stock)
+                self.assertTrue(any(math.isfinite(timings[choice]) for choice in stock))
+                self.assertTrue(all(math.isfinite(timings[choice]) for choice in split))
+                measured.append(dict(timings))
+                choices = split if force_split else stock
+                return min(choices, key=timings.__getitem__)
+
+            with (
+                temp_float32_matmul_precision("highest"),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+                mock.patch.object(
+                    InductorChoices,
+                    "get_flex_attention_fwd_configs",
+                    autospec=True,
+                    side_effect=fwd_configs,
+                ),
+                mock.patch.object(
+                    InductorChoices,
+                    "get_flex_attention_bwd_configs",
+                    return_value=[FlexBwDConfig(32, 128, 128, 32, 2, 4)],
+                ),
+                mock.patch.object(
+                    InductorChoices,
+                    "override_best_choice",
+                    autospec=True,
+                    side_effect=select,
+                ),
+            ):
+                output = torch.compile(attention, fullgraph=True)(*inputs)
+                gradients = torch.autograd.grad(output, inputs, grad_out)
+                results.append((output.detach(), *gradients))
+            self.assertEqual(len(measured), 1)
+        self._check_gfx950_xcd_snake_values(results[1], results[0], strict=True)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -15558,13 +16267,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     original_load = PyCodeCache.load_by_key_path
 
@@ -15573,7 +16276,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -15629,16 +16332,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     panel_active = fallback not in (
                         "sequence1024",
@@ -15732,13 +16435,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -15981,13 +16678,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     original_load = PyCodeCache.load_by_key_path
 
@@ -15996,7 +16687,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -16052,16 +16743,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     panel_active = fallback not in (
                         "short",
@@ -16147,13 +16838,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -16393,13 +17078,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     original_load = PyCodeCache.load_by_key_path
 
@@ -16408,7 +17087,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -16464,16 +17143,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     separate_active = fallback not in ("score_capture", "mask_capture")
                     active = requested and fallback is None
@@ -16550,13 +17229,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -16762,13 +17435,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     automatic_options_by_choice, selected_automatic_options = {}, []
                     original_load = PyCodeCache.load_by_key_path
@@ -16778,7 +17445,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -16855,16 +17522,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     active = requested and fallback is None
                     phases = [1, 2] if active else [0]
@@ -16956,13 +17623,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -17176,13 +17837,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     original_load = PyCodeCache.load_by_key_path
 
@@ -17191,7 +17846,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -17265,16 +17920,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     active = requested and fallback is None
                     phases = [1, 2] if active else [0]
@@ -17376,13 +18031,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -17575,16 +18224,10 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected = [], {}, []
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -17626,16 +18269,16 @@ class GraphModule(torch.nn.Module):
                         )
 
                     with (
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     separate = fallback not in (
                         "causal",
@@ -17682,13 +18325,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -17916,13 +18553,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     original_load = PyCodeCache.load_by_key_path
 
@@ -17931,7 +18562,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -17987,16 +18618,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     panel_active = fallback not in (
                         "sequence1024",
@@ -18097,13 +18728,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if phase not in (0, 1, 2):
                                 continue
@@ -18528,13 +19153,7 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = (
-                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
-                    )
-                    original_append, original_select = (
-                        template.maybe_append_choice,
-                        flex_kernel_mod.autotune_select_algorithm,
-                    )
+                    original_select = flex_kernel_mod.autotune_select_algorithm
                     choices, choice_metadata, selected, modules = [], {}, [], []
                     original_load = PyCodeCache.load_by_key_path
 
@@ -18543,7 +19162,7 @@ class GraphModule(torch.nn.Module):
                         modules.append(module)
                         return module
 
-                    def append_choice(*args, **kwargs):
+                    def append_choice(original_append, *args, **kwargs):
                         choice_list, count = kwargs["choices"], len(kwargs["choices"])
                         metadata = (
                             kwargs["ROCM_BWD_PHASE"],
@@ -18601,16 +19220,16 @@ class GraphModule(torch.nn.Module):
                         mock.patch.object(
                             PyCodeCache, "load_by_key_path", side_effect=retain_module
                         ),
-                        mock.patch.object(
-                            template, "maybe_append_choice", side_effect=append_choice
-                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
                         mock.patch.object(
                             flex_kernel_mod,
                             "autotune_select_algorithm",
                             side_effect=select_algorithm,
                         ),
                     ):
-                        (out, initial), code = run_and_get_code(invoke)
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
                     torch.cuda.synchronize(device)
                     separate_active = (
                         requested
@@ -18745,13 +19364,7 @@ class GraphModule(torch.nn.Module):
                                 for node in parsed.body
                             ):
                                 continue
-                            constants = {
-                                node.target.id: node.value.value
-                                for node in ast.walk(parsed)
-                                if isinstance(node, ast.AnnAssign)
-                                and isinstance(node.target, ast.Name)
-                                and isinstance(node.value, ast.Constant)
-                            }
+                            constants = self._gfx950_backward_constants(parsed)
                             phase = constants.get("ROCM_BWD_PHASE")
                             if fp32_balanced64_scope and phase in (0, 1, 2):
                                 self.assertEqual(
