@@ -2532,9 +2532,12 @@ def generic_getmethod(
         and result.obj is obj
     ):
         # Argument evaluation can shadow the method after LOAD_METHOD chose its owner.
+        qualname = obj.method_load_qualname(tx, name, result.descriptor)
         return result.clone(
             is_method_load=True,
-            method_load_qualname=obj.method_load_qualname(tx, name, result.descriptor),
+            method_load_qualname=qualname,
+            # getattr's source reconstructs a bound method, not descriptor + self.
+            source=None if qualname is not None else result.source,
         )
     return result
 
