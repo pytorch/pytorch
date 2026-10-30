@@ -1,6 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 
 import inspect
+from unittest.mock import patch
 
 import torch
 from torch.nn import functional as F
@@ -837,7 +838,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         "layout",
         (
             "leading",
+            "leading_reverse",
             "trailing",
+            "trailing_reverse",
             "trailing_batch_tile",
             "interleaved_batch",
             "interleaved_rank3",
@@ -853,10 +856,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_nd_dual(self, layout, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        if layout == "leading":
+        if layout in ("leading", "leading_reverse"):
             data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
             axes = (2, 3)
-        elif layout == "trailing":
+        elif layout in ("trailing", "trailing_reverse"):
             data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
             axes = (1, 2)
         elif layout == "trailing_batch_tile":
@@ -894,6 +897,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 2, 3, 64, 128, dtype=torch.bfloat16, device=device
             ).permute(0, 2, 3, 1)
             axes = (1, 2)
+        if layout in ("leading_reverse", "trailing_reverse"):
+            axes = axes[::-1]
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
             data_hp, axes, False, True
         )
@@ -927,6 +932,37 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
+
+    @parametrize("invalid", ("dtype", "size", "alignment"))
+    @skipIfNoCuteDSL
+    def test_to_mx_invalid_input_before_materialization(self, invalid, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
+            _blockscaled_tma_impl,
+        )
+
+        if invalid == "size":
+            data_hp = torch.empty((64, 96), dtype=torch.bfloat16, device=device)[:, ::2]
+            error = "quantized axis 1 must be divisible by 32; got size 48"
+        elif invalid == "alignment":
+            data_hp = torch.empty(64 * 64 + 1, dtype=torch.float64, device=device)[
+                1:
+            ].view(64, 64)
+            error = "blockscaled TMA supports only bf16, fp16, and fp32 input"
+        else:
+            data_hp = torch.empty((64, 128), dtype=torch.float64, device=device)[:, ::2]
+            error = "blockscaled TMA supports only bf16, fp16, and fp32 input"
+        with (
+            patch.object(
+                torch.Tensor, "contiguous", side_effect=AssertionError("copied input")
+            ),
+            patch.object(
+                torch.Tensor, "clone", side_effect=AssertionError("cloned input")
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, error):
+                _blockscaled_tma_impl(data_hp, (0, 1), False, True)
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_unaligned_fallback(self, device):

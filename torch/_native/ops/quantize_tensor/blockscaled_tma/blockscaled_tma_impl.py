@@ -195,8 +195,6 @@ def _blockscaled_tma_impl_on_current_device(
         canonical.input,
         dim=canonical.dim,
         dual=dual,
-        input_matrix_axes=canonical.input_matrix_axes,
-        requested_dim=dim,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
@@ -308,8 +306,11 @@ def _blockscaled_tma_impl(
     ``dim`` defines a logical 2D matrix plane; all other axes are batch axes.
     Layouts admitting a 2D or 4D TMA view can avoid copying. Other layouts,
     including trailing batch axes that prevent such a view, are made
-    contiguous. Canonical storage with an unaligned pointer is cloned to
-    meet the 16-byte alignment requirement.
+    contiguous. For otherwise view-compatible inputs, compact or square
+    scaling copies when ``dim[-1]`` is the physically slower matrix axis.
+    Swizzled scaling also copies in that orientation if the faster matrix
+    axis has size not divisible by 16. Canonical storage with an unaligned
+    pointer is cloned to meet the 16-byte alignment requirement.
 
     Args:
         input (Tensor): CUDA tensor with at least two dimensions on an SM100+
@@ -320,10 +321,9 @@ def _blockscaled_tma_impl(
             For 2D input, ``(0, 1)`` or ``(-2, -1)`` quantizes columns, while
             ``(1, 0)`` or ``(-1, -2)`` quantizes rows. Lists are not accepted.
         is_square_scaling (bool): Use 32x32 instead of 1x32 scale blocks.
-            Requires swizzled scales and a dim-k kernel layout after
-            canonicalization.
+            Requires swizzled scales and both selected axes divisible by 32.
         is_scale_swizzled (bool): Return swizzled scales if ``True``; compact
-            scales otherwise. Compact scales require a dim-k kernel layout.
+            scales otherwise.
         **kwargs: No additional keyword arguments are accepted.
 
     Returns:
@@ -370,11 +370,10 @@ def _blockscaled_tma_impl_dual(
         input (Tensor): CUDA tensor with the layout and dtypes described by
             :func:`_blockscaled_tma_impl`. Both selected axes must have sizes
             divisible by 32. Inputs not admitting a 2D or 4D TMA view are
-            materialized as described above.
+            materialized as described by :func:`_blockscaled_tma_impl`.
         dim (tuple[int, int], optional): Ordered matrix-axis pair. Both this
-            pair and its reverse are quantized. The pair must be in ascending
-            order after normalizing negative axes; all other axes are batch
-            axes. Default: ``(-2, -1)``.
+            pair and its reverse are quantized. All other axes are batch axes.
+            Default: ``(-2, -1)``.
 
     Returns:
         tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_first, s_first, q_reverse,

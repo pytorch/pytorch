@@ -7315,7 +7315,10 @@ def quantize_tensor(
     Both outputs preserve the axis positions of the input. For both outputs,
     the quantization axes from ``dim`` form contiguous slices when viewed
     in ``dim=(outer, inner)`` order, with the inner dim varying the fastest
-    and outer next-fastest. For example:
+    and outer next-fastest. An otherwise view-compatible input is copied if
+    compact or square scaling quantizes the physically slower matrix axis.
+    Swizzled scaling along that axis also copies if the faster matrix axis
+    has size not divisible by 16. For example:
 
     - ``mxfp8`` unswizzled quantization of input shaped ``(M, K)`` with
       strides ``(K, 1)`` and ``dim=(0, 1)`` will result in ``qdata`` with
@@ -7362,16 +7365,13 @@ def quantize_tensor(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
-          ``SwizzleType.SWIZZLE_32_4_4``. Unswizzled scales use the dim-k kernel
-          layout, materializing the input if a compatible view is unavailable.
+          ``SwizzleType.SWIZZLE_32_4_4``.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
           Note that the output scale size is still controlled by ``scaling_type``
-          and ``swizzle_type``. If this flag is ``True``, currently
-          ``SwizzleType.SWIZZLE_32_4_4`` and a dim-k kernel layout are required;
-          the input is materialized if a compatible view is unavailable.
-          Default: ``False``.
+          and ``swizzle_type``. If this flag is ``True``, currently only
+          ``SwizzleType.SWIZZLE_32_4_4`` is supported. Default: ``False``.
 
     Returns:
         tuple[Tensor, Tensor]: Quantized data in the logical input shape and
