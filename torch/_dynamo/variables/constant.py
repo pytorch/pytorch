@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import enum
 import operator
-from collections.abc import Iterable
+import types
+from collections.abc import Callable, Iterable
 from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
@@ -25,13 +26,90 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import _RICHCOMPARE_OPS, ValueMutationNew, VariableTracker
+from .base import (
+    _RICHCOMPARE_OPS,
+    GetSet,
+    Member,
+    Method,
+    readonly_setter,
+    ValueMutationNew,
+    VariableTracker,
+)
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
+
+
+def _constant_method(
+    descriptor: types.MethodDescriptorType,
+) -> Callable[..., VariableTracker | None]:
+    def handler(
+        self: ConstantVariable,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not all(a.is_python_constant() for a in (*args, *kwargs.values())):
+            return None
+        try:
+            res = descriptor(
+                self.value,
+                *[a.as_python_constant() for a in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # str.split and friends return a fresh list the caller may mutate.
+        mutation_type = ValueMutationNew() if isinstance(res, list) else None
+        return ConstantVariable.create(res, mutation_type=mutation_type)
+
+    return handler
+
+
+def _constant_getter(
+    descriptor: types.GetSetDescriptorType | types.MemberDescriptorType,
+) -> Callable[..., VariableTracker]:
+    def getter(
+        self: ConstantVariable, tx: InstructionTranslatorBase
+    ) -> VariableTracker:
+        return ConstantVariable.create(descriptor.__get__(self.value))
+
+    return getter
+
+
+class _ConstantTables:
+    """Per-type tp_methods / tp_getset / tp_members of the constant types, read
+    from the real descriptors of each type and its bases."""
+
+    def __init__(self) -> None:
+        self.methods: dict[type, dict[str, Method]] = {}
+        self.getset: dict[type, dict[str, GetSet]] = {}
+        self.members: dict[type, dict[str, Member]] = {}
+        for ty in (int, bool, float, complex, str, bytes, type(None), type(...)):
+            methods = self.methods[ty] = {}
+            getset = self.getset[ty] = {}
+            members = self.members[ty] = {}
+            for klass in reversed(ty.__mro__[:-1]):
+                for name, d in klass.__dict__.items():
+                    if isinstance(d, types.MethodDescriptorType):
+                        methods[name] = Method(_constant_method(d))
+                    elif isinstance(d, types.GetSetDescriptorType):
+                        getset[name] = GetSet(_constant_getter(d), readonly_setter)
+                    elif isinstance(d, types.MemberDescriptorType):
+                        members[name] = Member(_constant_getter(d), readonly_setter)
+
+    @staticmethod
+    def of(tables: dict[type, dict[str, Any]], value: object) -> dict[str, Any]:
+        for ty in type(value).__mro__:
+            if ty in tables:
+                return tables[ty]
+        return {}
+
+
+_CONSTANT_TABLES = _ConstantTables()
 
 
 class ConstantVariable(VariableTracker):
@@ -51,6 +129,19 @@ class ConstantVariable(VariableTracker):
     # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
     # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
     _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
+
+    # These depend on the wrapped value's type, so they are properties of the VT.
+    @property
+    def tp_methods(self) -> dict[str, Method]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.methods, self.value)
+
+    @property
+    def tp_getset(self) -> dict[str, GetSet]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.getset, self.value)
+
+    @property
+    def tp_members(self) -> dict[str, Member]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.members, self.value)
 
     @overload
     @staticmethod
