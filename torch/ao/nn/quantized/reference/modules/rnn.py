@@ -575,9 +575,9 @@ class LSTM(RNNBase):
 
     def forward(self, input, hx=None):
         orig_input = input
+        hx_supplied = hx is not None
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
-        hx_supplied = hx is not None
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = int(batch_sizes[0])
