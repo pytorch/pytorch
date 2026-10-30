@@ -389,6 +389,22 @@ class CustomOpDef:
             else:
                 self._disabled_kernel.discard(device_type)
 
+    def _make_backend_fn(
+        self, device_type: str | None, fn: Callable[..., object]
+    ) -> Callable[..., object]:
+        """Wraps fn to choose between the default implementation or the
+        device-specific one, depending on whether device_type's kernel is
+        disabled."""
+
+        @torch._disable_dynamo
+        def wrapped_fn(*args, **kwargs):
+            if device_type in self._disabled_kernel:
+                return self._init_fn(*args, **kwargs)
+            else:
+                return fn(*args, **kwargs)
+
+        return wrapped_fn
+
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
@@ -438,22 +454,6 @@ class CustomOpDef:
             return result
 
         return backend_impl
-
-    def _make_backend_fn(
-        self, device_type: str | None, fn: Callable[..., object]
-    ) -> Callable[..., object]:
-        """Wraps fn to choose between the default implementation or the
-        device-specific one, depending on whether device_type's kernel is
-        disabled."""
-
-        @torch._disable_dynamo
-        def wrapped_fn(*args, **kwargs):
-            if device_type in self._disabled_kernel:
-                return self._init_fn(*args, **kwargs)
-            else:
-                return fn(*args, **kwargs)
-
-        return wrapped_fn
 
     def register_kernel(
         self, device_types: device_types_t, fn: Callable | None = None, /
