@@ -305,6 +305,21 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
+        # Describe a non-fake tensor with the Fake key excluded: under a C++
+        # fake mode its metadata queries (e.g. sparse_dim) would otherwise route
+        # to the fake fallback, which rejects non-fake inputs. A C++ fake,
+        # including one inside a non-fake wrapper, is described with Fake
+        # enabled so its queries reach the fake fallback rather than backend
+        # kernels on a tensor without data. A Python fake mode only intercepts
+        # while it is on the mode stack, so this does not affect it.
+        with torch._C._SetExcludeDispatchKeyGuard(
+            torch._C.DispatchKey.Fake, not torch._C._is_fake_tensor(t)
+        ):
+            return self._describe_tensor(t, recurse=recurse, trace=trace)
+
+    def _describe_tensor(
+        self, t: torch.Tensor, *, recurse: bool, trace: bool
+    ) -> MetaTensorDesc[Any]:
         data = _unwrap_python_functional_tensor(t) if self.copy_data else None
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -1116,7 +1131,14 @@ class MetaConverter(Generic[_TensorT]):
             " will perform operations on them which need fake tensor mode to"
             " be active.  You will segfault if you are in a no_dispatch() block."
         )
-        if torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python):
+        # This guards the ops run on new Python fakes. A C++ fake mode (Fake in
+        # the include set) converts correctly even with the Fake key excluded,
+        # so the check does not apply to it.
+        if torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        ) and not torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Fake
+        ):
             raise AssertionError(msg)
         self.arg_cnt += 1
 
