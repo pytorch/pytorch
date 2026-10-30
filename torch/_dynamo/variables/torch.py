@@ -2146,7 +2146,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if (
                 isinstance(fill_value, variables.TensorVariable)
                 and not fill_value.requires_grad
-                and not issubclass(fill_value.python_type(), torch.nn.Parameter)
             ):
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
