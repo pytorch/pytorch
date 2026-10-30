@@ -31,15 +31,17 @@ class MemoryView(Protocol):
         """Return a view of a byte range of this one.
 
         ``offset`` is relative to this view and defaults to 0; ``length``
-        defaults to the rest. The range must lie within this view.
+        defaults to the rest. Raises ``ValueError`` unless the range lies within
+        this view.
         """
         ...
 
     def __getitem__(self, key: builtins.slice) -> Self:
         """Return ``view[a:b]``, a byte range of this one.
 
-        Negative bounds count from the end, out-of-range bounds are clamped and
-        the step must be 1.
+        Negative bounds count from the end and out-of-range bounds are clamped.
+        Raises ``TypeError`` for a non-slice key and ``ValueError`` for a step
+        other than 1.
         """
         ...
 
@@ -71,17 +73,18 @@ class RemoteBuffer(Protocol):
         """Return a descriptor for a byte range of this one.
 
         ``offset`` is relative to this descriptor and defaults to 0; ``length``
-        defaults to the rest. The range must lie within this descriptor. The
-        result shares this descriptor's registration and lifetime, and does not
-        restrict access to the rest of the registration.
+        defaults to the rest. Raises ``ValueError`` unless the range lies within
+        this descriptor. The result shares this descriptor's registration and
+        lifetime, and does not restrict access to the rest of the registration.
         """
         ...
 
     def __getitem__(self, key: builtins.slice) -> Self:
         """Return ``buffer[a:b]``, a byte range of this one.
 
-        Negative bounds count from the end, out-of-range bounds are clamped and
-        the step must be 1.
+        Negative bounds count from the end and out-of-range bounds are clamped.
+        Raises ``TypeError`` for a non-slice key and ``ValueError`` for a step
+        other than 1.
         """
         ...
 
