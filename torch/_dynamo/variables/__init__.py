@@ -210,6 +210,7 @@ from .user_defined import (
     NamedTupleVariable,
     RemovableHandleVariable,
     SimpleNamespaceVariable,
+    StringIOVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
