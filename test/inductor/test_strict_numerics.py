@@ -260,6 +260,99 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_mvlgamma_unbacked_size(self, device, dtype, numerics):
+        def fn(x):
+            return torch.mvlgamma(x[x > 10], 3)
+
+        x = torch.linspace(-30, 30, 257, device=device, dtype=dtype).requires_grad_()
+        expected = fn(x)
+        grad = torch.ones_like(expected)
+        expected_grad = torch.autograd.grad(expected, x, grad)[0]
+        with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
+            result, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True, options={"numerics": numerics}), x
+            )
+            self.assertIn("@triton.jit", "\n".join(codes))
+            actual_grad = torch.autograd.grad(result, x, grad)[0]
+        # Unbacked geometry retains the existing decomposition; this checks
+        # compilation and ordinary numerical agreement, not exact-bit equivalence.
+        self.assertEqual(result, expected)
+        self.assertEqual(actual_grad, expected_grad)
+
+    @skipIfNoCuteDSL
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("p", (1, 3, 5, 9, 15, 16))
+    @parametrize("layout", ("contiguous", "transposed", "strided"))
+    def test_mvlgamma_sum_order(self, device, dtype, numerics, p, layout):
+        from torch._native.registry import (
+            deregister_op_overrides,
+            native_decomp_table,
+            reenable_op_overrides,
+        )
+
+        if torch.ops.aten.sum.dim_IntList not in native_decomp_table(
+            overrides_only=True
+        ):
+            self.skipTest("requires active native inner-tree sum registration")
+        if layout == "transposed":
+            x = (
+                torch.linspace(10, 30, 257 * 3, device=device, dtype=dtype)
+                .reshape(3, 257)
+                .t()
+            )
+        elif layout == "strided":
+            x = torch.linspace(10, 30, 257 * 2, device=device, dtype=dtype)[::2]
+        else:
+            x = torch.linspace(10, 30, 257, device=device, dtype=dtype)
+        x.requires_grad_()
+        grad = torch.linspace(-1.3, 1.7, x.numel(), device=device, dtype=dtype).reshape(
+            x.shape
+        )
+
+        def fn(x):
+            return torch.mvlgamma(x, p)
+
+        with config.patch(force_disable_caches=False, fx_graph_cache=True):
+            for index, inner_tree in enumerate((True, False, True)):
+                if not inner_tree:
+                    deregister_op_overrides(disable_op_symbols="sum.dim_IntList")
+                try:
+                    expected = fn(x)
+                    expected_grad = torch.autograd.grad(expected, x, grad)[0]
+                    hits = counters["aot_autograd"]["autograd_cache_hit"]
+                    misses = counters["aot_autograd"]["autograd_cache_miss"]
+                    result, codes = run_and_get_code(
+                        torch.compile(
+                            fn, fullgraph=True, options={"numerics": numerics}
+                        ),
+                        x,
+                    )
+                    if index == 0:
+                        self.assertIn("@triton.jit", "\n".join(codes))
+                    grads, codes = run_and_get_code(
+                        torch.autograd.grad, result, x, grad
+                    )
+                    if index == 0:
+                        self.assertIn("@triton.jit", "\n".join(codes))
+                    bits = _BIT_VIEW[dtype]
+                    self.assertEqual(result.view(bits), expected.view(bits))
+                    self.assertEqual(grads[0].view(bits), expected_grad.view(bits))
+                    if index < 2:
+                        self.assertGreater(
+                            counters["aot_autograd"]["autograd_cache_miss"], misses
+                        )
+                    else:
+                        self.assertGreater(
+                            counters["aot_autograd"]["autograd_cache_hit"], hits
+                        )
+                finally:
+                    if not inner_tree:
+                        reenable_op_overrides(enable_op_symbols="sum.dim_IntList")
+                    torch._dynamo.reset()
+
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("op_name", ("i0", "i1"))
@@ -1998,15 +2091,6 @@ POINTWISE_XFAIL = frozenset(
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
-        ("mvlgamma_mvlgamma_p_1", "bfloat16"),
-        ("mvlgamma_mvlgamma_p_1", "float16"),
-        ("mvlgamma_mvlgamma_p_1", "float32"),
-        ("mvlgamma_mvlgamma_p_3", "bfloat16"),
-        ("mvlgamma_mvlgamma_p_3", "float16"),
-        ("mvlgamma_mvlgamma_p_3", "float32"),
-        ("mvlgamma_mvlgamma_p_5", "bfloat16"),
-        ("mvlgamma_mvlgamma_p_5", "float16"),
-        ("mvlgamma_mvlgamma_p_5", "float32"),
         ("special_erfcx", "float32"),
     }
 )
@@ -2014,9 +2098,6 @@ POINTWISE_XFAIL = frozenset(
 BACKWARD_XFAIL = frozenset(
     {
         ("float_power", "float32"),
-        ("mvlgamma_mvlgamma_p_1", "float32"),
-        ("mvlgamma_mvlgamma_p_3", "float32"),
-        ("mvlgamma_mvlgamma_p_5", "float32"),
         ("special_erfcx", "float32"),
     }
 )
@@ -2031,6 +2112,9 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "mvlgamma_mvlgamma_p_1",
+        "mvlgamma_mvlgamma_p_3",
+        "mvlgamma_mvlgamma_p_5",
         "hypot",
         "special_log_ndtr",
         "i0",
