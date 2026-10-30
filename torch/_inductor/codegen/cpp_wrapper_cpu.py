@@ -401,7 +401,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_dtypes: OrderedSet[str] = OrderedSet()
         self.used_cached_layouts: OrderedSet[str] = OrderedSet()
         self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
-        self.used_switch_selector: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -3092,7 +3091,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+    def codegen_subgraph(
+        self, subgraph, outer_inputs, outer_outputs, *, enclosing_device=None
+    ):
         # TODO (desertfire) - This function is the old way of supporting
         # subgraph codegen by inlining subgraphs in the output code. For python
         # wrapper, we have moved to lifting subgraphs as functions, supported by
