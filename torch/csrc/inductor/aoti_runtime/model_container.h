@@ -271,8 +271,8 @@ class AOTInductorModelContainer {
   }
 
   // Callers can't capture this into a CUDA graph, e.g. with torch.cuda.graph,
-  // since checking out an instance may query events of earlier calls. Use
-  // run_with_lazy_cuda_graphs(), or capture run_single_threaded().
+  // since checking out an instance may query events of earlier calls. Capture
+  // run_single_threaded() instead, or let run_with_lazy_cuda_graphs() capture.
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -303,6 +303,10 @@ class AOTInductorModelContainer {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
     AOTI_RUNTIME_CHECK(max_graphs_env_.error.empty(), max_graphs_env_.error);
+    // The checkout and its completion event can't be captured.
+    AOTI_RUNTIME_CHECK(
+        !is_stream_capturing(stream),
+        "run_with_lazy_cuda_graphs can't run inside a CUDA graph capture");
     run_on_available_model(
         stream, proxy_executor, [&](AOTInductorModel* model) {
           // Set even if the call fails, as long as a graph was captured.
@@ -620,10 +624,10 @@ class AOTInductorModelContainer {
           continue;
         }
 
-        AtenTensorHandle tensor;
+        AtenTensorHandle tensor = nullptr;
         if (it == constants_map.end()) {
-          aoti_torch_clone(
-              source.map->find(constant_name)->second.get(), &tensor);
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(
+              source.map->find(constant_name)->second.get(), &tensor));
         } else {
           tensor = it->second;
           // Null the source slot before RAIIAtenTensorHandle takes ownership so
@@ -999,11 +1003,11 @@ class AOTInductorModelContainer {
   };
   static MaxGraphsEnv read_max_graphs_env() {
     const char* env = std::getenv("AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS");
-    if (env == nullptr) {
+    if (env == nullptr || env[0] == '\0') {
       return {};
     }
     std::string value(env);
-    if (value.empty() || value.size() > 18 ||
+    if (value.size() > 18 ||
         !std::all_of(value.begin(), value.end(), [](unsigned char c) {
           return std::isdigit(c);
         })) {
@@ -1026,9 +1030,14 @@ class AOTInductorModelContainer {
   }
   std::atomic<bool> captured_cuda_graphs_{false};
 
-  // Folds the constants on the first call, then runs fn on a model instance
-  // checked out of the pool and leaves the instance in flight until its work
-  // finishes.
+  // Folds the active constants if their state is INITIALIZED (after the .so
+  // constants load, an update of the active buffer, or a swap to an updated
+  // buffer that wasn't folded), throws unless they are then FOLDED, and runs
+  // fn on a model instance checked out of the pool, holding model_exec_mutex_
+  // shared and the stream lock. fn must record the instance's run_finished_
+  // event after the work it enqueues, as AOTInductorModel::run() does: the
+  // pool reclaims an in-flight instance only through that event. If fn throws,
+  // the instance goes back to the pool without waiting for that work.
   template <typename Fn>
   void run_on_available_model(
       DeviceStreamType stream,
@@ -1045,6 +1054,9 @@ class AOTInductorModelContainer {
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
+        // A racing active update can pass its own check while a graph is
+        // captured; refolding would free the constants the graph reads.
+        check_no_cuda_graphs();
         auto* model = pool_.get_available_model();
         try {
           auto folded_const_map = model->run_const_fold(
@@ -1091,9 +1103,9 @@ class AOTInductorModelContainer {
   // thread holding this mutex shared must not lock it again, and must not
   // block on work that needs another thread to take it: either deadlocks as
   // soon as a swap or fold is waiting. Waiting for threads that already hold
-  // it is fine. run() and the inactive-buffer branch of run_const_fold() rely
-  // on this when they block in pool_.get_available_model() for a model another
-  // holder has checked out.
+  // it is fine. run_on_available_model() and the inactive-buffer branch of
+  // run_const_fold() rely on this when they block in
+  // pool_.get_available_model() for a model another holder has checked out.
   WritePrioritySharedMutex model_exec_mutex_;
 };
 

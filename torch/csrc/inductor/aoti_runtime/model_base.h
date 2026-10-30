@@ -1459,7 +1459,10 @@ class AOTInductorModelBase {
 
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs through this instance's
-  // CudaGraphManager.
+  // CudaGraphManager. max_graphs only applies when the manager is created, on
+  // the first call. Static-linkage callers get none of the container's
+  // checks: the graphs keep reading the constants they were captured with, so
+  // don't change or free them after a capture.
   void run_with_lazy_cuda_graphs(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles

@@ -81,8 +81,7 @@ void initAOTIPackageBindings(PyObject* module) {
           "run_with_lazy_cuda_graphs",
           &AOTIModelPackageLoaderPybind::run_with_lazy_cuda_graphs,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr,
-          py::call_guard<py::gil_scoped_release>())
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelPackageLoaderPybind::get_call_spec)
       .def(
           "get_constant_fqns", &AOTIModelPackageLoaderPybind::get_constant_fqns)

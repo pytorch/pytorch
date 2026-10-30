@@ -23,10 +23,6 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   ~AOTInductorModel() {
     cudagraph_manager_.reset();
   }
-  AOTInductorModel(const AOTInductorModel&) = delete;
-  AOTInductorModel& operator=(const AOTInductorModel&) = delete;
-  AOTInductorModel(AOTInductorModel&&) = delete;
-  AOTInductorModel& operator=(AOTInductorModel&&) = delete;
 #endif // USE_CUDA
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(

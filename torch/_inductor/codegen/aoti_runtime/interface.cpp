@@ -127,6 +127,50 @@ AOTIRuntimeError createModelImpl(
 
 } // namespace
 
+namespace {
+// Generated code defines AOTI_CUDA_GRAPHS only with aot_inductor.cudagraphs, so
+// other models don't depend on the CUDA graph shim functions.
+#if defined(USE_CUDA) && defined(AOTI_CUDA_GRAPHS)
+void run_with_lazy_cuda_graphs(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles,
+    size_t num_inputs,
+    AtenTensorHandle* output_handles,
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
+  AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  AOTINoGradGuard guard;
+  container->run_with_lazy_cuda_graphs(
+      input_handles, output_handles, stream, proxy_executor_handle);
+}
+#else
+void run_with_lazy_cuda_graphs(
+    AOTInductorModelContainerHandle /*container_handle*/,
+    AtenTensorHandle* /*input_handles*/,
+    size_t /*num_inputs*/,
+    AtenTensorHandle* /*output_handles*/,
+    size_t /*num_outputs*/,
+    AOTInductorStreamHandle /*stream_handle*/,
+    AOTIProxyExecutorHandle /*proxy_executor_handle*/) {
+#ifdef USE_CUDA
+  AOTI_RUNTIME_CHECK(
+      false,
+      "Running as CUDA graphs requires compiling the model with "
+      "aot_inductor.cudagraphs=True (not supported on ROCm yet)");
+#else
+  AOTI_RUNTIME_CHECK(false, "Running as CUDA graphs requires a CUDA model");
+#endif // USE_CUDA
+}
+#endif // defined(USE_CUDA) && defined(AOTI_CUDA_GRAPHS)
+} // namespace
+
 extern "C" {
 
 AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -298,22 +342,15 @@ AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle) AOTI_RUNTIME_TRY({
-#ifdef USE_CUDA
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
-  AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
-  auto stream =
-      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
-  AOTINoGradGuard guard;
-  container->run_with_lazy_cuda_graphs(
-      input_handles, output_handles, stream, proxy_executor_handle);
+  run_with_lazy_cuda_graphs(
+      container_handle,
+      input_handles,
+      num_inputs,
+      output_handles,
+      num_outputs,
+      stream_handle,
+      proxy_executor_handle);
   return AOTI_RUNTIME_SUCCESS;
-#else
-  AOTI_RUNTIME_CHECK(false, "Running as CUDA graphs requires a CUDA model");
-  return AOTI_RUNTIME_FAILURE;
-#endif // USE_CUDA
 })
 
 AOTIRuntimeError AOTInductorModelContainerGetNumConstants(

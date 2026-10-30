@@ -349,10 +349,11 @@ std::vector<at::Tensor> AOTIModelContainerRunner::call_run_func(
     const char* name,
     RunFunc&& run_func) {
   // The model steals each input handle and nulls its slot (see
-  // steal_from_raw_handles_to_raii_handles). If run_func throws before the
-  // steal (e.g. a failed input runtime check), the un-stolen handles would
-  // leak, keeping their input storage alive. Free whatever the model did not
-  // steal on every exit; on success all slots are null so this is a no-op.
+  // steal_from_raw_handles_to_raii_handles). If run_func fails or throws
+  // before the steal (e.g. a failed input runtime check), the un-stolen
+  // handles would leak, keeping their input storage alive. Free whatever the
+  // model did not steal on every exit; on success all slots are null so this
+  // is a no-op.
   auto free_unstolen_input_handles = c10::make_scope_exit([&input_handles]() {
     torch::aot_inductor::free_unstolen_handles(input_handles);
   });
@@ -366,7 +367,10 @@ std::vector<at::Tensor> AOTIModelContainerRunner::call_run_func(
 
   call_model(name, [&] {
     return std::forward<RunFunc>(run_func)(
-        output_handles.data(), output_handles.size());
+        input_handles.data(),
+        input_handles.size(),
+        output_handles.data(),
+        output_handles.size());
   });
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
@@ -379,11 +383,14 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
   return call_run_func(
       input_handles,
       "run_func_(...)",
-      [&](AtenTensorHandle* output_handles, size_t num_outputs) {
+      [&](AtenTensorHandle* inputs,
+          size_t num_inputs,
+          AtenTensorHandle* output_handles,
+          size_t num_outputs) {
         return run_func_(
             container_handle_,
-            input_handles.data(),
-            input_handles.size(),
+            inputs,
+            num_inputs,
             output_handles,
             num_outputs,
             reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
@@ -398,16 +405,20 @@ std::vector<at::Tensor> AOTIModelContainerRunner::
   return call_run_func(
       input_handles,
       "run_with_lazy_cuda_graphs_func_(...)",
-      [&](AtenTensorHandle* output_handles, size_t num_outputs) {
+      [&](AtenTensorHandle* inputs,
+          size_t num_inputs,
+          AtenTensorHandle* output_handles,
+          size_t num_outputs) {
         // Checked here, so that call_run_func frees the input handles.
         TORCH_CHECK(
             run_with_lazy_cuda_graphs_func_ != nullptr,
             "AOTInductorModelContainerRunWithLazyCudaGraphs is unavailable. "
-            "Rebuild the model with the latest AOTInductor.");
+            "Rebuild the model with the latest AOTInductor and "
+            "aot_inductor.cudagraphs=True.");
         return run_with_lazy_cuda_graphs_func_(
             container_handle_,
-            input_handles.data(),
-            input_handles.size(),
+            inputs,
+            num_inputs,
             output_handles,
             num_outputs,
             reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
@@ -442,6 +453,15 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_with_lazy_cuda_graphs(
     const std::vector<at::Tensor>& inputs,
     void* stream_handle) {
   RECORD_USER_SCOPE("AOTIModelContainerRunner::run_with_lazy_cuda_graphs");
+  TORCH_CHECK(
+      model_so_ != nullptr,
+      "CUDA graphs are unavailable for custom AOTI device runners");
+  // The single-threaded run() path assumes its one instance is never in
+  // flight.
+  TORCH_CHECK(
+      !run_single_threaded_,
+      "run_with_lazy_cuda_graphs isn't supported when run_single_threaded is "
+      "true");
   ScopedObserverEvent observer_event(
       observer(), AOTIContainerEvent::kInference, {});
   std::vector<AtenTensorHandle> input_handles =

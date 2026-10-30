@@ -193,12 +193,13 @@ Result from the second inference:
 ## Running as CUDA graphs
 
 A CUDA model compiled with `aot_inductor.cudagraphs=True` can run as CUDA graphs
-that the runtime captures lazily, on first use, and replays, which cuts the host
-overhead of launching kernels. The compile fails if the model can't be
-captured, e.g. because it runs ops on the CPU, syncs with the host, or has
-data-dependent shapes. Models that use random numbers are rejected too, for
-now, and so is ROCm, where a capture can't yet run safely next to other GPU
-work in the process
+that the runtime captures lazily, while serving calls, and replays, which cuts
+the host overhead of launching kernels. The compile fails if the model can't be
+captured, e.g. because it runs ops on the CPU, syncs with the host, uses side
+streams or control flow (`torch.cond`, `while_loop`), mutates its inputs, or
+has data-dependent shapes. Models that use random numbers are
+rejected too, for now (attention without dropout is fine), and so is ROCm,
+where a capture can't yet run safely next to other GPU work in the process
 ([ROCm/rocm-systems#12677](https://github.com/ROCm/rocm-systems/issues/12677)).
 
 ```python
@@ -211,24 +212,31 @@ out = compiled.run_with_lazy_cuda_graphs(*example_inputs)
 ```
 
 In C++, `AOTIModelPackageLoader::run_with_lazy_cuda_graphs` takes the same
-arguments as `run`.
+arguments as `run`. Calling the model as usual still runs it eagerly, and
+doesn't count as a warm-up.
 
-- A new input layout (shapes and strides) runs eagerly on its first call, is
-  captured on its next call and replayed after that. A thread's first call on
-  each model instance also runs eagerly, since some libraries set up per
-  thread.
-- Each model instance (see `num_runners`) keeps up to
-  `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs (an environment variable, default
-  8) in its own memory pool; past that, new layouts run eagerly.
+- On each model instance (see `num_runners`), a new input layout (shapes and
+  strides) runs eagerly on its first call, is captured on its next call and
+  replayed after that. Only a thread that has already finished an eager call on
+  that instance captures on it, since some libraries set up per thread; any
+  thread replays.
+- Each model instance keeps up to `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs (an environment variable read when
+  the model is loaded, default 8; a bad value makes every call fail) in its own
+  memory pool; past that, new layouts run eagerly.
 - Replayed outputs are copies: they don't alias the inputs, and views among
-  outputs come back as separate tensors.
+  outputs come back as separate tensors. Eager calls return the model's own
+  outputs.
 - If a capture fails but the eager call succeeds, that layout runs eagerly from
-  then on, with a warning.
+  then on, with a warning the first time; after 8 failures in a row, new
+  layouts run eagerly too.
 - Capturing needs PyTorch's native CUDA caching allocator: under
-  `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync`, models run eagerly, with a
+  `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, models run eagerly, with a
   warning.
-- Once a graph is captured, the model's constants can't change; load the model
-  again to use new weights.
+- Once a graph is captured, the model's active constants can't change, so
+  `load_constants` fails; in C++, the inactive buffer can still be updated, but
+  not swapped in. Load the model again to use new weights.
+- Calls can't run inside an outer CUDA graph capture, or on a model loaded with
+  `run_single_threaded=True`.
 
 ## Troubleshooting
 

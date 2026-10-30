@@ -742,13 +742,15 @@ class AOTICompiledModel:
     def run_with_lazy_cuda_graphs(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         """
         Like calling the model, but runs it as CUDA graphs captured lazily,
-        on first use; requires a CUDA
-        model compiled with ``aot_inductor.cudagraphs=True``. A new input
-        layout runs eagerly first, is captured on its next call and replayed
-        after that, up to ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8)
-        graphs per model instance. Outputs are copies, and once a graph is
-        captured, the model's constants can't change. Not supported on ROCm
-        yet; see https://github.com/ROCm/rocm-systems/issues/12677.
+        while serving calls; requires a CUDA model compiled with
+        ``aot_inductor.cudagraphs=True``. A new input layout runs eagerly
+        first, is captured on its next call and replayed after that, up to
+        ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8) graphs per model
+        instance. Replayed outputs are copies; eager calls return the model's
+        own outputs. Once a graph is captured, the model's active constants
+        can't change, so ``load_constants`` fails. Not supported for models
+        loaded with ``run_single_threaded=True``, or on ROCm yet; see
+        https://github.com/ROCm/rocm-systems/issues/12677.
         """
         return self._run(self.loader.run_with_lazy_cuda_graphs, args, kwargs)
 
