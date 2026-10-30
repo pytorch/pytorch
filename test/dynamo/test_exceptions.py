@@ -1830,27 +1830,38 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(run_gc_after_compile=False)
     def test_exception_traceback_frame_no_tx_cycle(self):
         # The tb_frame VT must not keep its translator alive; otherwise every
-        # traced value (here the optimizer state) waits for a full gc cycle.
+        # traced value of the frame waits for a full gc cycle.
         # run_gc_after_compile would hide a young cycle, so it is disabled.
-        txs = []
+        def callee():
+            raise ValueError
+
+        def fn(x):
+            try:
+                callee()
+            except ValueError as e:
+                lineno = e.__traceback__.tb_next.tb_frame.f_lineno
+            return x + 1, lineno
+
+        callee_txs = []
         orig_init = InstructionTranslatorBase.__init__
 
         def init(tx, *args, **kwargs):
-            txs.append(weakref.ref(tx))
             orig_init(tx, *args, **kwargs)
+            if tx.f_code is callee.__code__:
+                callee_txs.append(weakref.ref(tx))
 
-        model = torch.nn.Linear(8, 8, bias=False)
-        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
-        model(torch.ones(8)).sum().backward()
         gc.collect()
         gc.disable()
         try:
             with mock.patch.object(InstructionTranslatorBase, "__init__", init):
-                torch.compile(optimizer.step, backend="eager")()
-            alive = sum(ref() is not None for ref in txs)
+                result = torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.ones(2)
+                )
+            alive = sum(ref() is not None for ref in callee_txs)
         finally:
             gc.enable()
-        self.assertGreater(len(txs), 0)
+        self.assertEqual(result[1], fn(torch.ones(2))[1])
+        self.assertGreater(len(callee_txs), 0)
         self.assertEqual(alive, 0)
 
     def test_exception_traceback_finished_frame_lineno(self):
@@ -1950,7 +1961,73 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 tb = e.__traceback__
             return x + 1, names(tb)
 
-        for f in (fn, fn_exhausted, fn_empty, fn_cm):
+        def inner():
+            yield 1
+
+        def middle():
+            yield from inner()
+
+        def outer():
+            yield from middle()
+
+        def inner_close():
+            try:
+                yield 1
+            finally:
+                raise KeyError
+
+        def outer_close():
+            yield from inner_close()
+
+        class ThrowingIter:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return 1
+
+            def throw(self, *args):
+                raise ValueError
+
+        def outer_user_iter():
+            yield from ThrowingIter()
+
+        def fn_throw_yield_from(x):
+            g = outer()
+            next(g)
+            try:
+                g.throw(ValueError)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def fn_throw_user_iter(x):
+            g = outer_user_iter()
+            next(g)
+            try:
+                g.throw(ValueError)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def fn_close_yield_from(x):
+            g = outer_close()
+            next(g)
+            try:
+                g.close()
+            except KeyError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        for f in (
+            fn,
+            fn_exhausted,
+            fn_empty,
+            fn_cm,
+            fn_throw_yield_from,
+            fn_throw_user_iter,
+            fn_close_yield_from,
+        ):
             with self.subTest(fn=f.__name__):
                 torch._dynamo.reset()
                 x = torch.ones(2)
