@@ -2051,6 +2051,8 @@ class TestCompositeCompliance(TestCase):
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
+        if not torch._C._is_cow_tensor(torch.empty(1, device=device)._lazy_clone()):
+            self.skipTest("allocator does not support COW sharing")
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
 
         def is_strided_tensor(arg):
@@ -2074,7 +2076,7 @@ class TestCompositeCompliance(TestCase):
                 else f"Keyword argument '{idx_or_kw}'"
             ) + f" during {backward_or_forward} call"
 
-            if is_strided_tensor(arg):
+            if is_strided_tensor(arg) and arg.untyped_storage().nbytes():
                 self.assertTrue(
                     torch._C._is_cow_tensor(arg_raw),
                     msg=(
@@ -2130,6 +2132,8 @@ class TestCompositeCompliance(TestCase):
             # all inputs
             for arg in args_raw:
                 if is_strided_tensor(arg):
+                    if not torch._C._is_cow_tensor(arg):
+                        torch._C._cow_record_done(arg)
                     args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
                 else:
@@ -2141,6 +2145,8 @@ class TestCompositeCompliance(TestCase):
 
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
+                    if not torch._C._is_cow_tensor(arg):
+                        torch._C._cow_record_done(arg)
                     kwargs_copy[kw] = arg.detach().clone()
                     kwargs[kw] = torch._lazy_clone(arg)
                 else:
