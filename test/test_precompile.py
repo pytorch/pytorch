@@ -6548,16 +6548,13 @@ class TestPrecompileCudagraphs(TestCase):
 
     def setUp(self):
         super().setUp()
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = tmp.name
+        self.dir = self.enterContext(tempfile.TemporaryDirectory())
         self.artifact = os.path.join(self.dir, "m.py")
         self.cache = os.path.join(self.dir, "m.cache")
         self.module_name = f"precompile_cudagraph_{uuid.uuid4().hex}"
         with open(os.path.join(self.dir, self.module_name + ".py"), "w") as f:
             f.write(_CUDAGRAPH_MODULE)
-        sys.path.insert(0, self.dir)
-        self.addCleanup(sys.path.remove, self.dir)
+        self.enterContext(mock.patch.object(sys, "path", [self.dir, *sys.path]))
         self.mod = importlib.import_module(self.module_name)
         self.addCleanup(sys.modules.pop, self.module_name, None)
         self.model = self.mod.Model().cuda()
@@ -6706,11 +6703,24 @@ class TestPrecompileCudagraphs(TestCase):
     @parametrize(
         "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
     )
-    def test_a_capture_overriding_cudagraphs_is_refused(self, fn):
-        # Turning CUDA graphs on matters under a capture whose own flag is off.
-        on = None if fn == "turns_cudagraphs_on" else {"triton.cudagraphs": True}
-        with self.assertRaisesRegex(PrecompileError, "override_cudagraphs"):
-            self._capture_step(getattr(self.mod, fn), grad=True, options=on)
+    @parametrize("flag", [False, True])
+    def test_a_capture_overriding_cudagraphs_is_refused_when_they_disagree(
+        self, fn, flag
+    ):
+        fn = getattr(self.mod, fn)
+        options = {"triton.cudagraphs": flag}
+        disagrees = flag != (fn is self.mod.turns_cudagraphs_on)
+        if disagrees:
+            with self.assertRaisesRegex(PrecompileError, "Set triton.cudagraphs"):
+                self._capture_step(fn, grad=True, options=options)
+        else:
+            y, _ = self._capture_step(fn, grad=True, options=options)
+            self.model.zero_grad(set_to_none=True)
+            fn(self.model, self.x).sum().backward()
+            grad = self.model.lin.weight.grad.clone()
+            self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+        # An eager capture records no CUDA graph config for an override to contradict.
+        self._capture_step(fn, grad=True, backend="eager")
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
