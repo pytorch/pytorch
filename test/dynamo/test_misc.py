@@ -10186,18 +10186,12 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertTrue(torch.compiler.is_compiling())
             with torch.compiler._compile_session_context():
                 self.assertTrue(torch.compiler.is_compiling())
-            self.assertTrue(
-                torch._C._is_key_in_tls(torch.compiler._IS_COMPILING)
-            )
+            self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_COMPILING))
             with _compiling_state_context():
                 self.assertTrue(torch.compiler.is_compiling())
                 self.assertTrue(torch.compiler.is_exporting())
-            self.assertTrue(
-                torch._C._is_key_in_tls(torch.compiler._IS_COMPILING)
-            )
-            self.assertFalse(
-                torch._C._is_key_in_tls(torch.compiler._IS_EXPORTING)
-            )
+            self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_COMPILING))
+            self.assertFalse(torch._C._is_key_in_tls(torch.compiler._IS_EXPORTING))
             self.assertFalse(torch.compiler.is_exporting())
         finally:
             torch._C._remove_obj_from_tls(torch.compiler._IS_COMPILING)
@@ -10324,9 +10318,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             records = run_backward(session_ctx)
             self.assertTrue(records)
             self.assertTrue(any(not is_main for is_main, _, _, _ in records))
-            self.assertEqual(
-                set((c, e, n) for _, c, e, n in records), {want}
-            )
+            self.assertEqual(set((c, e, n) for _, c, e, n in records), {want})
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
         self.assertFalse(torch.compiler._is_non_strict_tracing())
