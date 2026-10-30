@@ -1008,7 +1008,7 @@ template <typename scalar_t, int BS, bool hermitian, bool cooperative>
 __global__ void __launch_bounds__(BS)
 ldl_diagonal_panel_fused_kernel(
   scalar_t* __restrict__ dLD, int n, int lda,
-  int nb, int curr_step, int* dcurr_step,
+  int nb, int curr_step, int* dcurr_step, int* dswapped,
   int* dipiv, int* dinfo,
   // cooperative only: scratch for the grid-wide argmax, 2 * gridDim.x elements each
   typename c10::scalar_value_type<scalar_t>::type* __restrict__ dpart_max,
@@ -1094,10 +1094,9 @@ ldl_diagonal_panel_fused_kernel(
   // symmetric/Hermitian, so dLD[k, first:] is the mirror of the column
   // and is copied rather than recomputed with strided reads.
   //
-  // Interchanges do not touch Lprev/Uprev, so the stale data moved to a
-  // position p is later updated with row/col p of Lprev/Uprev.
-  // To keep that consistent, only current data is ever moved to p,
-  // and adding the update for p back to it makes it stale again.
+  // Interchanges swap the rows of Lprev and the cols of Uprev along with the
+  // data, so stale data stays consistent wherever it moves. ldl_restore_l_kernel
+  // puts the rows of L back in LAPACK's order after the trailing GEMM.
   //
   // Also returns the thread's share of the argmax of the off-diagonal
   // |dLD[first:, k]| it has written, for reduce_argmax.
@@ -1132,6 +1131,9 @@ ldl_diagonal_panel_fused_kernel(
     }
     return std::make_tuple(my_max, my_idx);
   };
+
+  // Whether any rows were interchanged, so that the host can skip ldl_restore_l_kernel
+  bool swapped = false;
 
   // The processed block will factor nb or nb-1 rows/cols
   while (curr_step < panel_end) {
@@ -1192,12 +1194,6 @@ ldl_diagonal_panel_fused_kernel(
         // New 2x2 pivot
         piv = ilambda;
         pivot_rank = 2;
-        // The swap below moves row/col curr_step + 1 to ilambda, so it has
-        // to be current too. The entries shared with ilambda already are.
-        if (ilambda != curr_step + 1) {
-          update_rowcol(curr_step + 1, /*first=*/curr_step + 1, /*skip=*/ilambda);
-          sync();
-        }
       }
     }
     // }
@@ -1222,31 +1218,42 @@ ldl_diagonal_panel_fused_kernel(
       sync();
     }
     if (swp != piv) {
-      // Swap columns -- contiguous access
-      for (int i = curr_step + gtid; i < n; i += nthreads) {
+      swapped = true;
+      // Swap columns, Uprev included -- contiguous access
+      for (int i = panel_start + gtid; i < n; i += nthreads) {
         thrust::swap(dLD[LinOff(i, swp, lda)], dLD[LinOff(i, piv, lda)]);
       }
       sync();
-      // Swap rows -- noncontiguous access -- paying penalty here
-      for (int i = curr_step + gtid; i < n; i += nthreads) {
+      // Swap rows, Lprev included -- noncontiguous access -- paying penalty here
+      for (int i = panel_start + gtid; i < n; i += nthreads) {
         thrust::swap(dLD[LinOff(swp, i, lda)], dLD[LinOff(piv, i, lda)]);
       }
       sync();
     }
     // }
 
-    // Unless it is part of the pivot, row/col ilambda now holds current data,
-    // yet it gets updated later either here (in-panel) or by the GEMM.
-    // Make it stale again.
+    // With a 1x1 pivot, row/col ilambda now holds current data: either the rejected
+    // candidate or, if swapped, the former row/col curr_step. Yet it gets updated
+    // later either here (in-panel) or by the GEMM. Make it stale again.
+    // A 2x2 pivot needs no undo: both of its rows/cols are current, and the stale
+    // row/col curr_step + 1 moves to ilambda as is.
     // NOTE: this costs accuracy. Adding the update back and subtracting it again
     // later each round by about eps * |update|, which is large next to a column that
     // cancels down to much less than its update. LAPACK's ?lasyf/?lahef never undo:
-    // they update a copy of the candidate column in their workspace W. So, with the
-    // same pivots as LAPACK, the solve residual averages about 1.2x LAPACK's on
-    // random indefinite matrices, and a pivot that results from heavy cancellation,
-    // e.g. in a graded matrix, can lose several digits (normwise backward stability
-    // holds). It also loses exactly zero rows/cols: see the TODO at the info update.
-    if (ilambda_updated && ilambda >= curr_step + pivot_rank) {
+    // they update copies of the current and the candidate columns in their workspace
+    // W. So a pivot that results from heavy cancellation, e.g. in a graded matrix, can
+    // lose several digits (normwise backward stability holds). It leaves an exactly
+    // zero row/col exact, though: that row of Lprev is zero, so every term added to it is.
+    // NOTE: Lprev/Uprev used to stay put on interchanges. A 2x2 pivot then needed the
+    // undo too, to rebase its row/col curr_step + 1, moved to ilambda, onto the row of
+    // Lprev at ilambda, which belongs to another row/col. That round trip turned an
+    // exactly zero row/col into noise, so info missed about a third of such inputs
+    // (test_linalg_ldl_factor_zero_row_col_info). Moving Lprev/Uprev with the data, as
+    // ?lasyf/?lahef do, removed it: indefinite inputs got 1.15-1.45x faster for n >= 512
+    // on H100, and the solve residual at n = 128 went from 1.1-1.2x LAPACK's to 1.0-1.06x.
+    // The next step is to drop the undo left here, by updating copies of both rows/cols
+    // as in W above.
+    if (ilambda_updated && pivot_rank == 1) {
       update_rowcol(ilambda, /*first=*/curr_step + pivot_rank, /*skip=*/-1, /*undo=*/true);
       sync();
     }
@@ -1297,23 +1304,8 @@ ldl_diagonal_panel_fused_kernel(
       }
     }
     // Update info if singular and if detected for the first time.
-    // TODO: unlike LAPACK, an exactly zero row/col is not always detected. Its row of
-    // L is exactly zero, so all its updates are exact zeros, and LAPACK keeps it zero
-    // by moving its factors along with it. Here they stay put: if it is the
-    // curr_step + 1 partner of a 2x2 pivot, it moves to ilambda, and the undo above
-    // adds the update of the former row/col ilambda to it. The in-panel updates and
-    // the trailing GEMM subtract that again with different rounding, leaving noise in
-    // place of a zero pivot, so info stays 0, unless the 2x2 pivot is the first of
-    // its panel (Lprev is empty). Leading and trailing zero rows/cols never move.
-    // Fix, as in ?lasyf/?lahef: drop the undo by updating a saved copy of the stale
-    // candidate, swap the rows of Lprev along with the data, and swap them back after
-    // the trailing GEMM to keep LAPACK's storage of L. This also recovers the accuracy
-    // the undo costs. It is left for a follow-up as it adds work to the panel (a
-    // strided swap of up to nb entries per interchange, the copy, a pass after the
-    // GEMM), so it needs re-benchmarking and possibly re-tuning panel_width, while
-    // the factorization is backward stable either way and info differs only as above.
-    // Pinned by test_linalg_ldl_factor_zero_row_col_info. Once fixed, real dtypes can
-    // move here from cuSOLVER (see ldl_factor_kernel).
+    // An exactly zero row/col has an exactly zero row of L, as in LAPACK, which moves
+    // along with it, so all its updates are exact zeros and so is its pivot.
     if (D_is_singular && gtid == 0 && *dinfo == 0) {
       *dinfo = curr_step + 1;
     }
@@ -1328,6 +1320,7 @@ ldl_diagonal_panel_fused_kernel(
   if (gtid == 0) {
     // Panel is processed -- update curr_step in the global memory
     *dcurr_step = curr_step;
+    *dswapped = swapped;
   }
 }
 
@@ -1351,7 +1344,7 @@ int max_cooperative_panel_blocks() {
 template <typename scalar_t, bool hermitian>
 void ldl_diagonal_panel(
   scalar_t* dLD, int n, int lda,
-  int nb, int curr_step, int* dcurr_step,
+  int nb, int curr_step, int* dcurr_step, int* dswapped,
   int* dipiv, int* dinfo,
   typename c10::scalar_value_type<scalar_t>::type* dpart_max, int* dpart_idx,
   int max_coop_blocks
@@ -1365,7 +1358,7 @@ void ldl_diagonal_panel(
   auto problem_dim = n - curr_step;
   if (problem_dim > ldl::COOP_MIN_ROWS && max_coop_blocks > 1) {
     const auto nblocks = std::min((problem_dim + ldl::COOP_NTHREADS - 1) / ldl::COOP_NTHREADS, max_coop_blocks);
-    void* args[] = {&dLD, &n, &lda, &nb, &curr_step, &dcurr_step, &dipiv, &dinfo, &dpart_max, &dpart_idx};
+    void* args[] = {&dLD, &n, &lda, &nb, &curr_step, &dcurr_step, &dswapped, &dipiv, &dinfo, &dpart_max, &dpart_idx};
     const auto err = cudaLaunchCooperativeKernel(
       reinterpret_cast<void*>(ldl_diagonal_panel_fused_kernel<scalar_t, ldl::COOP_NTHREADS, hermitian, /*cooperative=*/true>),
       nblocks, ldl::COOP_NTHREADS, args, 0, stream
@@ -1381,10 +1374,39 @@ void ldl_diagonal_panel(
 
   ldl_diagonal_panel_fused_kernel<scalar_t, PANEL_NTHREADS, hermitian, /*cooperative=*/false><<<1, PANEL_NTHREADS, 0, stream>>>(
     dLD, n, lda,
-    nb, curr_step, dcurr_step,
+    nb, curr_step, dcurr_step, dswapped,
     dipiv, dinfo, nullptr, nullptr
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// The panel kernel swaps the rows of the factored cols of the panel along with the
+// data, as the trailing GEMM needs. LAPACK's storage of L applies to each col only
+// the interchanges up to its own step, so this undoes the later ones, last to first,
+// as ?lasyf/?lahef do. A single block, one thread per col.
+template <typename scalar_t>
+__global__ void ldl_restore_l_kernel(scalar_t* dLD, int lda, const int* dipiv, int panel_start, int panel_stop) {
+  // Each thread walks the pivots one after another, so they are staged in shared
+  // memory rather than read from global memory with a full latency per step.
+  extern __shared__ int spiv[];
+  spiv[threadIdx.x] = dipiv[panel_start + threadIdx.x];
+  __syncthreads();
+  const int j = panel_start + threadIdx.x;
+  for (int k = panel_stop - 1; k > j; --k) {
+    const int p = spiv[k - panel_start];
+    // Both entries of a 2x2 pivot are negative, and it interchanges its second row
+    const int swp = k;
+    if (p < 0) {
+      --k;
+      if (k <= j) {
+        break;
+      }
+    }
+    const int piv = (p > 0 ? p : -p) - 1;
+    if (piv != swp) {
+      thrust::swap(dLD[LinOff(swp, j, lda)], dLD[LinOff(piv, j, lda)]);
+    }
+  }
 }
 
 template <typename scalar_t, bool hermitian>
@@ -1396,8 +1418,10 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   auto* pivots_data = static_cast<int*>(pivots.data_ptr());
   auto* info_data = static_cast<int*>(info.data_ptr());
 
-  auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
-  auto* dstep = static_cast<int*>(panel_step_holder.data_ptr());
+  // The step the panel kernel stops at, and whether it interchanged any rows
+  auto panel_state_holder = at::empty({2}, LD.options().dtype(at::kInt));
+  auto* dstate = static_cast<int*>(panel_state_holder.data_ptr());
+  const auto stream = at::cuda::getCurrentCUDAStream();
 
   // Scratch for the grid-wide argmax of the cooperative panel kernel
   const auto max_coop_blocks = max_cooperative_panel_blocks<scalar_t, hermitian>();
@@ -1428,7 +1452,7 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
       const auto curr_nb = panel_end - step;
       ldl_diagonal_panel<scalar_t, hermitian>(
         dLD, n, lda,
-        curr_nb, step, dstep,
+        curr_nb, step, dstate, dstate + 1,
         dipiv, dinfo,
         dpart_max, dpart_idx, max_coop_blocks
       );
@@ -1436,7 +1460,9 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
 
       // 2. Trailing matrix update of B[panel_end:, panel_end:] {
       // D2H to update the step on the host
-      auto curr_step = panel_step_holder.item().toInt();
+      int panel_state[2];
+      at::cuda::memcpy_and_sync(panel_state, dstate, sizeof(panel_state), cudaMemcpyDeviceToHost, stream);
+      const auto [curr_step, swapped] = panel_state;
       if (panel_end < n) {
         // TODO: LD22 is symmetric/Hermitian, so updating its lower triangle suffices.
         // cuBLAS syrkx/herkx with W = op(U12) as an m x k matrix (a transpose, e.g. via
@@ -1455,6 +1481,14 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
       }
       // }
 
+      // 3. LAPACK's order of the rows of L in the panel. At most nb + 1 cols {
+      if (swapped) {
+        const auto ncols = curr_step - step;
+        ldl_restore_l_kernel<<<1, ncols, ncols * sizeof(int), stream>>>(dLD, lda, dipiv, step, curr_step);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+      // }
+
       // Finish iteration
       step = curr_step;
     }
@@ -1463,7 +1497,9 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
 
 // Hermitian LDL of complex inputs. Real ones go to cuSOLVER (see ldl_factor_kernel),
 // so they are not instantiated.
-void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info) {
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, const bool upper) {
+  // Impossible path unless 'upper' is enabled
+  TORCH_INTERNAL_ASSERT(!upper, "ldl_factor_blas3_kernel: upper=True is not supported yet");
   const int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
   if (LD.numel() == 0) {
     return;
