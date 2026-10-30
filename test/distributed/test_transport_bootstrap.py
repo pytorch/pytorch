@@ -64,6 +64,31 @@ def _hash_store():
     return store
 
 
+class _NoDeleteStore(dist.Store):
+    """Store without ``delete_key``."""
+
+    def __init__(self):
+        super().__init__()
+        self.store = _hash_store()
+
+    def set(self, key, value):
+        self.store.set(key, value)
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def add(self, key, value):
+        return self.store.add(key, value)
+
+    def wait(self, keys, timeout):
+        self.store.wait(keys, timeout)
+
+
+class _DeleteStore(_NoDeleteStore):
+    def delete_key(self, key):
+        return self.store.delete_key(key)
+
+
 def _bootstrap_worker(rank, port, path, implicit):
     store = dist.TCPStore("127.0.0.1", port, is_master=False)
     if implicit:
@@ -124,6 +149,8 @@ class TestRankBootstrap(TestCase):
             self.assertEqual([future.result(timeout=5) for future in futures], [0, 0])
         for rank, transport in enumerate(transports):
             self.assertEqual(transport.peers, [(bytes([1 - rank, attempt, 255]), 2)])
+            # Each peer deletes the connection bytes it read.
+            self.assertFalse(store.check([f"{_PREFIX}/0/1/{attempt + 1}/{rank}"]))
 
     def test_connect_rank_multiple_peers(self):
         # Each thread needs its own client; a TCPStore wait blocks its client.
@@ -190,13 +217,13 @@ class TestRankBootstrap(TestCase):
         store = dist.HashStore()
         store.set_timeout(timedelta(seconds=60))
         start = time.monotonic()
-        with self.assertRaises(dist.DistStoreError):
+        with self.assertRaisesRegex(dist.DistStoreError, "Wait timeout"):
             transport.connect_rank(1, store=store, rank=0, timeout=0.05)
         self.assertLess(time.monotonic() - start, 2)
         # timeout=None falls back to the Store's timeout.
         store.set_timeout(timedelta(milliseconds=50))
         start = time.monotonic()
-        with self.assertRaises(dist.DistStoreError):
+        with self.assertRaisesRegex(dist.DistStoreError, "Wait timeout"):
             transport.connect_rank(1, store=store, rank=0, timeout=None)
         self.assertLess(time.monotonic() - start, 2)
         self.assertEqual(transport.binds, [0.05, None])
@@ -213,6 +240,19 @@ class TestRankBootstrap(TestCase):
         ):
             transport.connect_rank(1, store=store, rank=0, timeout=1)
         self.assertEqual(transport.closes, 0)
+        self.assertFalse(store.check([f"{_PREFIX}/0/1/1/1"]))
+        self.assertTrue(store.check([f"{_PREFIX}/0/1/1/0"]))
+
+    def test_connect_rank_python_store(self):
+        for cls, kept in ((_NoDeleteStore, True), (_DeleteStore, False)):
+            transport = _Transport(b"endpoint")
+            store = cls()
+            store.set(f"{_PREFIX}/0/1/1/1", b"peer")
+            self.assertEqual(
+                transport.connect_rank(1, store=store, rank=0, timeout=1), 0
+            )
+            self.assertEqual(transport.peers, [(b"peer", 1)])
+            self.assertEqual(store.store.check([f"{_PREFIX}/0/1/1/1"]), kept)
 
     def test_connect_rank_attempt_count(self):
         store = _hash_store()

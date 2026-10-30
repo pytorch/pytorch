@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import numbers
 from abc import ABC, abstractmethod
 from datetime import timedelta
@@ -208,8 +209,10 @@ class Transport(ABC):
             peer_rank: Nonnegative integer identifying the peer in this Store namespace.
             store: Trusted rendezvous Store, such as ``torch.distributed.TCPStore``;
                 defaults to the default process group's Store. No collectives are
-                performed. Keys persist, and ``bind()`` bytes may describe
-                registered memory, such as NIXL agent metadata.
+                performed. ``bind()`` bytes may describe registered memory, such
+                as NIXL agent metadata; each peer deletes the peer bytes it reads,
+                best effort. Per-pair attempt counters persist, as do bytes the
+                peer never reads, such as after its bind failure or timeout.
             rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
                 explicit override requires no initialized process group. Identities
                 need not be contiguous, but must be distinct for the two peers.
@@ -260,7 +263,7 @@ class Transport(ABC):
             raise ValueError("peer_rank must differ from the local rank")
         pair = f"transport_connect_rank/{tag}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
         attempt = store.add(f"{pair}/attempts/{rank}", 1)
-        store = dist.PrefixStore(f"{pair}/{attempt}", store)
+        root, store = store, dist.PrefixStore(f"{pair}/{attempt}", store)
         # Store.set accepts bytes; the stub only declares str.
         # pyrefly: ignore [bad-argument-type]
         store.set(str(rank), self.bind(timeout=timeout))
@@ -268,7 +271,14 @@ class Transport(ABC):
             store.wait([str(peer_rank)])
         else:
             store.wait([str(peer_rank)], wait)
-        return self.connect(store.get(str(peer_rank)), timeout=timeout)
+        peer_url = store.get(str(peer_rank))
+        # Only this call reads the peer's bytes; later calls use new attempts.
+        # Cleanup is best effort: some Stores do not implement delete_key.
+        # Call it unprefixed: PrefixStore's deleteKey does not reach Python
+        # delete_key overrides.
+        with contextlib.suppress(RuntimeError):
+            root.delete_key(f"{pair}/{attempt}/{peer_rank}")
+        return self.connect(peer_url, timeout=timeout)
 
     @abstractmethod
     def connected(self) -> bool:
