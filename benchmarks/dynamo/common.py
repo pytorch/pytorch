@@ -399,21 +399,10 @@ def output_json(filename, headers, row):
         "quantization": current_quantization,
         "batch_size": current_batch_size,
     }
-    dtype = current_dtype
-    model_name = current_name
     if current_settings:
         extra_info.update(current_settings)
     is_tp = extra_info.get("tp_size", 1) > 1
     if is_tp:
-        dtype = next(
-            (
-                name
-                for name in ("float16", "bfloat16", "float32", "amp")
-                if extra_info.get(name)
-            ),
-            "",
-        )
-        extra_info["device"] = mapping_headers.get("dev", current_device)
         extra_info["batch_size"] = mapping_headers.get("batch_size", current_batch_size)
         extra_info.update(
             {
@@ -422,7 +411,6 @@ def output_json(filename, headers, row):
                 if key in mapping_headers
             }
         )
-        model_name = mapping_headers.get("name", current_name)
     else:
         extra_info.pop("tp_size", None)
     with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:
@@ -434,18 +422,18 @@ def output_json(filename, headers, row):
                 continue
 
             # Make sure that the record is valid
-            if not model_name:
+            if not current_name:
                 continue
 
             record = {
                 "benchmark": {
                     "name": "TorchInductor",
                     "mode": current_mode,
-                    "dtype": dtype,
+                    "dtype": current_dtype,
                     "extra_info": extra_info,
                 },
                 "model": {
-                    "name": model_name,
+                    "name": current_name,
                     "type": "OSS model",
                     "backend": current_backend,
                     "origins": [origin],
@@ -2187,7 +2175,7 @@ class BenchmarkRunner:
         statuses = gather_across_ranks(status, self.tp_group)
         return next((s for s in statuses if s != "pass"), "pass")
 
-    def use_model_forward_for_compilation(self):
+    def use_model_forward_for_accuracy(self):
         return False
 
     def get_request_tokens(self, example_inputs):
@@ -2494,7 +2482,6 @@ class BenchmarkRunner:
 
             # Cast the model to float16/float32 as necessary
             model, example_inputs = self.maybe_cast(model, example_inputs)
-            accuracy_status = "pass"
 
             # Get results of native pytorch
             reset_rng_state()
@@ -2514,12 +2501,10 @@ class BenchmarkRunner:
                     else "eager_1st_run_fail"
                 )
                 log.exception("")
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
                 empty_gpu_cache(current_device)
-            accuracy_status = self.agree_on_status(accuracy_status)
-            if accuracy_status != "pass":
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2539,12 +2524,10 @@ class BenchmarkRunner:
                     else "eager_2nd_run_fail"
                 )
                 log.exception("")
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
                 empty_gpu_cache(current_device)
-            accuracy_status = self.agree_on_status(accuracy_status)
-            if accuracy_status != "pass":
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result, within tolerance.
             # TODO If we want the above to be true, then deterministic should be set.
@@ -2611,9 +2594,9 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
-                        # Not hf_llm: generate-mode accuracy compiles forward_pass,
+                        # Generate-mode accuracy compiles forward_pass,
                         # while performance compiles the forward under generate().
-                        if self.use_model_forward_for_compilation():
+                        if self.use_model_forward_for_accuracy():
                             model_copy.forward = optimize_ctx(model_copy.forward)
                             optimized_model_iter_fn = self.model_iter_fn
                         else:
@@ -2632,13 +2615,11 @@ class BenchmarkRunner:
                         if isinstance(e, torch.cuda.OutOfMemoryError)
                         else "fail_to_run"
                     )
-                finally:
-                    del model_copy
-                accuracy_status = self.agree_on_status(accuracy_status)
-                if accuracy_status != "pass":
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
+                finally:
+                    del model_copy
 
                 if name in self.skip_accuracy_check_as_eager_non_deterministic:
                     return record_status(
@@ -4822,8 +4803,6 @@ def run(runner, args, original_dir=None):
         disable_output, \
         optimize_ctx
     optimize_ctx = contextlib.nullcontext()
-    if args.tp_size > 1:
-        set_current_metadata(args)
 
     if args.disable_output:
         disable_output = True
@@ -5100,7 +5079,6 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 name = model_name
-                load_status = None
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []
@@ -5162,20 +5140,19 @@ def run(runner, args, original_dir=None):
                     mode = "train" if args.training else "eval"
                     print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
-                    load_status = (
+                    status = (
                         "model_fail_to_load"
                         if isinstance(e, NotImplementedError)
                         else "eager_fail_to_run"
                     )
-                if load_status is not None:
-                    write_csv_when_exception(args, name, load_status, device)
+                    write_csv_when_exception(args, name, status, device)
                     # NB: current_name/current_device not set, so pass
                     # explicitly
                     output_signpost(
                         {"name": name, "dev": device},
                         args,
                         runner.suite_name,
-                        error=load_status,
+                        error=status,
                     )
                     continue  # bad benchmark implementation
 
