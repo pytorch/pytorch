@@ -21,6 +21,10 @@ if TYPE_CHECKING:
     from ._cuda_stream import _CudaStreamOrdering
 
 
+# TCPStore polls with an int millisecond timeout.
+_MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
+
+
 @runtime_checkable
 class MemoryView(Protocol):
     """A read-only view of registered memory."""
@@ -191,7 +195,7 @@ class Transport(ABC):
         store: dist.Store | None = None,
         rank: int | None = None,
         tag: str = "default",
-        timeout: float | timedelta | None = 30.0,
+        timeout: float | timedelta | None = None,
     ) -> int:
         """Connect to the peer identified by ``peer_rank`` through a Store.
 
@@ -213,10 +217,12 @@ class Transport(ABC):
                 a distinct tag for each transport connecting the same rank pair.
             timeout: Timeout for each of bind, the Store wait, and connect, in
                 seconds or as a ``timedelta``, from 1 ms to about 24.8 days (Store
-                waits use 32-bit milliseconds). ``None`` uses the backend's and
-                the Store's timeouts; with ``store=None``, the wait then holds the
-                default Store's client, shared with the default process group,
-                for up to the Store's timeout.
+                waits use 32-bit milliseconds). ``None`` uses the transport's
+                default timeout, such as NIXL's constructor ``timeout``, which must
+                then be in this range. Without one, the backend's and the Store's
+                timeouts apply; with ``store=None``, the wait then holds the
+                default Store's client, shared with the default process group, for
+                up to the Store's timeout.
 
         Calls are matched in order per rank pair and tag: the Nth call on each
         peer connects to the other's Nth call, including calls that failed after
@@ -231,6 +237,7 @@ class Transport(ABC):
         """
         if type(tag) is not str:
             raise TypeError("tag must be a string")
+        timeout = self._default_timeout if timeout is None else timeout
         wait = None
         if timeout is not None:
             if isinstance(timeout, timedelta):
@@ -239,7 +246,9 @@ class Transport(ABC):
                 raise TypeError("timeout must be seconds or a timedelta")
             timeout = float(timeout)
             if not 0.001 <= timeout <= _MAX_STORE_TIMEOUT:
-                raise ValueError("timeout must be in [1 ms, 2**31 - 1 ms]")
+                raise ValueError(
+                    f"timeout must be in [1 ms, 2**31 - 1 ms], got {timeout} s"
+                )
             wait = timedelta(seconds=timeout)
         rank = dist.get_rank() if rank is None else rank
         store = dist.distributed_c10d._get_default_store() if store is None else store
@@ -436,7 +445,3 @@ class Transport(ABC):
 
     def __exit__(self, *args: Any) -> None:
         self.close()
-
-
-# TCPStore polls with an int millisecond timeout.
-_MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
