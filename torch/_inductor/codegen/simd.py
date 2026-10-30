@@ -3428,7 +3428,16 @@ class SIMDScheduling(BaseScheduling):
         def _pick_split_size():
             # the overridden has highest priority
             if config.triton.mix_order_reduction_split_size is not None:
-                return config.triton.mix_order_reduction_split_size
+                split_size = config.triton.mix_order_reduction_split_size
+                # NPU (torch_npu fork): non-power-of-2 RSPLIT_SIZE
+                # miscompiles the tail-block mask of the mix-order kernel on
+                # triton-ascend (probed: 18/24/48 over-count rows,
+                # 16/32/64 are correct). Clamp to the largest power of two
+                # <= the requested value; the heuristic branch below already
+                # produces a power of two via last_power_of_2.
+                if node1.get_device().type == "npu" and split_size > 0:
+                    split_size = 1 << (split_size.bit_length() - 1)
+                return split_size
 
             # heuristics based on number of SMs
             device_prop = DeviceProperties.create(node1.get_device())
