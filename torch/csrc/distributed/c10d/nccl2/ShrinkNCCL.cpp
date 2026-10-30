@@ -133,6 +133,11 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       getRank() - excludedBeforeRank,
       getSize() - static_cast<int>(excluded.size()),
       childOptions);
+  if (global_rank_start_ < 0) {
+    // As in split(): this group's world ranks are unknown after reconfigure().
+    child->global_rank_start_ = -1;
+    child->global_rank_stride_ = -1;
+  }
   child->initFromComm(childComm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }

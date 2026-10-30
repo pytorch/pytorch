@@ -2344,6 +2344,9 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
         self.assertEqual(
             events["send"]["Process Group Ranks"], str(sorted([self.rank, nxt]))
         )
+        # Attributed to the pair sub-PG, not the parent.
+        self.assertIn("/p2p-", events["send"]["Process Group Name"])
+        self.assertIn("/p2p-", events["recv"]["Process Group Name"])
 
 
 class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
@@ -2763,15 +2766,17 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
     def test_profiler_reconfigure_drops_global_ranks(self) -> None:
         # Reconfigure handles carry no world ranks, so the group's members are
         # unknown afterwards; profiler metadata must not keep describing the
-        # construction-time members (here reversed world ranks).
+        # construction-time members, nor derive its split/shrink children's
+        # from them.
         torch.cuda.set_device(self.device)
         name = "zzz_reconf_prof"
         store = dist.PrefixStore(name, dist.distributed_c10d._get_default_store())
         opts = dist.ProcessGroupNCCL2.Options()
         opts.enable_reconfigure = True
         opts.group_name = name
-        opts.global_ranks_in_group = list(reversed(range(self.world_size)))
+        opts.global_ranks_in_group = list(range(self.world_size))
         backend = dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+        children = []
         try:
             handles = dist.PrefixStore("handles", store)
             handles.set(str(self.rank), backend.get_reconfigure_handle())
@@ -2783,25 +2788,46 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
             reconfigure_opts.timeout = timedelta(seconds=30)
             backend.reconfigure(reconfigure_opts).wait()
 
+            split_opts = dist.ProcessGroupNCCL2.Options()
+            split_opts.group_name = f"{name}_split"
+            children.append(
+                backend.split(store, list(range(self.world_size)), split_opts)
+            )
+            if self.rank == 0:
+                shrink_opts = dist.ProcessGroupNCCL2.Options()
+                shrink_opts.group_name = f"{name}_shrink"
+                children.append(
+                    backend.shrink(
+                        list(range(1, self.world_size)), opts_override=shrink_opts
+                    )
+                )
+
             t = torch.ones(4, device=self.device)
             with torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU],
                 record_shapes=True,
             ) as prof:
-                backend.allreduce([t]).wait()
+                for pg in [backend, *children]:
+                    pg.allreduce([t]).wait()
                 torch.cuda.synchronize()
         finally:
-            backend.shutdown()
+            for pg in [*children, backend]:
+                pg.shutdown()
 
-        (args,) = [
-            a
+        events = {
+            a["Process Group Name"]: a
             for a in _param_comms_args(prof)
             if a.get("Collective name") == "allreduce"
-        ]
-        self.assertEqual(args["Process Group Name"], name)
-        self.assertEqual(args["Process Group Ranks"], "[]")
-        self.assertNotIn("Global rank start", args)
-        self.assertNotIn("Global rank stride", args)
+        }
+        expected = [name, f"{name}_split"]
+        if self.rank == 0:
+            expected.append(f"{name}_shrink")
+        self.assertEqual(sorted(events), sorted(expected))
+        for pg_name in expected:
+            args = events[pg_name]
+            self.assertEqual(args["Process Group Ranks"], "[]", pg_name)
+            self.assertNotIn("Global rank start", args, pg_name)
+            self.assertNotIn("Global rank stride", args, pg_name)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

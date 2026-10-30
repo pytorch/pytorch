@@ -729,7 +729,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Backs the default commName; NCCL keeps the pointer for the comm's lifetime.
   std::string comm_name_;
   // options_c10d_->global_ranks_in_group as recorded in profiler metadata;
-  // reconfigure() resets both to -1 (unknown).
+  // reconfigure() resets both to -1 (unknown), and split()/shrink() children
+  // of such a group inherit -1.
   int global_rank_start_{-1};
   int global_rank_stride_{-1};
 

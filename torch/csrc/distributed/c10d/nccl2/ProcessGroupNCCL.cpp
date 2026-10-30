@@ -508,6 +508,12 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
 
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
       store, newRank, static_cast<int>(ranks.size()), childOpts);
+  if (global_rank_start_ < 0) {
+    // reconfigure() left this group's world ranks unknown, so childRanks is
+    // stale; record the child's as unknown too.
+    child->global_rank_start_ = -1;
+    child->global_rank_stride_ = -1;
+  }
   child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
