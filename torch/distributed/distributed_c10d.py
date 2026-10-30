@@ -1040,6 +1040,16 @@ def _register_nccl_backend(*, use_nccl2: bool) -> None:
     )
 
 
+# Set once _check_nccl_impl_agreement has checked a group of every rank.
+_nccl_impl_checked_world = False
+
+
+def _reset_nccl_impl_check() -> None:
+    # Groups re-created after WORLD is destroyed use a new store.
+    global _nccl_impl_checked_world
+    _nccl_impl_checked_world = False
+
+
 def _check_nccl_impl_agreement(
     opts: _DistributedBackendOptions, impl: Literal["nccl-legacy", "nccl2"], /
 ) -> None:
@@ -1053,11 +1063,22 @@ def _check_nccl_impl_agreement(
     and checks whether the other one was published; with stores that apply
     operations in order at least one rank warns. Does not block.
 
+    Runs for each group until one of every rank has been checked (reset when
+    WORLD is destroyed). If that group was created through ``nccl``, every
+    pair of ranks has then compared the process-wide ``TORCH_DIST_USE_NCCL2``.
+    With an NCCL default group that is one check per process; with a gloo
+    default, subgroups keep being checked since the first one may not span the
+    ranks that disagree (e.g. intra-node groups when hosts differ). Later
+    groups are not checked, so mismatched backend names, or a later ``nccl``
+    group after an all-rank ``nccl-legacy``/``nccl2``/``nccl-lazy`` group, go
+    undetected.
+
     Only warns: the keys are never deleted, and torchelastic reuses its store
     across restarts, so a key can be left over from an earlier attempt that
     used the other implementation. Best effort: store errors are ignored.
     """
-    if opts.group_size <= 1:
+    global _nccl_impl_checked_world
+    if opts.group_size <= 1 or _nccl_impl_checked_world:
         return
     other = "nccl2" if impl == "nccl-legacy" else "nccl-legacy"
     try:
@@ -1066,15 +1087,23 @@ def _check_nccl_impl_agreement(
     except Exception:
         logger.debug("Skipping NCCL implementation check", exc_info=True)
         return
+    # The default group is created before _world.default_pg is set.
+    default_pg = _world.default_pg
+    if default_pg is None or opts.group_size == default_pg.size():
+        _nccl_impl_checked_world = True
     if not mixed:
         return
+    # Like the ProcessGroupNCCL log prefix.
+    group = opts.group_id
+    if opts.group_desc not in ("", "undefined"):
+        group = f"{group}({opts.group_desc})"
     logger.warning(
-        "Process group %r may mix NCCL implementations: this rank uses %s, but "
-        "%s was published to the group's store. Mixed ranks hang until the "
+        "Process group %s may mix NCCL implementations: this rank uses %s, "
+        "but %s was published to the group's store. Mixed ranks hang until the "
         "timeout; use the same backend name and TORCH_DIST_USE_NCCL2 value on "
         "every rank. This is harmless if the key is left over from an earlier "
         "attempt that shared the store.",
-        opts.group_id,
+        group,
         impl,
         other,
     )
@@ -3454,6 +3483,7 @@ def destroy_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
+        _reset_nccl_impl_check()
     else:
         _finalize_torchcomms(pg)
         _release_nvshmem_team_pool(_world.pg_names[pg])
@@ -3568,6 +3598,7 @@ def _abort_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
+        _reset_nccl_impl_check()
     else:
         pg.abort()
         # As for WORLD above, only after the abort.
