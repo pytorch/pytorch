@@ -1166,6 +1166,10 @@ class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
         samples = [dtensor.normal_().to_local().clone() for _ in range(2)]
         self.assertNotEqual(samples[0], samples[1])
 
+        randn = torch.distributed.tensor.randn
+        samples = [randn(4, device_mesh=cpu_mesh).to_local() for _ in range(2)]
+        self.assertNotEqual(samples[0], samples[1])
+
 
 if __name__ == "__main__":
     run_tests()
