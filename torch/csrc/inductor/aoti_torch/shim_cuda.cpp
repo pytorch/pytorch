@@ -12,12 +12,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/_foreach_copy.h>
-#endif
-
 AOTITorchError aoti_torch_create_cuda_guard(
     int32_t device_index,
     CUDAGuardHandle* ret_guard // returns new reference
@@ -135,8 +129,21 @@ AOTITorchError aoti_torch_create_cuda_mem_pool(
 }
 
 AOTITorchError aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { delete reinterpret_cast<at::cuda::MemPool*>(pool); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
+    if (mem_pool != nullptr) {
+      // ~MemPool would throw, and so abort, while this thread captures.
+      cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+      C10_CUDA_CHECK(cudaStreamIsCapturing(
+          c10::cuda::getCurrentCUDAStream(mem_pool->device()).stream(),
+          &status));
+      TORCH_CHECK(
+          status == cudaStreamCaptureStatusNone,
+          "Can't delete a CUDA memory pool while the current stream on its "
+          "device is capturing");
+    }
+    delete mem_pool;
+  });
 }
 
 AOTITorchError aoti_torch_create_cuda_graph(
@@ -207,17 +214,5 @@ AOTITorchError aoti_torch_cuda_graph_replay(CUDAGraphHandle graph) {
       cuda_graph->instantiate();
     }
     cuda_graph->replay();
-  });
-}
-
-AOTITorchError aoti_torch_cuda_foreach_copy_(
-    const AtenTensorHandle* dst,
-    const AtenTensorHandle* src,
-    int64_t num_tensors) {
-  using torch::aot_inductor::pointer_to_list;
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::_foreach_copy_(
-        pointer_to_list<at::Tensor>(dst, num_tensors),
-        pointer_to_list<at::Tensor>(src, num_tensors));
   });
 }

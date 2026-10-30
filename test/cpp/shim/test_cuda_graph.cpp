@@ -231,29 +231,56 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
 
 TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
   auto longs = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
-  std::vector<at::Tensor> dst = {
-      at::empty({4}, at::kCUDA),
-      at::empty({2, 3}, at::kCUDA).t(),
-      at::empty({5}, longs)};
-  std::vector<at::Tensor> src = {
-      at::randn({4}, at::kCUDA),
-      at::randn({3, 2}, at::kCUDA),
-      at::randint(100, {5}, longs)};
-  std::vector<AtenTensorHandle> dst_handles, src_handles;
-  for (size_t i = 0; i < dst.size(); ++i) {
-    dst_handles.push_back(reinterpret_cast<AtenTensorHandle>(&dst[i]));
-    src_handles.push_back(reinterpret_cast<AtenTensorHandle>(&src[i]));
+  // Same dtype and layout, so the copies fuse, then mixed ones, which don't.
+  for (bool fused : {true, false}) {
+    std::vector<at::Tensor> dst = {
+        at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
+    std::vector<at::Tensor> src = {
+        at::randn({4}, at::kCUDA), at::randn({3, 2}, at::kCUDA)};
+    if (!fused) {
+      dst[1] = at::empty({2, 3}, at::kCUDA).t();
+      dst.push_back(at::empty({5}, longs));
+      src.push_back(at::randint(100, {5}, longs));
+    }
+    std::vector<AtenTensorHandle> dst_handles, src_handles;
+    for (size_t i = 0; i < dst.size(); ++i) {
+      dst_handles.push_back(reinterpret_cast<AtenTensorHandle>(&dst[i]));
+      src_handles.push_back(reinterpret_cast<AtenTensorHandle>(&src[i]));
+    }
+    auto n = static_cast<int64_t>(dst.size());
+    ASSERT_EQ(
+        aoti_torch_foreach_copy_(
+            dst_handles.data(), n, src_handles.data(), n, fused),
+        AOTI_TORCH_SUCCESS);
+    for (size_t i = 0; i < dst.size(); ++i) {
+      EXPECT_TRUE(dst[i].equal(src[i]));
+    }
+    EXPECT_EQ(
+        aoti_torch_foreach_copy_(
+            dst_handles.data(), n - 1, src_handles.data(), n, 0),
+        AOTI_TORCH_FAILURE);
+    dst[0] = at::empty({3}, at::kCUDA);
+    EXPECT_EQ(
+        aoti_torch_foreach_copy_(
+            dst_handles.data(), n, src_handles.data(), n, 0),
+        AOTI_TORCH_FAILURE);
   }
-  ASSERT_EQ(
-      aoti_torch_cuda_foreach_copy_(dst_handles.data(), src_handles.data(), 3),
-      AOTI_TORCH_SUCCESS);
-  for (size_t i = 0; i < dst.size(); ++i) {
-    EXPECT_TRUE(dst[i].equal(src[i]));
-  }
-  dst[0] = at::empty({3}, at::kCUDA);
   EXPECT_EQ(
-      aoti_torch_cuda_foreach_copy_(dst_handles.data(), src_handles.data(), 3),
-      AOTI_TORCH_FAILURE);
+      aoti_torch_foreach_copy_(nullptr, 1, nullptr, 1, 0), AOTI_TORCH_FAILURE);
+}
+
+TEST_F(AOTICudaGraphTest, DeletingAPoolWhileCapturingFails) {
+  CUDAMemPoolHandle pool = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool), AOTI_TORCH_SUCCESS);
+  {
+    at::cuda::CUDAStreamGuard guard(*capture_stream_);
+    ASSERT_EQ(
+        aoti_torch_cuda_graph_capture_begin(graph_, pool_, kThreadLocal),
+        AOTI_TORCH_SUCCESS);
+    EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_FAILURE);
+    EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph_), AOTI_TORCH_SUCCESS);
+  }
+  EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
 }
 
 TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
