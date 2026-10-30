@@ -114,8 +114,9 @@ class Transport(ABC):
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
 
-    Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
-    one outgoing peer; no process group, ranks, or matching receives are needed.
+    Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
+    connect to multiple peers, and remote descriptors identify their peer. No
+    process group, ranks, or matching receives are needed.
     Exchange connection bytes and remote descriptors through a trusted control
     plane. Registration is valid until unregistration or close, including after bind/connect.
 
@@ -166,13 +167,18 @@ class Transport(ABC):
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
         """Connect to a bound peer and return zero on success.
 
+        Connecting to additional peers keeps existing connections; reconnecting
+        with the same connection bytes is a no-op. There is no per-peer
+        disconnect; ``close`` releases all peers. Transfers to descriptors naming
+        an unconnected peer raise ``ValueError``.
+
         Rank-to-endpoint lookup belongs in a separate application control-plane
         adapter; this interface addresses peers using opaque connection bytes.
         """
 
     @abstractmethod
     def connected(self) -> bool:
-        """Return whether the endpoint is connected to its peer."""
+        """Return whether the endpoint is connected to any peer."""
 
     @abstractmethod
     def register_memory(
@@ -180,7 +186,7 @@ class Transport(ABC):
     ) -> Memory:
         """Register a contiguous tensor, including after bind/connect or transfers.
 
-        Exchange its remote-buffer descriptor with the peer before remote access.
+        Exchange its remote-buffer descriptor with peers before remote access.
         """
 
     def unregister_memory(
