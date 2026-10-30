@@ -2,6 +2,7 @@
 
 import functools
 import os
+import threading
 from collections.abc import Callable
 from typing import cast, TypeVar
 from typing_extensions import ParamSpec
@@ -43,7 +44,9 @@ def export_python(
     captured variant whose guards hold, and does not trace or compile. A call no
     captured variant covers raises :class:`~torch.compiler.PrecompileError` rather than
     recompiling. Nothing hashes the function, its config or the machine, so editing
-    the function does not recapture it: delete ``path`` to recapture::
+    the function does not recapture it: delete ``path`` to recapture. Concurrent first
+    calls in one process capture once; processes that share ``path`` (the ranks of one
+    job, say) should let one of them make the first call::
 
         @torch.compiler.export_python(path="artifacts/step.py")
         def step(model, x):
@@ -96,26 +99,33 @@ class _ExportedPython:
         self._backend = backend
         self._tracer = DynamoTracer(dynamic=dynamic)
         self._runnable: PrecompiledRunnable | None = None
+        self._lock = threading.RLock()
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         if self._runnable is None:
-            if not os.path.exists(self._path):
-                return self._capture(*args, **kwargs)
-            self._runnable = load(self._path, self._cache_path)
+            with self._lock:
+                if self._runnable is None:
+                    if not os.path.exists(self._path):
+                        return self._capture(*args, **kwargs)
+                    self._runnable = load(self._path, self._cache_path)
         return self._runnable(*args, **kwargs)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
-        with capture(
+        cap = capture(
             self._fn,
             artifact_path=self._path,
             cache_path=self._cache_path,
             tracer=self._tracer,
             backend=self._backend,
-        ) as cap:
-            result = cap(*args, **kwargs)
-        # The capture's live compile holds the names its artifact binds on load.
-        cast(_DynamoCapture, cap)._release_live_compile()
+        )
+        try:
+            with cap:
+                result = cap(*args, **kwargs)
+        finally:
+            # The capture's live compile holds the names its artifact binds on load,
+            # and one that raised must not stay live under the next call's capture.
+            cast(_DynamoCapture, cap)._release_live_compile()
         self._runnable = load(self._path, self._cache_path)
         return result
 
