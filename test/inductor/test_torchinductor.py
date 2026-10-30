@@ -8053,6 +8053,18 @@ for dtype in (torch.int32, torch.int64):
             # 7.5e10 overflows float16, so skip the automatic half rerun
             self.common(fn, (x,), atol=0, rtol=0, check_lowp=False)
 
+        if (
+            is_triton_backend(self.device)
+            and self.device != "cpu"
+            and not config.cpp_wrapper
+        ):
+            # The fallback shifts by the block maximum; make sure these sizes
+            # still reach it and do not silently take another path.
+            for n in (100, 1000):
+                x = torch.full((2, n), 7.5e10, dtype=torch.float32, device=self.device)
+                _, code = run_and_get_code(torch.compile(fn), x)
+                self.assertIn("triton_helpers.max2", " ".join(code))
+
     def test_var_mean_identical_bfloat16(self):
         # Covers the two-step variance window for bfloat16 on GPU
         # (1024 <= n <= 32768). Sums of identical bfloat16 values are exact in
@@ -8067,7 +8079,7 @@ for dtype in (torch.int32, torch.int64):
         def fn(x):
             return (
                 torch.var(x, dim=1),
-                torch.var_mean(x, dim=1)[0],
+                *torch.var_mean(x, dim=1),
                 torch.std(x, dim=1, correction=0),
             )
 
