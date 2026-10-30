@@ -101,6 +101,8 @@ class _TestDeviceInfoTestCase(TestCase):
 
 
 class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -908,8 +910,8 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
         get_tflops.assert_called_once_with(torch.float32, device=device)
 
 
-class TestFP4Support(TestCase):
-    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+class TestFP4ImportError(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_ensure_nv_universal_gemm_import_error(self):
         from torch._inductor import utils
@@ -924,11 +926,17 @@ class TestFP4Support(TestCase):
         ):
             self.assertFalse(utils.ensure_nv_universal_gemm_available())
 
+
+class TestFP4Support(TestCase):
+    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(
-        not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
-        "requires CUDA and cutlass.operators",
+        not ensure_nv_universal_gemm_available(),
+        "requires cutlass.operators",
     )
-    def test_ensure_fp4_dtype_registered(self):
+    def test_ensure_fp4_dtype_registered(self, device):
         """_ensure_fp4_dtype_registered should map torch FP4 to cutlass.Float4E2M1FN."""
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
@@ -946,6 +954,22 @@ class TestFP4Support(TestCase):
         )
         self.assertEqual(result_fp32, cutlass.Float32)
 
+
+class TestRandStridedFP4(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_rand_strided_fp4(self, device):
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=device)
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (16, 32))
+        self.assertTrue(t.is_cuda)
+
+
+class TestFP4SupportCPU(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_rand_strided_fp4(self):
         """rand_strided should produce valid FP4 tensors."""
         from torch._dynamo.testing import rand_strided
@@ -954,15 +978,6 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_rand_strided_fp4_cuda(self):
-        from torch._dynamo.testing import rand_strided
-
-        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
-        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
-        self.assertEqual(t.shape, (16, 32))
-        self.assertTrue(t.is_cuda)
 
 
 class TestTritonTypeMapping(TestCase):
@@ -1836,6 +1851,8 @@ class _GpuOnlyClassified(DeviceInterface):
 
 
 class TestDeviceClassification(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._registered = []
@@ -2020,6 +2037,8 @@ class TestScaleSwizzleInference(TestCase):
     `to_blocked` hands back the 32x8 buffer flattened.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8):
         with (
             mock.patch.object(torch.version, "hip", "7.14.0"),
@@ -2079,6 +2098,8 @@ instantiate_device_type_tests(TestDeviceTflops, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestDeviceTflopsTritonFallback, globals(), only_for=("cuda",)
 )
+instantiate_device_type_tests(TestFP4Support, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestRandStridedFP4, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
