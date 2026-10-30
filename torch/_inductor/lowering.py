@@ -8131,6 +8131,18 @@ def mul(a, b):
     for tensor, scalar in ((a, b), (b, a)):
         if (
             isinstance(tensor, TensorBox)
+            and isinstance(scalar, float)
+            and math.isnan(scalar)
+            and is_strict_cuda_triton(tensor.get_device())
+            and tensor.get_dtype() in (torch.float16, torch.bfloat16, torch.float32)
+        ):
+            # CUDA arithmetic canonicalizes NaNs; constant folding preserves their payload.
+            dtype = tensor.get_dtype()
+            int_dtype = torch.int16 if dtype.itemsize == 2 else torch.int32
+            bits = (1 << (dtype.itemsize * 8 - 1)) - 1
+            return to_dtype_bitcast(full_like(tensor, bits, dtype=int_dtype), dtype)
+        if (
+            isinstance(tensor, TensorBox)
             and isinstance(scalar, (int, float))
             and is_strict_cuda_triton(tensor.get_device())
             and tensor.get_dtype() in (torch.float16, torch.bfloat16)
@@ -9214,7 +9226,39 @@ register_pointwise_numeric(aten.asinh)
 register_pointwise_numeric(aten.atan2)
 register_pointwise_numeric(aten.atan)
 register_pointwise_numeric(aten.atanh)
-register_pointwise_numeric(aten.copysign)
+_copysign_default = register_pointwise_numeric(aten.copysign)
+
+
+@register_lowering(
+    [aten.copysign, *aten.copysign.op_overloads()],
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def copysign(a, b):
+    tensor = a if isinstance(a, (TensorBox, ExpandView)) else b
+    if not isinstance(tensor, (TensorBox, ExpandView)):
+        return _copysign_default(a, b)
+    dtype = tensor.get_dtype()
+    if not is_strict_cuda_triton(tensor.get_device()):
+        return _copysign_default(a, b)
+    if isinstance(b, (int, float)):
+        b = math.copysign(1.0, torch.tensor(b, dtype=dtype).item())
+    if dtype not in (torch.float16, torch.bfloat16):
+        return _copysign_default(a, b)
+
+    def fn(a, b):
+        # CUDA's low-precision copysign splices the storage bits directly.
+        magnitude = ops.to_dtype_bitcast(a, torch.int16, src_dtype=dtype)
+        sign = ops.to_dtype_bitcast(b, torch.int16, src_dtype=dtype)
+        bits = ops.bitwise_or(
+            ops.bitwise_and(magnitude, ops.constant(0x7FFF, torch.int16)),
+            ops.bitwise_and(sign, ops.constant(-0x8000, torch.int16)),
+        )
+        return ops.to_dtype_bitcast(bits, dtype, src_dtype=torch.int16)
+
+    return make_pointwise(fn)(a, b)
+
+
 register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
