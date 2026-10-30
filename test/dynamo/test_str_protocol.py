@@ -118,6 +118,10 @@ class FormatTests(TestCase):
         self.assertEqual((123).__format__("04d"), "0123")
         self.assertEqual((255).to_bytes(2, "big"), b"\x00\xff")
         self.assertEqual((2).__pow__(10, 1000), 24)
+        self.assertIs((1).__radd__(1.5), NotImplemented)
+        self.assertEqual((1).__getattribute__("real"), 1)
+        with self.assertRaises(AttributeError):
+            (1).__setattr__("x", 1)
 
     @torch._dynamo.config.patch(enable_trace_unittest=True)
     @make_dynamo_test
