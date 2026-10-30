@@ -45,23 +45,48 @@ class DistributedPlanEffectsTest(unittest.TestCase):
                 [],
                 ["oncall: distributed infra", "triaged"],
                 ["triage-review"],
+                ["triaged", "triage review", "needs reproduction"],
             ):
                 with self.subTest(decision=decision, labels=labels):
                     result = effects(decision, labels)
-                    self.assertIn(required, result.add_labels)
-                    self.assertNotIn("triaged", result.add_labels)
+                    self.assertEqual(
+                        set(result.add_labels)
+                        & {"triaged", "triage review", "needs reproduction"},
+                        {required},
+                    )
                     self.assertEqual(
                         MARKER in result.add_labels, decision != "high_priority"
                     )
                     self.assertFalse(result.close)
 
+    def test_routing_ignores_model_status_but_preserves_existing_status(self):
+        queue = "oncall: distributed infra"
+        for status_label in ("triage review", "needs reproduction"):
+            with self.subTest(status_label=status_label):
+                routed = effects("route", [queue, status_label])
+                self.assertEqual(routed.add_labels, [queue, "triaged", MARKER])
+                self.assertEqual(routed.comment, "")
+                held = effects("route", [queue], existing=ROUTED | {status_label})
+                self.assertEqual(held.add_labels, [queue, MARKER])
+                self.assertEqual(held.comment, "")
+
     def test_confident_decisions_complete_only_valid_classifications(self):
         for decision in ("route", "classify", "already_classified"):
             with self.subTest(decision=decision):
                 complete = effects(
-                    decision, ["oncall: distributed parallelisms", "module: fsdp"]
+                    decision,
+                    [
+                        "oncall: distributed parallelisms",
+                        "module: fsdp",
+                        "needs reproduction",
+                        "triage review",
+                    ],
                 )
-                self.assertIn("triaged", complete.add_labels)
+                self.assertEqual(
+                    set(complete.add_labels)
+                    & {"triaged", "triage review", "needs reproduction"},
+                    {"triaged"},
+                )
                 incomplete = effects(decision, ["oncall: distributed parallelisms"])
                 self.assertNotIn("triaged", incomplete.add_labels)
                 self.assertIn("triage review", incomplete.add_labels)
@@ -242,15 +267,18 @@ class DistributedPlanEffectsTest(unittest.TestCase):
                     )
                     self.assertFalse(result.close)
 
-    def test_discarding_a_template_does_not_discard_review(self):
+    def test_discarding_a_template_preserves_existing_review(self):
         result = effects(
             "classify",
-            ["oncall: distributed parallelisms", "module: dtensor", "triage review"],
+            ["oncall: distributed parallelisms", "module: dtensor"],
             ["not_distributed"],
+            existing=ROUTED | {"triage review"},
         )
         self.assertEqual(result.comment, "")
-        self.assertIn("triage review", result.add_labels)
-        self.assertNotIn("triaged", result.add_labels)
+        self.assertEqual(
+            result.add_labels,
+            ["oncall: distributed parallelisms", "module: dtensor", MARKER],
+        )
 
     def test_classification_without_a_distributed_module_goes_to_review(self):
         for existing_modules, requested_modules in (

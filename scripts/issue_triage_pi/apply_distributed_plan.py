@@ -66,10 +66,9 @@ def plan_effects(
         effects.notes.append(f"issue is not labeled {DISTRIBUTED!r}; skipping")
         return effects
 
+    derived_labels = {BOT_TRIAGED, PTD_TRIAGED, *DECISION_STATUS.values()}
     requested = [
-        label
-        for label in plan.get("labels", [])
-        if label not in (BOT_TRIAGED, PTD_TRIAGED)
+        label for label in plan.get("labels", []) if label not in derived_labels
     ]
     unknown = [label for label in requested if label not in valid_labels]
     if unknown:
@@ -96,8 +95,6 @@ def plan_effects(
 
     # Status comes from the decision; model-suggested labels cannot override it.
     required_status = DECISION_STATUS[decision]
-    if required_status != TRIAGED:
-        labels = [label for label in labels if label != TRIAGED]
     if required_status not in labels:
         labels.append(required_status)
     # Performance describes the issue type, not a distributed module.
