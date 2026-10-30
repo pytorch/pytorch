@@ -9,10 +9,14 @@ the value of every constant.
 """
 
 import weakref
-from collections.abc import Callable, Mapping
-from typing import Any
+from collections.abc import Callable, Collection, Mapping
+from typing import Any, TYPE_CHECKING
 
 import torch
+
+
+if TYPE_CHECKING:
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CuteDSLHostFnInfo
 
 
 # host function -> {argument signature -> compiled function}
@@ -37,6 +41,34 @@ def _launch_device(fn: Callable[..., Any], args: Mapping[str, Any]) -> torch.dev
     return devices[0]
 
 
+def _check_launch_args(
+    fn: Callable[..., Any], info: "CuteDSLHostFnInfo", names: Collection[str]
+) -> None:
+    """Check that ``names``, the arguments passed by name, bind to the parameters of
+    ``fn`` but the stream, which the launch supplies: a TypeError names the kernel
+    and the parameters for a name that is not one, for the stream, and for missing
+    parameters without a default."""
+    kernel = getattr(fn, "__name__", fn)
+    for name in names:
+        if name == info.stream_param:
+            raise TypeError(
+                f"CuTeDSL kernel {kernel}: got a value for its stream parameter "
+                f"{name!r}, which the launch supplies"
+            )
+        if name not in info.params:
+            raise TypeError(
+                f"CuTeDSL kernel {kernel}: got an unexpected argument {name!r}; its "
+                f"parameters are {info.params}"
+            )
+    missing = [
+        p
+        for p in info.params
+        if p != info.stream_param and p not in names and p not in info.defaults
+    ]
+    if missing:
+        raise TypeError(f"CuTeDSL kernel {kernel}: missing arguments {missing}")
+
+
 def launch_cutedsl_kernel(
     fn: Callable[..., Any], args: Mapping[str, Any], stream: int | None = None
 ) -> None:
@@ -56,6 +88,7 @@ def launch_cutedsl_kernel(
     from torch._native.cutedsl.launch import supported_alignment
 
     info = get_host_fn_info(fn)
+    _check_launch_args(fn, info, args.keys())
     device = _launch_device(fn, args)
     # Everything runs under the tensors' device: DLPack export requires it.
     with torch.cuda.device(device):
