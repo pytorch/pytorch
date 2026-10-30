@@ -587,6 +587,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
         | types.ClassMethodDescriptorType,
         obj: VariableTracker,
         value: types.BuiltinMethodType | None = None,
+        is_method_load: bool = False,
+        method_load_qualname: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -594,6 +596,16 @@ class BoundBuiltinMethodVariable(VariableTracker):
         self.obj = obj
         # The ID_MATCH-guarded runtime method, when built from one.
         self.value = value
+        self.is_method_load = is_method_load
+        self.method_load_qualname = method_load_qualname
+
+    def _call_qualname(self, tx: "InstructionTranslatorBase") -> str:
+        # Only wrong-arity calls need guards distinguishing LOAD_METHOD from binding.
+        if self.is_method_load and isinstance(self.obj, UserDefinedObjectVariable):
+            self.obj.install_method_load_guards()
+            if self.method_load_qualname is not None:
+                return self.method_load_qualname
+        return self._qualname(tx).as_python_constant()
 
     def __repr__(self) -> str:
         cls_name = getattr(
@@ -688,7 +700,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
                 args,
                 kwargs,
                 descriptor=descriptor,
-                qualname=lambda: self._qualname(tx).as_python_constant(),
+                qualname=lambda: self._call_qualname(tx),
             )
             if result is not None:
                 return result
