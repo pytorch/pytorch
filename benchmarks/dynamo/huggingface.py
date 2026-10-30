@@ -433,6 +433,10 @@ class HuggingfaceRunner(BenchmarkRunner):
             model = model_cls(config)
         return model
 
+    @download_retry_decorator
+    def _download_config(self, model_name):
+        return AutoConfig.from_pretrained(model_name)
+
     def validate_args(self, args):
         mode = args.hf_inference_mode
         if args.tp_size < 1:
@@ -513,19 +517,18 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires --backend or --inductor"
             )
-        if args.prompt_length is not None:
-            # Checked here so an invalid flag isn't recorded as a model failure.
-            for name in [args.only] if args.only else self.iter_model_names(args):
-                output_length = HF_LLM_MODELS[name].OUTPUT_LENGTH
-                total_length = args.prompt_length + output_length
-                config = AutoConfig.from_pretrained(name).get_text_config(decoder=True)
-                context_length = getattr(config, "max_position_embeddings", None)
-                if context_length is not None and total_length > context_length:
-                    raise ValueError(
-                        f"--prompt-length={args.prompt_length} plus {output_length} "
-                        f"generated-token slots exceeds {name}'s context length "
-                        f"{context_length}"
-                    )
+        if args.prompt_length is not None and args.only:
+            # Each child validates its model so config fetches cannot abort a sweep.
+            output_length = HF_LLM_MODELS[args.only].OUTPUT_LENGTH
+            total_length = args.prompt_length + output_length
+            config = self._download_config(args.only).get_text_config(decoder=True)
+            context_length = getattr(config, "max_position_embeddings", None)
+            if context_length is not None and total_length > context_length:
+                raise ValueError(
+                    f"--prompt-length={args.prompt_length} plus {output_length} "
+                    f"generated-token slots exceeds {args.only}'s context length "
+                    f"{context_length}"
+                )
         if args.tp_size > 1:
             self.validate_tensor_parallel_args(args)
 
@@ -550,10 +553,21 @@ class HuggingfaceRunner(BenchmarkRunner):
             unsupported.append("multiple --devices")
         if unsupported:
             raise ValueError("--tp-size does not support " + ", ".join(unsupported))
-        if not args.disable_cudagraphs or args.backend == "cudagraphs":
+        cudagraphs = False
+        if args.inductor or args.backend == "inductor":
+            for option in args.inductor_config or ():
+                key, _, value = option.partition("=")
+                if key == "triton.cudagraphs":
+                    cudagraphs = value in ("1", "True")
+            if args.inductor:
+                options = torch._inductor.list_mode_options(
+                    args.inductor_compile_mode or "default"
+                )
+                cudagraphs |= options.get("triton.cudagraphs", False)
+        if not args.disable_cudagraphs or args.backend == "cudagraphs" or cudagraphs:
             raise ValueError(
                 "--tp-size requires --disable-cudagraphs and a backend other than "
-                "cudagraphs until CUDA graphs are validated with tensor parallelism"
+                "cudagraphs, without compile options that re-enable CUDA graphs"
             )
         if not (args.bfloat16 or args.float16 or args.float32):
             raise ValueError("--tp-size requires --bfloat16, --float16, or --float32")
@@ -586,7 +600,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             return self.generate, None
         return super().get_performance_workload()
 
-    def use_model_forward_for_compilation(self):
+    def use_model_forward_for_accuracy(self):
         return self.args.hf_inference_mode in ("prefill", "decode")
 
     def get_request_tokens(self, example_inputs):
