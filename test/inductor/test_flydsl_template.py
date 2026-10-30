@@ -101,7 +101,7 @@ class TestFlyDSLTemplate(TestCase):
             mock.patch.object(
                 flydsl_utils,
                 "_available_version",
-                return_value=SimpleNamespace(release=(0, 3, 0)),
+                return_value=SimpleNamespace(release=(0, 4, 0)),
             ),
         ):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
