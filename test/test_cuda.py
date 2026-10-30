@@ -8470,6 +8470,34 @@ class TestCudaAllocator(TestCase):
                 f"expandable_segments:{EXPANDABLE_SEGMENTS}"
             )
 
+    @serialTest()
+    def test_garbage_collect_without_memory_fraction(self):
+        try:
+            orig = torch.cuda.get_per_process_memory_fraction(0)
+            torch.cuda.memory.set_per_process_memory_fraction(1.0)
+            torch.cuda.memory.empty_cache()
+            mb = 1024 * 1024
+            _, all_memory = torch.cuda.memory.mem_get_info()
+            pre_reserved = torch.cuda.memory_reserved()
+            target_bytes = 60 * mb + pre_reserved
+            thr = target_bytes / all_memory
+            if thr <= 0.0 or thr >= 1.0:
+                self.skipTest("Device memory outside testable range for threshold")
+
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:False,garbage_collection_threshold:{thr:.8f}"
+            )
+            for i in range(4):
+                x = torch.ones((30 + i * 2) * mb, dtype=torch.int8, device="cuda")
+                del x
+            # Verify GC reclaims older blocks even when per_process_memory_fraction == 1.0
+            self.assertLess(torch.cuda.memory_reserved() - pre_reserved, 120 * mb)
+        finally:
+            torch.cuda.memory.set_per_process_memory_fraction(orig)
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1

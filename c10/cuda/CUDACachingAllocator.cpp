@@ -1888,11 +1888,9 @@ class DeviceCachingAllocator {
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
-      // Do garbage collection if the flag is set.
-      if (C10_UNLIKELY(
-              allowed_memory_maximum.has_value() &&
-              AcceleratorAllocatorConfig::garbage_collection_threshold() >
-                  0.0)) {
+      // Do garbage collection if the flag is set (or by default on integrated
+      // unified-memory GPUs).
+      if (C10_UNLIKELY(effective_gc_threshold() > 0.0)) {
         garbage_collect_cached_blocks(context);
         drain_deferred_custom_frees_outside_lock(lock);
       }
@@ -4160,12 +4158,30 @@ class DeviceCachingAllocator {
     }
   }
 
+  static constexpr double kDefaultIntegratedGcThreshold = 0.8;
+
+  double effective_gc_threshold() const {
+    const double thr =
+        AcceleratorAllocatorConfig::garbage_collection_threshold();
+    if (thr > 0.0) {
+      return thr;
+    }
+    // On integrated/unified-memory GPUs (e.g., NVIDIA GB10 / Grace Blackwell /
+    // Tegra) where device allocations come directly from host system RAM via
+    // __GFP_RETRY_MAYFAIL, cudaMalloc does not fail until the OS kernel has
+    // evicted the host page cache and swapped out user space. Reclaim unused
+    // cached blocks at 80% capacity by default so idle cached blocks do not
+    // starve the host OS.
+    if (device_prop.integrated) {
+      return kDefaultIntegratedGcThreshold;
+    }
+    return 0.0;
+  }
+
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 
-    if (C10_UNLIKELY(
-            allowed_memory_maximum.has_value() &&
-            AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+    if (C10_UNLIKELY(effective_gc_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       ++pool.get_free_blocks_call_count;
     }
@@ -4235,17 +4251,48 @@ class DeviceCachingAllocator {
     // Unlike release_cached_blocks(), this does not enforce synchronization and
     // therefore should be of less overheads.
 
-    if (!allowed_memory_maximum.has_value()) {
+    const double gc_thr = effective_gc_threshold();
+    if (gc_thr <= 0.0) {
       return;
     }
-    size_t gc_threshold = static_cast<size_t>(
-        AcceleratorAllocatorConfig::garbage_collection_threshold() *
-        static_cast<double>(allowed_memory_maximum.value()));
+    const size_t max_allowed =
+        allowed_memory_maximum.value_or(device_prop.totalGlobalMem);
+    if (max_allowed == 0) {
+      return;
+    }
+    const size_t gc_threshold =
+        static_cast<size_t>(gc_thr * static_cast<double>(max_allowed));
+
+    size_t target_size = 0;
+    if (total_allocated_memory > gc_threshold) {
+      target_size = total_allocated_memory - gc_threshold;
+    } else if (
+        device_prop.integrated && !allowed_memory_maximum.has_value() &&
+        AcceleratorAllocatorConfig::garbage_collection_threshold() == 0.0 &&
+        !large_blocks.blocks.empty()) {
+      // On integrated/unified-memory GPUs (e.g., NVIDIA GB10 / Tegra), device
+      // memory is carved directly from host system RAM via __GFP_RETRY_MAYFAIL.
+      // Host CPU processes may already consume a substantial share of unified
+      // RAM, so total_allocated_memory alone can remain below gc_threshold even
+      // when physical RAM is nearly exhausted. Check actual free unified memory
+      // before falling through to cudaMalloc when idle cached blocks exist.
+      size_t device_free = 0;
+      size_t device_total = 0;
+      if (cudaMemGetInfo(&device_free, &device_total) == cudaSuccess &&
+          device_total > 0) {
+        const size_t min_free = static_cast<size_t>(
+            (1.0 - gc_thr) * static_cast<double>(device_total));
+        if (device_free < min_free) {
+          target_size = std::min(total_allocated_memory, min_free - device_free);
+        }
+      } else {
+        (void)cudaGetLastError();
+      }
+    }
     // No need to trigger GC yet
-    if (total_allocated_memory <= gc_threshold) {
+    if (target_size == 0) {
       return;
     }
-    const auto target_size = total_allocated_memory - gc_threshold;
     size_t gc_reclaimed = 0;
 
     // Calculate the total age of the free-able blocks. We'll use it later to
