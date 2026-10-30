@@ -470,6 +470,7 @@ class TunableOpWorkerTest(TestCase):
             with self.subTest(case=name):
                 tunableop._worker = None
                 tunableop._worker_key = None
+                tunableop._env_warned.clear()
                 self.created.clear()
                 tunable = mock.Mock()
                 tunable.get_filename.return_value = parent
@@ -480,10 +481,12 @@ class TunableOpWorkerTest(TestCase):
                 }
                 if env is not None:
                     environ["PYTORCH_TUNABLEOP_FILENAME"] = env
+                expect = self.assertNoLogs if expected else self.assertLogs
                 with (
                     mock.patch("torch.cuda.current_device", return_value=device),
                     mock.patch("torch.cuda.tunable", tunable),
                     mock.patch.dict(os.environ, environ, clear=True),
+                    expect(tunableop.log, level="WARNING"),
                 ):
                     tunableop.submit(tunableop.BenchmarkJob(None, tuning=False))
                 self.assertEqual(self._stamped().filename, expected)
