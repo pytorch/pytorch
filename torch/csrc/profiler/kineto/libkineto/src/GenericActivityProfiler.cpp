@@ -479,6 +479,12 @@ void GenericActivityProfiler::configure(
 
   config_ = config.clone();
 
+  if (!cpuOnly_) {
+    // Wait for the previous GPU teardown before clearGpuActivities(). If the
+    // wait times out, cpuOnly_ is set and resetTraceData() skips that call.
+    ensureGpuTracingReady();
+  }
+
   // Ensure we're starting in a clean state
   resetTraceData();
 
@@ -654,6 +660,9 @@ void GenericActivityProfiler::stopTraceInternal(
 void GenericActivityProfiler::resetInternal() {
   acceptCpuTraces_ = false;
   resetTraceData();
+  if (!cpuOnly_) {
+    requestGpuTracingTeardown();
+  }
 }
 
 void GenericActivityProfiler::finalizeTrace(
