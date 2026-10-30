@@ -11112,7 +11112,6 @@ from user code:
             This ensures reproducible results across eager and compiled runs.
             """
             torch.manual_seed(seed)
-            getattr(torch, GPU_TYPE).manual_seed(seed)
             for name, param in module.named_parameters():
                 if param.requires_grad:
                     local_param = (
