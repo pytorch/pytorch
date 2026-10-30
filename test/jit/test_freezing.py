@@ -2876,6 +2876,19 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(
         not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
     )
+    def test_mkldnn_layer_norm(self):
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(self.conv(), nn.LayerNorm(8), self.conv()).eval()
+            scripted_mod = torch.jit.freeze(torch.jit.script(mod))
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check("prim::MKLDNNLayerNorm").run(scripted_mod.graph)
+
+            inp = torch.rand([1, 8, 8, 8])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
+    @unittest.skipIf(
+        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+    )
     def test_mkldnn_fuser_broadcasting(self):
         class Add(nn.Module):
             def __init__(self, tensor):
