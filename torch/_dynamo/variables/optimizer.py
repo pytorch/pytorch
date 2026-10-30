@@ -198,10 +198,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def _safe_to_set_capturable(self, group: dict[str, Any]) -> bool:
         # Live-dict flip is only for eager _init_group: GPU params need step on
         # device. CPU must keep capturable=False so step matches eager.
+        from torch.optim.optimizer import _get_capturable_supported_devices
+
+        capturable_devices = _get_capturable_supported_devices()
         all_uninitialized = True
         all_gpu = True
         for p in group.get("params", []):
-            all_gpu &= p.is_cuda or p.is_xpu
+            all_gpu &= p.device.type in capturable_devices
             all_uninitialized &= p not in self.value.state
         return "capturable" in group and all_uninitialized and all_gpu
 
@@ -221,8 +224,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             orig_vt = param_group_vt.items.get(key)
             if orig_vt is None or isinstance(orig_vt, OptimizerCapturableVariable):
                 continue
-            param_group_vt.items[key] = OptimizerCapturableVariable(
-                value=True, orig_value=orig_vt.as_python_constant()
+            param_group_vt.items[key] = OptimizerCapturableVariable.create(
+                orig_vt.as_python_constant()
             )
 
     def get_python_args(
@@ -448,6 +451,10 @@ class OptimizerCapturableVariable(VariableTracker):
     """
 
     _nonvar_fields = {"orig_value", *VariableTracker._nonvar_fields}
+
+    @classmethod
+    def create(cls, orig_value: bool) -> "OptimizerCapturableVariable":
+        return cls(value=True, orig_value=orig_value)
 
     def __init__(self, value: bool, orig_value: bool, **kwargs: Any) -> None:
         super().__init__(**kwargs)
