@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import warnings
+
 import numpy
 
 import torch._numpy as tnp
@@ -80,13 +82,15 @@ class TestConvertDType(TestCase):
         self.assertEqual(tnp.dtype("float32"), numpy.float32)
         self.assertEqual(tnp.dtype("float32"), numpy.dtype("float32"))
         self.assertNotEqual(tnp.dtype("float32"), numpy.float64)
-        self.assertNotEqual(tnp.dtype("float32"), numpy.zeros(3))
+        self.assertNotEqual(tnp.dtype("float64"), numpy.zeros(3))
 
     def test_numpy_abstract_scalar_raises(self):
-        with self.assertRaises(TypeError):
-            tnp.dtype(numpy.floating)
-        with self.assertRaises(TypeError):
-            tnp.dtype(numpy.integer)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            with self.assertRaises(TypeError):
+                tnp.dtype(numpy.floating)
+            with self.assertRaises(TypeError):
+                tnp.dtype(numpy.integer)
 
     def test_numpy_c_scalar_alias_matches_canonical_name(self):
         for scalar in (numpy.uintc, numpy.intc, numpy.uintp, numpy.intp):
