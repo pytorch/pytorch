@@ -1485,7 +1485,7 @@ def device_put_noop(x, device, non_blocking=True):
     return x.device == decode_device(device)
 
 
-@register_noop_decomp([aten.ceil, aten.floor, aten.round, aten.trunc])
+@register_noop_decomp([aten.ceil, aten.floor, aten.round.default, aten.trunc])
 def int_noop(x):
     return is_integer_dtype(x.dtype)
 

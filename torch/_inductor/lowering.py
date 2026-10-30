@@ -1505,6 +1505,33 @@ def round(x):
         return make_pointwise(fn)(x)
 
 
+@register_lowering(aten.round.decimals)
+def round_decimals(x, decimals=0):
+    if not is_strict_cuda_triton(x.get_device()):
+        return fallback_handler(aten.round.decimals, add_to_fallback_set=False)(
+            x, decimals=decimals
+        )
+    dtype = x.get_dtype()
+    try:
+        scale = 10.0 ** (-decimals if decimals < 0 else decimals)
+    except OverflowError:
+        scale = float("inf")
+    scale = torch.tensor(scale, dtype=dtype).item()
+    narrow = dtype in (torch.float16, torch.bfloat16)
+
+    def fn(value):
+        factor = ops.constant(scale, dtype)
+        scaled = ops.div_rn(value, factor) if decimals < 0 else ops.mul(value, factor)
+        if narrow:
+            # CUDA rounds the scalar_t product/quotient before nearbyint promotes it.
+            scaled = ops.to_dtype(scaled, dtype, use_compute_types=False)
+            scaled = ops.to_dtype(scaled, torch.float32)
+        rounded = ops.round(scaled)
+        return ops.mul(rounded, factor) if decimals < 0 else ops.div_rn(rounded, factor)
+
+    return make_pointwise(fn)(x)
+
+
 @register_lowering(aten.trunc)
 def trunc(x):
     if is_integer_type(x):
@@ -7949,11 +7976,76 @@ def _div_rn(a, b):
     return ops.div_rn(a, b)
 
 
+def _strict_div_dtype(a, b) -> torch.dtype | None:
+    tensors = [x for x in (a, b) if isinstance(x, (TensorBox, ExpandView))]
+    if not tensors or not any(is_strict_cuda_triton(x.get_device()) for x in tensors):
+        return None
+    dtype = tensors[0].get_dtype()
+    return (
+        dtype
+        if dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        else None
+    )
+
+
+def _strict_floor_div_floating(a, b, dtype):
+    # Match c10::div_floor_floating and CUDA's separate CPU-scalar divisor path.
+    scalar_divisor = isinstance(b, (int, float))
+    narrow = dtype in (torch.float16, torch.bfloat16)
+    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
+    nan_bits = (1 << (dtype.itemsize * 8 - 1)) - 1
+
+    scalar_value = b
+
+    def fn(a, b=None):
+        if scalar_divisor:
+            opmath = torch.float32 if narrow else dtype
+            b = ops.constant(scalar_value, opmath)
+        a = ops.to_dtype(a, torch.float32) if narrow else a
+        b = ops.to_dtype(b, torch.float32) if narrow else b
+        zero = ops.constant(0.0, dtype)
+        one = ops.constant(1.0, dtype)
+        half = ops.constant(0.5, dtype)
+        mod = ops.fmod(a, b)
+        if scalar_divisor:
+            inv_b = ops.div_rn(one, b)
+            quotient = ops.mul(ops.sub(a, mod), inv_b)
+            direct = ops.mul(a, inv_b)
+        else:
+            quotient = ops.div_rn(ops.sub(a, mod), b)
+            direct = ops.div_rn(a, b)
+        correction = ops.logical_and(
+            ops.ne(mod, zero), ops.ne(ops.lt(b, zero), ops.lt(mod, zero))
+        )
+        quotient = ops.where(correction, ops.sub(quotient, one), quotient)
+        floored = ops.floor(quotient)
+        if narrow:
+            floored = ops.to_dtype(floored, dtype, use_compute_types=False)
+            floored = ops.to_dtype(floored, torch.float32)
+        rounded = ops.where(
+            ops.gt(ops.sub(quotient, floored), half), ops.add(floored, one), floored
+        )
+        signed_zero = ops.copysign(zero, direct)
+        result = ops.where(ops.eq(quotient, zero), signed_zero, rounded)
+        result = ops.where(ops.eq(b, zero), direct, result)
+        if dtype == torch.float64:
+            return result
+        nan = ops.to_dtype_bitcast(
+            ops.constant(nan_bits, int_dtype), dtype, src_dtype=int_dtype
+        )
+        return ops.where(ops.isnan(result), nan, result)
+
+    return make_pointwise(fn)(a) if scalar_divisor else make_pointwise(fn)(a, b)
+
+
 def _floor_div_floating(a, b):
     # Either operand may be a python scalar (e.g. torch.floor_divide(scalar,
     # tensor)); constant_like needs a tensor for dtype/device/size, so seed the
     # constants from whichever operand is a tensor.
     ref = a if isinstance(a, (TensorBox, IRNode)) else b
+    dtype = _strict_div_dtype(a, b)
+    if dtype is not None:
+        return _strict_floor_div_floating(a, b, dtype)
     nan = constant_like(float("nan"))(ref)
     neg_one = constant_like(-1.0)(ref)
     zero = constant_like(0.0)(ref)
@@ -8005,6 +8097,19 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
+        dtype = _strict_div_dtype(a, b)
+        if dtype is not None and isinstance(b, (int, float)):
+            opmath = torch.float64 if dtype == torch.float64 else torch.float32
+            divisor = torch.tensor(b, dtype=opmath).item()
+            inv = (
+                math.copysign(float("inf"), divisor) if divisor == 0 else 1.0 / divisor
+            )
+            inv = torch.tensor(inv, dtype=opmath).item()
+
+            def fn(a):
+                return ops.trunc(ops.mul(a, ops.constant(inv, opmath)))
+
+            return make_pointwise(fn)(a)
         return truncdiv(a, b) if both_integer else trunc(div(a, b))
     return div(a, b)
 
@@ -8081,7 +8186,11 @@ def div_prim(a, b):
 
     # Disable CPU optimization to avoid precision issues.
     # see https://github.com/pytorch/pytorch/issues/157959
-    if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
+    if (
+        (divisor := get_constant_value(b)) is not None
+        and a.get_device().type != "cpu"
+        and _strict_div_dtype(a, b) is None
+    ):
         # Replace divide by constant with multiply by reciprocal
 
         if divisor.value == 0:
@@ -8105,9 +8214,22 @@ register_pointwise_op("truediv")
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def div(a, b):
+    dtype = _strict_div_dtype(a, b)
+    if dtype is not None and isinstance(b, (int, float)):
+        # Eager computes the reciprocal on the host in double, then casts to opmath.
+        reciprocal = math.copysign(float("inf"), b) if b == 0 else 1.0 / b
+        return mul(a, reciprocal)
     a, b = promote_constants(
         (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     )
+    if dtype is not None and dtype in (torch.float16, torch.bfloat16):
+
+        def narrow_div(a, b):
+            return ops.div_rn(
+                ops.to_dtype(a, torch.float32), ops.to_dtype(b, torch.float32)
+            )
+
+        return make_pointwise(narrow_div, force_output_cast=True)(a, b)
     return div_prim(a, b)
 
 
@@ -9023,6 +9145,18 @@ register_op_dtype_propagation_rules(
 @register_lowering(aten.remainder, broadcast=True)
 def remainder(a, b):
     a, b = promote_constants((a, b), round_scalar_constants=True)
+    if _strict_div_dtype(a, b) is not None:
+
+        def fn(a, b):
+            result = ops.fmod(a, b)
+            nonzero = ops.ne(result, ops.constant(0, torch.int32))
+            zero = ops.constant(0, torch.int32)
+            opposite_signs = ops.ne(ops.lt(result, zero), ops.lt(b, zero))
+            return ops.where(
+                ops.logical_and(nonzero, opposite_signs), ops.add(result, b), result
+            )
+
+        return make_pointwise(fn)(a, b)
     fn = ops_wrapper("remainder")
     return make_pointwise(fn)(a, b)
 
