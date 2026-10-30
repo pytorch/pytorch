@@ -14,7 +14,9 @@
 #include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -333,6 +335,161 @@ void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
   completionHooks_.erase(hook_id);
 }
 
+void ProcessGroupNCCL::registerOnCompletionHook(
+    std::function<void(std::shared_ptr<::c10d::WorkInfo>)>&& hook) {
+  TORCH_WARN_ONCE(
+      "ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder. "
+      "Please check out FlightRecorder.hpp for information that is recorded at work completion. "
+      "You can file an issue if you want additional information to be recorded. "
+      "You can also file an RFC if you want Flight Recorder to accept plugins that customize the recording.");
+
+  std::lock_guard<std::mutex> lock(on_completion_->mutex);
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      onCompletionHook_ == nullptr,
+      "ProcessGroupNCCL OnCompletion hook already registered");
+  TORCH_CHECK_WITH(
+      ValueError,
+      collectivesTimingEnabled(),
+      "ProcessGroupNCCL OnCompletion hook requires recording start and end "
+      "events which require setting TORCH_NCCL_ENABLE_TIMING environment variable. "
+      "This is only available for NCCL version >= 2.4.");
+  on_completion_->hook = hook;
+  on_completion_->log_prefix =
+      fmt::format("[TC]{}{} ", getRankPrefix(this), getCommNamePrefix(this));
+  // Kept only for c10d::Backend::hasHooks(); the hook thread runs the copy in
+  // on_completion_.
+  onCompletionHook_ = std::move(hook);
+  std::lock_guard<std::mutex> thread_lock(on_completion_thread_mutex_);
+  on_completion_thread_ =
+      std::thread(&ProcessGroupNCCL::runOnCompletionHookLoop, on_completion_);
+}
+
+bool ProcessGroupNCCL::hasOnCompletionHook() {
+  std::lock_guard<std::mutex> lock(on_completion_->mutex);
+  return on_completion_->hook != nullptr;
+}
+
+void ProcessGroupNCCL::enqueueOnCompletion(
+    std::shared_ptr<::c10d::WorkInfo> info) {
+  {
+    std::lock_guard<std::mutex> lock(on_completion_->mutex);
+    if (on_completion_->stop) {
+      return;
+    }
+    on_completion_->queue.push(std::move(info));
+  }
+  on_completion_->cv.notify_all();
+}
+
+void ProcessGroupNCCL::runOnCompletionHookLoop(
+    const std::shared_ptr<OnCompletionState>& state) {
+  c10::setThreadName("pt_nccl_runhook");
+  std::unique_lock<std::mutex> lock(state->mutex);
+  state->thread_id = std::this_thread::get_id();
+  while (true) {
+    state->cv.wait(
+        lock, [&state] { return state->stop || !state->queue.empty(); });
+    // Stopping still drains what was queued before the stop.
+    if (state->queue.empty()) {
+      break;
+    }
+    auto info = std::move(state->queue.front());
+    state->queue.pop();
+    state->running = true;
+    // A Python hook takes the GIL, so it must not run under our lock.
+    lock.unlock();
+    // Unlike stock ProcessGroupNCCL, which aborts every communicator when a
+    // hook throws, a throwing hook is only logged. Only std::exception is
+    // caught, as there: anything else (e.g. the forced unwind of a thread
+    // exiting during interpreter shutdown) must propagate.
+    try {
+      state->hook(std::move(info));
+    } catch (const std::exception& e) {
+      LOG(ERROR) << state->log_prefix
+                 << "OnCompletion hook threw exception: " << e.what();
+    }
+    lock.lock();
+    state->running = false;
+    state->cv.notify_all();
+  }
+  // stopOnCompletionHookThread() destroys the hook after joining us: a Python
+  // hook's destructor takes the GIL, which this thread cannot do once the
+  // interpreter is finalizing. A thread detached by its own hook destroys it
+  // here instead, rather than with the last reference to state, which it may
+  // drop after interpreter shutdown. Not under our lock either way.
+  if (!state->detached) {
+    return;
+  }
+  auto hook = std::move(state->hook);
+  state->hook = nullptr;
+  lock.unlock();
+}
+
+void ProcessGroupNCCL::requestOnCompletionStop() {
+  {
+    std::lock_guard<std::mutex> lock(on_completion_->mutex);
+    on_completion_->stop = true;
+  }
+  on_completion_->cv.notify_all();
+}
+
+void ProcessGroupNCCL::stopOnCompletionHookThread() {
+  requestOnCompletionStop();
+  std::thread thread;
+  {
+    std::lock_guard<std::mutex> lock(on_completion_thread_mutex_);
+    thread = std::move(on_completion_thread_);
+  }
+  if (!thread.joinable()) {
+    return;
+  }
+  // The hook itself may tear the group down; the thread keeps its own
+  // reference to on_completion_.
+  if (std::this_thread::get_id() == thread.get_id()) {
+    {
+      std::lock_guard<std::mutex> lock(on_completion_->mutex);
+      on_completion_->detached = true;
+    }
+    thread.detach(); // NOLINT(facebook-hte-BadCall-detach)
+    return;
+  }
+  // Remaining hooks may need the GIL, which callers must not hold.
+  thread.join();
+  // Destroyed here, not under the lock, like the Backend's own copy.
+  std::function<void(std::shared_ptr<::c10d::WorkInfo>)> hook;
+  std::lock_guard<std::mutex> lock(on_completion_->mutex);
+  hook.swap(on_completion_->hook);
+}
+
+void ProcessGroupNCCL::waitForPendingWorks() {
+  // Never raises: a failed or timed-out work ends the wait; the watchdog
+  // reports it if it runs before shutdown. destroy_process_group() calls this
+  // before shutting the group down.
+  while (init_state_ == InitializationState::INITIALIZED &&
+         comm_state_ == CommState::NORMAL) {
+    // Retire completed work here rather than waiting for the watchdog's next
+    // tick.
+    const auto status = workq_.garbageCollect();
+    if (status == WorkNCCL::WorkStatus::TIMEDOUT ||
+        status == WorkNCCL::WorkStatus::ERROR || workq_.idle()) {
+      break;
+    }
+    // GPU progress has no host-side notification, so poll.
+    std::unique_lock<std::mutex> lock(on_completion_->mutex);
+    on_completion_->cv.wait_for(lock, std::chrono::milliseconds(10));
+  }
+  // Deliver the reports already queued. A hook (e.g. via
+  // destroy_process_group) cannot wait for itself.
+  std::unique_lock<std::mutex> lock(on_completion_->mutex);
+  if (std::this_thread::get_id() == on_completion_->thread_id) {
+    return;
+  }
+  on_completion_->cv.wait(lock, [this] {
+    return on_completion_->queue.empty() && !on_completion_->running;
+  });
+}
+
 void ProcessGroupNCCL::shutdown() {
   // Called by destroy_process_group(). Drain in-flight work and close the comm
   // gracefully. Idempotent: finalize-on-already-finalized throws, so swallow.
@@ -547,6 +704,11 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::coalesceWorks(
   }
   work->setChildren(std::move(works));
   work->setOutputs(std::move(outputs));
+  // Like stock ProcessGroupNCCL, the op reports one COALESCED OnCompletion
+  // hook. In a coalescing window, endCoalescing() reports for the window.
+  if (!coalescing_batch_) {
+    work->releaseOnCompletionReportAsCoalesced();
+  }
   return work;
 }
 
@@ -556,6 +718,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
   const auto config = materializeConfig(opts.config);
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
   ++sequence_number_;
+  // The per-tensor works hold their OnCompletion report; see coalesceWorks.
+  in_coalesced_op_ = true;
+  auto reset = c10::make_scope_exit([this] { in_coalesced_op_ = false; });
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -651,6 +816,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  // The per-tensor works hold their OnCompletion report; see coalesceWorks.
+  in_coalesced_op_ = true;
+  auto reset = c10::make_scope_exit([this] { in_coalesced_op_ = false; });
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   std::vector<at::Tensor> outputs;
   works.reserve(inputTensors.size());
@@ -679,6 +847,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  // The per-tensor works hold their OnCompletion report; see coalesceWorks.
+  in_coalesced_op_ = true;
+  auto reset = c10::make_scope_exit([this] { in_coalesced_op_ = false; });
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(inputs.size());
   for (const auto i : c10::irange(inputs.size())) {
@@ -857,6 +1028,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  // The per-tensor works hold their OnCompletion report; see coalesceWorks.
+  in_coalesced_op_ = true;
+  auto reset = c10::make_scope_exit([this] { in_coalesced_op_ = false; });
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(outputs.size());
   for (const auto i : c10::irange(outputs.size())) {
@@ -1003,13 +1177,18 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   auto works = std::move(coalescing_works_);
   coalescing_works_.clear();
   if (!batch.ops.empty()) {
+    in_coalesced_op_ = true;
+    auto reset = c10::make_scope_exit([this] { in_coalesced_op_ = false; });
     works.push_back(
         batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout));
   }
   if (works.empty()) {
     return c10::make_intrusive<CompletedWork>();
   }
+  // The window's works hold their OnCompletion report; like stock
+  // ProcessGroupNCCL, the window reports once, as COALESCED.
   if (works.size() == 1) {
+    works.front()->releaseOnCompletionReportAsCoalesced();
     return works.front();
   }
 
@@ -1033,12 +1212,13 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   }
   auto work = c10::make_intrusive<WorkNCCL>(
       this, stream, timeout, std::vector<at::Tensor>{});
-  work->setSequenceNumber(works.back()->getSequencenumber());
+  work->setSequenceNumber(
+      works.back()->getSequencenumber(), works.back()->state_->isP2P);
   work->setDurationStart(*works.front());
   // Under graph capture nothing else may hold the inputs once the caller drops
   // the ops' works.
   work->retainInputs(works);
-  work->recordStart("coalesced");
+  work->recordStart("coalesced", ::c10d::OpType::COALESCED);
   work->waitFor(works);
   work->recordEnd();
   enqueueWork(work, stream);

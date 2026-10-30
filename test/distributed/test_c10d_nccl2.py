@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import weakref
@@ -25,6 +26,7 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceCoalescedOptions,
     ErrorType,
+    OpType,
     ReconfigureOptions,
     ReduceScatterOptions,
     WorkResult,
@@ -1702,6 +1704,281 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce()
 
 
+class ProcessGroupNCCL2OnCompletionHookTest(_ProcessGroupNCCL2SubgroupTest):
+    def _new_timed_subgroup(self):
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENABLE_TIMING": "1"}):
+            return self._new_subgroup()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_requires_timing(self) -> None:
+        pg = self._new_subgroup()
+        with self.assertRaisesRegex(ValueError, "TORCH_NCCL_ENABLE_TIMING"):
+            pg._register_on_completion_hook(lambda _: None)
+
+        pg._enable_collectives_timing()
+        pg._register_on_completion_hook(lambda _: None)
+        with self.assertRaisesRegex(RuntimeError, "already registered"):
+            pg._register_on_completion_hook(lambda _: None)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_for_pending_works(self) -> None:
+        pg = self._new_timed_subgroup()
+        infos = []
+        pg._register_on_completion_hook(infos.append)
+
+        t = torch.ones(4, device=self.device)
+        out = torch.empty(4 * self.world_size, device=self.device)
+        # Never waited on, so only _wait_for_pending_works() can observe them.
+        dist.all_reduce(t, group=pg, async_op=True)
+        dist.broadcast(t, src=0, group=pg, async_op=True)
+        dist.all_gather_into_tensor(out, t, group=pg, async_op=True)
+        dist.reduce_scatter_tensor(t, out, group=pg, async_op=True)
+        pg._wait_for_pending_works()
+        # barrier() uses the current stream; issue it after the internal-stream
+        # ops drain so the hook sees issue order.
+        dist.barrier(group=pg, async_op=True)
+        pg._wait_for_pending_works()
+
+        expected = [
+            OpType.ALLREDUCE,
+            OpType.BROADCAST,
+            OpType._ALLGATHER_BASE,
+            OpType._REDUCE_SCATTER_BASE,
+            OpType.BARRIER,
+        ]
+        self.assertEqual([info.op_type for info in infos], expected)
+        seqs = [info.seq for info in infos]
+        self.assertEqual(seqs, list(range(seqs[0], seqs[0] + len(expected))))
+        for info in infos:
+            self.assertGreater(info.active_duration.total_seconds(), 0)
+            self.assertGreaterEqual(info.time_finished, info.time_started)
+
+        dist.destroy_process_group(pg)
+        self.assertEqual(len(infos), len(expected))
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_error_then_abort(self) -> None:
+        pg = self._new_timed_subgroup()
+        seqs = []
+
+        def hook(info) -> None:
+            seqs.append(info.seq)
+            raise RuntimeError("hook failure")
+
+        pg._register_on_completion_hook(hook)
+        self._check_all_reduce(pg)
+        self._check_all_reduce(pg)
+        pg._wait_for_pending_works()
+        self.assertEqual(len(seqs), 2)
+
+        # A throwing hook is only logged: the group keeps working and still
+        # tears down cleanly.
+        self._check_all_reduce(pg)
+        pg._wait_for_pending_works()
+        self.assertEqual(len(seqs), 3)
+        dist.distributed_c10d._abort_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_op_types_and_p2p_seq(self) -> None:
+        pg = self._new_timed_subgroup()
+        infos = []
+        pg._register_on_completion_hook(infos.append)
+
+        peer = 1 - self.rank
+        t = torch.ones(4, device=self.device)
+        ins = [torch.ones(4, device=self.device) for _ in range(self.world_size)]
+        outs = [torch.empty(4, device=self.device) for _ in range(self.world_size)]
+        dist.reduce(t, dst=0, group=pg)
+        dist.reduce_scatter(t, ins, group=pg)
+        dist.scatter(t, ins if self.rank == 0 else None, src=0, group=pg)
+        dist.gather(t, outs if self.rank == 0 else None, dst=0, group=pg)
+        dist.all_to_all(outs, ins, group=pg)
+        # Like stock ProcessGroupNCCL, p2p ops count their own sequence numbers.
+        for send_first in (self.rank == 0, self.rank != 0):
+            if send_first:
+                dist.send(t, peer, group=pg)
+            else:
+                dist.recv(t, peer, group=pg)
+        dist.all_reduce(t, group=pg)
+        pg._wait_for_pending_works()
+
+        # Collectives and p2p are checked separately; each kind shares a stream.
+        p2p_ops = (OpType.SEND, OpType.RECV)
+        colls = [info for info in infos if info.op_type not in p2p_ops]
+        p2p = [info for info in infos if info.op_type in p2p_ops]
+        expected = [
+            OpType.REDUCE,
+            OpType.REDUCE_SCATTER,
+            OpType.SCATTER,
+            OpType.GATHER,
+            OpType.ALLTOALL,
+            OpType.ALLREDUCE,
+        ]
+        self.assertEqual([info.op_type for info in colls], expected)
+        seqs = [info.seq for info in colls]
+        self.assertEqual(seqs, list(range(seqs[0], seqs[0] + len(expected))))
+        self.assertEqual(
+            [(info.op_type, info.seq) for info in p2p],
+            [(OpType.SEND, 1), (OpType.RECV, 2)]
+            if self.rank == 0
+            else [(OpType.RECV, 1), (OpType.SEND, 2)],
+        )
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalesced_reports_once(self) -> None:
+        # Coalesced ops stock ProcessGroupNCCL lacks: each still reports once,
+        # as COALESCED.
+        pg = self._new_timed_subgroup()
+        infos = []
+        pg._register_on_completion_hook(infos.append)
+
+        peer = 1 - self.rank
+        t = torch.ones(4, device=self.device)
+        recv = torch.empty(4, device=self.device)
+        outs = [
+            [torch.empty(4, device=self.device) for _ in range(self.world_size)]
+            for _ in range(2)
+        ]
+        pg.allgather_coalesced(outs, [t, t]).wait()
+        # A window mixing a collective and p2p ops.
+        pg._start_coalescing(self.device)
+        pg.allreduce([t])
+        for send_first in (self.rank == 0, self.rank != 0):
+            if send_first:
+                pg.send([t], peer, 0)
+            else:
+                pg.recv([recv], peer, 0)
+        pg._end_coalescing(self.device).wait()
+        pg._wait_for_pending_works()
+
+        self.assertEqual([info.op_type for info in infos], [OpType.COALESCED] * 2)
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_shutdown_delivers_queued_hooks(self) -> None:
+        pg = self._new_timed_subgroup()
+        infos = []
+        pg._register_on_completion_hook(infos.append)
+
+        dist.all_reduce(torch.ones(4, device=self.device), group=pg, async_op=True)
+        # No _wait_for_pending_works(): finalize must still deliver the report.
+        pg._get_backend(self.device).shutdown()
+        self.assertEqual([info.op_type for info in infos], [OpType.ALLREDUCE])
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_abort_while_hook_blocked(self) -> None:
+        pg = self._new_timed_subgroup()
+        entered = threading.Event()
+        release = threading.Event()
+        released = []
+
+        def hook(_) -> None:
+            entered.set()
+            released.append(release.wait(timeout=60))
+
+        pg._register_on_completion_hook(hook)
+        self._check_all_reduce(pg)
+        self.assertTrue(entered.wait(timeout=60))
+        # Like stock ProcessGroupNCCL, abort() does not wait for the hook, which
+        # is only released after abort() returns.
+        pg._get_backend(self.device).abort()
+        release.set()
+
+        dist.destroy_process_group(pg)
+        self.assertEqual(released, [True])
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_destroy_after_abort_with_hook(self) -> None:
+        pg = self._new_timed_subgroup()
+        pg._register_on_completion_hook(lambda _: None)
+        self._check_all_reduce(pg)
+
+        pg._get_backend(self.device).abort()
+        # Like stock ProcessGroupNCCL, waiting for pending works on a failed
+        # group returns instead of raising, so the group can be destroyed.
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_for_pending_works_after_timeout(self) -> None:
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0", "TORCH_NCCL_ENABLE_TIMING": "1"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        infos = []
+        pg._register_on_completion_hook(infos.append)
+        self._check_all_reduce(pg)
+        pg._wait_for_pending_works()
+        self.assertEqual([info.op_type for info in infos], [OpType.ALLREDUCE])
+
+        if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
+            # Nobody else joins, so this times out.
+            dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
+            # Returns instead of raising, like stock ProcessGroupNCCL, and the
+            # timed-out work is not reported.
+            pg._wait_for_pending_works()
+            self.assertEqual([info.op_type for info in infos], [OpType.ALLREDUCE])
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_destroys_group(self) -> None:
+        # The hook drops the last reference, so the group is torn down on the
+        # hook thread, which must outlive it.
+        holder = [self._new_timed_subgroup()]
+        pg_ref = weakref.ref(holder[0])
+        released = threading.Event()
+        done = threading.Event()
+        freed_on_hook_thread = []
+        was_released = []
+
+        def hook(_) -> None:
+            if not holder:
+                return
+            was_released.append(released.wait(timeout=60))
+            try:
+                dist.destroy_process_group(holder.pop())
+                freed_on_hook_thread.append(pg_ref() is None)
+            finally:
+                done.set()
+
+        holder[0]._register_on_completion_hook(hook)
+        self._check_all_reduce(holder[0])
+        gc.collect()
+        released.set()
+        self.assertTrue(done.wait(timeout=60))
+        self.assertEqual(was_released, [True])
+        self.assertEqual(freed_on_hook_thread, [True])
+        self._check_all_reduce()
+
+
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -2421,6 +2698,58 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         finally:
             for group in groups:
                 dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_p2p_sequence_number(self) -> None:
+        # Like stock ProcessGroupNCCL, p2p ops are numbered by the group's own
+        # p2p counter, which profilers must see rather than the collective one.
+        if self.world_size % 2:
+            self.skipTest("needs an even world size")
+        group = dist.new_group(
+            backend=self.backend_str(),
+            use_local_synchronization=True,
+            timeout=timedelta(seconds=60),
+        )
+        t = torch.ones(4, device=self.device)
+        peer = self.rank ^ 1
+        even = self.rank % 2 == 0
+        try:
+            dist.all_reduce(t, group=group)
+            torch.cuda.synchronize()
+            base = group._get_sequence_number_for_group()
+
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                record_shapes=True,
+            ) as prof:
+                dist.all_reduce(t, group=group)
+                for send in (even, not even):
+                    op = dist.send if send else dist.recv
+                    op(t, peer, group=group)
+                torch.cuda.synchronize()
+
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+                trace_path = f.name
+            try:
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    trace = json.load(f)
+            finally:
+                os.unlink(trace_path)
+
+            recorded: dict[str, set[int]] = {}
+            for ev in trace.get("traceEvents", []):
+                args = ev.get("args", {})
+                if args.get("Process Group Name") == group.group_name and "Seq" in args:
+                    recorded.setdefault(args.get("Collective name"), set()).add(
+                        args["Seq"]
+                    )
+            self.assertEqual(recorded.get("send"), {1 if even else 2})
+            self.assertEqual(recorded.get("recv"), {2 if even else 1})
+            self.assertEqual(group._get_sequence_number_for_group(), base + 1)
+        finally:
+            dist.destroy_process_group(group)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

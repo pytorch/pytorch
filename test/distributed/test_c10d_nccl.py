@@ -4073,17 +4073,18 @@ class WorkHookTest(MultiProcessTestCase):
     def _get_store(self):
         return dist.FileStore(self.file_name, self.world_size)
 
-    def _get_process_group(self):
+    def _get_process_group(self, backend):
         store = self._get_store()
         c10d.init_process_group(
-            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            backend, store=store, rank=self.rank, world_size=self.world_size
         )
         return c10d.distributed_c10d._get_default_group()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_broadcast(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_broadcast(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired = 0
         durations: list[float] = []
 
@@ -4110,8 +4111,9 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_mixed_ops(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_mixed_ops(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired = 0
         durations: list[float] = []
 
@@ -4152,8 +4154,9 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_with_ddp(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_with_ddp(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired: dict[int, int] = {}
         durations: dict[OpType, list[float]] = {}
 
@@ -4204,10 +4207,11 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_all_gather_object(self):
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_all_gather_object(self, backend):
         torch.cuda.set_device(self.rank)
 
-        pg = self._get_process_group()
+        pg = self._get_process_group(backend)
         num_hook_fired: dict[int, int] = {}
         durations: dict[OpType, list[float]] = {}
 
@@ -4245,8 +4249,9 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_seq(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_seq(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired = 0
         seq: int = -1
         work: int = 0
@@ -4269,6 +4274,50 @@ class WorkHookTest(MultiProcessTestCase):
 
         self.assertEqual(num_hook_fired, work_count)
         self.assertEqual(work, seq)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_coalesced(self, backend):
+        pg = self._get_process_group(backend)
+        device = torch.device("cuda", self.rank)
+        op_types = []
+        pg._register_on_completion_hook(lambda info: op_types.append(info.op_type))
+
+        tensors = [torch.ones(4, device=device) for _ in range(3)]
+        pg.allreduce_coalesced(tensors).wait()
+        with c10d._coalescing_manager(group=pg, device=device, async_ops=True) as cm:
+            for t in tensors:
+                c10d.all_reduce(t, group=pg)
+        cm.wait()
+        pg._start_coalescing(device)
+        pg.allreduce([tensors[0]])
+        pg.broadcast([tensors[1]])
+        pg._end_coalescing(device).wait()
+        peer = 1 - self.rank
+        recv = torch.empty(4, device=device)
+        ops = [
+            c10d.P2POp(c10d.isend, tensors[0], peer, pg),
+            c10d.P2POp(c10d.irecv, recv, peer, pg),
+        ]
+        for work in c10d.batch_isend_irecv(ops):
+            work.wait()
+        out = torch.empty(4 * self.world_size, device=device)
+        with c10d._coalescing_manager(group=pg, device=device, async_ops=True) as cm:
+            c10d.all_gather_into_tensor(out, tensors[0], group=pg)
+            c10d.all_gather_into_tensor(out, tensors[1], group=pg)
+        cm.wait()
+        with c10d._coalescing_manager(group=pg, device=device, async_ops=True) as cm:
+            c10d.reduce_scatter_tensor(tensors[0], out, group=pg)
+            c10d.reduce_scatter_tensor(tensors[1], out, group=pg)
+        cm.wait()
+
+        c10d.destroy_process_group(pg)
+        # One report per coalesced op or window.
+        self.assertEqual(op_types, [OpType.COALESCED] * 6)
+
+
+instantiate_parametrized_tests(WorkHookTest)
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):

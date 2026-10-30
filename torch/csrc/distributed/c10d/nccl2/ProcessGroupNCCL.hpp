@@ -378,6 +378,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       override;
   void unregisterCompletionHook(int64_t hook_id) override;
 
+  void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<::c10d::WorkInfo>)>&& hook) override;
+  void waitForPendingWorks() override;
+
   // ---- accessors used by friend classes (work) ----
   NcclApi* getNcclApi() const {
     return nccl_api_.get();
@@ -652,6 +656,31 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void runCompletionHooks(
       uint64_t completion_key,
       std::optional<float> duration_ms);
+  // registerOnCompletionHook state, shared with the hook thread. A hook may
+  // tear the group down, so that thread may outlive this object and touches
+  // only this struct.
+  struct OnCompletionState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::queue<std::shared_ptr<::c10d::WorkInfo>> queue;
+    std::function<void(std::shared_ptr<::c10d::WorkInfo>)> hook;
+    std::thread::id thread_id;
+    bool running{false};
+    bool stop{false};
+    // The hook thread was detached by its own hook.
+    bool detached{false};
+    std::string log_prefix;
+  };
+  bool hasOnCompletionHook();
+  void enqueueOnCompletion(std::shared_ptr<::c10d::WorkInfo> info);
+  static void runOnCompletionHookLoop(
+      const std::shared_ptr<OnCompletionState>& state);
+  // Stops accepting reports; the hook thread exits once it has delivered the
+  // queued ones. Does not wait for it.
+  void requestOnCompletionStop();
+  // requestOnCompletionStop(), then waits for the hook thread unless called
+  // from it.
+  void stopOnCompletionHookThread();
 
   void attachMemoryHook();
   void detachMemoryHook();
@@ -665,6 +694,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};
+  // Serializes abortNcclComm() with checkAndAbortIfTimedOutOrError() reading
+  // nccl_comm_ on a user thread while the watchdog aborts it.
+  std::mutex nccl_comm_abort_mutex_;
   at::Device device_;
   int comm_size_{};
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
@@ -683,6 +715,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   c10::intrusive_ptr<::c10d::Store> store_;
   uint64_t bootstrap_generation_{0};
   uint64_t sequence_number_{0};
+  // Sequence number of p2p works (send, recv, batched p2p), which stock
+  // ProcessGroupNCCL counts separately from collectives (seqP2P_).
+  uint64_t p2p_sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
   std::unique_ptr<at::cuda::MemPool> memPool_;
@@ -761,6 +796,19 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // un/registering on another thread.
   std::unordered_map<int64_t, ::c10d::CompletionHook> completionHooks_;
   std::mutex completion_hooks_mutex_;
+
+  // WorkNCCL::State::reportOnCompletion() queues a WorkInfo and the hook runs
+  // on on_completion_thread_, so the watchdog never waits on the GIL a Python
+  // hook takes.
+  std::shared_ptr<OnCompletionState> on_completion_{
+      std::make_shared<OnCompletionState>()};
+  std::thread on_completion_thread_;
+  // Guards on_completion_thread_: finalize(), the destructor and a hook
+  // tearing the group down may stop it from different threads.
+  std::mutex on_completion_thread_mutex_;
+  // Set while a *_coalesced op issues its per-tensor works, which hold their
+  // OnCompletion report (see WorkNCCL::holdOnCompletionReport()).
+  bool in_coalesced_op_{false};
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.

@@ -26,11 +26,13 @@ struct TracingGuardInfo {
 
 class TracingGuard {
  public:
-  // `sequence_number` is the issuing process group's own collective counter
-  // (ProcessGroupNCCL::sequence_number_, the value the work handle also
-  // carries). Profilers pair collectives across ranks by (process group,
-  // sequence number), so it has to be per-PG: a process-wide counter makes a
-  // rank's numbering depend on how it interleaved its other groups' work.
+  // `sequence_number` is the issuing process group's own counter, the value
+  // the work handle also carries: ProcessGroupNCCL::sequence_number_ for
+  // collectives, p2p_sequence_number_ with `is_p2p` for p2p ops, as in stock
+  // ProcessGroupNCCL. Profilers pair ops across ranks by (process group,
+  // sequence number, is_p2p), so it has to be per-PG: a process-wide counter
+  // makes a rank's numbering depend on how it interleaved its other groups'
+  // work.
   TracingGuard(
       std::string_view comm_name,
       int comm_size,
@@ -38,7 +40,8 @@ class TracingGuard {
       int collective_rank,
       uint64_t sequence_number,
       const std::vector<at::Tensor>& input_tensor_list = {},
-      const std::vector<at::Tensor>& output_tensor_list = {});
+      const std::vector<at::Tensor>& output_tensor_list = {},
+      bool is_p2p = false);
 
   TracingGuard(
       std::string_view comm_name,
@@ -47,7 +50,8 @@ class TracingGuard {
       int collective_rank,
       uint64_t sequence_number,
       const at::Tensor& input_tensor,
-      const at::Tensor& output_tensor);
+      const at::Tensor& output_tensor,
+      bool is_p2p = false);
 
   TracingGuard(
       const TracingGuardInfo& info,
@@ -71,7 +75,8 @@ class TracingGuard {
       int collective_rank,
       uint64_t sequence_number,
       const std::vector<at::Tensor>& input_tensor_list,
-      const std::vector<at::Tensor>& output_tensor_list);
+      const std::vector<at::Tensor>& output_tensor_list,
+      bool is_p2p = false);
 
   std::shared_ptr<torch::ParamCommsDebugInfo> getDebugInfo(
       std::string_view comm_name,
