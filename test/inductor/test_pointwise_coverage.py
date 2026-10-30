@@ -30,6 +30,7 @@ class TestPointwiseCoverage(TestCase):
         "outcome",
         (
             "matched",
+            "matched_without_kernel",
             "known_mismatch",
             "skipped",
             "failed",
@@ -40,7 +41,9 @@ class TestPointwiseCoverage(TestCase):
     )
     def test_runner_outcomes(self, outcome):
         record = CoverageRecord(
-            {"test": "example"}, expected_mismatch=outcome == "known_mismatch"
+            {"test": "example"},
+            expected_mismatch=outcome == "known_mismatch",
+            kernel_required=outcome != "matched_without_kernel",
         )
 
         class Example(unittest.TestCase):
@@ -54,7 +57,7 @@ class TestPointwiseCoverage(TestCase):
                 if outcome in ("failed", "expected_failure"):
                     self.fail("numerical mismatch")
                 record.compared = 1
-                record.generated_kernels = 1
+                record.generated_kernels = int(outcome != "matched_without_kernel")
                 if outcome == "known_mismatch":
                     record.mismatches["nan-payload"] += 1
                 else:

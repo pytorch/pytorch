@@ -9,6 +9,8 @@ Workers write separate JSONL logs, archived by the existing CI log uploader.
 The summary retains failed attempts across
 reruns. A matched row describes the executed comparisons, with kernel generation
 checked per test; it does not prove every signature used a generated kernel.
+Copies, representation views and evaluation dropout may match without a kernel;
+these comparisons have a separate matched_without_kernel status.
 """
 
 import argparse
@@ -84,6 +86,7 @@ class CoverageRecord:
     compared: int = 0
     matched: int = 0
     generated_kernels: int = 0
+    kernel_required: bool = True
     mismatches: Counter = field(default_factory=Counter)
     filters: Counter = field(default_factory=Counter)
     status: str = "not_run"
@@ -99,6 +102,7 @@ class CoverageRecord:
             "compared": self.compared,
             "matched": self.matched,
             "generated_kernels": self.generated_kernels,
+            "kernel_required": self.kernel_required,
             "mismatches": dict(self.mismatches),
             "filters": dict(self.filters),
         }
@@ -138,9 +142,16 @@ def record_result(record, result, test):
                                 not record.expected_mismatch
                                 and record.compared > 0
                                 and record.matched == record.compared
-                                and record.generated_kernels > 0
+                                and (
+                                    record.generated_kernels > 0
+                                    or not record.kernel_required
+                                )
                             ):
-                                record.status = "matched"
+                                record.status = (
+                                    "matched"
+                                    if record.generated_kernels > 0
+                                    else "matched_without_kernel"
+                                )
                             else:
                                 record.status = "unverified"
                 return original(item, *args)
@@ -193,6 +204,7 @@ def summarize(directory):
         "unverified": 3,
         "skipped": 4,
         "matched": 5,
+        "matched_without_kernel": 5,
         "not_run": 6,
     }
     rows = []

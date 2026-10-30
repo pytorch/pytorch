@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 
 # Native reductions register during import, so enable the rollout first.
@@ -24,6 +25,7 @@ from torch.testing._internal.common_cuda import IS_SM100, IS_SM89, IS_SM90, SM90
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    OpDTypes,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -53,6 +55,7 @@ from torch.testing._internal.opinfo.core import (
     UnaryUfuncInfo,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_leaves, tree_map
 from torch.utils._triton import has_triton_reduction_ordering
 
 
@@ -1927,8 +1930,99 @@ POINTWISE_EXTRA = frozenset(
         "nn.functional.hardswish",
         "nn.functional.leaky_relu",
         "native_dropout_backward",
+        "alias_copy",
+        "clone",
+        "contiguous",
+        "resolve_conj",
+        "resolve_neg",
+        "to",
+        "view_as_complex",
+        "view_as_real",
+        "addr",
+        "outer",
+        "kron",
+        "nn.functional.glu",
+        "tril",
+        "triu",
+        "zero_",
+        "unravel_index",
+        "jiterator_2inputs_2outputs",
+        "jiterator_4inputs_with_extra_args",
     }
 )
+
+POINTWISE_LOSSES = frozenset(
+    {
+        "nn.functional.binary_cross_entropy",
+        "nn.functional.binary_cross_entropy_with_logits",
+        "nn.functional.gaussian_nll_loss",
+        "nn.functional.hinge_embedding_loss",
+        "nn.functional.huber_loss",
+        "nn.functional.kl_div",
+        "nn.functional.l1_loss",
+        "nn.functional.margin_ranking_loss",
+        "nn.functional.mse_loss",
+        "nn.functional.poisson_nll_loss",
+        "nn.functional.smooth_l1_loss",
+        "nn.functional.soft_margin_loss",
+    }
+)
+POINTWISE_FIXED_STATS = frozenset(
+    {
+        "nn.functional.batch_norm",
+        "native_batch_norm",
+        "_native_batch_norm_legit",
+        "nn.functional.instance_norm",
+    }
+)
+POINTWISE_DROPOUT = frozenset(
+    {
+        "nn.functional.alpha_dropout",
+        "nn.functional.dropout",
+        "nn.functional.dropout2d",
+        "nn.functional.dropout3d",
+        "nn.functional.feature_alpha_dropout",
+    }
+)
+POINTWISE_CONDITIONAL = (
+    POINTWISE_LOSSES
+    | POINTWISE_FIXED_STATS
+    | POINTWISE_DROPOUT
+    | {"nn.functional.rrelu", "nn.functional.one_hot", "einsum", "tensordot"}
+)
+POINTWISE_REPRESENTATIONS = frozenset(
+    {
+        "alias_copy",
+        "clone",
+        "contiguous",
+        "conj",
+        "resolve_conj",
+        "resolve_neg",
+        "view_as_complex",
+        "view_as_real",
+        "to",
+    }
+)
+POINTWISE_GEOMETRY = frozenset(
+    {
+        "addr",
+        "outer",
+        "kron",
+        "nn.functional.glu",
+        "view_as_complex",
+        "view_as_real",
+        "tril",
+        "triu",
+        "unravel_index",
+    }
+)
+
+
+def _pointwise_op(op):
+    # Evaluation needs no seed wrapper, which Dynamo cannot trace.
+    if op.name in POINTWISE_DROPOUT | {"nn.functional.rrelu"}:
+        return getattr(torch.nn.functional, op.name.rsplit(".", 1)[1])
+    return op.op
 
 
 def _op_id(op):
@@ -1942,7 +2036,7 @@ def _pointwise_ops():
     for op in op_db:
         if not (
             isinstance(op, (UnaryUfuncInfo, BinaryUfuncInfo))
-            or op.name in POINTWISE_EXTRA
+            or op.name in POINTWISE_EXTRA | POINTWISE_CONDITIONAL
         ):
             continue
         oid = _op_id(op)
@@ -1963,7 +2057,7 @@ def _dtype_label(dtype):
 
 # Exhaust all 16-bit encodings and sample float32 bit patterns.
 NUM_BITPATTERN_SAMPLES = 65536
-# Opt in to all floating dtypes and reference inputs, including arbitrary strides.
+# Opt in to expanded reference inputs, including arbitrary strides.
 ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 
 _FINFO32 = torch.finfo(torch.float32)
@@ -2100,6 +2194,11 @@ def _pointwise_subnormals(dtype):
 
 
 def _pointwise_grad_values(dtype, device):
+    if dtype.is_complex:
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _pointwise_grad_values(real_dtype, device)
+        zeros = torch.zeros_like(values)
+        return torch.cat((torch.complex(values, zeros), torch.complex(zeros, values)))
     return torch.cat(
         (_pointwise_subnormals(dtype).to(device), _min_max_specials(dtype, device))
     )
@@ -2202,6 +2301,7 @@ def _diff_kind(a, b):
         return "value" if "value" in kinds or not kinds else "+".join(sorted(kinds))
     if a.dtype != b.dtype or a.shape != b.shape:
         return "shape"
+    a, b = a.resolve_conj().resolve_neg(), b.resolve_conj().resolve_neg()
     if a.is_complex():
         a, b = torch.view_as_real(a), torch.view_as_real(b)
     int_dtype = _BIT_VIEW.get(a.dtype)
@@ -2220,15 +2320,12 @@ def _diff_kind(a, b):
     return "+".join(parts) or "value"
 
 
-def _diff_output(out):
-    r"""Select the floating-point output, excluding frexp's integer exponent."""
-    if isinstance(out, torch.Tensor):
-        return out if out.is_floating_point() else None
-    if isinstance(out, (tuple, list)):
-        for t in out:
-            if isinstance(t, torch.Tensor) and t.is_floating_point():
-                return t
-    return None
+def _diff_outputs(out):
+    return [
+        t
+        for t in tree_leaves(out)
+        if isinstance(t, torch.Tensor) and (t.is_floating_point() or t.is_complex())
+    ]
 
 
 def _outputs_equal(a, b):
@@ -2248,6 +2345,7 @@ def _outputs_equal(a, b):
         return False
     if a.numel() == 0:
         return True
+    a, b = a.resolve_conj().resolve_neg(), b.resolve_conj().resolve_neg()
     if a.is_complex():
         a, b = torch.view_as_real(a), torch.view_as_real(b)
     return torch.equal(
@@ -2255,33 +2353,6 @@ def _outputs_equal(a, b):
         b.contiguous().reshape(-1).view(torch.uint8),
     )
 
-
-_NONFLOAT_DTYPES = (
-    torch.int64,
-    torch.int32,
-    torch.int16,
-    torch.int8,
-    torch.uint8,
-    torch.bool,
-    torch.complex64,
-    torch.complex128,
-    torch.complex32,
-)
-
-
-def _first_nonfloat_dtype(op):
-    for d in _NONFLOAT_DTYPES:
-        if d in op.supported_dtypes("cuda"):
-            return d
-    return None
-
-
-NONFLOAT_INPUT_OPS = [
-    op
-    for op in POINTWISE_OPS
-    if torch.float32 not in op.supported_dtypes("cuda")
-    and _first_nonfloat_dtype(op) is not None
-]
 
 BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 
@@ -2305,113 +2376,6 @@ NONFLOAT_XFAIL = frozenset(
         ("nn_functional_silu_complex", "complex128"),
     }
 )
-
-
-# Preserve all floating dtype coverage after removing repaired xfail entries.
-FULL_DTYPE_BACKWARD_OPS = frozenset(
-    {
-        "special_erfcx",
-        "nn_functional_softshrink",
-        "mvlgamma_mvlgamma_p_1",
-        "mvlgamma_mvlgamma_p_3",
-        "mvlgamma_mvlgamma_p_5",
-        "hypot",
-        "special_log_ndtr",
-        "i0",
-        "special_bessel_j0",
-        "special_bessel_j1",
-        "special_bessel_y0",
-        "special_bessel_y1",
-        "special_i1",
-        "special_modified_bessel_i0",
-        "special_modified_bessel_i1",
-        "addcmul",
-        "deg2rad",
-        "erf",
-        "erfc",
-        "erfinv",
-        "exp2",
-        "lerp",
-        "log10",
-        "log2",
-        "logit",
-        "rad2deg",
-        "rsqrt",
-        "sinc",
-        "special_ndtr",
-        "__rpow__",
-        "copysign",
-        "special_xlog1py",
-        "xlogy",
-        "double",
-        "float_power",
-        "__rmod__",
-        "addcdiv",
-        "div_floor_rounding",
-        "div_no_rounding_mode",
-        "div_trunc_rounding",
-        "floor_divide",
-        "remainder",
-        "round_decimals_3",
-        "round_decimals_neg_3",
-        "true_divide",
-        "ldexp",
-        "logaddexp2",
-        "rsub",
-        "sub",
-        "nn_functional_gelu",
-        "nn_functional_hardswish",
-        "nn_functional_mish",
-        "nn_functional_silu",
-        "nn_functional_softplus",
-        "nn_functional_tanhshrink",
-        "sigmoid",
-        "tanh",
-    }
-)
-
-FULL_DTYPE_POINTWISE_OPS = (
-    frozenset(
-        {
-            "abs",
-            "angle",
-            "double",
-            "fmax",
-            "fmin",
-            "frexp",
-            "max_binary",
-            "maximum",
-            "min_binary",
-            "minimum",
-            "neg",
-            "special_entr",
-            "special_xlog1py",
-            "xlogy",
-        }
-    )
-    | FULL_DTYPE_BACKWARD_OPS
-)
-
-
-class _strict_ops(ops):
-    def __init__(self, op_list, xfails, *, full_dtype_ops=()):
-        super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
-        self.xfails = xfails
-        self.full_dtype_ops = full_dtype_ops
-
-    def _parametrize_test(self, test, generic_cls, device_cls):
-        for case in super()._parametrize_test(test, generic_cls, device_cls):
-            params = case[2]
-            op, dtype = params["op"], params["dtype"]
-            supported = op.supported_dtypes(device_cls.device_type)
-            preferred = next(d for d in POINTWISE_DTYPES if d in supported)
-            if (
-                ALL_SAMPLES
-                or dtype == preferred
-                or _op_id(op) in self.full_dtype_ops
-                or (_op_id(op), _dtype_label(dtype)) in self.xfails
-            ):
-                yield case
 
 
 POINTWISE_STRICT_CFG = {
@@ -2448,15 +2412,6 @@ BITPATTERN_SLOW = frozenset(
     }
 )
 
-# Jiterator kernels cannot compile under fullgraph.
-COMPILE_UNSUPPORTED = frozenset(
-    {
-        "jiterator_unary",
-        "jiterator_binary",
-        "jiterator_binary_return_by_ref",
-    }
-)
-
 
 class _RngOpDetector(TorchDispatchMode):
     def __init__(self):
@@ -2486,14 +2441,18 @@ class PointwiseStrictNumericsTest(TestCase):
         if not directory or case is None:
             return super().run(result)
         ledgers = {
-            "test_pointwise_bitwise": POINTWISE_XFAIL,
+            "test_pointwise_bitwise": POINTWISE_XFAIL | NONFLOAT_XFAIL,
             "test_pointwise_backward": BACKWARD_XFAIL,
-            "test_pointwise_nonfloat": NONFLOAT_XFAIL,
         }
         self._coverage = CoverageRecord(
             case,
             (case["op"], case["dtype"]) in ledgers.get(case["family"], ()),
         )
+        self._coverage.kernel_required = case["op"] not in {
+            _op_id(op)
+            for op in POINTWISE_OPS
+            if op.name in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT
+        }
         if result is None:
             result = self.defaultTestResult()
         try:
@@ -2536,22 +2495,83 @@ class PointwiseStrictNumericsTest(TestCase):
         )
         self.assertEqual(grads, (weight, inp))
 
+    @dtypes(torch.complex64)
+    def test_nested_multi_output_input_grads(self, device, dtype):
+        x = torch.tensor([1 + 2j, -3 + 4j], device=device, dtype=dtype).requires_grad_()
+        y = torch.tensor(2 - 1j, device=device, dtype=dtype).requires_grad_()
+        constant = torch.tensor(3 + 2j, device=device, dtype=dtype)
+        g1, g2 = torch.ones_like(x), torch.full_like(x, 2 + 1j)
+
+        def fn(inputs, args, kwargs):
+            a, b = inputs
+            return a * b, a * kwargs["constant"]
+
+        _, grads = self._input_grads(
+            fn, (x, y), (), {"constant": constant}, (g1, g2), respect_requires_grad=True
+        )
+        expected = torch.autograd.grad(
+            (x * y, x * constant), (x, y), grad_outputs=(g1, g2)
+        )
+        self.assertTrue(_outputs_equal(grads, expected))
+        self.assertEqual(len(grads), 2)
+        # The scalar's gradient must include the broadcast sum.
+        self.assertEqual(grads[1], (g1 * x.conj()).sum())
+
+    @dtypes(torch.float32)
+    def test_swapped_output_gradients_are_detected(self, device, dtype):
+        class Swapped(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return 2 * x, 3 * x
+
+            @staticmethod
+            def backward(ctx, g1, g2):
+                return 3 * g1 + 2 * g2
+
+        class Op:
+            name, variant_test_name = "clone", ""
+
+            @staticmethod
+            def op(x):
+                return 2 * x, 3 * x
+
+        x = torch.ones(4, device=device, dtype=dtype).requires_grad_()
+        with mock.patch(
+            "torch.compile", return_value=lambda inp, args, kwargs: Swapped.apply(inp)
+        ):
+            mismatches = self._sweep_backward(
+                device, Op(), dtype, POINTWISE_STRICT_CFG, calls=[("sample", x, (), {})]
+            )
+        self.assertTrue(mismatches)
+        self.assertEqual(mismatches[0][-1], "value")
+
+    @dtypes(torch.complex64)
+    def test_bitwise_lazy_views(self, device, dtype):
+        x = torch.tensor([1 + 2j, -0.0 - 3j], dtype=dtype, device=device)
+        for view in (x.conj(), torch._neg_view(x)):
+            self.assertTrue(_outputs_equal(view, view.resolve_conj().resolve_neg()))
+            self.assertEqual(_diff_kind(view, view + 1), "value")
+
+    @dtypes(torch.float32)
+    def test_conditional_pointwise_samples(self, device, dtype):
+        for name in POINTWISE_CONDITIONAL:
+            for op in (o for o in POINTWISE_OPS if o.name == name):
+                with self.subTest(op=_op_id(op)):
+                    sample_dtype = (
+                        torch.int64 if name == "nn.functional.one_hot" else dtype
+                    )
+                    calls = self._collect_calls(device, op, sample_dtype)
+                    self.assertTrue(calls)
+                    for _, inp, args, kwargs in calls:
+                        if name in POINTWISE_LOSSES:
+                            self.assertEqual(kwargs["reduction"], "none")
+                        elif name in POINTWISE_DROPOUT | {"nn.functional.rrelu"}:
+                            self.assertFalse(kwargs["training"])
+
     @dtypes(torch.float32)
     def test_coverage_filtered_samples(self, device, dtype):
         self._coverage = CoverageRecord({"test": self._testMethodName})
         x = torch.ones(2, device=device, dtype=dtype)
-        add = next(op for op in POINTWISE_OPS if op.name == "add")
-        with self.assertRaisesRegex(unittest.SkipTest, "no differentiable sample"):
-            self._sweep_backward(
-                device,
-                add,
-                dtype,
-                POINTWISE_STRICT_CFG,
-                calls=[("sample", x, (x[:1],), {})],
-            )
-        self.assertEqual(self._coverage.filters, {"backward_requires_reduction": 1})
-        self.assertEqual(self._coverage.compared, 0)
-
         reduction = next(op for op in op_db if op.name == "sum")
         with self.assertRaisesRegex(unittest.SkipTest, "no usable sample"):
             self._sweep(
@@ -2563,6 +2583,15 @@ class PointwiseStrictNumericsTest(TestCase):
             )
         self.assertEqual(self._coverage.filters["output_shape_not_pointwise"], 1)
         self.assertEqual(self._coverage.compared, 0)
+        remainder = next(op for op in POINTWISE_OPS if op.name == "__rmod__")
+        calls = self._collect_calls(device, remainder, dtype, backward=True)
+        self.assertTrue(calls)
+        self.assertTrue(
+            all(isinstance(args[0], torch.Tensor) for _, _, args, _ in calls)
+        )
+        self.assertGreater(
+            self._coverage.filters["scalar_remainder_has_no_eager_backward"], 0
+        )
 
     def _is_tensor_output(self, out):
         return isinstance(out, torch.Tensor) or (
@@ -2570,42 +2599,89 @@ class PointwiseStrictNumericsTest(TestCase):
             and all(isinstance(t, torch.Tensor) for t in out)
         )
 
-    def _is_pointwise_output(self, inp, args, kwargs, out):
-        shapes = [inp.shape] + [a.shape for a in args if isinstance(a, torch.Tensor)]
-        shapes += [v.shape for v in kwargs.values() if isinstance(v, torch.Tensor)]
+    def _is_pointwise_output(self, inp, args, kwargs, out, op=None):
+        if op is not None and op.name in POINTWISE_EXTRA | POINTWISE_CONDITIONAL:
+            return True
+        shapes = [
+            t.shape
+            for t in tree_leaves((inp, args, kwargs))
+            if isinstance(t, torch.Tensor)
+        ]
         try:
             bshape = torch.broadcast_shapes(*shapes)
         except Exception:
             return False
-        outs = out if isinstance(out, (tuple, list)) else (out,)
+        outs = tree_leaves(out)
         return all(isinstance(o, torch.Tensor) and o.shape == bshape for o in outs)
 
     def _build_calls(self, samples, dtype):
         r"""Build calls without flattening so reference layouts exercise codegen."""
         calls = []
         for sample in samples:
-            if not isinstance(sample.input, torch.Tensor):
+            tensors = tree_leaves((sample.input, sample.args, sample.kwargs))
+            if not any(isinstance(t, torch.Tensor) for t in tree_leaves(sample.input)):
                 self._coverage_filter("non_tensor_input")
                 continue
-            tensors = [sample.input, *sample.args]
             if any(isinstance(t, torch.Tensor) and t.dtype == dtype for t in tensors):
                 calls.append((sample.input, tuple(sample.args), dict(sample.kwargs)))
             else:
                 self._coverage_filter("input_dtype_not_selected")
         return calls
 
-    def _sample_inputs(self, op, device, dtype):
-        samples = list(op.sample_inputs(device, dtype, requires_grad=False))
+    def _sample_inputs(self, op, device, dtype, *, requires_grad=False):
+        samples = list(op.sample_inputs(device, dtype, requires_grad=requires_grad))
         if isinstance(op, BinaryUfuncInfo) and dtype.is_floating_point:
             samples.extend(
                 generate_elementwise_binary_with_scalar_samples(
-                    op, device=device, dtype=dtype
+                    op, device=device, dtype=dtype, requires_grad=requires_grad
                 )
             )
         return samples
 
+    def _pointwise_call(self, op, inp, args, kwargs):
+        kwargs = dict(kwargs)
+        if op.name in POINTWISE_LOSSES:
+            kwargs.pop("size_average", None)
+            kwargs.pop("reduce", None)
+            kwargs["reduction"] = "none"
+        elif op.name in POINTWISE_DROPOUT or op.name == "nn.functional.rrelu":
+            kwargs["training"] = False
+        elif op.name == "nn.functional.instance_norm":
+            if kwargs.get("running_mean") is None or kwargs.get("running_var") is None:
+                return None
+            kwargs["use_input_stats"] = False
+        elif op.name == "nn.functional.batch_norm":
+            if len(args) < 2 or args[0] is None or args[1] is None:
+                return None
+            kwargs["training"] = False
+        elif op.name in POINTWISE_FIXED_STATS:
+            if len(args) < 7 or args[2] is None or args[3] is None:
+                return None
+            args = (*args[:4], False, *args[5:])
+        elif op.name == "tensordot":
+            kwargs["dims"] = 0
+        elif op.name == "einsum":
+            equation = args[0].replace(" ", "")
+            if "->" not in equation:
+                return None
+            left, right = equation.split("->")
+            if set(left.replace(",", "")) - set(right):
+                return None
+        elif op.name == "nn.functional.one_hot":
+            classes = args[0] if args else kwargs.get("num_classes", -1)
+            if classes < 1:
+                classes = int(inp.max()) + 1 if inp.numel() else 1
+            if args:
+                args = (classes, *args[1:])
+            else:
+                kwargs["num_classes"] = classes
+        return inp, tuple(args), kwargs
+
     def _bitpattern_call(self, op, dtype, device):
         r"""Build valid raw-bit calls for each sampled signature and mask parity."""
+        if op.name in POINTWISE_GEOMETRY | POINTWISE_CONDITIONAL:
+            self._coverage_filter("raw_bits_require_original_geometry")
+            return []
         if op.name in BITPATTERN_SLOW:
             self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
             return []
@@ -2669,53 +2745,63 @@ class PointwiseStrictNumericsTest(TestCase):
                 calls.append((x, args, kwargs))
         return calls
 
-    def _collect_calls(self, device, op, dtype):
+    def _collect_calls(self, device, op, dtype, *, backward=False):
         r"""Return (source, input, args, kwargs) calls for both sweeps."""
-        if op.name in COMPILE_UNSUPPORTED:
-            self.skipTest("uncompilable op under fullgraph")
         key = (_op_id(op), _dtype_label(dtype))
         use_reference = ALL_SAMPLES or key in REFERENCE_INPUTS
         calls = []
         try:
             if use_reference:
-                samples = list(op.reference_inputs(device, dtype, requires_grad=False))
+                samples = list(
+                    op.reference_inputs(device, dtype, requires_grad=backward)
+                )
                 calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
             calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
-            # Preserve scalar/mixed-dtype signatures and float's layout conversion.
-            keep_samples = op.name in ("clamp", "float", "ldexp", "nn.functional.prelu")
-            if not use_reference and (not calls or keep_samples):
-                samples = self._sample_inputs(op, device, dtype)
+            if not use_reference:
+                samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
                 sample_calls = self._build_calls(samples, dtype)
-                if not keep_samples:
-                    usable = [c for c in sample_calls if c[0].numel() > 1]
-                    self._coverage_filter(
-                        "small_reference_input", len(sample_calls) - len(usable)
-                    )
-                    self._coverage_filter(
-                        "reference_signature_not_selected", max(0, len(usable) - 1)
-                    )
-                    sample_calls = usable[:1]
                 calls += [("sample", *c) for c in sample_calls]
         except Exception as e:
-            self.skipTest(f"input generation failed: {type(e).__name__}")
+            self.fail(f"{_op_id(op)} {dtype} input generation failed: {e}")
         if not calls:
             self.skipTest("no usable sample")
-        # Probe every call: RNG use can depend on the scalar signature.
-        detector = _RngOpDetector()
-        with detector:
-            for _, inp, args, kwargs in calls:
-                op.op(inp, *args, **kwargs)
-                if detector.has_rng:
-                    break
-        if detector.has_rng:
-            self.skipTest("RNG op excluded (RNG-source equivalence is separate)")
-        return calls
+        usable = []
+        for tag, inp, args, kwargs in calls:
+            # remainder.Scalar_Tensor has no eager derivative.
+            if (
+                backward
+                and op.name == "__rmod__"
+                and args
+                and not isinstance(args[0], torch.Tensor)
+            ):
+                self._coverage_filter("scalar_remainder_has_no_eager_backward")
+                continue
+            call = self._pointwise_call(op, inp, args, kwargs)
+            if call is None:
+                self._coverage_filter("non_pointwise_mode")
+                continue
+            inp, args, kwargs = call
+            detector = _RngOpDetector()
+            with detector:
+                _pointwise_op(op)(inp, *args, **kwargs)
+            if detector.has_rng and op.name not in POINTWISE_DROPOUT | {
+                "nn.functional.rrelu"
+            }:
+                self._coverage_filter("rng_call")
+                continue
+            usable.append((tag, inp, args, kwargs))
+        if not usable:
+            self.skipTest("no deterministic pointwise sample")
+        return usable
 
-    def _require_kernel(self, tested, nothing_tested):
+    def _require_kernel(self, tested, nothing_tested, op):
         # ATen fallbacks compare eager against itself, so do not count them as coverage.
         if tested == 0:
             self.skipTest(nothing_tested)
-        if metrics.generated_kernel_count == 0:
+        if (
+            metrics.generated_kernel_count == 0
+            and op.name not in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT
+        ):
             self.skipTest("no Triton kernel generated (op falls back to ATen)")
 
     def _sweep(self, device, op, dtype, cfg, *, calls=None):
@@ -2724,7 +2810,7 @@ class PointwiseStrictNumericsTest(TestCase):
             calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
-            return op.op(inp, *args, **kwargs)
+            return _pointwise_op(op)(inp, *args, **kwargs)
 
         tested = 0
         mismatches = []
@@ -2743,7 +2829,7 @@ class PointwiseStrictNumericsTest(TestCase):
                 if not self._is_tensor_output(eager):
                     self._coverage_filter("non_tensor_output")
                     continue
-                if not self._is_pointwise_output(inp, args, kwargs, eager):
+                if not self._is_pointwise_output(inp, args, kwargs, eager, op):
                     self._coverage_filter("output_shape_not_pointwise")
                     continue
                 result = compiled(inp, args, kwargs)
@@ -2752,11 +2838,19 @@ class PointwiseStrictNumericsTest(TestCase):
                 kind = "" if equal else _diff_kind(eager, result)
                 self._coverage_comparison(equal, kind)
                 if not equal:
-                    mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
+                    mismatches.append(
+                        (
+                            tag,
+                            idx,
+                            [tuple(t.shape) for t in tree_leaves(inp)],
+                            kwargs,
+                            kind,
+                        )
+                    )
 
         if not mismatches:
             # A mismatch must not be turned into a no-kernel skip.
-            self._require_kernel(tested, "no usable sample")
+            self._require_kernel(tested, "no usable sample", op)
         return mismatches
 
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
@@ -2775,13 +2869,16 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @_strict_ops(
-        POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
-    )
+    @ops(POINTWISE_OPS)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
-            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
+            mismatches,
+            op,
+            dtype,
+            "forward",
+            POINTWISE_XFAIL | NONFLOAT_XFAIL,
+            "POINTWISE_XFAIL/NONFLOAT_XFAIL",
         )
 
     @ops(POINTWISE_EDGE_OPS, allowed_dtypes=POINTWISE_EDGE_DTYPES)
@@ -2790,53 +2887,48 @@ class PointwiseStrictNumericsTest(TestCase):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
         self.assertFalse(mismatches, f"{_op_id(op)} {dtype} edge outputs: {mismatches}")
 
-    @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
-    def test_pointwise_nonfloat(self, device, dtype, op):
-        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
-        )
-
-    def _input_grads(self, call_fn, inp, args, kwargs, grad_output):
+    def _input_grads(
+        self, call_fn, inp, args, kwargs, grad_output, *, respect_requires_grad=False
+    ):
         leaves = []
 
         def leafify(t):
-            if isinstance(t, torch.Tensor) and t.is_floating_point():
-                # Preserve non-dense strides; clone expanded inputs to avoid overlap.
-                src = t.detach()
-                if src.is_contiguous() or 0 in src.stride():
-                    leaf = src.clone().requires_grad_(True)
-                else:
-                    leaf = torch.empty_strided(
-                        src.shape, src.stride(), dtype=src.dtype, device=src.device
-                    )
-                    leaf.copy_(src)
-                    leaf.requires_grad_(True)
+            if (
+                isinstance(t, torch.Tensor)
+                and (t.is_floating_point() or t.is_complex())
+                and (t.requires_grad or not respect_requires_grad)
+            ):
+                leaf = t.detach().requires_grad_(True)
                 leaves.append(leaf)
                 return leaf
             return t
 
-        inp2 = leafify(inp)
-        args2 = tuple(leafify(a) for a in args)
-        kwargs2 = {k: leafify(v) for k, v in kwargs.items()}
+        inp2, args2, kwargs2 = tree_map(leafify, (inp, args, kwargs))
         out = call_fn(inp2, args2, kwargs2)
-        target = _diff_output(out)
-        if not leaves or target is None:
+        targets = _diff_outputs(out)
+        upstream = (
+            [grad_output] if isinstance(grad_output, torch.Tensor) else grad_output
+        )
+        if len(targets) != len(upstream):
+            raise AssertionError(
+                "every differentiable output needs an upstream gradient"
+            )
+        pairs = [(t, g) for t, g in zip(targets, upstream) if t.requires_grad]
+        if not leaves or not pairs:
             return out, None
-        if target.shape != grad_output.shape:
-            return out, None
+        targets, upstream = zip(*pairs)
         grads = torch.autograd.grad(
-            target, leaves, grad_outputs=grad_output, allow_unused=True
+            targets, leaves, grad_outputs=upstream, allow_unused=True
         )
         return out, grads
 
     def _sweep_backward(self, device, op, dtype, cfg, *, calls=None):
         r"""Compare input gradients with identical upstream gradients."""
         if calls is None:
-            calls = self._collect_calls(device, op, dtype)
+            calls = self._collect_calls(device, op, dtype, backward=True)
 
         def fn(inp, args, kwargs):
-            return op.op(inp, *args, **kwargs)
+            return _pointwise_op(op)(inp, *args, **kwargs)
 
         tested = 0
         mismatches = []
@@ -2853,72 +2945,98 @@ class PointwiseStrictNumericsTest(TestCase):
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 with torch.no_grad():
                     probe = fn(inp, args, kwargs)
-                probe_out = _diff_output(probe)
-                if probe_out is None:
-                    self._coverage_filter("no_floating_output")
+                outputs = _diff_outputs(probe)
+                if not outputs:
+                    self._coverage_filter("no_differentiable_output_dtype")
                     continue
-                if not self._is_pointwise_output(inp, args, kwargs, probe):
+                if not self._is_pointwise_output(inp, args, kwargs, probe, op):
                     self._coverage_filter("output_shape_not_pointwise")
                     continue
-                # Exclude broadcasted inputs whose gradients require a reduction.
-                diff_ts = [
-                    t
-                    for t in (inp, *args, *kwargs.values())
-                    if isinstance(t, torch.Tensor) and t.is_floating_point()
-                ]
-                if any(t.shape != probe_out.shape for t in diff_ts):
-                    self._coverage_filter("backward_requires_reduction")
-                    continue
-                if tag.startswith("edge_"):
-                    values = _pointwise_grad_values(probe_out.dtype, probe_out.device)
-                    grad_output = values.repeat(probe_out.numel() // values.numel())
-                    grad_output = grad_output.reshape(probe_out.shape)
-                else:
-                    gen = torch.Generator(device=probe_out.device).manual_seed(0)
-                    grad_output = torch.randn(
-                        probe_out.shape,
-                        generator=gen,
-                        device=probe_out.device,
-                        dtype=probe_out.dtype,
-                    )
-                    # Seed signed zeros, which randn does not reliably generate.
-                    flat = grad_output.reshape(-1)
-                    if flat.numel() >= 2:
-                        flat[0] = 0.0
-                        flat[1] = -0.0
-                try:
-                    _, eager_grads = self._input_grads(
-                        fn, inp, args, kwargs, grad_output
-                    )
-                except Exception as error:
+                upstream = []
+                for output_index, output in enumerate(outputs):
                     if tag.startswith("edge_"):
-                        raise
-                    self._coverage_filter(
-                        f"eager_backward_error:{type(error).__name__}"
-                    )
-                    continue
+                        values = _pointwise_grad_values(
+                            output.dtype, output.device
+                        ).roll(output_index)
+                        grad = values.repeat(
+                            (output.numel() + values.numel() - 1) // values.numel()
+                        )
+                        grad = grad[: output.numel()].reshape(output.shape)
+                    else:
+                        gen = torch.Generator(device=output.device).manual_seed(
+                            output_index
+                        )
+                        grad = torch.randn(
+                            output.shape,
+                            generator=gen,
+                            device=output.device,
+                            dtype=output.dtype,
+                        )
+                        flat = grad.reshape(-1)
+                        if flat.numel() >= 4:
+                            flat[0] = 0.0
+                            flat[1] = -0.0
+                    upstream.append(grad)
+                respect_requires_grad = tag == "ref" or tag == "sample"
+                _, eager_grads = self._input_grads(
+                    fn,
+                    inp,
+                    args,
+                    kwargs,
+                    upstream,
+                    respect_requires_grad=respect_requires_grad,
+                )
                 if eager_grads is None:
                     self._coverage_filter("no_input_gradients")
                     continue
                 _, comp_grads = self._input_grads(
-                    compiled, inp, args, kwargs, grad_output
+                    compiled,
+                    inp,
+                    args,
+                    kwargs,
+                    upstream,
+                    respect_requires_grad=respect_requires_grad,
                 )
                 tested += 1
                 if comp_grads is None:
                     self._coverage_comparison(False, "shape")
-                    mismatches.append((tag, idx, tuple(inp.shape), kwargs, "shape"))
+                    mismatches.append(
+                        (
+                            tag,
+                            idx,
+                            [
+                                tuple(t.shape)
+                                for t in tree_leaves(inp)
+                                if isinstance(t, torch.Tensor)
+                            ],
+                            kwargs,
+                            "shape",
+                        )
+                    )
                     continue
                 equal = _outputs_equal(eager_grads, comp_grads)
                 kind = "" if equal else _diff_kind(eager_grads, comp_grads)
                 self._coverage_comparison(equal, kind)
                 if not equal:
-                    mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
+                    mismatches.append(
+                        (
+                            tag,
+                            idx,
+                            [
+                                tuple(t.shape)
+                                for t in tree_leaves(inp)
+                                if isinstance(t, torch.Tensor)
+                            ],
+                            kwargs,
+                            kind,
+                        )
+                    )
 
         if not mismatches:
-            self._require_kernel(tested, "no differentiable sample")
+            self._require_kernel(tested, "no differentiable sample", op)
         return mismatches
 
-    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=FULL_DTYPE_BACKWARD_OPS)
+    @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
@@ -2927,6 +3045,7 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(
         [op for op in POINTWISE_EDGE_OPS if op.supports_autograd],
+        dtypes=OpDTypes.supported_backward,
         allowed_dtypes=POINTWISE_EDGE_DTYPES,
     )
     def test_pointwise_edges_backward(self, device, dtype, op):
