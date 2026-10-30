@@ -4,6 +4,9 @@ r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
 import threading
+from collections.abc import Callable
+from typing import Any
+
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import (
@@ -22,6 +25,40 @@ CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
+CUDA_DEVICE_IS_INTEGRATED = LazyVal(
+    lambda: TEST_CUDA
+    and bool(torch.cuda.get_device_properties(CUDA_DEVICE).is_integrated)
+)
+
+
+def with_limited_cuda_memory_on_integrated_device(
+    limit_mb: int,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(test: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(test)
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            if not CUDA_DEVICE_IS_INTEGRATED:
+                return test(*args, **kwargs)
+
+            original_fraction = torch.cuda.get_per_process_memory_fraction(CUDA_DEVICE)
+            torch.cuda.empty_cache()
+            reserved = torch.cuda.memory_reserved(CUDA_DEVICE)
+            total = torch.cuda.get_device_properties(CUDA_DEVICE).total_memory
+            fraction = (reserved + limit_mb * 1024**2) / total
+            torch.cuda.set_per_process_memory_fraction(fraction, CUDA_DEVICE)
+            try:
+                return test(*args, **kwargs)
+            finally:
+                torch.cuda.empty_cache()
+                torch.cuda.set_per_process_memory_fraction(
+                    original_fraction, CUDA_DEVICE
+                )
+
+        return wrapped
+
+    return decorator
+
+
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 if TEST_WITH_ROCM:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA)
@@ -166,6 +203,10 @@ _CDNA2_ARCHS = ["gfx90a"]
 _CDNA3_ARCHS = ["gfx942", "gfx950"]
 # GFX1250 (CDNA 5)
 _CDNA5_ARCHS = ["gfx1250"]
+# GFX11 (RDNA 3 and RDNA 3.5)
+_RDNA3_ARCHS = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"]
+# GFX12 (RDNA 4)
+_RDNA4_ARCHS = ["gfx1200", "gfx1201"]
 
 def CDNA5OrLater():
     return evaluate_gfx_arch_within(_CDNA5_ARCHS)
@@ -175,6 +216,9 @@ def CDNA3OrLater():
 
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
+
+def RDNA3OrLater():
+    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _RDNA4_ARCHS)
 
 # Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
 # lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
@@ -317,6 +361,8 @@ def evaluate_platform_supports_fp8():
                 archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
+            if ROCM_VERSION >= (10, 3):
+                archs.extend(["gfx1170", "gfx1171"])
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
