@@ -39,6 +39,7 @@
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_embedding_bag.h>
 #include <ATen/ops/_fft_c2c.h>
+#include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
@@ -973,6 +974,30 @@ AOTITorchError aoti_torch_copy_(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     tensor_handle_to_tensor_pointer(self)->copy_(
         *tensor_handle_to_tensor_pointer(src), non_blocking);
+  });
+}
+
+AOTITorchError aoti_torch_foreach_copy_(
+    const AtenTensorHandle* dst,
+    int64_t dst_len,
+    const AtenTensorHandle* src,
+    int64_t src_len,
+    int32_t non_blocking) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        dst_len == src_len,
+        "aoti_torch_foreach_copy_: ",
+        dst_len,
+        " dst tensors but ",
+        src_len,
+        " src tensors");
+    TORCH_CHECK(
+        dst != nullptr && src != nullptr,
+        "aoti_torch_foreach_copy_: null tensor handle array");
+    at::_foreach_copy_(
+        pointer_to_list<at::Tensor>(dst, dst_len),
+        pointer_to_list<at::Tensor>(src, src_len),
+        non_blocking != 0);
   });
 }
 
