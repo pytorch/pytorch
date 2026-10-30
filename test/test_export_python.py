@@ -16,6 +16,8 @@ from torch.compiler.precompile import no_compilation
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -112,6 +114,11 @@ def _edit_graph_code(path, old, new):
 
 
 def _in_a_fresh_process(test, body):
+    if TEST_WITH_CROSSREF:
+        # The crossref harness keeps a dispatch mode active while the capture runs,
+        # and Dynamo guards on it; a fresh process has no such mode, so every call
+        # would miss there.
+        test.skipTest("a fresh process lacks the crossref dispatch mode")
     script = (
         f"import sys, torch\nsys.path.insert(0, {test.dir!r})\n"
         f"import {test.module_name} as m\n{textwrap.dedent(body)}\nprint('served')\n"
@@ -145,6 +152,7 @@ class _ExportPythonTestCase(TestCase):
         )
 
 
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 class TestExportPython(_ExportPythonTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -421,6 +429,7 @@ class TestExportPython(_ExportPythonTestCase):
 
 
 @unittest.skipUnless(HAS_CUDA_AND_TRITON, "needs CUDA and Triton")
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 class TestExportPythonCUDA(_ExportPythonTestCase):
     hw_classification = HardwareClassification.CUDA
 
