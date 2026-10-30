@@ -3738,7 +3738,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _class_vt(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.source:
-            cls_source: Source | None = AttrSource(self.source, "__class__")
+            cls_source: Source | None = TypeSource(self.source)
         else:
             # An instance built during tracing has no source of its own, but its
             # class can still be sourced (see cls_source in __init__). Keeping
@@ -3760,9 +3760,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
 
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        The algorithm: MRO walk, data descriptor, instance __dict__,
+        non-data descriptor / plain class attr, dynamic fallback, AttributeError.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -3770,12 +3769,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if not hasattr(self.value, "__dict__"):
                 raise_observed_exception(AttributeError, tx)
             return self.get_dict_vt(tx)
-
-        # TODO(anijain2305) - Investigate if we need specialization for more
-        # dunder attrs. inspect.getattr_static does not return correct value for
-        # them.
-        if name == "__class__":
-            return self._class_vt(tx)
 
         from ..mutation_guard import unpatched_nn_module_init
 
@@ -3786,14 +3779,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
         #   4. if type_attr is a non-data descriptor → invoke it
         #   5. if type_attr is a plain class variable → return it
-        #   6. __getattr__ fallback
-        #   7. raise AttributeError
+        #   6. raise AttributeError
         #
         # Between steps 5 and 6, we also handle objects with custom storage
         # that aren't visible via the MRO walk or instance __dict__ (step 5b).
         #
         # Step 1: Single MRO walk on the type (cached).
         type_attr = self.lookup_class_mro_attr(name)
+        if name == "__class__":
+            if type_attr is object.__dict__["__class__"]:
+                return self._class_vt(tx)
+            if self.cls_source is not None:
+                source = self.get_source_by_walking_mro(tx, name)
 
         # Dynamo patches nn.Module.__init__ at import time to inject tracing
         # hooks.  Undo that here so the unpatched original is traced instead.
@@ -3843,22 +3840,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             except AttributeError:
                 pass
 
-        # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
-        if result is not None:
-            if (
-                self.source
-                and isinstance(self, variables.UnspecializedNNModuleVariable)
-                and hasattr(self.value, "__dict__")
-                and name not in self.value.__dict__
-            ):
-                # A pending deletion in the traced code can reach here with the
-                # name still in the live dict; guarding absence then would fail
-                # on the frame it was created.
-                install_not_in_instance_dict_guard(self.source, name)
-            return result
-
-        # Step 7: AttributeError.
+        # Step 6: AttributeError.
         raise_observed_exception(
             AttributeError,
             tx,
@@ -3869,15 +3851,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if self._object_has_getattribute:
-            getattribute_fn = inspect.getattr_static(
-                type(self.value), "__getattribute__"
-            )
-            new_source: AttrSource | None = (
-                AttrSource(self.source, "__getattribute__") if self.source else None
-            )
+        try:
+            if self._object_has_getattribute:
+                getattribute_fn = inspect.getattr_static(
+                    type(self.value), "__getattribute__"
+                )
+                new_source: AttrSource | None = (
+                    AttrSource(self.source, "__getattribute__") if self.source else None
+                )
 
-            try:
                 return variables.UserMethodVariable(
                     # Keep this off VariableTracker.build. The builder installs
                     # a guard on the accessor eagerly; constructing directly
@@ -3893,11 +3875,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     self,
                     source=new_source,
                 ).call_function(tx, [VariableTracker.build(tx, name)], {})
-            except ObservedAttributeError:
-                # Pass through to __getattr__ if __getattribute__ fails
-                handle_observed_exception(tx)
-
-        return self.generic_getattr(tx, name)
+            return self.generic_getattr(tx, name)
+        except ObservedAttributeError:
+            if self._check_for_getattr() is None:
+                raise
+            handle_observed_exception(tx)
+            result = self.call_getattr_fallback(tx, name)
+            if result is not None:
+                if (
+                    self.source
+                    and isinstance(self, variables.UnspecializedNNModuleVariable)
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
+                    # A pending deletion in the traced code can reach here with the
+                    # name still in the live dict; guarding absence then would fail
+                    # on the frame it was created.
+                    install_not_in_instance_dict_guard(self.source, name)
+                return result
+            raise_observed_exception(AttributeError, tx, args=[name])
 
     def resolve_data_descriptor(
         self,
@@ -3917,9 +3913,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
-            return prop_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return prop_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
         if isinstance(type_attr, types.MemberDescriptorType):
             if tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name, AttrMutationKind.GENERIC_SETATTR
@@ -3935,9 +3929,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 return result
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
-            return md_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return md_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
 
         if isinstance(type_attr, types.GetSetDescriptorType):
             if tx.output.side_effects.has_pending_mutation_of_attr(
@@ -3954,15 +3946,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 return result
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
-            return gs_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return gs_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
 
         if isinstance(type_attr, _collections._tuplegetter):
             tg_vt = variables.TupleGetterVariable(type_attr, source=source)
-            return tg_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return tg_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -4024,9 +4012,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             sm_vt = variables.StaticMethodVariable.from_descriptor(
                 tx, type_attr, source=source
             )
-            return sm_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return sm_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
         elif isinstance(type_attr, classmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -4036,22 +4022,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             cm_vt = variables.ClassMethodVariable.from_descriptor(
                 tx, type_attr, name, source=source
             )
-            return cm_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return cm_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
             cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
-            return cmd_vt.tp_descr_get_impl(
-                tx, self, self.tp_getattro_impl(tx, "__class__")
-            )
+            return cmd_vt.tp_descr_get_impl(tx, self, self._class_vt(tx))
         elif isinstance(type_attr, types.WrapperDescriptorType):
-            class_vt = self.tp_getattro_impl(tx, "__class__")
+            class_vt = self._class_vt(tx)
             wd_vt = variables.WrapperDescriptorVariable(
                 type_attr, owner=class_vt, source=source
             )
             return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
-            class_vt = self.tp_getattro_impl(tx, "__class__")
+            class_vt = self._class_vt(tx)
             md_vt = variables.MethodDescriptorVariable(
                 type_attr, owner=class_vt, source=source
             )
