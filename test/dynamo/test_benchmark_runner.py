@@ -23,7 +23,11 @@ from unittest import mock
 from packaging.version import Version
 
 import torch
-from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -126,6 +130,29 @@ def _tiny_causal_lm(model_type, **config_overrides):
         )
     config_kwargs.update(config_overrides)
     return model_cls(config_cls(**config_kwargs))
+
+
+def _tiny_whisper():
+    from transformers import WhisperConfig, WhisperForConditionalGeneration
+
+    config = WhisperConfig(
+        vocab_size=32,
+        num_mel_bins=8,
+        d_model=16,
+        encoder_layers=2,
+        encoder_attention_heads=2,
+        encoder_ffn_dim=32,
+        decoder_layers=1,
+        decoder_attention_heads=2,
+        decoder_ffn_dim=32,
+        # Half of the 100 frames that a 1-second feature extractor chunk produces.
+        max_source_positions=50,
+        pad_token_id=0,
+        bos_token_id=1,
+        eos_token_id=0,
+        decoder_start_token_id=1,
+    )
+    return WhisperForConditionalGeneration(config)
 
 
 class BenchmarkRunnerTests(TestCase):
@@ -533,6 +560,27 @@ class HuggingFacePrefillTestCase(TestCase):
                 llm.AutoModelForCausalLM, "from_pretrained", return_value=model
             ),
             mock.patch.object(AutoConfig, "from_pretrained", return_value=model.config),
+        ):
+            yield
+
+    @contextlib.contextmanager
+    def _mock_whisper(self, model):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+        from transformers import WhisperFeatureExtractor
+
+        # Truncates the benchmark's 30 seconds of audio to the tiny model's 1 second.
+        feature_extractor = WhisperFeatureExtractor(
+            feature_size=model.config.num_mel_bins, chunk_length=1
+        )
+        with (
+            mock.patch.object(
+                llm.WhisperProcessor, "from_pretrained", return_value=feature_extractor
+            ),
+            mock.patch.object(
+                llm.WhisperForConditionalGeneration,
+                "from_pretrained",
+                return_value=model,
+            ),
         ):
             yield
 
@@ -1198,6 +1246,43 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         self.assertEqual(len(roots), 1)
         self.assertEqual(roots[0].num_descendants(), 0)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
+
+
+class TestHuggingFaceWhisperDevice(HuggingFacePrefillTestCase):
+    def test_training_accuracy(self, device):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = common.parse_args(
+            [
+                f"--device={device}",
+                "--backend=aot_eager",
+                "--accuracy",
+                "--training",
+                "--only=openai/whisper-tiny",
+            ]
+        )
+        runner.model_iter_fn = runner.forward_and_backward_pass
+        with self._mock_whisper(_tiny_whisper()):
+            _, name, model, inputs, _ = runner.load_model(device, "openai/whisper-tiny")
+        self.assertEqual(set(inputs), {"input_features", "labels"})
+        self.assertEqual(inputs["labels"].shape, (1, 128))
+        self.assertTrue(model.training)
+        self.assertFalse(model.config.use_cache)
+        self.assertEqual(
+            runner.get_performance_workload(), (runner.forward_and_backward_pass, None)
+        )
+
+        backend = AotEagerAndRecordGraphs()
+        with (
+            mock.patch.object(common, "current_name", name),
+            mock.patch.object(common, "current_device", device),
+            mock.patch.object(common, "write_outputs"),
+            mock.patch.object(common, "output_signpost", return_value=0),
+        ):
+            status = runner.check_accuracy(
+                name, model, inputs, torch._dynamo.optimize(backend), None, None
+            )
+        self.assertEqual(status, "pass")
+        self.assertTrue(backend.bw_graphs)
 
 
 def _tp_device():
@@ -2349,6 +2434,9 @@ instantiate_parametrized_tests(TestTensorParallelLaunch)
 instantiate_parametrized_tests(TestTensorParallelPerfCli)
 instantiate_device_type_tests(
     TestHuggingFacePrefillDevice, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestHuggingFaceWhisperDevice, globals(), only_for=("cpu", "cuda")
 )
 
 
