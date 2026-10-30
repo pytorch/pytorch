@@ -1668,6 +1668,27 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res, ref)
 
+    @onlyCUDA
+    @skipIfCrossRef
+    def test_baddbmm_out_dtype_decomp(self, device):
+        cases = [
+            {"beta": 1, "alpha": 1},
+            {"beta": 0, "alpha": 1},
+            {"beta": 2, "alpha": 3},
+        ]
+        for kwargs in cases:
+            a = torch.randn(4, 2, 8, dtype=torch.bfloat16, device=device)
+            b = torch.randn(4, 8, 4, dtype=torch.bfloat16, device=device)
+            c = torch.randn(4, 2, 4, dtype=torch.float32, device=device)
+
+            ref = torch.ops.aten.baddbmm.dtype(c, a, b, torch.float32, **kwargs)
+            res = torch._decomp.decompositions.baddbmm_dtype(
+                c, a, b, out_dtype=torch.float32, **kwargs
+            )
+
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res, ref)
+
     @onlyCPU
     @skipIfCrossRef
     def test_addmv_decomp_rejects_mixed_dtype(self, device):

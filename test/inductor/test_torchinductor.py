@@ -11714,6 +11714,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 rtol=0.001,
             )
 
+    def test_baddbmm_out_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/163880: registering the
+        # decomposition on the OpOverloadPacket bound out_dtype to beta, and
+        # aten.baddbmm.dtype had no decomposition of its own.
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("baddbmm.dtype is CUDA and XPU only")
+
+        def fn(bias, x, weight, beta, alpha):
+            return torch.baddbmm(
+                bias, x, weight, beta=beta, alpha=alpha, out_dtype=torch.float32
+            )
+
+        bias = torch.rand(4, 1, 13, dtype=torch.float16, device=self.device)
+        x = torch.rand(4, 8, 7, dtype=torch.float16, device=self.device)
+        weight = torch.rand(4, 7, 13, dtype=torch.float16, device=self.device)
+
+        for beta, alpha in ((1, 1), (0.5, 2.0), (0, 1)):
+            result = fn(bias, x, weight, beta, alpha)
+            self.assertEqual(result.dtype, torch.float32)
+            self.common(fn, [bias, x, weight, beta, alpha])
+
     @config.patch({"triton.max_tiles": 2})
     def test_fuse_tiled(self):
         def fn(a, b, c):

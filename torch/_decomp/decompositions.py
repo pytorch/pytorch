@@ -5999,7 +5999,7 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-@register_decomposition([aten.baddbmm])
+@register_decomposition([aten.baddbmm.default, aten.baddbmm.out])
 @out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
@@ -6014,6 +6014,16 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.baddbmm.dtype, aten.baddbmm.dtype_out])
+@out_wrapper(exact_dtype=True)
+def baddbmm_dtype(self, batch1, batch2, out_dtype, beta=1, alpha=1):
+    # Accumulates in out_dtype, so this cannot go through pw_cast_for_opmath.
+    out = alpha * torch.bmm(batch1, batch2, out_dtype=out_dtype)
+    if beta == 0:
+        return out
+    return out + beta * self.to(out_dtype).expand_as(out)
 
 
 @register_decomposition(aten.floor_divide)
