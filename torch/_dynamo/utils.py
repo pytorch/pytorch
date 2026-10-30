@@ -2825,11 +2825,9 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 
 @contextmanager
 def preserve_rng_state() -> Generator[None, None, None]:
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
-
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
-    with disable_current_modes(), disable_functorch(), unset_fake_temporarily():
+    with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
@@ -2839,7 +2837,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
     try:
         yield
     finally:
-        with disable_current_modes(), unset_fake_temporarily():
+        with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
@@ -4377,8 +4375,13 @@ def _get_fake_value_impl(
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ) or (
+            isinstance(cause, RuntimeError)
+            and "Unsupported operator for C++ FakeTensor" in str(cause)
         ):
-            op = cause.func  # type: ignore[assignment]
+            op = getattr(cause, "func", node.target)  # type: ignore[assignment]
+            if isinstance(op, torch._ops.OpOverloadPacket):
+                op = op.default
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
@@ -4393,7 +4396,7 @@ def _get_fake_value_impl(
                     )
             unimplemented(
                 gb_type="Operator does not support running with fake tensors",
-                context=f"unsupported operator: {cause.func}",
+                context=f"unsupported operator: {op}",
                 explanation="",
                 hints=[
                     f"{import_suggestion}see "
@@ -4532,8 +4535,14 @@ def run_node(
     with set_current_node(node):
 
         def make_error_message(e: object) -> str:
+            try:
+                args_str = repr(args)
+                kwargs_str = repr(kwargs)
+            except Exception:
+                args_str = f"<{len(args)} args>"
+                kwargs_str = f"<{len(kwargs)} kwargs>"
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args_str}, **{kwargs_str}): got "
                 + repr(e)
             )
 
