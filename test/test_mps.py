@@ -10724,6 +10724,21 @@ class TestLogical(TestCaseMPS):
         self.assertEqual((4095 >> x).cpu(), 4095 >> x_cpu)
         self.assertEqual((257 << x).cpu(), 257 << x_cpu)
 
+    @parametrize("dtype", [torch.int32, torch.int64, torch.int16, torch.int8, torch.uint8])
+    def test_shift_out_of_range(self, dtype):
+        # Regression: out-of-range counts are undefined on Metal, so the GPU applied
+        # them modulo the element width instead of CPU's 0 for `<<` and -1/0 for `>>`
+        info = torch.iinfo(dtype)
+        bits = info.bits
+        shifts = [0, bits - 1, bits, bits + 1, 100]
+        if info.min < 0:
+            shifts += [-100, -1]
+        values = torch.tensor([info.min, info.max], device="mps", dtype=dtype)
+        values_cpu = values.cpu()
+        for shift in shifts:
+            self.assertEqual((values << shift).cpu(), values_cpu << shift)
+            self.assertEqual((values >> shift).cpu(), values_cpu >> shift)
+
 
 class TestSmoothL1Loss(TestCaseMPS):
     @parametrize("reduction", ["none", "mean", "sum"])

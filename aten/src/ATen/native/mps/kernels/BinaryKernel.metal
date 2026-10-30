@@ -401,14 +401,16 @@ struct bitwise_xor_functor {
 struct bitwise_left_shift_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return a << b;
+    auto valid = b >= 0 && b < static_cast<T>(sizeof(T) * 8);
+    return valid ? a << b : T(0);
   }
 };
 
 struct bitwise_right_shift_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return a >> b;
+    auto valid = b >= 0 && b < static_cast<T>(sizeof(T) * 8);
+    return valid ? a >> b : (a < 0) ? T(-1) : T(0);
   }
 };
 
