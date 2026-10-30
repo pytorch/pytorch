@@ -2985,6 +2985,34 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    def test_synchronize_indexless_device_resolves_current_device(self) -> None:
+        # Single-GPU counterpart to the 2-GPU test in test_compile_on_one_rank.py,
+        # since the dynamo shards are single-GPU. Patching current_device_index
+        # drives both the trace-time resolution and the guard that checks it, so a
+        # second current device must produce a second graph carrying the new index.
+        def f():
+            torch.cuda.synchronize(torch.device("cuda"))
+            return 1
+
+        def emitted():
+            return [
+                n.args
+                for g in backend.graphs
+                for n in g.graph.nodes
+                if "synchronize_device" in str(n.target)
+            ]
+
+        torch._dynamo.reset()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        for index in (3, 5):
+            with patch.object(
+                torch.accelerator, "current_device_index", return_value=index
+            ):
+                compiled()
+
+        self.assertEqual(emitted(), [("cuda", 3), ("cuda", 5)])
+
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
         def f(x):
