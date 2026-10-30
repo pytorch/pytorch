@@ -2620,6 +2620,32 @@ class CachingAutotuner(KernelInterface):
             self._debug_call = None
             debug_call.finalize(self.get_device_interface())
 
+    def _refine_launcher(self, *args, **kwargs) -> None:
+        """Run the combo and coordinate descent tuning that refine the one launcher."""
+        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
+            self.launchers[0].config, "found_by_combo_autotune", False
+        ):
+            with dynamo_timed(
+                "CachingAutotuner.combo_sequential_autotune",
+                log_pt2_compile_event=False,
+                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                compile_id=self.compile_id,
+                is_backward=self.is_backward,
+                log_waitcounter=True,
+                waitcounter_name_override="triton_autotuner",
+            ):
+                self.launchers = [
+                    self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
+                ]
+
+        if not getattr(
+            self.launchers[0].config, "found_by_coordesc", False
+        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
+            self.launchers = [
+                self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
+            ]
+
     def run(
         self,
         *args,
@@ -2698,30 +2724,7 @@ class CachingAutotuner(KernelInterface):
                 if len(self.launchers) > 1:
                     self.autotune_to_one_config(*args, **kwargs)
 
-        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
-            self.launchers[0].config, "found_by_combo_autotune", False
-        ):
-            with dynamo_timed(
-                "CachingAutotuner.combo_sequential_autotune",
-                log_pt2_compile_event=False,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
-            ):
-                self.launchers = [
-                    self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
-                ]
-
-        if not getattr(
-            self.launchers[0].config, "found_by_coordesc", False
-        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
-            self.launchers = [
-                self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
-            ]
-
+        self._refine_launcher(*args, **kwargs)
         (launcher,) = self.launchers
         # Ensure the final launcher is marked as a winner for bundle filtering.
         # For multi-config autotuning and coordesc, put_winner was already called
