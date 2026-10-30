@@ -221,12 +221,12 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         # ExcludeDispatchKeyGuard restores the excluded dispatch-key set on exit,
-        # which includes the keys tracking autocast enabled state (not dtype or
-        # nesting), so the comparison has to run before the guard restores those
-        # keys. Compare after disable_autocast_cache exits: that CM temporarily
-        # forces cache=False and restores the prior cache flag, so cache need not
-        # be in the snapshot. Autocast dtypes and nesting are independent TLS and
-        # are restored in finally on every exit.
+        # including keys that track autocast enabled TLS. Matching pre-PR behavior,
+        # we deliberately do not reject enabled-state mutations (detecting them
+        # would newly fail previously compiling programs, e.g. graph breaks between
+        # bare _enter_autocast/_exit_autocast). Autocast dtypes are independent TLS
+        # and are checked here; nesting is restored in finally. Cache is forced off
+        # by disable_autocast_cache and restored on exit, so it is not in the snapshot.
         with disable_above:
             try:
                 with mode, suppress_pending, disable_autocast_cache():
@@ -257,27 +257,21 @@ def run_functionalized_fw_and_collect_metadata(
                         fake_mode.reset_nt_tensor_id_counter()
 
                 current_autocast_states = _get_autocast_states()
-                if current_autocast_states != prior_autocast_states:
-                    mismatches = []
-                    for device_type, (prior_enabled, prior_dtype) in prior_autocast_states.items():
-                        cur_enabled, cur_dtype = current_autocast_states[device_type]
-                        if prior_enabled != cur_enabled:
-                            mismatches.append(
-                                f"  {device_type} autocast enabled: was {prior_enabled!r}, became {cur_enabled!r}"
-                            )
-                        if prior_dtype != cur_dtype:
-                            mismatches.append(
-                                f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
-                            )
+                mismatches = []
+                for device_type, (_, prior_dtype) in prior_autocast_states.items():
+                    _, cur_dtype = current_autocast_states[device_type]
+                    if prior_dtype != cur_dtype:
+                        mismatches.append(
+                            f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
+                        )
+                if mismatches:
                     raise RuntimeError(
-                        "AOTAutograd detected that the traced graph left the autocast state "
-                        "changed (enabled flag and/or dtype):\n"
+                        "AOTAutograd detected that the traced graph left autocast dtype "
+                        "changed:\n"
                         + "\n".join(mismatches)
-                        + "\nPrefer `with torch.autocast(...)`, which Dynamo can exit and "
-                        "re-enter across graph breaks. Bare `_enter_autocast`/`_exit_autocast`, "
-                        "`__enter__`/`__exit__`, or `torch.set_autocast_enabled`/"
-                        "`set_autocast_dtype` that leave the graph unbalanced are not "
-                        "supported under AOT."
+                        + "\nPrefer `with torch.autocast(...)` so dtype is restored before "
+                        "the graph exits, or avoid calling torch.set_autocast_dtype inside "
+                        "the compiled region."
                     )
             finally:
                 for device_type, (_, dtype) in prior_autocast_states.items():
