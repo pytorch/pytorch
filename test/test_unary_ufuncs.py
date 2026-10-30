@@ -1577,15 +1577,6 @@ class TestUnaryUfuncs(TestCase):
             ):
                 torch_op(t, out=out)
 
-    # abs_xpu is not implemented for Float8_e5m2, which is the only fp8 dtype
-    # whose isinf path relies on abs, so skip it on XPU.
-    # See intel/torch-xpu-ops/issues/5559
-    @dtypesIfXPU(
-        torch.float8_e4m3fn,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
-        torch.float8_e8m0fnu,
-    )
     @dtypes(*float8_types_and(torch.float8_e8m0fnu))
     @dtypesIfMPS(torch.float8_e4m3fn)
     def test_isinf_isfinite_float8(self, device, dtype):
