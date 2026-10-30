@@ -4387,6 +4387,30 @@ class TestFakeTensorDispatchCache(TestCase):
             self.assertFalse(actual.requires_grad)
             self._assert_symbolic_cache_hit(before_hit, actual, expected)
 
+    def test_cache_bypass_custom_op_without_cache_key(self):
+        """
+        Test that a custom op, which can't be cached, is bypassed without
+        building a cache key for it.
+        """
+
+        @torch.library.custom_op("_torch_testing::fake_cache_bypass", mutates_args=())
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        outputs = []
+        f.register_fake(lambda x: outputs[0])
+
+        with FakeTensorMode():
+            x = torch.randn(3)
+            outputs.append(torch.empty(3))
+            FakeTensorMode.cache_clear()
+            built_key = AssertionError("built a cache key")
+            with patch.object(FakeTensorMode, "_cache_key", side_effect=built_key):
+                f(x)
+                f(x)
+            self.assertBypasses("non-builtin", 2)
+            self.assertEqual(FakeTensorMode.cache_info().size, 0)
+
     def test_cache_bypass_prims_as_strided(self):
         x = torch.empty(0, 8)
         y = torch.empty(0, 8)
