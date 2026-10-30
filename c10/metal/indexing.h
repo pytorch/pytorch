@@ -997,17 +997,25 @@ kernel void binary_alpha_dense_cast(
   out[tid] = f(a, b, alpha);
 }
 
+// Index into a dense broadcast operand of bcast.x elements, each repeated over
+// `inner` consecutive outputs. tid / inner is a multiply-high by the magic
+// number bcast.y and a shift by bcast.z, exact for tid < 2^31 (see IntDivider
+// in ATen/cuda/detail/IntegerDivider.cuh).
+inline uint broadcast_index(uint tid, uint3 bcast) {
+  return ((::metal::mulhi(tid, bcast.y) + tid) >> bcast.z) % bcast.x;
+}
+
 template <typename T, typename F, typename om_t = opmath_t<T>>
 kernel void binary_dense_broadcast(
     device result_of<F, T, T>* out [[buffer(0)]],
     device const T* input [[buffer(1)]],
     device const T* broadcast [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
   out[tid] = static_cast<res_t>(
-      f(om_t(input[tid]), om_t(broadcast[tid % broadcast_numel])));
+      f(om_t(input[tid]), om_t(broadcast[broadcast_index(tid, bcast)])));
 }
 
 template <typename T, typename F, typename om_t = opmath_t<T>>
@@ -1015,12 +1023,12 @@ kernel void binary_dense_broadcast_rhs(
     device result_of<F, T, T>* out [[buffer(0)]],
     device const T* broadcast [[buffer(1)]],
     device const T* input [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
   out[tid] = static_cast<res_t>(
-      f(om_t(broadcast[tid % broadcast_numel]), om_t(input[tid])));
+      f(om_t(broadcast[broadcast_index(tid, bcast)]), om_t(input[tid])));
 }
 
 template <typename T, typename T2, typename F>
@@ -1028,11 +1036,11 @@ kernel void binary_alpha_dense_broadcast(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
     device const T* input [[buffer(1)]],
     device const T* broadcast [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     constant T2& alpha [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  out[tid] = f(input[tid], broadcast[tid % broadcast_numel], alpha);
+  out[tid] = f(input[tid], broadcast[broadcast_index(tid, bcast)], alpha);
 }
 
 template <typename T, typename T2, typename F>
@@ -1040,11 +1048,11 @@ kernel void binary_alpha_dense_broadcast_rhs(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
     device const T* broadcast [[buffer(1)]],
     device const T* input [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     constant T2& alpha [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  out[tid] = f(broadcast[tid % broadcast_numel], input[tid], alpha);
+  out[tid] = f(broadcast[broadcast_index(tid, bcast)], input[tid], alpha);
 }
 
 template <typename T, typename F, typename om_t = T>
@@ -1052,7 +1060,7 @@ kernel void binary_dense_broadcast_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
     device const char* input [[buffer(1)]],
     device const char* broadcast [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     constant uint4& sizes_types [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
@@ -1061,7 +1069,7 @@ kernel void binary_dense_broadcast_cast(
       input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
   const auto b = val_at_offs<om_t>(
       broadcast,
-      (tid % broadcast_numel) * sizes_types.y,
+      broadcast_index(tid, bcast) * sizes_types.y,
       static_cast<ScalarType>(sizes_types.w));
   out[tid] = static_cast<res_t>(f(a, b));
 }
@@ -1071,14 +1079,14 @@ kernel void binary_dense_broadcast_rhs_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
     device const char* broadcast [[buffer(1)]],
     device const char* input [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     constant uint4& sizes_types [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
   const auto a = val_at_offs<om_t>(
       broadcast,
-      (tid % broadcast_numel) * sizes_types.x,
+      broadcast_index(tid, bcast) * sizes_types.x,
       static_cast<ScalarType>(sizes_types.z));
   const auto b = val_at_offs<om_t>(
       input, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
@@ -1090,7 +1098,7 @@ kernel void binary_alpha_dense_broadcast_cast(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
     device const char* input [[buffer(1)]],
     device const char* broadcast [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     constant T2& alpha [[buffer(4)]],
     constant uint4& sizes_types [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
@@ -1099,7 +1107,7 @@ kernel void binary_alpha_dense_broadcast_cast(
       input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
   const auto b = val_at_offs<T>(
       broadcast,
-      (tid % broadcast_numel) * sizes_types.y,
+      broadcast_index(tid, bcast) * sizes_types.y,
       static_cast<ScalarType>(sizes_types.w));
   out[tid] = f(a, b, alpha);
 }
@@ -1109,14 +1117,14 @@ kernel void binary_alpha_dense_broadcast_rhs_cast(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
     device const char* broadcast [[buffer(1)]],
     device const char* input [[buffer(2)]],
-    constant long& broadcast_numel [[buffer(3)]],
+    constant uint3& bcast [[buffer(3)]],
     constant T2& alpha [[buffer(4)]],
     constant uint4& sizes_types [[buffer(5)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   const auto a = val_at_offs<T>(
       broadcast,
-      (tid % broadcast_numel) * sizes_types.x,
+      broadcast_index(tid, bcast) * sizes_types.x,
       static_cast<ScalarType>(sizes_types.z));
   const auto b = val_at_offs<T>(
       input, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
@@ -1304,7 +1312,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                            \
           device const DTYPEI* input_,                                         \
           device const DTYPEI* broadcast_,                                     \
-          constant long& broadcast_numel,                                      \
+          constant uint3& bcast,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_broadcast_rhs_" #DTYPEO "_" #DTYPEI)]]    \
   kernel void ::c10::metal::                                                   \
@@ -1313,7 +1321,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                            \
           device const DTYPEI* broadcast_,                                     \
           device const DTYPEI* input_,                                         \
-          constant long& broadcast_numel,                                      \
+          constant uint3& bcast,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEO "_" #DTYPEI)]]   \
   kernel void ::c10::metal::                                                   \
@@ -1322,7 +1330,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                            \
           device const char* input_,                                           \
           device const char* broadcast_,                                       \
-          constant long& broadcast_numel,                                      \
+          constant uint3& bcast,                                               \
           constant uint4& sizes_types,                                         \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEO              \
@@ -1332,7 +1340,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                            \
           device const char* broadcast_,                                       \
           device const char* input_,                                           \
-          constant long& broadcast_numel,                                      \
+          constant uint3& bcast,                                               \
           constant uint4& sizes_types,                                         \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI)]]           \
@@ -1455,7 +1463,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                           \
           device const DTYPEI* input_,                                        \
           device const DTYPEI* broadcast_,                                    \
-          constant long& broadcast_numel,                                     \
+          constant uint3& bcast,                                              \
           constant DTYPEA& alpha,                                             \
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_broadcast_rhs_" #DTYPEO "_" #DTYPEI      \
@@ -1466,7 +1474,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                           \
           device const DTYPEI* broadcast_,                                    \
           device const DTYPEI* input_,                                        \
-          constant long& broadcast_numel,                                     \
+          constant uint3& bcast,                                              \
           constant DTYPEA& alpha,                                             \
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEO "_" #DTYPEI     \
@@ -1477,7 +1485,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                           \
           device const char* input_,                                          \
           device const char* broadcast_,                                      \
-          constant long& broadcast_numel,                                     \
+          constant uint3& bcast,                                              \
           constant DTYPEA& alpha,                                             \
           constant uint4& sizes_types,                                        \
           uint tid);                                                          \
@@ -1489,7 +1497,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               out_,                                                           \
           device const char* broadcast_,                                      \
           device const char* input_,                                          \
-          constant long& broadcast_numel,                                     \
+          constant uint3& bcast,                                              \
           constant DTYPEA& alpha,                                             \
           constant uint4& sizes_types,                                        \
           uint tid);                                                          \
