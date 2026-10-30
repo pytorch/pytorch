@@ -53,11 +53,12 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
-    MACOS_VERSION,
+    MI200_ARCH,
     parametrize as parametrize_test,
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmArch,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -1471,7 +1472,6 @@ class TestConvolutionNNDevice(NNTestCase):
 
     @onlyAccelerator
     @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfMPS(torch.float, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
@@ -1537,7 +1537,6 @@ class TestConvolutionNNDevice(NNTestCase):
 
     @onlyAccelerator
     @dtypes(torch.float, torch.double, torch.half)
-    @dtypesIfMPS(torch.float, torch.half)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.01)
@@ -1611,7 +1610,6 @@ class TestConvolutionNNDevice(NNTestCase):
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
     @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
-    @dtypesIfMPS(torch.float, torch.half)
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to(device, dtype)
@@ -1847,9 +1845,6 @@ class TestConvolutionNNDevice(NNTestCase):
                 )
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
     def test_conv1d_same_padding(self, device, dtype):
@@ -1891,9 +1886,6 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(expect, actual)
 
     @tf32_on_and_off(0.005)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
         # Compare F.conv2d padding='same' output against manual padding
@@ -1943,9 +1935,6 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     def test_conv1d_valid_padding(self, device, dtype):
         # Test F.conv1d padding='valid' is the same as no padding
         x = torch.rand(1, 1, 10, device=device, dtype=dtype)
@@ -1955,9 +1944,6 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     def test_conv2d_valid_padding(self, device, dtype):
         # Test F.conv2d padding='valid' is the same as no padding
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype)
@@ -1976,9 +1962,6 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     def test_conv1d_same_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='same'
         x = torch.rand(1, 1, 12, dtype=dtype, device=device, requires_grad=True)
@@ -2008,9 +1991,6 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     @tf32_on_and_off(0.005)
     def test_conv2d_same_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='same'
@@ -2106,9 +2086,6 @@ class TestConvolutionNNDevice(NNTestCase):
             )
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
         x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
@@ -2137,9 +2114,6 @@ class TestConvolutionNNDevice(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv1d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 10), device=device, dtype=dtype)
@@ -2179,9 +2153,6 @@ class TestConvolutionNNDevice(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     @parametrize_test("mode", ("valid", "same"))
     def test_conv2d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 10), device=device, dtype=dtype)
@@ -2275,9 +2246,6 @@ class TestConvolutionNNDevice(NNTestCase):
             _test(t, weight_odd, mode)
 
     @dtypes(torch.float, torch.complex64)
-    @dtypesIfMPS(
-        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
     def test_conv2d_valid_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='valid'
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype, requires_grad=True)
@@ -3343,6 +3311,9 @@ class TestConvolutionNNDevice(NNTestCase):
     @largeTensorTest("12GB")
     @serialTest()
     @skipXPU
+    # MI200-specific MIOpen failure, addressed by
+    # https://github.com/ROCm/rocm-libraries/pull/11809
+    @skipIfRocmArch(MI200_ARCH)
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type != "cpu" else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -4594,6 +4565,43 @@ class TestConvolutionNNCUDA(NNTestCase):
             yref = m(x)
         y = m(x)
         self.assertEqual(yref, y)
+
+    @skipCUDAIfNoMiopen
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test("transposed", [False, True])
+    @parametrize_test("benchmark", [False, True])
+    def test_conv_cuda_graph_new_shape(self, device, dtype, transposed, benchmark):
+        conv = F.conv_transpose2d if transposed else F.conv2d
+        w = torch.randn(8, 8, 3, 3, device=device, dtype=dtype, requires_grad=True)
+
+        def step(x):
+            out = conv(x, w, stride=2, padding=1)
+            return (out, *torch.autograd.grad(out.sum(), (x, w)))
+
+        def make_input(n, size):
+            x = torch.randn(n, 8, size, size, device=device, dtype=dtype)
+            return x.requires_grad_()
+
+        # The MIOpen algorithm cache is per process and not keyed on benchmark,
+        # so give each variant its own capture shape to keep it a cache miss.
+        size = 9 + 2 * benchmark + 4 * transposed
+        # deterministic keeps MIOpen off its split-K weight-gradient kernels,
+        # whose results vary from run to run.
+        with cudnn.flags(
+            enabled=True, benchmark=benchmark, deterministic=True, allow_tf32=False
+        ):
+            for _ in range(2):
+                step(make_input(2, 7))
+            x = make_input(4, size)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = step(x)
+            graph.replay()
+            # Capture uses immediate mode for the new shape; eager Find may pick
+            # a solver that rounds differently, so compare against immediate mode.
+            with torch.backends.miopen.flags(immediate=True):
+                expected = step(x)
+        self.assertEqual(captured, expected)
 
     @skipCUDAIfRocm
     @largeTensorTest("96GB", "cuda")
