@@ -5147,13 +5147,15 @@ transfers and reusing CPU buffers.
 
 Here are the ways to call ``to``:
 
-.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with the specified :attr:`dtype`
 
     Args:
         {memory_format}
+        round (str, optional): the rounding direction of a narrowing
+            floating-point conversion. See :ref:`below <tensor-to-round>`.
 
 .. note::
 
@@ -5162,7 +5164,7 @@ Here are the ways to call ``to``:
     If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
     the behavior is undefined and the result may vary across platforms.
 
-.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
@@ -5178,7 +5180,7 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
 
-.. method:: to(other, non_blocking=False, copy=False) -> Tensor
+.. method:: to(other, non_blocking=False, copy=False, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
@@ -5197,6 +5199,34 @@ Here are the ways to call ``to``:
     a non-default CUDA stream, the caller is responsible for proper
     cross-stream synchronization. See :ref:`cuda-stream-semantics` for
     the required pattern.
+
+.. _tensor-to-round:
+
+.. note::
+
+    :attr:`round` selects how a value is rounded when it is not representable
+    in the target dtype. It is only allowed when converting a ``float64``,
+    ``float32``, ``float16`` or ``bfloat16`` tensor to a narrower
+    floating-point dtype, i.e., one that cannot represent all its values
+    exactly (``float32``, ``float16``, ``bfloat16`` or a float8 dtype), and
+    raises an error otherwise. Its values are the IEEE 754 rounding directions:
+
+    * ``"to_nearest_even"``: to the nearest value, ties to the one with an
+      even last digit.
+    * ``"toward_zero"``: to the nearest value whose magnitude is not larger.
+    * ``"toward_positive"``: to the nearest value that is not smaller.
+    * ``"toward_negative"``: to the nearest value that is not larger.
+
+    The exact value is rounded once, even for ``float64`` inputs. On overflow,
+    values rounded toward zero become the largest finite value; the others
+    become infinity, or, for dtypes without infinity, the value that the
+    conversion without :attr:`round` produces (the largest finite value for
+    ``torch.float8_e4m3fn``, NaN for the ``fnuz`` dtypes and
+    ``torch.float8_e8m0fnu``). ``torch.float8_e8m0fnu`` only has positive
+    powers of two: the magnitude of the input is rounded, so
+    ``"toward_negative"`` behaves like ``"toward_zero"``, values below
+    :math:`2^{{-127}}` become :math:`2^{{-127}}`, and ties of
+    ``"to_nearest_even"`` round up.
 
 Example::
 
@@ -5218,6 +5248,11 @@ Example::
     >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
+
+    >>> torch.tensor([0.1, 0.75, -0.75]).to(torch.bfloat16, round="toward_positive")
+    tensor([ 0.1001,  0.7500, -0.7500], dtype=torch.bfloat16)
+    >>> torch.tensor([0.75, 3.0, 5.0]).to(torch.float8_e8m0fnu, round="toward_positive")
+    tensor([1., 4., 8.], dtype=torch.float8_e8m0fnu)
 """.format(**common_args),
 )
 

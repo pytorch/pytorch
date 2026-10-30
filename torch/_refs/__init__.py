@@ -2304,6 +2304,7 @@ def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
 
 
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
+    rounding = kwargs.pop("round", None)
     # handled dispatch via positional arguments
     if len(args) != 0:
         kwargs = _to_dispatch(*args, **kwargs)
@@ -2312,6 +2313,24 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     # https://github.com/pytorch/pytorch/issues/84925
     if "pin_memory" in kwargs:
         raise AssertionError("pin_memory is not supported in refs")
+
+    if rounding is not None:
+        dtype = kwargs.pop("dtype", None) or a.dtype
+        memory_format = kwargs.pop("memory_format", None)
+        kwargs.pop("copy", None)
+
+        def convert(t):
+            return torch._to_dtype_rounded(
+                t, dtype, rounding, memory_format=memory_format
+            )
+
+        # Like aten, convert on the accelerator, before copying to the CPU or
+        # after copying from it.
+        device = kwargs.get("device")
+        if device is not None and torch.device(device).type == "cpu":
+            return to(convert(a), **kwargs)
+        return convert(to(a, **kwargs))
+
     _canonicalize_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):

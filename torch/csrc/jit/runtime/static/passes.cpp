@@ -107,6 +107,17 @@ namespace {
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph);
 
+  // aten::to with its trailing round=None argument.
+  std::string pattern_round = R"IR(
+    graph(%a, %b, %c, %d, %e, %f, %g):
+        %none : NoneType = prim::Constant()
+        %y0 : Tensor = aten::to(%a, %b, %c, %c, %d, %none)
+        %y1 : Tensor = fb::batch_one_hot_lengths(%y0, %e, %f)
+        %res : Tensor = aten::to(%y1, %g, %c, %c, %d, %none)
+        return (%res))IR";
+  fuse.RegisterRewritePattern(pattern_round, fused_pattern);
+  fuse.runOnGraph(graph);
+
   std::string pattern2 = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
         %y0 : Tensor = aten::to(%a, %b, %c, %c)
@@ -240,6 +251,17 @@ namespace {
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph);
 
+  // aten::to with its trailing round=None argument.
+  std::string pattern_round = R"IR(
+    graph(%a, %b, %c, %d, %to0_in0, %to0_in1, %to0_in2):
+        %none : NoneType = prim::Constant()
+        %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
+        %y2 : Tensor = aten::to(%y1, %to0_in0, %to0_in1, %to0_in1, %to0_in2, %none)
+        %y3 : Tensor = fb::lengths_to_offsets(%y2, %d)
+        return (%y3, %y0))IR";
+  fuse.RegisterRewritePattern(pattern_round, fused_pattern);
+  fuse.runOnGraph(graph);
+
   std::string pattern2 = R"IR(
     graph(%a, %b, %c, %d, %to0_in0, %to0_in1):
         %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
@@ -274,6 +296,18 @@ namespace {
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph);
 
+  // aten::to with its trailing round=None argument.
+  std::string pattern_round = R"IR(
+    graph(%a, %b, %c, %d, %to0_in0, %to0_in1):
+        %none : NoneType = prim::Constant()
+        %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
+        %y0_type : int = prim::dtype(%y0)
+        %y2 : Tensor = aten::to(%y1, %y0_type, %to0_in0, %to0_in0, %to0_in1, %none)
+        %y3 : Tensor = fb::lengths_to_offsets(%y2, %d)
+        return (%y3, %y0))IR";
+  fuse.RegisterRewritePattern(pattern_round, fused_pattern);
+  fuse.runOnGraph(graph);
+
   std::string pattern2 = R"IR(
     graph(%a, %b, %c, %d, %to0_in0):
         %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather(%a, %b, %c)
@@ -303,6 +337,16 @@ namespace {
         return (%y0))IR";
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  // aten::to with its trailing round=None argument.
+  std::string pattern_round = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %none : NoneType = prim::Constant()
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat, %none)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  fuse.RegisterRewritePattern(pattern_round, fused_pattern);
   fuse.runOnGraph(graph);
 
   std::string pattern2 = R"IR(
@@ -630,10 +674,10 @@ void ReplaceWithMaybeCopy(
              "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
          fromQualString("static_runtime::to_maybe_copy_out")},
         {torch::schema(
-             "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
+             "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)"),
          fromQualString("static_runtime::to_maybe_copy_out")},
         {torch::schema(
-             "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
+             "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)"),
          fromQualString("static_runtime::to_maybe_copy_out")}}};
 
   auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
@@ -646,12 +690,30 @@ void ReplaceWithMaybeCopy(
     return false;
   };
 
+  // to_maybe_copy_out does not support round, so only rewrite nodes where it
+  // is a constant None, and drop it.
+  auto num_supported_inputs = [](const Node* node) -> std::optional<size_t> {
+    const auto round_index = node->schema().argumentIndexWithName("round");
+    if (!round_index.has_value()) {
+      return node->inputs().size();
+    }
+    const auto round = toIValue(node->input(*round_index));
+    if (!round.has_value() || !round->isNone()) {
+      return std::nullopt;
+    }
+    return *round_index;
+  };
+
   // old node, new node, select_tensor node
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto n = graph_it.next(); n != nullptr; n = graph_it.next()) {
     c10::Symbol new_symbol;
     if (!match_schema(n, new_symbol)) {
+      continue;
+    }
+    const auto num_inputs = num_supported_inputs(n);
+    if (!num_inputs.has_value()) {
       continue;
     }
     TORCH_CHECK(n->outputs().size() == 1);
@@ -668,8 +730,8 @@ void ReplaceWithMaybeCopy(
 
     // Add the did_copy flag to outputs.
     auto* new_node = graph->create(new_symbol, n->outputs().size() + 1);
-    for (auto* input : n->inputs()) {
-      new_node->addInput(input);
+    for (const auto i : c10::irange(*num_inputs)) {
+      new_node->addInput(n->input(i));
     }
     new_node->outputs().at(1)->setType(c10::BoolType::get());
 

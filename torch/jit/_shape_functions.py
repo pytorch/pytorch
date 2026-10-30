@@ -1402,7 +1402,7 @@ add_shape_compute_mapping(
     unary,
 )
 add_shape_compute_mapping(
-    "aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+    "aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None, *, str? round=None) -> (Tensor(a))",
     unary,
 )
 add_shape_compute_mapping(

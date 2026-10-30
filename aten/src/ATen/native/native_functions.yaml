@@ -7855,25 +7855,36 @@
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
-- func: to.dtype_layout(Tensor(a) self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
+- func: to.dtype_layout(Tensor(a) self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, str? round=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
 
-- func: to.device(Tensor(a) self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
+- func: to.device(Tensor(a) self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
 
-- func: to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
+- func: to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
 
-- func: to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
+- func: to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
+
+# Converts to a narrower floating-point dtype with an explicit IEEE 754
+# rounding direction; backs Tensor.to(..., round=...).
+- func: _to_dtype_rounded(Tensor self, ScalarType dtype, str round, *, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _to_dtype_rounded
+
+# memory_format only affects how the functional variant allocates its output.
+- func: _to_dtype_rounded.out(Tensor self, ScalarType dtype, str round, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA, Meta: _to_dtype_rounded_out
 
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
 
