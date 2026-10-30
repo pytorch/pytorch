@@ -844,9 +844,7 @@ class GraphModuleSerializer(metaclass=Final):
                 return meta_val is not None and isinstance(meta_val, torch.Tensor)
 
             user_kernel_hop = get_user_kernel_hop_info(node.target)
-            if user_kernel_hop is not None and user_kernel_hop.dsl != "triton":
-                # The node indexes a process-local side table that holds the host
-                # function, which has no serialized form.
+            if user_kernel_hop is not None and not user_kernel_hop.serializable:
                 raise SerializeError(
                     f"Serializing {node.target.__name__} nodes ({user_kernel_hop.dsl} "
                     "user kernels) is not supported"

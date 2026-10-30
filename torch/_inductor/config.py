@@ -200,7 +200,9 @@ unsafe_marked_cacheable_functions: dict[str, str] = {}
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: int | None = None
 
-# The default layout constraint for user-defined triton kernels.
+# The default layout constraint for user-defined kernels. Despite the name, it covers
+# the mutation HOP of every DSL registered in torch._higher_order_ops.user_kernel_hop,
+# not only Triton's.
 # See "The default layout constraint for custom operators" for options.
 triton_kernel_default_layout_constraint: Literal[
     "needs_fixed_stride_order", "flexible_layout"

@@ -13,13 +13,13 @@ import copy
 import dataclasses
 import threading
 import types
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
@@ -32,7 +32,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -94,59 +94,104 @@ def constant_key(value: object) -> object:
     they are interchangeable: lists, tuples, dicts and objects (see _object_state)
     by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
     same), a cutlass Numeric by its type and Python value, other values by their own
-    equality. Any other unhashable value is refused."""
-    if isinstance(value, (tuple, list)):
-        return (type(value), tuple(constant_key(v) for v in value))
-    if isinstance(value, dict):
-        return (
-            type(value),
-            tuple((constant_key(k), constant_key(v)) for k, v in value.items()),
-        )
-    if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
-        inner = getattr(value, "value", None)
-        if isinstance(inner, (bool, int, float)):
-            return (type(value), constant_key(inner))
-    if isinstance(value, float):
-        return (type(value), value.hex())
-    state = _object_state(value)
-    if state is not None:
-        return (type(value), constant_key(state))
-    try:
-        hash(value)
-    except TypeError:
-        raise TypeError(
-            f"a constant kernel argument of type {type(value).__name__} is "
-            "unhashable: pass a hashable value, or a list, tuple, dict, dataclass or "
-            "plain object of them"
-        ) from None
-    return (type(value), value)
+    equality. Any other unhashable value, and a value that contains itself, are
+    refused."""
+    return _ContentWalk().key(value)
 
 
 def _snapshot(value: object) -> object:
     """``value`` with everything constant_key keys by content copied, so that the
     caller mutating it later changes neither the stored value nor its key."""
-    if isinstance(value, tuple):
-        items = [_snapshot(v) for v in value]
-        if all(a is b for a, b in zip(items, value)):
+    return _ContentWalk().snapshot(value)
+
+
+class _ContentWalk:
+    """One walk of a constant kernel argument's contents, by constant_key or
+    _snapshot. A cycle would be followed forever, so entering a container that the
+    walk is already inside raises a TypeError naming the cycle."""
+
+    def __init__(self) -> None:
+        # The containers the walk is inside, outermost first, by id, each with the
+        # step it took out of it: a format and the index, key or attribute name.
+        self.path: dict[int, tuple[str, object]] = {}
+
+    def visit(
+        self,
+        container: object,
+        pairs: Iterable[tuple[object, object]],
+        step: str,
+        fn: Callable[[object], object],
+    ) -> list[object]:
+        """``fn`` of the item of each (key, item) pair of ``container``, called with
+        the container on the path; ``step`` formats the key."""
+        if id(container) in self.path:
+            start = list(self.path).index(id(container))
+            steps = list(self.path.values())[start:]
+            raise TypeError(
+                f"a constant kernel argument of type {type(container).__name__} "
+                f"refers to itself through {''.join(f.format(k) for f, k in steps)}"
+            )
+        results = []
+        for key, item in pairs:
+            self.path[id(container)] = (step, key)
+            results.append(fn(item))
+        self.path.pop(id(container), None)
+        return results
+
+    def key(self, value: object) -> object:
+        if isinstance(value, (tuple, list)):
+            items = self.visit(value, enumerate(value), "[{!r}]", self.key)
+            return (type(value), tuple(items))
+        if isinstance(value, dict):
+            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.key)
+            items = self.visit(value, value.items(), "[{!r}]", self.key)
+            return (type(value), tuple(keys), tuple(items))
+        if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
+            inner = getattr(value, "value", None)
+            if isinstance(inner, (bool, int, float)):
+                return (type(value), self.key(inner))
+        if isinstance(value, float):
+            return (type(value), value.hex())
+        state = _object_state(value)
+        if state is not None:
+            items = self.visit(value, state.items(), ".{}", self.key)
+            return (type(value), tuple(state), tuple(items))
+        try:
+            hash(value)
+        except TypeError:
+            raise TypeError(
+                f"a constant kernel argument of type {type(value).__name__} is "
+                "unhashable: pass a hashable value, or a list, tuple, dict, dataclass "
+                "or plain object of them"
+            ) from None
+        return (type(value), value)
+
+    def snapshot(self, value: object) -> object:
+        if isinstance(value, (tuple, list)):
+            items = self.visit(value, enumerate(value), "[{!r}]", self.snapshot)
+            if isinstance(value, list):
+                new_list = copy.copy(value)
+                new_list[:] = items
+                return new_list
+            if all(a is b for a, b in zip(items, value)):
+                return value
+            # A namedtuple is rebuilt with _make, any other tuple from the items.
+            return getattr(type(value), "_make", type(value))(items)
+        if isinstance(value, dict):
+            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.snapshot)
+            items = self.visit(value, value.items(), "[{!r}]", self.snapshot)
+            new_dict = copy.copy(value)
+            new_dict.clear()
+            new_dict.update(zip(keys, items))
+            return new_dict
+        state = _object_state(value)
+        if state is None:
             return value
-        # A namedtuple is rebuilt with _make, any other tuple from the items.
-        return getattr(type(value), "_make", type(value))(items)
-    if isinstance(value, list):
-        new_list = copy.copy(value)
-        new_list[:] = [_snapshot(v) for v in value]
-        return new_list
-    if isinstance(value, dict):
-        new_dict = copy.copy(value)
-        new_dict.clear()
-        new_dict.update((_snapshot(k), _snapshot(v)) for k, v in value.items())
-        return new_dict
-    state = _object_state(value)
-    if state is None:
-        return value
-    new = copy.copy(value)
-    for name, v in state.items():
-        object.__setattr__(new, name, _snapshot(v))
-    return new
+        items = self.visit(value, state.items(), ".{}", self.snapshot)
+        new = copy.copy(value)
+        for name, item in zip(state, items):
+            object.__setattr__(new, name, item)
+        return new
 
 
 # We cannot put user kernels into the FX graph as the graph nodes
@@ -481,6 +526,15 @@ class UserKernelHOPInfo:
       ``tensors_to_clone``. Reinplacing removes the names whose tensors the kernel
       may write in place.
     - Any other argument is the DSL's own; the passes only hand it on.
+
+    Despite its name, config.triton_kernel_default_layout_constraint sets the layout
+    constraint that Inductor applies to every registered DSL's mutation HOP.
+
+    The FX graph cache keys user kernels by source for Triton only
+    (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
+    it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
+    not cacheable by default, and CuTeDSL's pass cacheable=False: the cache bypasses
+    every graph that contains them.
     """
 
     dsl: str
@@ -500,6 +554,8 @@ class UserKernelHOPInfo:
     functional_dense: Callable[..., dict[str, Any]]
     # Counts this DSL's reinplacing decisions.
     reinplace_trigger: "ReInplaceTrigger"
+    # torch.export's serializer can write this DSL's nodes.
+    serializable: bool
 
 
 _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
@@ -560,3 +616,10 @@ class UserKernelHOPifier:
 
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
+
+
+def specialize_symbolic(arg: Any) -> Any:
+    # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+    if isinstance(arg, (SymInt, SymBool, SymFloat)):
+        return guard_scalar(arg)
+    return arg
