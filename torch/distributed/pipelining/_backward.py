@@ -41,6 +41,30 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor | GradientEdge) -> Node | None:
         return t.grad_fn
 
 
+def _graph_ownership_tokens(
+    stage_outputs_or_loss: Sequence[torch.Tensor | GradientEdge | None],
+) -> list[Node]:
+    """Return C++ nodes that keep the autograd graph alive after outputs are detached.
+
+    Python ``grad_fn`` objects for custom ``autograd.Function`` nodes do not pin
+    the C++ graph. A view node's ``grad_fn`` is C++-owned and does, matching
+    ``torch.autograd.graph.get_gradient_edge``.
+    """
+    tokens: list[Node] = []
+    for stage_output in stage_outputs_or_loss:
+        if isinstance(stage_output, GradientEdge):
+            if stage_output.ownership_token is not None:
+                tokens.append(stage_output.ownership_token)
+        elif (
+            isinstance(stage_output, torch.Tensor) and stage_output.grad_fn is not None
+        ):
+            with torch.enable_grad():
+                token = stage_output.view_as(stage_output).grad_fn
+            if token is not None:
+                tokens.append(token)
+    return tokens
+
+
 def reverse_closure(
     roots: list[Node], target_nodes: set[Node], reverse_edges_dict
 ) -> tuple[set[Node], set[Node]]:
@@ -278,6 +302,12 @@ def stage_backward_input(
                 else:
                     inp.grad += dinput
 
+        # Pin the graph before detach. Custom autograd.Function nodes die with
+        # the output tensor unless a C++-owned token keeps them for dW.
+        ownership_tokens = _graph_ownership_tokens(stage_outputs_or_loss)
+        for param_group in param_groups:
+            param_group["ownership_tokens"] = ownership_tokens
+
         # Drop output-side graph state we no longer need. A view cannot be
         # detached in place (e.g. the output of an identity autograd.Function,
         # such as an activation-checkpoint boundary); its graph is freed when
@@ -363,6 +393,8 @@ def stage_backward_weight(
         finally:
             for handle in handles:
                 handle.remove()
+            # dW no longer needs the C++ graph pin taken before detach.
+            param_group.pop("ownership_tokens", None)
     return tuple(weight_grads)
 
 
