@@ -10207,17 +10207,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_exporting())
 
     def test_tracing_flags_scriptable(self):
-        # TorchScript static-ifs its is_scripting() checks, so the TLS
-        # builtins stay out of the scripted IR and the flags resolve to False.
         @torch.jit.script
         def scripted_flags():
             return (
-                torch.compiler.is_compiling()
-                and torch.compiler.is_exporting()
-                and torch.compiler._is_non_strict_tracing()
+                torch.compiler.is_compiling(),
+                torch.compiler.is_exporting(),
+                torch.compiler._is_non_strict_tracing(),
             )
 
-        self.assertFalse(scripted_flags())
+        self.assertEqual(scripted_flags(), (False, False, False))
 
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
@@ -10300,25 +10298,37 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     )
                     return g
 
-            with session_ctx():
+            def once():
                 x = torch.randn(4, device="cuda", requires_grad=True)
                 y = ProbeFn.apply(x.sin())
                 torch.autograd.grad(y.sum(), (x,))
+
+            if session_ctx is None:
+                once()
+            else:
+                with session_ctx():
+                    once()
             return recorded
 
-        records = run_backward(torch.compiler._compile_session_context)
-        self.assertTrue(records)
-        self.assertTrue(any(not is_main for is_main, _, _, _ in records))
-        self.assertTrue(all(compiling for _, compiling, _, _ in records))
-        self.assertTrue(all(not exporting for _, _, exporting, _ in records))
-        records = run_backward(_compiling_state_context)
-        self.assertTrue(records)
-        self.assertTrue(
-            all(compiling and exporting for _, compiling, exporting, _ in records)
+        session_ctxs = (
+            torch.compiler._compile_session_context,
+            _compiling_state_context,
+            torch.compiler._non_strict_tracing_context,
+            None,
         )
-        records = run_backward(torch.compiler._non_strict_tracing_context)
-        self.assertTrue(records)
-        self.assertTrue(all(non_strict for _, _, _, non_strict in records))
+        expected = (
+            (True, False, False),
+            (True, True, False),
+            (False, False, True),
+            (False, False, False),
+        )
+        for session_ctx, want in zip(session_ctxs, expected):
+            records = run_backward(session_ctx)
+            self.assertTrue(records)
+            self.assertTrue(any(not is_main for is_main, _, _, _ in records))
+            self.assertEqual(
+                set((c, e, n) for _, c, e, n in records), {want}
+            )
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
         self.assertFalse(torch.compiler._is_non_strict_tracing())
