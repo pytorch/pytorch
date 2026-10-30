@@ -12,6 +12,10 @@
 #include <string>
 #include <c10/core/ScalarType.h>
 
+#ifndef USE_ROCM
+#include <optional>
+#endif
+
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -286,13 +290,10 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
   switch (value) {
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
       return std::string("None");
-      break;
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
       return std::string("RELU");
-      break;
     case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
       return std::string("GELU");
-      break;
     default:
       return std::string("unknown");
   }
@@ -723,6 +724,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
+#ifdef USE_ROCM
     // In Blas.cpp, code defaults to a bias_dtype of Half even when there is no bias vector.
     // Search for this line::
     // params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
@@ -741,6 +743,22 @@ struct ScaledGemmParams : OpParams {
       sig += fmt::sprintf("_swz_%d_%d", static_cast<int>(a_swizzle_type), static_cast<int>(b_swizzle_type));
     }
     return sig;
+#else
+    return fmt::sprintf(
+      "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_a_%s_b_%s_c_%s_as_%s_bs_%s_"
+      "ast_%d_bst_%d_dscale_%d_fast_%d_bias_%s",
+      transa, transb, m, n, k, lda, ldb, ldc,
+      at::toString(a_dtype),
+      at::toString(b_dtype),
+      at::toString(c_dtype),
+      at::toString(a_scale_dtype),
+      at::toString(b_scale_dtype),
+      static_cast<int>(a_scaling_type),
+      static_cast<int>(b_scaling_type),
+      c_scale_ptr != nullptr,
+      use_fast_accum,
+      bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
+#endif
   }
 
   std::string DynamicSignature() const override {
@@ -853,6 +871,9 @@ struct ScaledGemmParams : OpParams {
   ScalarType c_dtype{};
   void* amax_ptr{};
   bool use_fast_accum{};
+#ifndef USE_ROCM
+  std::optional<Tensor> alpha{};
+#endif
 private:
   bool duplicate_inputs_{false};
 };

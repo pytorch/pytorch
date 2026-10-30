@@ -1,5 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import ast
 import importlib.util
 import os
 import re
@@ -9,7 +10,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -17,9 +23,14 @@ VENDOR_SCRIPT = REPO_ROOT / "tools" / "vendoring" / "quack" / "vendor.sh"
 FLEX_GEMM_PATCHES = REPO_ROOT / "tools" / "vendoring" / "quack" / "flex_gemm_patches"
 # Classes the FlexGEMM patch series may add to QuACK: generic protocol hooks
 # only. Concrete FlexGEMM EpiOps live in torch/_inductor/kernel/flex_gemm/quack_ops.
-FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin"}
+FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin", "ModProblem"}
 
 
+# Python 3.10's IntEnum formatting breaks QuACK schema inference, not native-AOT.
+@unittest.skipIf(
+    sys.version_info < (3, 11),
+    "QuACK custom-op imports require Python 3.11 or newer",
+)
 @unittest.skipIf(
     importlib.util.find_spec("cutlass") is None,
     "vendored QuACK imports require CuTeDSL/CUTLASS",
@@ -46,7 +57,60 @@ class TestQuackVendor(TestCase):
         self.assertTrue(hasattr(torch.ops.torch_vendor_quack, "_rmsnorm_fwd"))
 
 
+@unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+@instantiate_parametrized_tests
+class TestQuackCache(TestCase):
+    @parametrize(
+        "source",
+        ["_inductor/kernel/flex_gemm/quack_ops", "_native/ops"],
+        name_fn=lambda source: source.rsplit("/", 1)[-1],
+    )
+    def test_source_fingerprint_covers_pytorch_sources(self, source: str) -> None:
+        # Both source directories must be registered before any caller computes
+        # the memoized fingerprint.
+        script = (
+            "from pathlib import Path\n"
+            "import torch._vendor.quack\n"
+            "from torch._vendor.quack import cache\n"
+            "from torch._vendor.quack.cache import jit\n"
+            "root = Path(torch._vendor.quack.__file__).resolve().parents[2]\n"
+            f"source = root / {source!r}\n"
+            "if source not in cache.EXTRA_SOURCE_DIRS:\n"
+            "    raise AssertionError(f'{source} was not registered')\n"
+            "fingerprint = jit._compute_source_fingerprint()\n"
+            "cache.EXTRA_SOURCE_DIRS.remove(source)\n"
+            "jit._compute_source_fingerprint.cache_clear()\n"
+            "if fingerprint == jit._compute_source_fingerprint():\n"
+            "    raise AssertionError(f'{source} was not hashed')\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
+
+
 class TestQuackFlexGemmPatches(TestCase):
+    def test_no_mixed_constexpr_if_tests(self):
+        # The vendored copy does not install upstream's process-wide
+        # mixed_constexpr_if AST rewrite (other quack copies can claim its flag
+        # first), so `if const_expr(S) and/or D:` would be traced as a dynamic
+        # if. Nest the static and dynamic tests explicitly instead.
+        def is_const_expr(node):
+            func = getattr(node, "func", None)
+            return isinstance(node, ast.Call) and (
+                getattr(func, "attr", None) == "const_expr"
+                or getattr(func, "id", None) == "const_expr"
+            )
+
+        spec = importlib.util.find_spec("torch._vendor.quack")
+        vendor_root = Path(spec.submodule_search_locations[0])
+        offenders = [
+            f"{path.relative_to(vendor_root)}:{node.lineno}"
+            for path in sorted(vendor_root.rglob("*.py"))
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.BoolOp)
+            and is_const_expr(node.test.values[0])
+        ]
+        self.assertFalse(offenders, f"mixed const_expr if tests: {offenders}")
+
     def test_patch_series_holds_only_hooks(self):
         series = [
             line.split("#")[0].strip()

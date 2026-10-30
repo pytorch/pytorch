@@ -2,6 +2,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/quantized/IndexKernel.h>
+#include <ATen/native/cuda/IndexKernelUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
@@ -33,9 +34,11 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/scatter_reduce_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #endif
 
@@ -1385,6 +1388,32 @@ void index_reduce_func_cuda_impl(
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  // Fast path: index_reduce_(0, idx, src, amin/amax) is equivalent to
+  // scatter_reduce_(0, idx.view({n, 1, ...}).expand_as(src), src). Reuse the
+  // scatter path so eligibility and architecture-specific dispatch remain in one place.
+  // For include_self=False, the identity initialization above has already
+  // replaced the indexed rows, so the delegated reduction includes that state.
+  const auto stype = self_.scalar_type();
+  const bool dtype_supported_by_scatter_reduce =
+      stype == at::kHalf || stype == at::kBFloat16;
+  const bool minmax_reduce =
+      reduce == ReductionType::MAX || reduce == ReductionType::MIN;
+  const bool contiguous_dim0_rows = self_.is_contiguous() && source_.is_contiguous();
+  const int device_major = at::cuda::getCurrentDeviceProperties()->major;
+  const bool row_size_supported = sliceSize * self_.element_size() >= 16 &&
+      (sliceSize * self_.element_size()) % 16 == 0;
+  if (dtype_supported_by_scatter_reduce && minmax_reduce && contiguous_dim0_rows &&
+      row_size_supported && device_major >= 8 && dim == 0 && numIndex > 0 && index.dim() == 1 &&
+      indContig && source_.dim() > 0 &&
+      source_.size(0) == static_cast<int64_t>(numIndex)) {
+    self_.scatter_reduce_(
+        0, index.view({static_cast<int64_t>(numIndex), 1}).expand_as(source_), source_,
+        reduce == ReductionType::MAX ? "amax" : "amin", /*include_self=*/true);
+    return;
+  }
+#endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
@@ -1491,6 +1520,23 @@ void index_reduce_func_cuda_impl(
 
 #undef SMALL_INDEX
 #undef LARGE_INDEX
+}
+
+TORCH_IMPL_FUNC(index_copy_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
+  // Like index_add, delegate row copies to scatter's fast-path dispatch.
+  if (dim == 0 && index.is_contiguous() && index.numel() > 1 &&
+      source.nbytes() / index.numel() >= kFastScatterMinSliceBytes &&
+      !globalContext().deterministicAlgorithms()) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    std::vector<int64_t> index_shape(source.dim(), 1);
+    index_shape[0] = index.numel();
+    result.scatter_(dim, index.view(index_shape).expand_as(source), source);
+    return;
+  }
+  index_copy_out_impl(self, dim, index, source, result);
 }
 
 TORCH_IMPL_FUNC(index_add_cuda_out)

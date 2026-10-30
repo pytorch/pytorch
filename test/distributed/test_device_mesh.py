@@ -136,6 +136,19 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         self.assertEqual(mesh_group.group_desc, "mesh_dim_0")
         self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
 
+    @skip_if_lt_x_gpu(4)
+    @with_comms(eager_init=True)
+    def test_device_mesh_preserve_rank_order_eager(self):
+        # with_comms does not bind Gloo to the accelerator device.
+        torch.accelerator.set_device_index(self.rank)
+        _get_default_group().bound_device_id = torch.device(self.device_type, self.rank)
+        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
+        group = DeviceMesh(self.device_type, mesh_tensor).get_group(1)
+        global_ranks = [get_global_rank(group, i) for i in range(get_world_size(group))]
+        for ranks in mesh_tensor:
+            if self.rank in ranks:
+                self.assertEqual(global_ranks, sorted(ranks.tolist()))
+
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
     @property
@@ -238,6 +251,45 @@ class DeviceMeshTest(DTensorTestBase):
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
+    @with_comms(eager_init=True)
+    def test_device_mesh_preserve_rank_order_eager(self):
+        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
+        dim_ranks = mesh_tensor
+
+        default_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        default_group = default_mesh.get_group(1)
+        default_global_ranks = [
+            get_global_rank(default_group, i)
+            for i in range(get_world_size(default_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                self.assertEqual(default_global_ranks, sorted(ranks.tolist()))
+
+        ordered_mesh = DeviceMesh(
+            self.device_type, mesh_tensor, preserve_rank_order=True
+        )
+        ordered_group = ordered_mesh.get_group(1)
+        ordered_global_ranks = [
+            get_global_rank(ordered_group, i)
+            for i in range(get_world_size(ordered_group))
+        ]
+        for ranks in dim_ranks:
+            if self.rank in ranks:
+                self.assertEqual(ordered_global_ranks, ranks.tolist())
+        self.assertEqual(
+            ordered_mesh.get_local_rank(1), ordered_mesh.get_coordinate()[1]
+        )
+
+    @with_comms(eager_init=True, backend="nccl-legacy")
+    def test_device_mesh_preserve_rank_order_eager_nccl_legacy(self):
+        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
+        group = DeviceMesh(self.device_type, mesh_tensor).get_group(1)
+        global_ranks = [get_global_rank(group, i) for i in range(get_world_size(group))]
+        for ranks in mesh_tensor:
+            if self.rank in ranks:
+                self.assertEqual(global_ranks, sorted(ranks.tolist()))
+
     @with_comms()
     def test_get_group_and_get_all_groups(self):
         mesh_shape = (2, self.world_size // 2)
@@ -258,6 +310,55 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(len(groups), 2)
         self.assertTrue(tp_mesh.get_group() in groups)
         self.assertTrue(dp_mesh.get_group() in groups)
+
+    @with_comms()
+    def test_abort_2d_mesh(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        groups = mesh_2d.get_all_groups()
+        group_names = [pg.group_name for pg in groups]
+
+        mesh_2d.abort()
+
+        for name in group_names:
+            self.assertNotIn(name, [_world.pg_names[pg] for pg in _world.pg_names])
+
+    @with_comms()
+    def test_abort_1d_mesh(self):
+        mesh_1d = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("world",)
+        )
+        group = mesh_1d.get_group()
+        default_group = _get_default_group()
+        if group is default_group:
+            # 1D mesh reused the WORLD PG; aborting it tears down the
+            # default group which conflicts with @with_comms teardown.
+            return
+        group_name = group.group_name
+
+        mesh_1d.abort()
+
+        self.assertNotIn(group_name, [_world.pg_names[pg] for pg in _world.pg_names])
+
+    @with_comms()
+    def test_abort_submesh_raises(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        submesh = mesh_2d["tp"]
+
+        with self.assertRaisesRegex(RuntimeError, "not supported on a submesh"):
+            submesh.abort()
+
+    @with_comms()
+    def test_abort_no_backend(self):
+        mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size),
+            _init_backend=False,
+        )
+        mesh.abort()
 
     @with_comms
     def test_get_local_rank_raises_exception(self):
@@ -364,8 +465,8 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(device_mesh.ndim, 1)
         self.assertEqual(device_mesh.size(), 1)
         self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
-        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
-        self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
+        backend = dist.get_backend_impl(device_mesh.get_group(), torch.device("cuda"))
+        self.assertIsInstance(backend, FakeProcessGroup)
 
     @with_comms
     def test_from_group_with_global_pg(self):

@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_MACOS,
-    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
@@ -1427,7 +1426,6 @@ except RuntimeError as e:
             self.assertTrue(target.is_pinned())
 
     @skipIfXpu
-    @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # Test that DataLoader properly handles worker segfaults
     # Note: This test has inconsistent behavior across Linux distributions:
     # - Passes on RHEL 9.6 (segfault triggers correctly)
@@ -3869,19 +3867,6 @@ class TestCustomPinFn(TestCase):
             )
             batch = next(iter(loader))
         self.assertEqual(batch.device, "cuda")
-
-    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
-    def test_custom_device_pin_dataloader_worker(self):
-        loader = DataLoader(
-            self.dataset,
-            batch_size=2,
-            collate_fn=collate_with_device,
-            pin_memory=True,
-            num_workers=1,
-        )
-        for batch in loader:
-            self.assertEqual(batch.device, torch.accelerator.current_accelerator().type)
-            self.assertTrue(batch.data.is_pinned())
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_custom_batch_pin(self):

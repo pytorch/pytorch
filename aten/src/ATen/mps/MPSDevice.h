@@ -21,14 +21,22 @@ namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
-  MACOS_14_4 = 0,
-  MACOS_15_0,
+  MACOS_15_0 = 0,
   MACOS_15_1,
   MACOS_15_2,
   MACOS_26_0,
   MACOS_26_2,
   MACOS_26_4,
   MACOS_27_0,
+  MACOS_27_0_1,
+};
+
+// Metal language version to compile shaders with
+// Values match MTLLanguageVersion
+enum class MetalLanguageVersion : uint32_t {
+  METAL_3_1 = (3 << 16) + 1,
+  METAL_3_2 = (3 << 16) + 2, // allows lambdas in shader code
+  METAL_4_0 = (4 << 16) + 0, // allows tensor template arguments
 };
 
 // Helper enum for GPU-family-gated workarounds
@@ -92,8 +100,17 @@ class TORCH_API MPSDevice {
 TORCH_API bool is_available();
 TORCH_API bool is_macos_at_least(MacOSVersion version);
 TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
-// Whether MetalPerformancePrimitives (cooperative tensors) is usable;
+// Metal language version to compile shaders with. Derived from the OS version,
+// but PYTORCH_MPS_METAL_VERSION overrides it outright, so requesting a version
+// the host cannot provide fails rather than silently falling back
+TORCH_API MetalLanguageVersion metal_language_version();
+// Whether MetalPerformancePrimitives (cooperative tensors) is usable, i.e. the
+// OS is new enough, the Metal 4.0 shaders were compiled into this binary and
+// PYTORCH_MPS_METAL_VERSION did not ask for an older language version
 TORCH_API bool has_mpp();
+// Whether the Metal 4.1 shaders (native fp8 MPP operands) were compiled into
+// this binary and the OS (macOS 27+) can run them
+TORCH_API bool has_metal_4_1();
 TORCH_API at::Allocator* GetMPSAllocator();
 
 inline Device getDeviceFromPtr(void* ptr) {

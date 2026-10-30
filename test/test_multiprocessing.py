@@ -3,6 +3,7 @@ import contextlib
 import copy
 import gc
 import os
+import struct
 import sys
 import time
 import unittest
@@ -17,15 +18,20 @@ from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     load_tests,
+    parametrize,
     run_tests,
-    skipIfRocm,
     slowTest,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -78,6 +84,47 @@ def _test_cuda_ipc_deadlock_learner(queue, iterations):
         time.sleep(0.01)
 
 
+def _test_cuda_ipc_collect_during_export():
+    import torch.cuda._gpu_trace as gpu_trace
+
+    test_case = TestCase()
+    # Match CUDA_IPC_REF_COUNTER_FILE_SIZE in torch/csrc/CudaIPCTypes.h.
+    # This must exceed CUDA_IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
+    counter_file_size = 10000
+    tensors = [
+        torch.empty(1, dtype=torch.uint8, device="cuda")
+        for _ in range(counter_file_size + 1)
+    ]
+    handles = []
+    collections = 0
+
+    def collect(_stream):
+        nonlocal collections
+        torch.cuda.ipc_collect()
+        collections += 1
+
+    try:
+        # Exhaust the first counter file and the IPC event allowance.
+        for i in range(counter_file_size):
+            handles.append(tensors[i].untyped_storage()._share_cuda_())
+        torch._C._activate_gpu_trace()
+        gpu_trace.register_callback_for_stream_synchronization(collect)
+        # Collect during stream synchronization for the first slot in a new file.
+        handles.append(tensors[-1].untyped_storage()._share_cuda_())
+        test_case.assertEqual(collections, 1)
+        test_case.assertEqual(handles[0][5], 0)
+        test_case.assertEqual(handles[-2][5], counter_file_size - 1)
+        test_case.assertEqual(handles[-1][5], 0)
+        test_case.assertEqual(handles[-2][7], False)
+        test_case.assertEqual(handles[-1][7], False)
+        test_case.assertNotEqual(handles[-1][4], handles[0][4])
+    finally:
+        for handle in handles:
+            torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
+        tensors.clear()
+        torch.cuda.ipc_collect()
+
+
 def simple_fill(queue, event):
     data = queue.get()
     data[0][:] = 4
@@ -115,10 +162,13 @@ def limbo_cleanup_worker(q, e):
     del t
 
 
-def send_tensor_with_untyped_storage(queue, event):
-    tensors = torch.ones(2, device="cuda").chunk(2, dim=0)
+def send_tensor_with_untyped_storage(queue, event, expandable, peer):
+    os.environ["TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC"] = "1"
+    torch.cuda.memory._set_allocator_settings(f"expandable_segments:{expandable}")
+    torch.cuda.empty_cache()
+    tensors = (*torch.ones(2, device="cuda").chunk(2), torch.ones(1, device="cuda"))
     specs = []
-    for tensor in tensors:
+    for tensor in tensors * (2 if peer else 1):
         storage = tensor.untyped_storage()
         (
             storage_device,
@@ -149,7 +199,7 @@ def send_tensor_with_untyped_storage(queue, event):
                 "event_sync_required": event_sync_required,
             }
         )
-    queue.put(specs)
+    queue.put((specs, tensors[2].data_ptr() - tensors[0].data_ptr()))
     event.wait()
 
 
@@ -183,10 +233,10 @@ def sum_tensors(inq, outq):
             )
 
 
-def queue_get_exception(inqueue, outqueue):
+def queue_get_exception(device, inqueue, outqueue):
     os.close(2)  # hide expected error message
     try:
-        torch.zeros(5, 5).cuda()
+        torch.zeros(5, 5).to(device)
     except Exception as e:
         outqueue.put(e)
     else:
@@ -263,8 +313,8 @@ def _event_multiprocess_child(event, p2c, c2p):
     c2p.put(1)  # notify parent synchronization is done
 
 
-def _event_handle_importer_consumer(handle, p2c, c2p):
-    e1 = torch.cuda.Event.from_ipc_handle(0, handle)
+def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+    e1 = event_cls.from_ipc_handle(0, handle)
     c2p.put(0)  # notify parent child is ready
     p2c.get()  # wait for record in parent
     e1.synchronize()
@@ -272,10 +322,10 @@ def _event_handle_importer_consumer(handle, p2c, c2p):
     p2c.get()  # wait for parent to finish before destructing child event
 
 
-def _event_handle_exporter_consumer(handle, p2c, c2p):
+def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
     stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        e1 = torch.cuda.Event.from_ipc_handle(torch.cuda.current_device(), handle)
+    with stream:
+        e1 = event_cls.from_ipc_handle(torch.cuda.current_device(), handle)
         torch.cuda._sleep(50000000)  # spin for about 50 ms
         e1.record()
         c2p.put(0)
@@ -500,8 +550,10 @@ class _MultiprocessingTestMixin:
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
-class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
+class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     """Device-generic multiprocessing tests, instantiated per available backend."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def tearDown(self):
         if torch.cuda.is_available():
@@ -512,15 +564,17 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
             return mp
         return mp.get_context("spawn")
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     def test_simple_sharing(self, device):
         ctx = self._get_ctx(device)
         self._test_sharing(ctx, device, torch.float)
 
+    @skipXPUIf(IS_WINDOWS, "https://github.com/intel/torch-xpu-ops/issues/4068")
     @dtypes(torch.float32, torch.int64)
     def test_empty_tensor_sharing(self, device, dtype):
         self._test_empty_tensor_sharing(dtype, torch.device(device))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "non-deterministically hangs with ASAN "
@@ -536,14 +590,17 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
             )
             self._test_autograd_sharing(var, ctx)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     def test_parameter_sharing(self, device):
         ctx = self._get_ctx(device)
         param = Parameter(torch.arange(1.0, 26, device=device).view(5, 5))
         self._test_autograd_sharing(param, ctx, is_parameter=True)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5219")
     def test_integer_parameter_serialization(self, device):
         self._test_integer_parameter_serialization(device=device)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5219")
     # See https://github.com/pytorch/pytorch/issues/14997
     @unittest.skipIf(TEST_WITH_ASAN, "non-deterministically hangs with ASAN")
     def test_leaf_variable_sharing(self, device):
@@ -571,14 +628,53 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         queue = mp.SimpleQueue()
         self.assertRaisesRegex(RuntimeError, r"requires_grad", lambda: queue.put(var))
 
+    @onlyAccelerator
     def test_is_shared_accelerator(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("CPU tensors are not shared by default")
         t = torch.randn(5, 5, device=device)
         self.assertTrue(t.is_shared())
 
+    @onlyAccelerator
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    def test_device_bad_call(self, device):
+        # Initialize device
+        t = torch.zeros(5, 5).to(device).cpu()
+        inq = mp.Queue()
+        outq = mp.Queue()
+        p = mp.Process(target=queue_get_exception, args=(device, inq, outq))
+        p.start()
+        inq.put(t)
+        p.join()
+        self.assertIsInstance(outq.get(), RuntimeError)
 
-instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
+    @onlyAccelerator
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    def test_wrong_device_fork(self, device):
+        stderr = TestCase.runWithPytorchAPIUsageStderr(
+            f"""\
+import torch
+from torch.multiprocessing import Process
+def run(rank):
+    torch.get_device_module("{device}").set_device(rank)
+if __name__ == "__main__":
+    size = 2
+    processes = []
+    for rank in range(size):
+        # it would work fine without the line below
+        x = torch.rand(20, 2).to("{device}")
+        p = Process(target=run, args=(rank,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+"""
+        )
+        device_type = torch.device(device).type.upper()
+        self.assertRegex(
+            stderr, f"Cannot re-initialize {device_type} in forked subprocess."
+        )
+
+
+instantiate_device_type_tests(TestMultiprocessingDevice, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(
@@ -586,9 +682,7 @@ instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
 class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
-    def tearDown(self):
-        if torch.cuda.is_available():
-            torch.cuda.ipc_collect()
+    hw_classification = HardwareClassification.GENERIC
 
     def test_spawn_child_keyboard_interrupt(self):
         # A child interrupted while the parent lives must be reported as a
@@ -700,16 +794,18 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         else:
             self.assertEqual(t, torch.ones(5, 5) * 3, atol=0, rtol=0)
 
+    def test_autograd_fine_with_spawn(self):
+        ctx = mp.get_context("spawn")
+        simple_autograd_function()
+        with ctx.Pool(3) as pool:
+            pool.map(simple_autograd_function, [1, 2, 3])
+
     @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):
         ctx = mp.get_context("fork")
         simple_autograd_function()
         # Autograd only uses thread when GPUs are involved
-        if (
-            torch.cuda.is_available()
-            or torch.backends.mps.is_available()
-            or torch.xpu.is_available()
-        ):
+        if torch.accelerator.is_available():
             with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
                 with ctx.Pool(3) as pool:
                     pool.map(simple_autograd_function, [1, 2, 3])
@@ -717,13 +813,65 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
             with ctx.Pool(3) as pool:
                 pool.map(simple_autograd_function, [1, 2, 3])
 
-    def test_autograd_fine_with_spawn(self):
-        ctx = mp.get_context("spawn")
-        simple_autograd_function()
-        with ctx.Pool(3) as pool:
-            pool.map(simple_autograd_function, [1, 2, 3])
+    def test_empty_tensor_sharing_meta(self):
+        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_tensor_sharing_meta(self):
+        dtype = torch.float32
+        device = torch.device("meta")
+        q = mp.Queue()
+        empty = torch.tensor([1], dtype=dtype, device=device)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
+    )
+    def test_meta_simple(self):
+        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
+
+    def test_empty_shared(self):
+        t = torch.tensor([])
+        t.share_memory_()
+
+    def _test_is_shared(self):
+        t = torch.randn(5, 5)
+        self.assertFalse(t.is_shared())
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
+    def test_is_shared(self):
+        self._test_is_shared()
+
+    def test_fs_is_shared(self):
+        with fs_sharing():
+            self._test_is_shared()
+
+    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+@unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+@instantiate_parametrized_tests
+class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def tearDown(self):
+        if torch.cuda.is_available():
+            torch.cuda.ipc_collect()
+
     def test_cuda_memory_allocation(self):
         ctx = mp.get_context("spawn")
         q = ctx.Queue()
@@ -740,7 +888,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         e.set()
         p.join(1)
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_ipc_limbo_cleanup_at_exit(self):
         ctx = mp.get_context("spawn")
         q = ctx.Queue()
@@ -755,7 +902,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         self.assertEqual(p.exitcode, 0)
         del t_received
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_ipc_deadlock(self):
         ctx = mp.get_context("spawn")
         queue = ctx.Queue(1)
@@ -773,8 +919,20 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         for p in processes.values():
             self.assertFalse(p.is_alive())
 
+    def test_cuda_ipc_collect_during_export(self):
+        ctx = mp.get_context("spawn")
+        p = ctx.Process(target=_test_cuda_ipc_collect_during_export)
+        p.start()
+        try:
+            p.join(60)
+            self.assertFalse(p.is_alive(), "CUDA IPC collection during export hung")
+            self.assertEqual(p.exitcode, 0, "CUDA IPC export crashed during collection")
+        finally:
+            if p.is_alive():
+                p.terminate()
+                p.join()
+
     @slowTest
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_send_many(self, name=None, size=5, count=100000):
         ctx = mp.get_context("spawn")
         q1 = ctx.Queue()
@@ -805,7 +963,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         p2.join(1)
         p3.join(1)
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
     def test_cuda_small_tensors(self):
         # Check multiple small tensors which will likely use the same
@@ -850,65 +1007,68 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         # memory 'file' for performance reason
         torch.cuda.ipc_collect()
 
-    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_cuda_bad_call(self):
-        # Initialize CUDA
-        t = torch.zeros(5, 5).cuda().cpu()
-        inq = mp.Queue()
-        outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception, args=(inq, outq))
-        p.start()
-        inq.put(t)
-        p.join()
-        self.assertIsInstance(outq.get(), RuntimeError)
-
-    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_wrong_cuda_fork(self):
-        stderr = TestCase.runWithPytorchAPIUsageStderr(
-            """\
-import torch
-from torch.multiprocessing import Process
-def run(rank):
-    torch.cuda.set_device(rank)
-if __name__ == "__main__":
-    size = 2
-    processes = []
-    for rank in range(size):
-        # it would work fine without the line below
-        x = torch.rand(20, 2).cuda()
-        p = Process(target=run, args=(rank,))
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
-"""
-        )
-        self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
-
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_rebuild_cuda_tensor(self):
+    @parametrize("expandable", [False, True])
+    @parametrize("peer", [False, True])
+    def test_rebuild_cuda_tensor(self, expandable, peer):
+        if peer and (not TEST_MULTIGPU or not torch.cuda.can_device_access_peer(1, 0)):
+            self.skipTest("requires peer access from cuda:1 to cuda:0")
         ctx = mp.get_context("spawn")
         queue = ctx.Queue()
         event = ctx.Event()
 
         proc = ctx.Process(
             target=send_tensor_with_untyped_storage,
-            args=(queue, event),
+            args=(queue, event, expandable, peer),
         )
         proc.start()
 
-        specs = queue.get()
         tensors = []
-        for spec in specs:
-            tensors.append(mp.reductions.rebuild_cuda_tensor(**spec))
-        self.assertEqual(tensors, [1, 1])
+        try:
+            specs, ptr_delta = queue.get(timeout=30)
+            handles = [s["storage_handle"] for s in specs]
+            handle = handles[0]
+            self.assertEqual(handles, [handle] * len(specs))
+            if expandable:
+                self.assertEqual(handle[1:2], b"e")
+                self.assertEqual(handle[6:10] + handle[30:34], bytes(8))
+                wrong_handle = bytearray(handle)
+                handle_type = struct.unpack_from("=i", handle, 26)[0]
+                if os.environ.get("TEST_CONFIG") == "h100-fabric":
+                    self.assertEqual(handle_type, 2)  # FABRIC_HANDLE
+                struct.pack_into("=i", wrong_handle, 26, 0)  # UNSPECIFIED
+                with self.assertRaisesRegex(RuntimeError, "Unsupported.*IPC"):
+                    mp.reductions.rebuild_cuda_tensor(
+                        **dict(specs[0], storage_handle=bytes(wrong_handle))
+                    )
+            for dev in range(2 if peer else 1):
+                start = 3 * dev
+                tensors.extend(
+                    mp.reductions.rebuild_cuda_tensor(**dict(s, storage_device=dev))
+                    for s in specs[start : start + 3]
+                )
+                self.assertEqual([t.device.index for t in tensors[start:]], [dev] * 3)
+                self.assertEqual(tensors[start:], [1, 1, 1])
+                self.assertEqual(
+                    tensors[start + 2].data_ptr() - tensors[start].data_ptr(), ptr_delta
+                )
+                self.assertEqual(
+                    tensors[start].untyped_storage()._cdata,
+                    tensors[start + 1].untyped_storage()._cdata,
+                )
+            with self.assertRaisesRegex(RuntimeError, "received from another process"):
+                mp.reductions.reduce_tensor(tensors[0])
+            if peer:
+                del tensors[:3]
+                self.assertEqual(tensors, [1, 1, 1])
+        finally:
+            tensors.clear()
+            event.set()
+            proc.join(30)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+        self.assertEqual(proc.exitcode, 0)
 
-        del tensors, spec
-        event.set()
-
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event(self):
         ctx = mp.get_context("spawn")
         queue = ctx.Queue()
@@ -932,9 +1092,15 @@ if __name__ == "__main__":
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_event_multiprocess(self):
-        event = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
         ctx = mp.get_context("spawn")
@@ -956,7 +1122,6 @@ if __name__ == "__main__":
         self.assertTrue(event.query())
         p.join()
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
     def test_event_handle_multi_gpu(self):
         d0 = torch.device("cuda:0")
@@ -978,9 +1143,15 @@ if __name__ == "__main__":
             # create handle on different device from recorded event
             e1.ipc_handle()
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_event_handle_importer(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_importer(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
         ctx = mp.get_context("spawn")
@@ -988,7 +1159,7 @@ if __name__ == "__main__":
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -1003,16 +1174,22 @@ if __name__ == "__main__":
         p2c.put(1)  # notify child that parent is done
         p.join()
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_event_handle_exporter(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_exporter(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
 
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
         # wait for event in child process is recorded
@@ -1023,25 +1200,6 @@ if __name__ == "__main__":
         self.assertTrue(e0.query())
         p2c.put(0)
         p.join()
-
-    def test_empty_tensor_sharing_meta(self):
-        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
-        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
-
-    def test_tensor_sharing_meta(self):
-        dtype = torch.float32
-        device = torch.device("meta")
-        q = mp.Queue()
-        empty = torch.tensor([1], dtype=dtype, device=device)
-        q.put(empty)
-        out = q.get(timeout=1)
-        self.assertEqual(out, empty)
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
-    )
-    def test_meta_simple(self):
-        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
 
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
@@ -1066,35 +1224,8 @@ if __name__ == "__main__":
         time.sleep(5)
         p.join()
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_mixed_types_cuda_sharing(self):
         self._test_mixed_types_cuda_sharing(mp.get_context("spawn"))
-
-    def test_empty_shared(self):
-        t = torch.tensor([])
-        t.share_memory_()
-
-    def _test_is_shared(self):
-        t = torch.randn(5, 5)
-        self.assertFalse(t.is_shared())
-        t.share_memory_()
-        self.assertTrue(t.is_shared())
-
-    @unittest.skipIf(
-        platform == "darwin", "file descriptor strategy is not supported on macOS"
-    )
-    def test_is_shared(self):
-        self._test_is_shared()
-
-    def test_fs_is_shared(self):
-        with fs_sharing():
-            self._test_is_shared()
-
-    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
-    def test_set_thread_name(self):
-        name = "test name"
-        mp._set_thread_name(name)
-        self.assertEqual(mp._get_thread_name(), name)
 
 
 if __name__ == "__main__":

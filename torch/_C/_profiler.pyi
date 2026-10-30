@@ -57,12 +57,9 @@ class _EventType(Enum):
 class _ExperimentalConfig:
     def __init__(
         self,
-        profiler_metrics: list[str] = ...,
-        profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
-        adjust_profiler_step: bool = ...,
         disable_external_correlation: bool = ...,
         profile_all_threads: bool = ...,
         capture_overload_names: bool = ...,
@@ -73,10 +70,6 @@ class _ExperimentalConfig:
         trace_only: bool = ...,
     ) -> None: ...
     trace_only: bool
-    # Deprecated no-ops; retained only so the Python layer can detect and warn.
-    profiler_metrics: list[str]
-    profiler_measure_per_kernel: bool
-    adjust_profiler_step: bool
 
 class ProfilerConfig:
     def __init__(
@@ -330,6 +323,7 @@ class _CuspyModule:
         render: tuple | None = None,
         counters: tuple | None = None,
         compression_level: int = 1,
+        metadata: list[tuple[str, str]] = ...,
     ) -> bytes: ...
 
 _cuspy: _CuspyModule

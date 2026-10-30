@@ -16,6 +16,7 @@ bf16 loss parity — FLOOR clips block maxima in (448, 512)·2^e, which hurts
 especially on gradient tensors. The FP4 quantizers remain FLOOR-only.
 """
 
+import functools
 import inspect
 
 import torch
@@ -468,26 +469,49 @@ if "recompile_limit" in inspect.signature(torch.compile).parameters:
     _COMPILE_KW = dict(dynamic=False, recompile_limit=64)
 else:
     _COMPILE_KW = dict(dynamic=False)
-    _dynamo_cfg = torch._dynamo.config
-    _limit_name = (
-        "recompile_limit" if hasattr(_dynamo_cfg, "recompile_limit") else "cache_size_limit"
-    )
-    setattr(_dynamo_cfg, _limit_name, max(getattr(_dynamo_cfg, _limit_name), 64))
 
-to_mx_compiled = torch.compile(to_mx, **_COMPILE_KW)
-to_mx_e5m2_compiled = torch.compile(to_mx_e5m2, **_COMPILE_KW)
-to_mx_dim0_compiled = torch.compile(to_mx_dim0, **_COMPILE_KW)
-to_mxfp4_compiled = torch.compile(to_mxfp4, **_COMPILE_KW)
-to_nvfp4_compiled = torch.compile(to_nvfp4, **_COMPILE_KW)
+
+def _lazy_compile(fn, **compile_kw):
+    """``torch.compile(fn)`` on first call rather than at import.
+
+    ``torch.compile`` imports Dynamo and Inductor (~1.4 s) even though it
+    traces lazily; deferring keeps ``import quack`` cheap in processes that
+    never quantize (compile workers, eager GEMM users).
+    """
+    compiled = None
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        nonlocal compiled
+        if compiled is None:
+            if "recompile_limit" not in _COMPILE_KW:
+                _dynamo_cfg = torch._dynamo.config
+                _limit_name = (
+                    "recompile_limit"
+                    if hasattr(_dynamo_cfg, "recompile_limit")
+                    else "cache_size_limit"
+                )
+                setattr(_dynamo_cfg, _limit_name, max(getattr(_dynamo_cfg, _limit_name), 64))
+            compiled = torch.compile(fn, **compile_kw)
+        return compiled(*args, **kwargs)
+
+    return wrapper
+
+
+to_mx_compiled = _lazy_compile(to_mx, **_COMPILE_KW)
+to_mx_e5m2_compiled = _lazy_compile(to_mx_e5m2, **_COMPILE_KW)
+to_mx_dim0_compiled = _lazy_compile(to_mx_dim0, **_COMPILE_KW)
+to_mxfp4_compiled = _lazy_compile(to_mxfp4, **_COMPILE_KW)
+to_nvfp4_compiled = _lazy_compile(to_nvfp4, **_COMPILE_KW)
 
 # In-repo quantizers by canonical format name: (eager fn, torch.compile'd fn).
 # Membership is the single source of "which formats can be quantized in-repo";
 # formats without an entry are from_parts-only until an encoder lands.
-to_mxfp6_e2m3_compiled = torch.compile(to_mxfp6_e2m3, dynamic=True)
-to_mxfp6_e3m2_compiled = torch.compile(to_mxfp6_e3m2, dynamic=True)
-to_mxfp6_e2m3_packed_compiled = torch.compile(to_mxfp6_e2m3_packed, dynamic=True)
-to_mxfp6_e3m2_packed_compiled = torch.compile(to_mxfp6_e3m2_packed, dynamic=True)
-to_mxfp4_byte_compiled = torch.compile(to_mxfp4_byte, dynamic=True)
+to_mxfp6_e2m3_compiled = _lazy_compile(to_mxfp6_e2m3, dynamic=True)
+to_mxfp6_e3m2_compiled = _lazy_compile(to_mxfp6_e3m2, dynamic=True)
+to_mxfp6_e2m3_packed_compiled = _lazy_compile(to_mxfp6_e2m3_packed, dynamic=True)
+to_mxfp6_e3m2_packed_compiled = _lazy_compile(to_mxfp6_e3m2_packed, dynamic=True)
+to_mxfp4_byte_compiled = _lazy_compile(to_mxfp4_byte, dynamic=True)
 to_mxfp6_e2m3_byte_compiled = to_mxfp6_e2m3_compiled
 to_mxfp6_e3m2_byte_compiled = to_mxfp6_e3m2_compiled
 

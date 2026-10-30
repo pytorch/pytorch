@@ -48,6 +48,16 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
+def get_triton_constexpr_function_type() -> type | None:
+    """Check if Triton is installed and has constexpr_function, introduced in v3.5."""
+    if not has_triton_package():
+        return None
+    import triton
+
+    return getattr(triton.runtime.jit, "ConstexprFunction", None)
+
+
+@functools.cache
 def has_triton_block_ptr() -> bool:
     """Whether the installed Triton still provides the block-pointer frontend API.
 
@@ -199,7 +209,23 @@ def _has_triton_amd_tdm_device(arch: str) -> bool:
             arch,
             exc_info=True,
         )
+    return False
+
+
+@functools.cache
+def has_triton_cuda_tma_device() -> bool:
+    """Whether the current CUDA device supports Triton device-side TMA."""
+    if not has_triton_package():
         return False
+
+    import torch
+
+    return (
+        torch.cuda.is_available()
+        and not torch.version.hip
+        and torch.cuda.get_device_capability() >= (9, 0)
+        and has_triton_tma_device()
+    )
 
 
 @functools.cache

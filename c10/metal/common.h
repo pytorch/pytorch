@@ -2,11 +2,21 @@
 // Set of global constants that could be shareable between CPU and Metal code
 
 #ifdef __METAL__
+#include <c10/metal/float8.h>
 #include <metal_array>
 #define C10_METAL_CONSTEXPR constant constexpr
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+#define C10_METAL_HAS_MPP 1
 #else
+#define C10_METAL_HAS_MPP 0
+#endif
+#else
+#include <c10/util/BFloat16.h>
 #include <c10/util/complex.h>
 #include <array>
+#include <cstdint>
 #define C10_METAL_CONSTEXPR constexpr
 #endif
 
@@ -31,14 +41,20 @@
   _(ComplexFloat, 9, float2)           \
   _(Bool, 11, bool)                    \
   _(BFloat16, 15, bfloat)              \
+  _(Float8_e4m3fn, 24, float8_e4m3fn)  \
   _(UInt16, 27, uint16_t)              \
   _(UInt32, 28, uint32_t)              \
   _(UInt64, 29, uint64_t)
+
+#define C10_METAL_SERIAL_SUFFIX_false ""
+#define C10_METAL_SERIAL_SUFFIX_true "_serial"
+#define C10_METAL_SERIAL_SUFFIX(SERIAL) C10_METAL_SERIAL_SUFFIX_##SERIAL
 
 namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
+C10_METAL_CONSTEXPR unsigned max_threadgroup_size = 1024;
 // Number of elements each thread processes in dense elementwise kernels.
 // Reading/writing a small array of values per thread improves memory-level
 // parallelism vs. a one-element-per-thread kernel.
@@ -70,7 +86,54 @@ struct alignas(4 * sizeof(T)) vec3 {
 // alignas(2 * sizeof(T)), matching the layout of Metal's vec<T, 2>.
 template <typename T>
 using complex = ::c10::complex<T>;
+// Host spellings of Metal's reduced floating point types
+using half = ::c10::Half;
+using bfloat = ::c10::BFloat16;
 #endif
+
+namespace detail {
+template <typename T>
+struct OpMathType {
+  using type = T;
+};
+template <>
+struct OpMathType<half> {
+  using type = float;
+};
+template <>
+struct OpMathType<bfloat> {
+  using type = float;
+};
+template <>
+struct OpMathType<int8_t> {
+  using type = int;
+};
+// Metal kernels use `char` for int8 tensors, which unlike int8_t (signed char)
+// is a distinct type
+template <>
+struct OpMathType<char> {
+  using type = int;
+};
+template <>
+struct OpMathType<uint8_t> {
+  using type = int;
+};
+template <>
+struct OpMathType<int16_t> {
+  using type = int;
+};
+template <>
+struct OpMathType<complex<half>> {
+  using type = complex<float>;
+};
+} // namespace detail
+
+// Type used for intermediate computations in Metal kernels. Defined for both
+// host and Metal, so that kernel param structs (e.g. a scalar stored at opmath
+// precision) have the same layout on both sides. Unlike at::opmath_type, small
+// integer types are widened to int.
+template <typename T>
+using opmath_t = typename detail::OpMathType<T>::type;
 
 // Integer ceiling division: ceil(a / b). Usable from both host code and
 // Metal shaders (where the overload is selected by ADL via `using namespace

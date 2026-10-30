@@ -75,6 +75,8 @@
 #   TORCH_XPU_ARCH_LIST      XPU arches, e.g. "ats-m150,lnl-m" (passthrough)
 #   PYTORCH_ROCM_ARCH        AMD GPU targets, e.g. "gfx900;gfx906" (read from env
 #                            in cmake/public/utils.cmake)
+#   TORCH_CK_GEMM_ARCH_LIST  AMD GPU archs Composable Kernel GEMM is built and
+#                            enabled for, e.g. "gfx90a;gfx942;gfx950" (passthrough)
 #
 # Library/backend selection (passthrough or read from the environment):
 #   BLAS                     MKL, Eigen, ATLAS, FlexiBLAS, or OpenBLAS; fails the
@@ -100,6 +102,10 @@
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
+#   CAFFE2_CUSTOM_PROTOC_EXECUTABLE  host protoc to use instead of the one built
+#                            from third_party/protobuf. Required when cross-compiling,
+#                            where the built protoc targets an architecture the build
+#                            host cannot execute (see cmake/ProtoBuf.cmake)
 #
 # Handled outside this module (NOT forwarded here; see also the everyday knobs
 # above, which are all handled via pyproject.toml or natively):
@@ -144,10 +150,12 @@ set(_ENV_PASSTHROUGH
   INSTALL_TEST
   INTEL_MKL_DIR
   INTEL_OMP_DIR
+  LLVM_BOLT_PROFILES_DIR
   MKL_THREADING
   MKLDNN_CPU_RUNTIME
   MSVC_Z7_OVERRIDE
   CAFFE2_USE_MSVC_STATIC_RUNTIME
+  CAFFE2_CUSTOM_PROTOC_EXECUTABLE
   Numa_INCLUDE_DIR
   Numa_LIBRARIES
   ONNX_ML
@@ -158,8 +166,10 @@ set(_ENV_PASSTHROUGH
   STATIC_DISPATCH_BACKEND
   SELECTED_OP_LIST
   TORCH_CUDA_ARCH_LIST
+  TORCH_CK_GEMM_ARCH_LIST
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
+  PYTHON_SIX_SOURCE_DIR
 )
 
 # Low-priority aliases: if the canonical var is not set, use the alias.
