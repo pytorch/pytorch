@@ -30,6 +30,11 @@ from torch.utils._python_dispatch import (
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
 
+def has_lazy_neg_bit(t: object) -> bool:
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    return isinstance(t, Tensor) and not is_traceable_wrapper_subclass(t) and t.is_neg()
+
+
 def to_fun(t: object) -> Any:
     if isinstance(t, Tensor):
         if is_traceable_wrapper_subclass(t):

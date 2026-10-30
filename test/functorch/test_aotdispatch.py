@@ -541,6 +541,58 @@ class TestAOTAutograd(AOTTestCase):
             self.assertTrue(outs[0].is_neg())
             self.assertEqual(outs[0].data_ptr(), base[1:].data_ptr())
 
+    def test_neg_view_input_mutated_in_training_graph(self):
+        # x doesn't require grad, so its mutation stays in the training graph
+        # and the resolved copy is copied back to the user's tensor.
+        def f(x, w):
+            x.mul_(2)
+            return (x * w).sum()
+
+        base_ref = torch.arange(4.0)
+        w_ref = torch.randn(4, requires_grad=True)
+        f(base_ref._neg_view(), w_ref).backward()
+
+        base = torch.arange(4.0)
+        w = w_ref.detach().requires_grad_()
+        compiled_f = aot_function(
+            f,
+            fw_compiler=self._no_neg_input_compiler,
+            bw_compiler=self._no_neg_input_compiler,
+            keep_inference_input_mutations=True,
+        )
+        compiled_f(base._neg_view(), w).backward()
+        self.assertEqual(base, base_ref)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    def test_neg_view_input_beside_synthetic_base(self):
+        # a and b alias and a is mutated, so they're merged into a synthetic
+        # base and the input metadata is rebuilt; x must keep its negative bit.
+        def f(x, a, b):
+            a.add_(1)
+            return x + 1
+
+        def inp_callable():
+            base = torch.zeros(4)
+            inps = [torch.arange(4.0)._neg_view(), base, base[1:]]
+            return inps, inps
+
+        # debug_assert recomputes the synthetic base metadata and compares.
+        self.verify_aot_autograd(f, inp_callable)
+
+        (x, a, b), _ = inp_callable()
+        out = aot_function(f, self._no_neg_input_compiler)(x, a, b)
+        self.assertEqual(out, -torch.arange(4.0) + 1)
+
+    def test_neg_view_input_set_is_rejected(self):
+        def f(x, y):
+            with torch.no_grad():
+                x.set_(y)
+            return x + 1
+
+        compiled_f = aot_function(f, nop, keep_inference_input_mutations=True)
+        with self.assertRaisesRegex(RuntimeError, "lazy negative bit"):
+            compiled_f(torch.arange(4.0)._neg_view(), torch.ones(2))
+
     def test_conj_view_input_left_to_traced_graph(self):
         # Tracing records the conjugation of a conj-bit input as explicit ops
         # (Tensor.imag emits _conj), so the input must reach the graph as is.

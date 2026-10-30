@@ -533,6 +533,30 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_neg_view_input_cache_hit(self):
+        """
+        A cache hit rebuilds the runtime wrapper from the cached metadata, which
+        must still mark the lazy negative input: Inductor ignores that bit, so
+        it has to get a resolved copy (#145093).
+        """
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(8)._neg_view()
+        y = torch.randn(8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(x, y), compiled_fn(x, y))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )

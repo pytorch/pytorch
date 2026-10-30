@@ -551,10 +551,12 @@ class _FirstInvocationContext:
 # The runtime wrapper therefore hands the compiled graph resolve_neg() copies of
 # these inputs, and the backend compiles against resolved example inputs. The
 # mutation epilogue and output alias replay keep using the user's original
-# tensors, which are captured before the call. A mutation the graph performs
-# in place lands on the copy, so it is copied back after the call. Only inputs
-# that carried the bit when the graph was traced are resolved, so graphs
-# without such inputs are unchanged.
+# tensors, which are captured before the call. A data mutation the graph
+# performs in place lands on the copy, so it is copied back after the call.
+# An in-graph set_() or resize_() of such an input can't be replayed onto the
+# user's tensor that way and is rejected. Only inputs that carried the bit
+# when the graph was traced are resolved, so graphs without such inputs are
+# unchanged.
 #
 # Conjugate-bit inputs are left alone: tracing already records their
 # conjugation as explicit ops (e.g. Tensor.imag emits _conj), so resolving them
@@ -1083,6 +1085,14 @@ def _create_runtime_wrapper(
         for i in neg_input_indices
         if runtime_metadata.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH
     )
+    for i in neg_inputs_mutated_in_graph:
+        info = runtime_metadata.input_info[i]
+        if info.mutates_storage_metadata or info.mutation_inductor_storage_resize:
+            raise RuntimeError(
+                f"aot_autograd() does not yet handle set_() or resize_() on input {i}, "
+                "which carries the lazy negative bit (Tensor._neg_view()). Call "
+                "resolve_neg() on it before passing it in."
+            )
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
