@@ -305,6 +305,10 @@ class TestExportPython(_ExportPythonTestCase):
         with self.assertLogs("torch._precompile", "WARNING") as logs:
             self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
         self.assertIn("could not read the cache envelope", logs.output[0])
+        os.remove(path + ".cache")
+        os.mkdir(path + ".cache")
+        with self.assertRaisesRegex(PrecompileError, "could not read the cache"):
+            self._export("shifted", path)(x)
 
     def test_a_main_module_function_is_refused(self):
         def fn(x):
