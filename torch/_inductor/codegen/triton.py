@@ -105,6 +105,8 @@ from ..virtualized import _ops as ops, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .block_analysis import BlockPatternMatcher
 from .common import (
+    _triton_bessel,
+    _triton_cyl_bessel_i,
     ArgName,
     BackendFeature,
     ConstexprArg,
@@ -2611,6 +2613,74 @@ class TritonKernelOverrides(TritonOverrides):
             )
             fn.__name__ = fn_name  # type: ignore[attr-defined]
             setattr(cls, fn_name, staticmethod(fn))
+
+    @staticmethod
+    def _use_aten_fp32_special(x):
+        return utils.is_strict_cuda_triton() and triton_arg_dtype(x) == torch.float32
+
+    @staticmethod
+    def i0(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+        ):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions._strict_i0(ops.to_dtype(x, torch.float32)).value
+        return _triton_cyl_bessel_i(0, x)
+
+    @staticmethod
+    def i1(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+        ):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions._strict_i1(ops.to_dtype(x, torch.float32)).value
+        return _triton_cyl_bessel_i(1, x)
+
+    @staticmethod
+    def modified_bessel_i0(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions._strict_i0(x).value
+        return _triton_cyl_bessel_i(0, x)
+
+    @staticmethod
+    def modified_bessel_i1(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions._strict_i1_impl(x, modified_bessel=True).value
+        return _triton_cyl_bessel_i(1, x)
+
+    @staticmethod
+    def bessel_j0(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_bessel_j0({x})"
+        return _triton_bessel(0, "j", x)
+
+    @staticmethod
+    def bessel_j1(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_bessel_j1({x})"
+        return _triton_bessel(1, "j", x)
+
+    @staticmethod
+    def bessel_y0(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_bessel_y0({x})"
+        return _triton_bessel(0, "y", x)
+
+    @staticmethod
+    def bessel_y1(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_bessel_y1({x})"
+        return _triton_bessel(1, "y", x)
 
     @classmethod
     def constant(cls, value, dtype):
