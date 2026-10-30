@@ -881,8 +881,11 @@ def _descriptor_load_pattern(operand):
 
 def _pointer_load_pattern(operand):
     # load_checked_2d is defined unconditionally in every generated kernel, so
-    # only an operand-qualified call establishes the fallback.
-    return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
+    # only an operand-qualified call establishes the fallback. A module-level
+    # kernel definition suffixes every @triton.jit helper the kernel binds at
+    # top level with the kernel's own name, so accept that suffix; the operand
+    # argument is what distinguishes the call from the helper's own def.
+    return rf"\bload_checked_2d\w*\(\s*{operand.upper()}\s*,"
 
 
 def _check_int64_decode_narrows_coordinates(
