@@ -87,6 +87,10 @@ def decorated_scaled(x):
 def decorated_outer(x):
     return inner(x * 2) + 1
 
+@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "countdown.py"))
+def countdown(x, n):
+    return x if n == 0 else countdown(x + 1, n - 1)
+
 def shifted(x):
     return x * 7.25 + 1
 
@@ -245,6 +249,10 @@ class TestExportPython(_ExportPythonTestCase):
                 torch.testing.assert_close(m.decorated_outer(x), (x * 2).sin().cos() + 1)
             """,
         )
+
+    def test_a_recursive_first_call_is_refused(self):
+        with self.assertRaisesRegex(PrecompileError, "called itself during the first"):
+            self.module.countdown(torch.zeros(2), 2)
 
     def test_a_first_call_that_raises_writes_nothing_and_the_next_call_captures(self):
         path = os.path.join(self.dir, "flaky.py")
