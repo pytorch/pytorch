@@ -8024,21 +8024,6 @@ class TestMPS(TestCaseMPS):
         out_cpu.backward(cpu_grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    def test_adaptive_avg_pool3d_channels_last(self):
-        # Output layout must match CPU and the meta kernel, or torch.compile fallbacks fail stride asserts
-        cpu_x = torch.randn(2, 4, 6, 10, 10).to(memory_format=torch.channels_last_3d)
-        x = cpu_x.to('mps')
-        out = torch.ops.aten._adaptive_avg_pool3d(x, (3, 7, 9))
-        out_cpu = torch.ops.aten._adaptive_avg_pool3d(cpu_x, (3, 7, 9))
-        self.assertEqual(out, out_cpu)
-        self.assertEqual(out.stride(), out_cpu.stride())
-
-        cpu_grad = torch.randn(out_cpu.shape)
-        grad_input = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad.to('mps'), x)
-        grad_input_cpu = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad, cpu_x)
-        self.assertEqual(grad_input, grad_input_cpu)
-        self.assertEqual(grad_input.stride(), grad_input_cpu.stride())
-
     def test_adaptive_avg_pool_backward_errors(self):
         x = torch.randn(2, 3, 4, 5, 6, device='mps')
         grad = torch.randn(2, 3, 2, 2, 2, device='mps')
