@@ -361,8 +361,18 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
 
 
 def maybe_get_real_tensor(x: object) -> Tensor | None:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.real_tensor
+    elif isinstance(x, FunctionalTensor):
+        return maybe_get_real_tensor(x.elem)
+    elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return maybe_get_real_tensor(unwrapped)
+    elif isinstance(x, Tensor) and is_functorch_wrapped_tensor(x):
+        return maybe_get_real_tensor(torch._C._functorch.get_unwrapped(x))
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         return torch._C._get_real_tensor(x)
     return None
@@ -402,8 +412,12 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
 # unique_consecutive_memo). A C++ fake has no SymNumberMemoDescriptor, so this
 # keeps the descriptor's state in the tensor's __dict__ under the same names,
 # and like the descriptor drops the memo once the tensor is mutated or
-# fake_mode's epoch changes.
-def maybe_get_sym_memo(x: object, name: str, fake_mode: FakeTensorMode) -> Any:
+# fake_mode's epoch changes. Unlike the item memo, which goes through the fake
+# mode's own store (maybe_get_item_memo), these memos are only used by the
+# Python fake impls, so they need no C++ store.
+def maybe_get_sym_memo(
+    x: object, name: str, fake_mode: FakeTensorMode
+) -> SymInt | int | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return getattr(x, name)
     if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
