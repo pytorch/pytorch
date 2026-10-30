@@ -415,12 +415,13 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
 # fake_mode's epoch changes. Unlike the item memo, which goes through the fake
 # mode's own store (maybe_get_item_memo), these memos are only used by the
 # Python fake impls, so they need no C++ store.
-def maybe_get_sym_memo(
-    x: object, name: str, fake_mode: FakeTensorMode
-) -> SymInt | int | None:
+def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return getattr(x, name)
     if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
+    fake_mode = maybe_get_fake_mode(x)
+    if fake_mode is None:
         return None
     memo = getattr(x, f"_{name}", None)
     if memo is None:
@@ -432,12 +433,13 @@ def maybe_get_sym_memo(
     return memo
 
 
-def maybe_set_sym_memo(
-    x: object, name: str, value: SymInt | int, fake_mode: FakeTensorMode
-) -> None:
+def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         setattr(x, name, value)
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is None:
+            return
         setattr(x, f"_{name}", value)
         if not x.is_inference():
             setattr(x, f"_{name}_vc", x._version)
@@ -1098,9 +1100,9 @@ def in_kernel_invocation_manager(
     if meta_in_tls != prev_in_kernel:
         raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
 
-    # _FakeInKernelInvocation makes C++ fakes report meta here too, see Note
+    # _InKernelInvocation makes C++ fakes report meta here too, see Note
     # [C++ fake in_kernel_invocation].
-    with torch._C._DisableTorchDispatch(), torch._C._FakeInKernelInvocation():
+    with torch._C._DisableTorchDispatch(), torch._C._InKernelInvocation():
         fake_mode.in_kernel_invocation = True
         # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
         # `Dense` turned on (because it's implied by `Meta`)
