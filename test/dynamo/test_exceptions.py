@@ -1686,13 +1686,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_str_unbound_local_error(self):
         def fn(t):
+            return t.sin(), str(UnboundLocalError("x"))
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_str_unbound_local_error_from_deleted_local(self):
+        def fn(t):
             value = 1
             del value
             try:
                 _ = value  # noqa: F821
             except UnboundLocalError as e:
-                raised = str(e)
-            return t.sin(), raised, str(UnboundLocalError("x"))
+                return t.sin(), str(e)
 
         t = torch.randn(2)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
