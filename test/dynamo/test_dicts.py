@@ -995,6 +995,50 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
 
+    @parametrize(
+        "cls",
+        [
+            subtest(dict, name="dict"),
+            subtest(OrderedDict, name="OrderedDict"),
+            subtest(partial(defaultdict, int), name="defaultdict"),
+        ],
+    )
+    @parametrize(
+        "truth_fn",
+        [
+            subtest(lambda d: not d, name="not"),
+            subtest(bool, name="bool"),
+            subtest(operator.not_, name="operator_not"),
+            subtest(operator.truth, name="operator_truth"),
+        ],
+    )
+    @parametrize("empty_first", [True, False])
+    def test_dict_truthiness_guards_emptiness(self, cls, truth_fn, empty_first):
+        def fn(x, d):
+            t = truth_fn(d)
+            return x + (1 if t else 0)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.zeros(1)
+        inputs = [cls(), cls(a=1)]
+        if not empty_first:
+            inputs.reverse()
+        for d in inputs:
+            self.assertEqual(opt_fn(x, d), fn(x, d))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_empty_dict_constant_fold_guards_keys(self):
+        def fn(x, d):
+            return x + len(operator.or_(d, {"b": 2}))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.zeros(1)
+        for d in ({}, {"a": 1}):
+            self.assertEqual(opt_fn(x, d), fn(x, d))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_dict_guard_on_keys_order2(self):
         d = {
             2: 4,
