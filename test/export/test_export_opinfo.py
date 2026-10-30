@@ -176,7 +176,10 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 def _get_env_by_device(device):
     device_type = torch.device(device).type
     if device_type == "cuda":
-        return {"CUDA_VISIBLE_DEVICES": ""}
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
+        env.pop("HIP_VISIBLE_DEVICES", None)
+        env.pop("ROCR_VISIBLE_DEVICES", None)
+        return env
     elif device_type == "xpu":
         return {**os.environ, "ONEAPI_DEVICE_SELECTOR": "*:cpu", "ZE_AFFINITY_MASK": ""}
     raise AssertionError(
