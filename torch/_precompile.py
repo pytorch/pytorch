@@ -222,12 +222,12 @@ it.
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
 # every overriding kernel is still the active one, registered from the same file or
 # by the same recorded calling module. make_fx case: before load, the caller must
-# import C++ extension ops, and ops and kernels registered from __main__ or outside
-# a module's import. Dynamo case: if an
-# op or kernel has no recorded module or a recorded module is outside torch, the
-# artifact also imports its served frames' modules, all in the order their imports
-# finished, so the caller must import only those registered outside every served
-# frame's module.
+# import C++ extension ops, ops and kernels registered from __main__ or outside a
+# module's import, and kernels registered through another module's Library. Dynamo
+# case: if an op or kernel has no recorded module or a recorded module is outside
+# torch, the artifact also imports its served frames' modules, all in the order
+# their imports finished, so the caller must import only those registered outside
+# every served frame's module.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a

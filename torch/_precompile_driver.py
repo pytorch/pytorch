@@ -103,19 +103,22 @@ def _import_custom_op_modules(served=(), import_served=None):
     import_errors = {}
 
     # find_spec imports a dotted name's parents, so this follows the ordered imports.
+    # None when the lookup raised, which import_served then reports.
     def found(module):
         try:
             return module != "__main__" and (
                 module in sys.modules or importlib.util.find_spec(module) is not None
             )
-        except Exception:
+        except ModuleNotFoundError:
             return False
+        except Exception:
+            return None
 
     # The entry may register a served module find_spec cannot locate (a plugin
     # loader), so a module not found yet is looked up again after the entry imports.
     # The module's own import then reports a failure, not the entry's.
     def import_or_entry(module, import_served):
-        if not found(module) and ENTRY_MODULE in served:
+        if found(module) is False and ENTRY_MODULE in served:
             with contextlib.suppress(Exception):
                 import_served(ENTRY_MODULE)
         import_served(module)
