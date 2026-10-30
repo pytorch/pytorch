@@ -5049,10 +5049,12 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
       Tensor common_term = at::matmul(grad_self, result.mH());
       common_term = common_term + common_term.mH();
 
+      // The op reads one triangle of input2. See
+      // [Note: Forward / Backward AD solve_triangular]
       if (upper) {
-        grad_input2 = -at::matmul(input2, common_term);
+        grad_input2 = at::matmul(input2.triu(), -common_term).triu();
       } else {
-        grad_input2 = -at::matmul(common_term, input2);
+        grad_input2 = at::matmul(-common_term, input2.tril()).tril();
       }
     }
   }
@@ -5066,7 +5068,9 @@ Tensor cholesky_solve_jvp(
     const Tensor& dB,
     const bool upper) {
   at::NoTF32Guard disable_tf32;
-  auto dK = upper ? dU.mH().matmul(U) : dU.matmul(U.mH());
+  // Keep only the triangle of U and dU the op reads
+  auto dK =
+      upper ? dU.triu().mH().matmul(U.triu()) : dU.tril().matmul(U.tril().mH());
   auto dA = dK + dK.mH();
   // Unlike linalg.solve, cholesky_solve has no vector case. A B of shape
   // A.shape[:-1] is one matrix broadcast over the batch.
