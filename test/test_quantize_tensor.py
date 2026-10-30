@@ -214,83 +214,87 @@ def _make_nd_quantize_input(layout, device):
 
 def _get_tensor_and_quant_dims(
     test_case_name: str,
+    device: str,
 ) -> tuple[torch.Tensor, tuple[int, int]]:
     if test_case_name == "leading":
-        data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
         axes = (2, 3)
     elif test_case_name == "leading_reverse":
-        data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
         axes = (3, 2)
     elif test_case_name == "leading_short_tile":
         # Distinct batches expose aliases in the short dim-K tile's compact scale store.
-        data_hp = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device=device)
         data_hp[0].fill_(0.25)
         data_hp[1].fill_(2.5)
         axes = (1, 2)
     elif test_case_name == "trailing":
-        data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
+        axes = (1, 2)
+    elif test_case_name == "trailing_singleton":
+        data_hp = torch.randn(2, 64, 128, 1, dtype=torch.bfloat16, device=device)
         axes = (1, 2)
     elif test_case_name == "trailing_reverse":
-        data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
         axes = (2, 1)
     elif test_case_name == "trailing_short_tile":
-        batched = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device="cuda")
+        batched = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device=device)
         batched[0].fill_(0.25)
         batched[1].fill_(2.5)
         data_hp = batched.permute(1, 2, 0).contiguous()
         axes = (0, 1)
     elif test_case_name == "trailing_batch_tile":
-        data_hp = torch.randn(2, 64, 128, 32, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 64, 128, 32, dtype=torch.bfloat16, device=device)
         axes = (1, 2)
     elif test_case_name == "trailing_batch_partial":
-        data_hp = torch.randn(2, 160, 96, 33, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 160, 96, 33, dtype=torch.bfloat16, device=device)
         axes = (1, 2)
     elif test_case_name == "interleaved_trailing_batch":
-        data_hp = torch.randn(2, 160, 3, 96, 64, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 160, 3, 96, 64, dtype=torch.bfloat16, device=device)
         axes = (1, 3)
     elif test_case_name == "interleaved_batch":
-        data_hp = torch.randn(2, 64, 4, 128, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 64, 4, 128, dtype=torch.bfloat16, device=device)
         axes = (1, 3)
     elif test_case_name == "interleaved_rank3":
-        data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device=device)
         axes = (0, 2)
     elif test_case_name == "interleaved_singleton":
-        data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device=device)
         axes = (0, 2)
     elif test_case_name == "interleaved_multi_batch":
-        data_hp = torch.randn(2, 3, 64, 4, 5, 128, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 3, 64, 4, 5, 128, dtype=torch.bfloat16, device=device)
         axes = (2, 5)
     elif test_case_name == "permuted_interleaved_batch":
         data_hp = torch.randn(
-            2, 3, 64, 4, 128, dtype=torch.bfloat16, device="cuda"
+            2, 3, 64, 4, 128, dtype=torch.bfloat16, device=device
         ).permute(2, 4, 0, 3, 1)
         axes = (0, 1)
     elif test_case_name == "transposed_interleaved_batch":
         data_hp = torch.randn(
-            2, 64, 4, 128, dtype=torch.bfloat16, device="cuda"
+            2, 64, 4, 128, dtype=torch.bfloat16, device=device
         ).permute(0, 3, 2, 1)
         axes = (1, 3)
     elif test_case_name == "permuted_trailing_batch":
         data_hp = torch.randn(
-            2, 160, 96, 32, dtype=torch.bfloat16, device="cuda"
+            2, 160, 96, 32, dtype=torch.bfloat16, device=device
         ).permute(0, 3, 1, 2)
         axes = (2, 3)
     elif test_case_name == "sliced_trailing_batch":
-        data_hp = torch.randn(2, 64, 256, 32, dtype=torch.bfloat16, device="cuda")[
+        data_hp = torch.randn(2, 64, 256, 32, dtype=torch.bfloat16, device=device)[
             :, :, ::2, :
         ]
         axes = (1, 2)
     elif test_case_name == "interleaved":
-        data_hp = torch.randn(2, 64, 3, 128, 4, dtype=torch.bfloat16, device="cuda")
+        data_hp = torch.randn(2, 64, 3, 128, 4, dtype=torch.bfloat16, device=device)
         axes = (1, 3)
     elif test_case_name == "permuted":
         data_hp = torch.randn(
-            2, 3, 64, 128, dtype=torch.bfloat16, device="cuda"
+            2, 3, 64, 128, dtype=torch.bfloat16, device=device
         ).permute(0, 2, 3, 1)
         axes = (1, 2)
     elif test_case_name == "transposed":
         data_hp = torch.randn(
-            2, 3, 128, 64, dtype=torch.bfloat16, device="cuda"
+            2, 3, 128, 64, dtype=torch.bfloat16, device=device
         ).permute(0, 3, 2, 1)
         axes = (1, 2)
     else:
@@ -302,6 +306,7 @@ _MXFP8_SINGLE_LAYOUTS = (
     "leading",
     "leading_short_tile",
     "trailing",
+    "trailing_singleton",
     "trailing_short_tile",
     "trailing_batch_tile",
     "trailing_batch_partial",
@@ -813,13 +818,27 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_nd(self, layout, mode, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp, axes = _get_tensor_and_quant_dims(layout)
+        data_hp, axes = _get_tensor_and_quant_dims(layout, device)
         dim = axes[::-1] if mode == "m_swizzled" else axes
         square = mode == "k_square"
         swizzled = mode != "k_compact"
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, dim, square, swizzled
         )
+        if layout == "trailing_singleton":
+            from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+                _canonicalize_matrix_input,
+            )
+
+            with patch.object(
+                torch.Tensor,
+                "contiguous",
+                side_effect=AssertionError("materialized input"),
+            ):
+                canonical = _canonicalize_matrix_input(
+                    data_hp, dim, square, swizzled, dual=False
+                )
+            self.assertEqual(canonical.input.data_ptr(), data_hp.data_ptr())
         swizzle_type = (
             SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
         )
@@ -834,6 +853,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.shape, data_hp.shape)
         self.assertEqual(qdata.stride()[dim[-1]], 1)
         self.assertEqual(scales.shape, scales_ref.shape)
+        batch_axes = tuple(
+            sorted(
+                (axis for axis in range(data_hp.ndim) if axis not in axes),
+                key=lambda axis: -data_hp.stride(axis),
+            )
+        )
+        output_order = (*batch_axes, *dim)
+        self.assertTrue(qdata.permute(output_order).is_contiguous())
+        self.assertTrue(scales.permute(output_order).is_contiguous())
 
     @parametrize(
         "dim,is_square_scaling,is_scale_swizzled",
@@ -872,7 +900,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_nd_dual(self, layout, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp, axes = _get_tensor_and_quant_dims(layout)
+        data_hp, axes = _get_tensor_and_quant_dims(layout, device)
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
             data_hp, axes, False, True
         )
@@ -892,6 +920,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.shape, data_hp.shape)
         self.assertEqual(qdata_k.stride()[axes[-1]], 1)
         self.assertEqual(qdata_m.stride()[axes[0]], 1)
+        batch_axes = tuple(
+            sorted(
+                (axis for axis in range(data_hp.ndim) if axis not in axes),
+                key=lambda axis: -data_hp.stride(axis),
+            )
+        )
+        for output in (qdata_k, scales_k):
+            self.assertTrue(output.permute((*batch_axes, *axes)).is_contiguous())
+        for output in (qdata_m, scales_m):
+            self.assertTrue(output.permute((*batch_axes, *axes[::-1])).is_contiguous())
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_strided_input_fallback(self, device):
@@ -920,10 +958,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
             data_hp = torch.empty((64, 96), dtype=torch.bfloat16, device=device)[:, ::2]
             error = "quantized axis 1 must be divisible by 32; got size 48"
         elif invalid == "alignment":
-            data_hp = torch.empty(64 * 64 + 1, dtype=torch.float64, device=device)[
+            data_hp = torch.empty(64 * 48 + 1, dtype=torch.bfloat16, device=device)[
                 1:
-            ].view(64, 64)
-            error = "blockscaled TMA supports only bf16, fp16, and fp32 input"
+            ].view(64, 48)
+            error = "quantized axis 1 must be divisible by 32; got size 48"
         else:
             data_hp = torch.empty((64, 128), dtype=torch.float64, device=device)[:, ::2]
             error = "blockscaled TMA supports only bf16, fp16, and fp32 input"
