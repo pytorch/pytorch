@@ -46,7 +46,7 @@ the `templates` to post, and your `reasoning`. The apply step enforces it:
 
 - Labels are only added, never removed, and only from [distributed-labels.json](distributed-labels.json).
 - An issue keeps at most one sub-oncall label: an existing one is never replaced, and a plan with two goes to `triage review`.
-- Status comes from `decision`: uncertain/non-distributed/high-priority decisions require `triage review`, and `needs_reproduction` requires `needs reproduction`.
+- Status comes from `decision`, not the model's `labels` list: uncertain/non-distributed/high-priority decisions require `triage review`, and `needs_reproduction` requires `needs reproduction`. The apply step can still escalate incomplete classifications to review.
 - Confident decisions add `triaged` only with a valid sub-oncall (and a distributed module for parallelisms). Incomplete classifications go to `triage review`.
 - The apply step never adds `triaged` alongside `triage review` or `needs reproduction`; existing human labels are preserved.
 - Comments follow `decision`: `not_distributed` uses that template, `needs_reproduction` uses `needs_distributed_reproduction`, and other decisions post no comment. Conflicting requested templates are ignored. Templates from [templates.json](templates.json) are posted verbatim, without repeating an existing request.
