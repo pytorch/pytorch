@@ -203,8 +203,12 @@ def simulate_fp8_precision(input, variant):
 def _round_e8m0_rne(biased_exponent, lsb, g, r, s):
     round_up = False
 
+    if biased_exponent == 0:
+        # float32 subnormals lie between 2**-127 (g set) and 2**-126, round up
+        # from their midpoint (g and r set)
+        round_up = g == 1 and r == 1
     # apply g,r,s rounding rules for RNE rounding
-    if g == 1:
+    elif g == 1:
         if (r == 1) or (s == 1):
             round_up = True
         else:
