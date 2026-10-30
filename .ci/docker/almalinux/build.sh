@@ -29,7 +29,7 @@ elif [[ "${DOCKER_TAG_PREFIX}" == rocm* ]]; then
     ROCM_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'rocm' '{print $2}')
     if [[ "${ROCM_VERSION}" == "10.2" ]]; then
         # Release candidate; drop this branch once 10.2 is on the stable index.
-        ROCM_VERSION="10.2.0rc0"
+        ROCM_VERSION="10.2.0rc1"
         THEROCK_INDEX_URL="https://rc.repo.amd.com/rocm/whl-next/"
     else
         THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
