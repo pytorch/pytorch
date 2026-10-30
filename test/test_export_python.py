@@ -319,6 +319,10 @@ class TestExportPython(_ExportPythonTestCase):
         with self.assertLogs("torch._precompile", "WARNING") as logs:
             self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
         self.assertIn("could not read the cache envelope", logs.output[0])
+        os.remove(path + ".cache")
+        os.mkdir(path + ".cache")
+        with self.assertRaisesRegex(PrecompileError, "could not read the cache"):
+            self._export("shifted", path)(x)
 
     def test_check_catches_an_edit_that_changes_the_numerics(self):
         path = os.path.join(self.dir, "shifted.py")
@@ -367,6 +371,12 @@ class TestExportPython(_ExportPythonTestCase):
         x = torch.randn(4, requires_grad=True)
         self._export("grad_aware", path)(x)
         self.assertEqual(self._export("grad_aware", path, check=True)(x), x * 2)
+        # An activation stays a non-leaf in the eager run, which writes to it in place.
+        path = os.path.join(self.dir, "bump.py")
+        self._export("bump", path)(x * 1)
+        activation = x * 1
+        out = self._export("bump", path, check=True)(activation)
+        self.assertEqual((out, activation), (x * 2 + 1, x * 2))
 
     def test_check_defaults_to_the_environment_variable(self):
         path = os.path.join(self.dir, "shifted.py")
