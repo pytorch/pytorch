@@ -120,7 +120,13 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(const char* coll_name);
+  // status_name and the numels feed the periodic work status record and
+  // follow legacy ProcessGroupNCCL's values; both names must be literals.
+  void recordStart(
+      const char* coll_name,
+      const char* status_name,
+      int64_t numel_in,
+      int64_t numel_out);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -169,6 +175,10 @@ class WorkNCCL : public c10d::Work {
     uint64_t seq{0};
     // Set by recordStart(); must point to static storage.
     const char* opType{""};
+    // Legacy opTypeToString() name, e.g. "ALLREDUCE".
+    const char* statusName{""};
+    int64_t numelIn{0};
+    int64_t numelOut{0};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
@@ -181,6 +191,8 @@ class WorkNCCL : public c10d::Work {
   struct TrackedWork {
     std::shared_ptr<State> state;
     std::shared_ptr<InputTensorShelf> inputTensors;
+    // Position in WorkNCCLQueue's enqueue order; see WorkNCCLQueue::Status.
+    int64_t statusSeq{-1};
   };
 
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
@@ -209,6 +221,24 @@ class WorkNCCLQueue {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
+  struct StatusEntry {
+    int64_t seq{-1};
+    const char* name{""};
+    int64_t numelIn{0};
+    int64_t numelOut{0};
+  };
+  // Last enqueued, started and completed work. seq counts the works enqueued
+  // on this queue (from 1), not the collective sequence number: p2p works share
+  // the previous collective's number and coalesced ops give every child the
+  // same one, which would hide a hung send or a pending child. Unlike legacy's
+  // collective seq, it differs across ranks that issue different p2p, window
+  // or coalesced ops.
+  struct Status {
+    StatusEntry enqueued;
+    StatusEntry started;
+    StatusEntry completed;
+  };
+  Status status();
 
  private:
   // completed collects the states retired as COMPLETED, so the caller can push
@@ -219,6 +249,9 @@ class WorkNCCLQueue {
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
       completedInputTensors_;
+  // Guarded by work_queues_mutex_.
+  int64_t numEnqueued_{0};
+  Status status_;
   std::mutex work_queues_mutex_;
 };
 

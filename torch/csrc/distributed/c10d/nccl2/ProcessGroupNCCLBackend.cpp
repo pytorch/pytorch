@@ -27,6 +27,8 @@ namespace c10d::nccl2 {
 
 namespace {
 
+std::atomic<size_t> nextLocalId{0};
+
 #if defined(USE_ROCM)
 struct NcclAllocatorSegmentRegistry {
   std::mutex mutex;
@@ -124,10 +126,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true),
           getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false),
           kDefaultMaxEventPoolSize)),
+      local_id_(nextLocalId.fetch_add(1)),
       async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),
       blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
+      work_status_period_(getCvarInt(
+          {"TORCH_NCCL2_WORK_STATUS_PERIOD_MS"},
+          ::c10d::kWorkStatusUpdatePeriodMs)),
       options_c10d_(options ? std::move(options) : Options::create()) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
@@ -1040,7 +1046,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   // Under graph capture nothing else may hold the inputs once the caller drops
   // the ops' works.
   work->retainInputs(works);
-  work->recordStart("coalesced");
+  work->recordStart("coalesced", "COALESCED", 0, 0);
   work->waitFor(works);
   work->recordEnd();
   enqueueWork(work, stream);

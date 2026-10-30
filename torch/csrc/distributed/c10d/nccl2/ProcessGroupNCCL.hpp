@@ -632,6 +632,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
+  // Logs the periodic work status record, like stock ProcessGroupNCCL's
+  // watchdog.
+  void logWorkStatus();
   // Creates a lazy_init communicator and checks that it is ready.
   void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
@@ -707,9 +710,15 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::string name_;
   // Backs the default commName; NCCL keeps the pointer for the comm's lifetime.
   std::string comm_name_;
+  // Process-wide creation index, logged as pg_id like stock ProcessGroupNCCL.
+  const size_t local_id_;
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;
+  // Period of the watchdog's work status record. Read here so a malformed
+  // TORCH_NCCL2_WORK_STATUS_PERIOD_MS (a test hook) fails construction rather
+  // than stopping the watchdog.
+  const std::chrono::milliseconds work_status_period_;
 
   c10::intrusive_ptr<Options> options_c10d_;
 

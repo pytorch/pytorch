@@ -11,6 +11,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -332,6 +334,56 @@ void ProcessGroupNCCL::checkWorkQueue() {
   }
 }
 
+void ProcessGroupNCCL::logWorkStatus() {
+  const auto status = workq_.status();
+  const auto& desc = getGroupDesc();
+  // Legacy createLogPrefix() format; TC_LOG without a comm adds only "[TC]".
+  const bool has_desc = !desc.empty() && desc != "undefined";
+  TC_LOG(INFO) << "[PG ID " << local_id_ << " PG GUID " << getGroupUid()
+               << (has_desc ? "(" + desc + ")" : "") << " Rank " << rank_
+               << "] NCCL Work update periodically: "
+               << "last enqueued NCCL work: " << status.enqueued.seq
+               << ", last completed NCCL work: " << status.completed.seq << ".";
+  auto logger = ::c10d::C10dLogger::getLogger();
+  if (!logger) {
+    return;
+  }
+  int64_t global_rank = rank_;
+  const auto& global_ranks = options_c10d_->global_ranks_in_group;
+  if (static_cast<size_t>(rank_) < global_ranks.size()) {
+    global_rank = static_cast<int64_t>(global_ranks[rank_]);
+  }
+  ::c10d::C10dLoggingData data;
+  // Same keys as legacy ProcessGroupNCCL's work status record.
+  data.integers["pg_id"] = static_cast<int64_t>(local_id_);
+  data.integers["rank"] = rank_;
+  data.integers["global_rank"] = global_rank;
+  const std::pair<const char*, const WorkNCCLQueue::StatusEntry&> entries[] = {
+      {"enqueued", status.enqueued},
+      {"started", status.started},
+      {"completed", status.completed},
+  };
+  for (const auto& [kind, entry] : entries) {
+    const std::string prefix = std::string("last_") + kind;
+    data.integers[prefix + "_work"] = entry.seq;
+    data.integers[prefix + "_numel_in"] = entry.numelIn;
+    data.integers[prefix + "_numel_out"] = entry.numelOut;
+    data.strings[prefix + "_work_name"] = entry.name;
+  }
+  data.strings["pg_name"] = getGroupUid();
+  data.strings["pg_desc"] = desc;
+  // This runs on the watchdog thread, which nothing else monitors: a logger
+  // that blocks stalls timeout and error detection and abort(), which joins
+  // the watchdog, and one that throws must not stop the watchdog.
+  try {
+    logger->log(data);
+  } catch (const std::exception& e) {
+    TC_LOG(WARNING, this) << "Failed to log work status: " << e.what();
+  } catch (...) {
+    TC_LOG(WARNING, this) << "Failed to log work status: unknown exception";
+  }
+}
+
 // Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
@@ -345,6 +397,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
     c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
+    auto last_status_update = std::chrono::steady_clock::now();
     while (!shutdown_) {
       {
         std::unique_lock<std::mutex> lock(timeout_mutex_);
@@ -373,6 +426,11 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       checkWorkQueue();
       if (shutdown_) {
         break;
+      }
+      if (std::chrono::steady_clock::now() - last_status_update >=
+          work_status_period_) {
+        logWorkStatus();
+        last_status_update = std::chrono::steady_clock::now();
       }
       if (comm_state_ != CommState::NORMAL) {
         handleWatchdogFailure(

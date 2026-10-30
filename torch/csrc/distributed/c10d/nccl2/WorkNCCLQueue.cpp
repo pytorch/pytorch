@@ -22,6 +22,22 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
 
       // Use the checkStatus function to determine the work status
       WorkNCCL::WorkStatus status = work.state->checkStatus();
+      const auto& state = *work.state;
+      const StatusEntry entry{
+          work.statusSeq, state.statusName, state.numelIn, state.numelOut};
+
+      // A work is checked until it completes, so only record its start once.
+      if ((status == WorkNCCL::WorkStatus::INPROGRESS ||
+           status == WorkNCCL::WorkStatus::COMPLETED) &&
+          status_.started.seq < entry.seq) {
+        status_.started = entry;
+      }
+
+      // Queues are walked in stream order, not enqueue order.
+      if (status == WorkNCCL::WorkStatus::COMPLETED &&
+          status_.completed.seq < entry.seq) {
+        status_.completed = entry;
+      }
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
         completed.push_back(work.state);
@@ -120,12 +136,21 @@ void WorkNCCLQueue::enqueueWork(
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
     completedInputTensors.swap(completedInputTensors_);
-    stream_work_queues_[stream].push({work->state_, work->inputTensors_});
+    const auto& state = *work->state_;
+    status_.enqueued = {
+        ++numEnqueued_, state.statusName, state.numelIn, state.numelOut};
+    stream_work_queues_[stream].push(
+        {work->state_, work->inputTensors_, numEnqueued_});
   }
   while (!completedInputTensors.empty()) {
     completedInputTensors.front()->clear();
     completedInputTensors.pop();
   }
+}
+
+WorkNCCLQueue::Status WorkNCCLQueue::status() {
+  std::lock_guard<std::mutex> lock(work_queues_mutex_);
+  return status_;
 }
 
 } // namespace c10d::nccl2

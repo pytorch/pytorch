@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils.cpp_extension import load_inline
 
 
 try:
@@ -2689,13 +2690,104 @@ dist.distributed_c10d._abort_process_group()
 _WORK_EXCEPTION_KEY = "PYTORCH_API_USAGE ProcessGroupNCCL.WorkNCCL.handleException"
 
 
+_STATUS_LOGGER_MODULE = "nccl2_work_status_logger"
+
+# A C10dLogger can only be registered from C++.
+_STATUS_LOGGER_SOURCE = """
+#include <torch/csrc/distributed/c10d/logger.hpp>
+
+#include <pybind11/stl.h>
+
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+
+namespace {
+
+std::mutex mutex;
+std::condition_variable cv;
+std::vector<c10d::C10dLoggingData> records;
+
+struct CapturingLogger : c10d::C10dLogger {
+  CapturingLogger() : c10d::C10dLogger("test") {}
+
+  void log(const c10d::C10dLoggingData& data) override {
+    if (!data.integers.count("last_enqueued_work")) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      records.push_back(data);
+    }
+    cv.notify_all();
+  }
+};
+
+} // namespace
+
+void install() {
+  c10d::C10dLogger::registerLogger(std::make_unique<CapturingLogger>());
+}
+
+// Waits for a work status record of pg_name that shows a work enqueued after
+// `after` and, if `idle`, every enqueued work completed, else the last one
+// pending.
+std::pair<std::map<std::string, std::string>, std::map<std::string, int64_t>>
+wait_record(const std::string& pg_name, int64_t after, bool idle) {
+  pybind11::gil_scoped_release no_gil;
+  std::unique_lock<std::mutex> lock(mutex);
+  std::pair<std::map<std::string, std::string>, std::map<std::string, int64_t>>
+      result;
+  const bool found = cv.wait_for(lock, std::chrono::minutes(2), [&] {
+    for (const auto& r : records) {
+      const auto enqueued = r.integers.at("last_enqueued_work");
+      const auto completed = r.integers.at("last_completed_work");
+      if (r.strings.at("pg_name") == pg_name && enqueued > after &&
+          (idle ? completed == enqueued : completed < enqueued)) {
+        result = {r.strings, r.integers};
+        return true;
+      }
+    }
+    return false;
+  });
+  TORCH_CHECK(found, "no matching work status record for ", pg_name);
+  return result;
+}
+"""
+
+_WORK_STATUS_PRELUDE = f"""
+import json
+
+import {_STATUS_LOGGER_MODULE} as status_logger
+
+status_logger.install()
+last_seq = {{}}
+
+
+def record(pg, op, idle=True):
+    if idle:
+        torch.cuda.synchronize()
+    strings, integers = status_logger.wait_record(pg, last_seq.get(pg, 0), idle)
+    if idle:
+        last_seq[pg] = integers["last_enqueued_work"]
+    print("STATUS", json.dumps({{"op": op, **strings, **integers}}), flush=True)
+
+
+"""
+
+
 class ProcessGroupNCCL2TelemetryTest(TestCase):
-    def _run_ranks(self, body: str, reconfigurable: bool = False) -> str:
-        """Runs ``body`` on two ranks and returns rank 0's output."""
+    _status_logger_dir: str | None = None
+
+    def _run_all_ranks(
+        self, body: str, reconfigurable: bool = False, env: dict[str, str] | None = None
+    ) -> list[str]:
+        """Runs ``body`` on two ranks and returns their outputs."""
         env = {
             **os.environ,
             "PYTORCH_API_USAGE_STDERR": "1",
             "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            **(env or {}),
         }
         with tempfile.TemporaryDirectory() as tmp:
             store_path = os.path.join(tmp, "store")
@@ -2704,7 +2796,45 @@ class ProcessGroupNCCL2TelemetryTest(TestCase):
                 _TELEMETRY_PRELUDE + body + _TELEMETRY_EPILOGUE,
                 [[str(rank), store_path, str(int(reconfigurable))] for rank in (0, 1)],
                 env,
-            )[0]
+            )
+
+    def _run_ranks(self, body: str, reconfigurable: bool = False) -> str:
+        """Runs ``body`` on two ranks and returns rank 0's output."""
+        return self._run_all_ranks(body, reconfigurable)[0]
+
+    def _run_work_status(self, body: str) -> tuple[list[str], list[list[dict]]]:
+        """Runs ``body`` with a capturing C10dLogger and returns each rank's
+        output and the work status records it printed with ``record()``."""
+        cls = type(self)
+        if cls._status_logger_dir is None:
+            # Built once and shared by the tests of this class.
+            build_dir = cls.enterClassContext(tempfile.TemporaryDirectory())
+            load_inline(
+                name=_STATUS_LOGGER_MODULE,
+                cpp_sources=_STATUS_LOGGER_SOURCE,
+                functions=["install", "wait_record"],
+                build_directory=build_dir,
+            )
+            cls._status_logger_dir = build_dir
+        outs = self._run_all_ranks(
+            _WORK_STATUS_PRELUDE + body,
+            env={
+                "PYTHONPATH": os.pathsep.join(
+                    [cls._status_logger_dir, os.environ.get("PYTHONPATH", "")]
+                ),
+                # Log the work status on every watchdog pass (~1s).
+                "TORCH_NCCL2_WORK_STATUS_PERIOD_MS": "0",
+                "TORCH_CPP_LOG_LEVEL": "INFO",
+            },
+        )
+        return outs, [
+            [
+                json.loads(line.removeprefix("STATUS "))
+                for line in out.splitlines()
+                if line.startswith("STATUS ")
+            ]
+            for out in outs
+        ]
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
@@ -2777,6 +2907,136 @@ if rank == 0:
         self.assertNotIn(_WORK_EXCEPTION_KEY, out[:aborted])
         self.assertIn(_WORK_EXCEPTION_KEY, out[aborted:])
         self.assertRegex(out[aborted:], r"WAIT_ERROR .*timed out")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_status_record(self) -> None:
+        outs, records = self._run_work_status(
+            """
+peer = 1 - rank
+pg = dist.group.WORLD.group_name
+
+
+def ones(n):
+    return torch.ones(n, device=device)
+
+
+warm_up()
+record(pg, "all_reduce")
+if rank == 0:
+    dist.send(ones(4), peer)
+else:
+    dist.recv(ones(4), peer)
+record(pg, "p2p")
+dist.all_gather([ones(3), ones(3)], ones(3))
+record(pg, "all_gather")
+dist.all_gather([ones(3), ones(2)], ones(3 - rank))
+record(pg, "all_gather_uneven")
+dist.reduce_scatter(ones(3), [ones(3), ones(3)])
+record(pg, "reduce_scatter")
+dist.reduce_scatter(ones(3 - rank), [ones(3), ones(2)])
+record(pg, "reduce_scatter_uneven")
+dist.all_to_all([ones(2), ones(2)], [ones(2), ones(2)])
+record(pg, "all_to_all")
+dist.scatter(ones(5), [ones(5), ones(5)] if rank == 0 else None, src=0)
+record(pg, "scatter")
+dist.gather(ones(5), [ones(5), ones(5)] if rank == 0 else None, dst=0)
+record(pg, "gather")
+for work in dist.batch_isend_irecv(
+    [dist.P2POp(dist.isend, ones(2), peer), dist.P2POp(dist.irecv, ones(2), peer)]
+):
+    work.wait()
+record(pg, "batch_p2p")
+dist.barrier()
+record(pg, "barrier")
+# Rank 1 holds back, so rank 0's all_reduce stays enqueued but not completed.
+if rank == 0:
+    work = dist.all_reduce(ones(1), async_op=True)
+    record(pg, "pending", idle=False)
+    store.set("release", "1")
+    work.wait()
+else:
+    store.wait(["release"])
+    dist.all_reduce(ones(1))
+record(pg, "released")
+"""
+        )
+        (pending,) = [r for r in records[0] if r["op"] == "pending"]
+        records[0].remove(pending)
+        self.assertEqual(pending["last_enqueued_work_name"], "ALLREDUCE")
+        self.assertEqual(
+            pending["last_completed_work"], pending["last_enqueued_work"] - 1
+        )
+        # Legacy ProcessGroupNCCL names and numels: (name, numel in, numel out).
+        expected = {
+            "all_reduce": ("ALLREDUCE", 1, 1),
+            "p2p": (("SEND", 4, 4), ("RECV", 4, 4)),
+            "all_gather": ("ALLGATHER", 3, 6),
+            # Uneven all_gather runs as a coalesced batch without numels.
+            "all_gather_uneven": ("ALLGATHER", 0, 0),
+            "reduce_scatter": ("REDUCE_SCATTER", 6, 3),
+            "reduce_scatter_uneven": ("REDUCE_SCATTER", 0, 0),
+            "all_to_all": ("ALLTOALL", 4, 4),
+            "scatter": (("SCATTER", 5, 10), ("SCATTER", 5, 0)),
+            "gather": (("GATHER", 5, 10), ("GATHER", 5, 0)),
+            "batch_p2p": ("COALESCED", 0, 0),
+            "barrier": ("ALLREDUCE", 1, 1),
+            "released": ("ALLREDUCE", 1, 1),
+        }
+        for rank, rank_records in enumerate(records):
+            self.assertEqual([r["op"] for r in rank_records], list(expected))
+            prev = 0
+            for r in rank_records:
+                op = r["op"]
+                name, numel_in, numel_out = (
+                    expected[op][rank]
+                    if isinstance(expected[op][0], tuple)
+                    else expected[op]
+                )
+                seq = r["last_enqueued_work"]
+                # batch_isend_irecv may enqueue several works; every other op
+                # enqueues exactly one, p2p included.
+                if op == "batch_p2p":
+                    self.assertGreater(seq, prev, op)
+                else:
+                    self.assertEqual(seq, prev + 1, op)
+                prev = seq
+                for kind in ("enqueued", "started", "completed"):
+                    self.assertEqual(r[f"last_{kind}_work"], seq, (op, kind))
+                    self.assertEqual(r[f"last_{kind}_work_name"], name, (op, kind))
+                    self.assertEqual(r[f"last_{kind}_numel_in"], numel_in, (op, kind))
+                    self.assertEqual(r[f"last_{kind}_numel_out"], numel_out, (op, kind))
+                self.assertEqual(r["rank"], rank)
+                self.assertEqual(r["global_rank"], rank)
+                self.assertEqual(r["pg_desc"], "default_pg")
+        self.assertRegex(
+            outs[0],
+            r"\[PG ID \d+ PG GUID 0\(default_pg\) Rank 0\] NCCL Work update "
+            r"periodically: last enqueued NCCL work: \d+, last completed NCCL "
+            r"work: \d+\.",
+        )
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_work_status_record_shrink_global_rank(self) -> None:
+        _, records = self._run_work_status(
+            """
+group = dist.new_group(device_id=device)
+dist.barrier(group=group)
+if rank == 0:
+    dist.destroy_process_group(group)
+else:
+    shrunk = dist.shrink_group([0], group=group)
+    dist.all_reduce(torch.ones(1, device=device), group=shrunk)
+    record(shrunk.group_name, "shrunk")
+"""
+        )
+        (r,) = records[1]
+        self.assertEqual(r["rank"], 0)
+        self.assertEqual(r["global_rank"], 1)
 
 
 if __name__ == "__main__":
