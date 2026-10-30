@@ -504,23 +504,13 @@ class MixOrderReduction:
             # fully cached by L2
             size_thres = 5 * 2**20
 
-            # Call evaluate_expr rather than statically_known_geq since nrow can
-            # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow * ncol, size_thres),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow, 4096)):
                 return False
 
         # Equal groups can be true square inner+outer reductions, but also
@@ -5976,8 +5966,8 @@ class Scheduler:
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_real_name = {"buf0" : "buf1"}
-        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        # mutation_real_name = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_real_name: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
@@ -5986,8 +5976,8 @@ class Scheduler:
         #                   (changed once per mutation)
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_renames = {"buf1" : "buf0"}
-        # in codegen we only use buf0, never buf1
+        # mutation_renames = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_renames: dict[str, str] = {}
 
         self.seen_template_fusions: OrderedSet[
