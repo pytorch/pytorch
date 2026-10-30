@@ -2103,13 +2103,13 @@ class TestSparseCSR(TestCase):
                 # Here, m1 is lower-triangular, while m1 @ m2 is not
                 m1 = torch.randn(10, 10, device=device).to(dtype).tril()
                 m2 = torch.randn(10, 10, device=device).to(dtype)
-                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
+                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=beta, layout=layout, mode="all_sparse")
 
                 # Test sp(C) == sp(A @ B), where sp denotes a sparse pattern
                 # Here, m1 is lower-triangular, so is m2, and so is (m1 @ m2)
                 m1 = torch.randn(10, 10, device=device).to(dtype).tril()
                 m2 = torch.randn(10, 10, device=device).to(dtype).tril()
-                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
+                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=beta, layout=layout, mode="all_sparse")
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
