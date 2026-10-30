@@ -242,6 +242,47 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("op_name", ("i0", "i1"))
+    @parametrize("upcast", (False, True))
+    def test_bessel_opmath(self, device, dtype, numerics, op_name, upcast):
+        x = _exhaustive_16bit(dtype, device)
+        fn = getattr(torch.special, op_name)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(x)
+        self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
+
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "op_name",
+        (
+            "i0",
+            "i1",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+        ),
+    )
+    def test_bessel_branch_boundaries(self, device, dtype, numerics, op_name):
+        centers = torch.tensor(
+            [-8.0, -5.0, -0.0, 0.0, 1e-5, 5.0, 8.0, 88.0],
+            device=device,
+            dtype=dtype,
+        ).view(torch.int32)
+        bits = centers[:, None] + torch.arange(-8, 9, device=device, dtype=torch.int32)
+        x = torch.cat((bits.flatten().view(dtype), _min_max_specials(dtype, device)))
+        fn = getattr(torch.special, op_name)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize(
@@ -1941,9 +1982,6 @@ POINTWISE_XFAIL = frozenset(
         ("float_power", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
-        ("i0", "bfloat16"),
-        ("i0", "float16"),
-        ("i0", "float32"),
         ("mvlgamma_mvlgamma_p_1", "bfloat16"),
         ("mvlgamma_mvlgamma_p_1", "float16"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
@@ -1953,17 +1991,8 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "bfloat16"),
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("special_bessel_j0", "float32"),
-        ("special_bessel_j1", "float32"),
-        ("special_bessel_y0", "float32"),
-        ("special_bessel_y1", "float32"),
         ("special_erfcx", "float32"),
-        ("special_i1", "bfloat16"),
-        ("special_i1", "float16"),
-        ("special_i1", "float32"),
         ("special_log_ndtr", "float32"),
-        ("special_modified_bessel_i0", "float32"),
-        ("special_modified_bessel_i1", "float32"),
     }
 )
 
@@ -1972,23 +2001,11 @@ BACKWARD_XFAIL = frozenset(
         ("float_power", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
-        ("i0", "bfloat16"),
-        ("i0", "float16"),
-        ("i0", "float32"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
         ("mvlgamma_mvlgamma_p_3", "float32"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("special_bessel_j0", "float32"),
-        ("special_bessel_j1", "float32"),
-        ("special_bessel_y0", "float32"),
-        ("special_bessel_y1", "float32"),
         ("special_erfcx", "float32"),
-        ("special_i1", "bfloat16"),
-        ("special_i1", "float16"),
-        ("special_i1", "float32"),
         ("special_log_ndtr", "float32"),
-        ("special_modified_bessel_i0", "float32"),
-        ("special_modified_bessel_i1", "float32"),
     }
 )
 
@@ -2002,6 +2019,14 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "i0",
+        "special_bessel_j0",
+        "special_bessel_j1",
+        "special_bessel_y0",
+        "special_bessel_y1",
+        "special_i1",
+        "special_modified_bessel_i0",
+        "special_modified_bessel_i1",
         "addcmul",
         "deg2rad",
         "erf",
