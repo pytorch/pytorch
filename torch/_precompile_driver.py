@@ -1017,7 +1017,12 @@ def _build_installed_forward():
 
     def forward(*args, **kwargs):
         try:
-            return compiled(*args, **kwargs)
+            if not _ALLOW_SERVE_TIME_COMPILES:
+                return compiled(*args, **kwargs)
+            # A serve-time compile traces as the capture's calls did: Dynamo reads
+            # triton.cudagraphs while tracing (it specializes floats under it).
+            with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
+                return compiled(*args, **kwargs)
         except _RecompileRefusedError as _e:
             raise _PrecompileError(
                 f"precompile: no captured variant matches this call. Either a "

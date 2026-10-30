@@ -6456,6 +6456,22 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+def reads_the_cudagraph_flag(model, x):
+    if not torch._inductor.config.triton.cudagraphs:
+        raise AssertionError("traced outside the capture's CUDA graph config")
+    return breaking_helper(model(x))
+
+
+def overrides_the_backward(model, x):
+    with torch._dynamo.override_cudagraphs(bwd=False):
+        return step(model, x)
+
+
+def overrides_the_forward(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=False):
+        return step(model, x)
+
+
 def bumps_a_buffer(model, x):
     model.calls.add_(1)
     return model(x).sin()
@@ -6534,6 +6550,11 @@ class TestPrecompileCudagraphs(TestCase):
         self.addCleanup(sys.modules.pop, self.module_name, None)
         self.model = self.mod.Model().cuda()
         self.x = torch.randn(4, 8, device="cuda")
+        from torch._inductor.utils import fresh_cache
+
+        # Some CUDA graph decisions (force_disable_cudagraph_TESTING_ONLY) are made
+        # only by a fresh compile and are not in the cache key.
+        self.enterContext(fresh_cache())
 
     def _capture_step(self, fn, grad=False, **kwargs):
         with torch.set_grad_enabled(grad):
@@ -6621,6 +6642,16 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, _ = self._serve_in_fresh_process(expected, x=miss, serve_time=True)
         self.assertGreater(recorded, 0)
 
+    def test_a_serve_time_compile_traces_under_the_capture_cudagraph_config(self):
+        fn = self.mod.reads_the_cudagraph_flag
+        # Reading the flag guards on it, a guard the artifact drops.
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        self._capture_step(fn, mode="reduce-overhead", tracer=tracer)
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad(), torch._inductor.config.patch({"triton.cudagraphs": True}):
+            expected = fn(self.model, miss)
+        self._serve_in_fresh_process(expected, x=miss, serve_time=True)
+
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.step, grad=True, options=options)
@@ -6643,6 +6674,20 @@ class TestPrecompileCudagraphs(TestCase):
         grad = self.model.lin.weight.grad.clone()
         recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
         self.assertEqual(recorded, 1)
+
+    @parametrize("graph", ["forward", "backward"])
+    def test_a_graph_an_override_kept_out_of_cudagraphs_serves_without_one(self, graph):
+        # The override compiles the graph without CUDA graphs, though
+        # CUDAGRAPH_CONFIG turns them on for the rest.
+        fn = getattr(self.mod, f"overrides_the_{graph}")
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(fn, grad=True, options=options)
+        self.model.zero_grad(set_to_none=True)
+        fn(self.model, self.x).sum().backward()
+        grad = self.model.lin.weight.grad.clone()
+        recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
+        # A forward kept out keeps its backward out too.
+        self.assertEqual(recorded, 1 if graph == "backward" else 0)
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}

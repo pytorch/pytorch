@@ -4303,7 +4303,10 @@ def load(
     exactly when its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading
     process's ``torch._inductor.config.triton.cudagraphs``,
     ``triton.cudagraph_trees`` and ``graph_partition`` say; the rest of the
-    CUDA graph config is the loading process's. A serve-time compile
+    CUDA graph config is the loading process's. The record is the capture's, not
+    each graph's: a graph :func:`torch._dynamo.override_cudagraphs` kept out of
+    CUDA graphs runs without one, but one it turned on while the capture's
+    ``triton.cudagraphs`` was off is served without one. A serve-time compile
     (``allow_serve_time_compiles``) takes the capture's ``mode`` or
     ``options`` and ``CUDAGRAPH_CONFIG`` over the loading process's config, so
     it compiles CUDA graphs exactly when the captured graphs do.
