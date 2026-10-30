@@ -1021,6 +1021,130 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertEqual(ref, res)
 
+    def test_linalg_inv_singular_in_try_except(self):
+        # Data-dependent error: fake tracing succeeds for a square input,
+        # so without a graph break the handler would be dropped and the
+        # error would escape at runtime instead of reaching the except.
+        def fn(x):
+            try:
+                return torch.linalg.inv(x)
+            except RuntimeError:
+                return torch.linalg.pinv(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_inv_singular_in_try_except_linalg_error(self):
+        def fn(x):
+            try:
+                return torch.linalg.inv(x)
+            except torch.linalg.LinAlgError:
+                return torch.linalg.pinv(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_inverse_singular_in_try_except(self):
+        # torch.inverse fails with the same linalg.inv error and goes through
+        # the same call funnel, so it needs the same graph break.
+        def fn(x):
+            try:
+                return torch.inverse(x)
+            except RuntimeError:
+                return torch.linalg.pinv(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_inverse_singular_in_try_except_linalg_error(self):
+        def fn(x):
+            try:
+                return torch.inverse(x)
+            except torch.linalg.LinAlgError:
+                return torch.linalg.pinv(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_cholesky_non_pd_in_try_except(self):
+        def fn(x):
+            try:
+                return torch.linalg.cholesky(x)
+            except RuntimeError:
+                return torch.eye(x.shape[0])
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.tensor([[-1.0, 0.0], [0.0, 1.0]])
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_cholesky_non_pd_in_try_except_linalg_error(self):
+        def fn(x):
+            try:
+                return torch.linalg.cholesky(x)
+            except torch.linalg.LinAlgError:
+                return torch.eye(x.shape[0])
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.tensor([[-1.0, 0.0], [0.0, 1.0]])
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_inv_in_try_except_with_preceding_op(self):
+        def fn(x):
+            y = x + 1
+            try:
+                return torch.linalg.inv(y)
+            except RuntimeError:
+                return torch.linalg.pinv(y)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_inv_in_try_except_via_helper(self):
+        def helper(x):
+            return torch.linalg.inv(x)
+
+        def fn(x):
+            try:
+                return helper(x)
+            except RuntimeError:
+                return torch.linalg.pinv(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_linalg_inv_singular_without_try_still_raises(self):
+        def fn(x):
+            return torch.linalg.inv(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(2, 2)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            fn(x)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            opt_fn(x)
+
     def test_runtime_error_graph_break(self):
         cnt = CompileCounter()
 

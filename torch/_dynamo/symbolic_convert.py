@@ -1757,7 +1757,53 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn is not None and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+        result = fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
+        if (
+            inner_fn is torch.linalg.inv
+            or inner_fn is torch.linalg.cholesky
+            or inner_fn is torch.inverse
+        ):
+            # The call may be inlined from a helper whose own frame has no
+            # try, while the caller's call site sits inside one, so walk the
+            # translator chain. Any enclosing try region means a runtime
+            # error would escape the handler in the compiled graph.
+            tx: InstructionTranslatorBase | None = self
+            in_try = False
+            while tx is not None:
+                inst = getattr(tx, "current_instruction", None)
+                if inst is not None and inst.exn_tab_entry is not None:
+                    in_try = True
+                    break
+                tx = tx.parent
+            if in_try:
+                # Fake-tensor tracing cannot see data-dependent errors, so a call
+                # to inv/inverse/cholesky inside a try region traces successfully
+                # even when the real input would fail (singular matrix,
+                # non-positive-definite input). torch.inverse fails with the same
+                # linalg.inv error, so it is covered too. The compiled graph then
+                # drops the handler and the error escapes at runtime instead of
+                # reaching the except block (#202732).
+                # Break the graph so the try region runs eagerly, where the handler
+                # works. Errors fake tracing does catch (e.g. non-square input)
+                # still take the handler path, since the call raises before here.
+                unimplemented(
+                    gb_type="Data-dependent exception in try block",
+                    context=f"called {inner_fn.__name__} inside a try block",
+                    explanation=(
+                        "Dynamo cannot trace an exception handler for errors "
+                        "that depend on tensor data (for example, a singular "
+                        "matrix for torch.linalg.inv or torch.inverse, or a "
+                        "non-positive-definite input for torch.linalg.cholesky): "
+                        "fake-tensor tracing succeeds, so the compiled graph "
+                        "would drop the handler and the error would escape at "
+                        "runtime instead of reaching the except block. "
+                        "Graph-breaking so the try region runs eagerly."
+                    ),
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+        self.push(result)
 
     def inline_generator_function(
         self,
