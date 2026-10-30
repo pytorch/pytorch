@@ -119,6 +119,8 @@ class PackedSequence(PackedSequence_):
         if data is self.data:
             return self
         else:
+            # round only applies to data; the indices are integers.
+            kwargs.pop("round", None)
             _device, _dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
                 *args, **kwargs
             )

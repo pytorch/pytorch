@@ -960,14 +960,15 @@ Tensor to_dtype_layout_batching_rule(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     bool non_blocking, bool copy,
-    std::optional<MemoryFormat> memory_format) {
+    std::optional<MemoryFormat> memory_format,
+    std::optional<std::string_view> round) {
   auto options = TensorOptions()
     .dtype(dtype)
     .layout(layout)
     .device(device)
     .pinned_memory(pin_memory);
   auto* input_batched = unsafeGetBatchedImpl(self);
-  auto output_physical = input_batched->value().to(options, non_blocking, copy, memory_format);
+  auto output_physical = input_batched->value().to(options, non_blocking, copy, memory_format, round);
   auto old_bdims = input_batched->bdims();
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
@@ -1178,9 +1179,9 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
     m.impl(name, unwrap_and_call_method< \
         to_type, &Tensor::to, __VA_ARGS__>);\
   }
-  TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, std::optional<MemoryFormat>)
-  TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, std::optional<MemoryFormat>)
-  TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, std::optional<MemoryFormat>)
+  TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, std::optional<MemoryFormat>, std::optional<std::string_view>)
+  TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, std::optional<MemoryFormat>, std::optional<std::string_view>)
+  TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, std::optional<MemoryFormat>, std::optional<std::string_view>)
   m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);

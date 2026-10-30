@@ -1025,6 +1025,14 @@ class TensorExprFuser {
       if (has_unsupported_pin_memory(node)) {
         return false;
       }
+
+      // NNC's cast always rounds to nearest even.
+      if (const auto round_index =
+              node->schema().argumentIndexWithName("round")) {
+        if (!toIValue(node->input(*round_index))->isNone()) {
+          return false;
+        }
+      }
     }
 
     if (node->kind() == aten::_autocast_to_reduced_precision ||
