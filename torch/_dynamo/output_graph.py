@@ -2542,16 +2542,22 @@ class OutputGraph(OutputGraphCommon):
                 # `CellVariable.local_name`.
                 freevars = tuple(sorted(cur_tx.cell_and_freevars()))
                 for cell in freevars:
+                    cell_var = cur_tx._cellvar(cell)
+                    if (
+                        isinstance(cell_var, variables.CellVariable)
+                        and cell_var.linked_cell is not None
+                    ):
+                        # A class built during tracing closes over this cell
+                        # (see SideEffects.track_cell_alias). The resumed code
+                        # could bind it to a value that differs between calls
+                        # without the check in store_cell, so retrace and
+                        # graph break at the class statement instead.
+                        tx.speculation_log.graph_break_on_cell_alias = True
+                        raise exc.CellAliasRestartAnalysis(
+                            restart_reason="graph break with a class closure cell alias"
+                        )
                     if cur_tx is self.root_tx:  # root frame
-                        cell_var = cur_tx._cellvar(cell)
-                        if not isinstance(cell_var, variables.CellVariable):
-                            raise AssertionError(
-                                f"Expected CellVariable, got {type(cell_var)}"
-                            )
-                        if cell_var.linked_cell is not None:
-                            cg(cell_var.linked_cell)
-                        else:
-                            cg.append_output(cg.create_load_closure(cell))
+                        cg.append_output(cg.create_load_closure(cell))
                     else:  # nested frame
                         if not cur_tx.post_prune_cell_and_freevars:
                             raise AssertionError(

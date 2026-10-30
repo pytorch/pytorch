@@ -359,6 +359,10 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    # If True, don't hand classes built by __build_class__ alias cells for
+    # names bound later, so the class statement graph breaks. Set when such a
+    # name is later bound to a value that can differ between calls.
+    graph_break_on_cell_alias: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -2379,6 +2383,25 @@ class InstructionTranslatorBase(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
         cell = self._cellvar(inst.argval)
+        # A pre-existing cell that is still empty, e.g. a free variable bound
+        # later by the enclosing function or the closure of a method of a
+        # class built during tracing (see SideEffects.track_cell_alias).
+        if (
+            isinstance(cell, variables.CellVariable)
+            and isinstance(cell.pre_existing_contents, variables.DeletedVariable)
+            and not self.output.side_effects.has_pending_mutation_of_attr(
+                cell, "cell_contents"
+            )
+        ):
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[
+                    f"cannot access free variable '{inst.argval}' where it is "
+                    "not associated with a value in enclosing scope"
+                ],
+                kwargs={"name": ConstantVariable.create(inst.argval)},
+            )
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 

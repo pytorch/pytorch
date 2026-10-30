@@ -18551,8 +18551,9 @@ fn
         cnt = torch._dynamo.testing.CompileCounter()
         compiled_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(compiled_fn(t), fn(t))
-        # Only the explicit graph break splits the frame, not the class.
-        self.assertEqual(cnt.frame_count, 2)
+        # The class statement graph breaks too, since the code resumed after
+        # the explicit graph break could bind `value` to anything.
+        self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 3)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
@@ -18640,10 +18641,30 @@ fn
         self.assertEqual(outer(t), (t + 1, 2, 2))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name_read_before_bound(self):
+        def fn(t):
+            class C:
+                def get(self):
+                    return value
+
+            try:
+                C().get()
+            except NameError as e:
+                t = t + 1
+                name = e.name
+            value = 2
+            return t + C().get(), name
+
+        t = torch.tensor(0.0)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_closure_unbound_name_shared_across_calls(self):
-        # Known limitation: the class is built once at trace time and reused
-        # by every call of the compiled code, and so is the cell its methods
-        # close over. CPython creates a fresh class and cell per call.
+        # The class is built once at trace time and reused by every call of
+        # the compiled code, and so is the cell its methods close over. A
+        # value that differs per call must not end up in that cell: the class
+        # statement graph breaks instead and runs on every call, like CPython.
         def fn(t):
             class C:
                 def get(self):
@@ -18652,11 +18673,61 @@ fn
             value = t + 1
             return C
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Non-constant store to a class closure cell"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
+
+        compiled_fn = torch.compile(fn, backend="eager")
         cls1 = compiled_fn(torch.tensor(1.0))
         cls2 = compiled_fn(torch.tensor(2.0))
-        self.assertIs(cls1, cls2)
-        self.assertEqual(cls1().get(), torch.tensor(3.0))
+        self.assertIsNot(cls1, cls2)
+        self.assertEqual(cls1().get(), torch.tensor(2.0))
+        self.assertEqual(cls2().get(), torch.tensor(3.0))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name_store_after_graph_break(self):
+        # Code resumed after a graph break binds the name without the store
+        # check, so the class statement graph breaks as well.
+        def fn(t):
+            class C:
+                def get(self):
+                    return value
+
+            torch._dynamo.graph_break()
+            value = t + 1
+            return C
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        cls1 = compiled_fn(torch.tensor(1.0))
+        cls2 = compiled_fn(torch.tensor(2.0))
+        self.assertIsNot(cls1, cls2)
+        self.assertEqual(cls1().get(), torch.tensor(2.0))
+        self.assertEqual(cls2().get(), torch.tensor(3.0))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name_input_object(self):
+        # An input object is the same on every call that passes the ID_MATCH
+        # guard, so it may be stored in the shared cell.
+        class Obj:
+            pass
+
+        def fn(t, obj):
+            class C:
+                def get(self):
+                    return value
+
+            value = obj
+            return t + 1, C
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        obj1, obj2 = Obj(), Obj()
+        _, cls1 = compiled_fn(torch.tensor(0.0), obj1)
+        _, cls2 = compiled_fn(torch.tensor(0.0), obj2)
+        self.assertIs(cls1().get(), obj1)
+        self.assertIs(cls2().get(), obj2)
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_body_unbound_name(self):

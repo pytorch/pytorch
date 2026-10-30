@@ -6983,5 +6983,16 @@
         "Please open an issue."
       ]
     }
+  ],
+  "GB4604": [
+    {
+      "Gb_type": "Non-constant store to a class closure cell",
+      "Context": "cellvar: {cellvar}, value: {value}",
+      "Explanation": "A method of a class built during tracing closes over this name, and the class is reused by every call of the compiled code. Dynamo only supports binding the name to a Python constant or an unmodified input object.",
+      "Hints": [
+        "Bind the name before the class statement.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
