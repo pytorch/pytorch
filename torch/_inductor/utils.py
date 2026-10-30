@@ -2553,6 +2553,13 @@ def can_use_tma(
 
         return True
 
+    for m in matrices:
+        device = m.get_device()
+        if device is not None and device.type == "npu":
+            # triton-ascend only lowers in-kernel tl.make_tensor_descriptor;
+            # template kernels take host-side TensorDescriptor arguments,
+            # which the npu backend cannot compile.
+            return False
     return (
         has_triton_tma_device()
         and all(_is_tma_compatible_matrix(m) for m in matrices)
