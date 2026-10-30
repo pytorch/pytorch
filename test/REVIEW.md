@@ -7,26 +7,34 @@ duplicated execution and maximizing test reuse.
 
 ## When the rules apply
 
-**Scenario 1: Test-case refactoring** (all changed files are under `test/` or
-`torch/testing/`)
+**Scenario 1: Test-case refactoring**
 
 A test refactoring may be split across several PRs (even one file or one class
 may span multiple PRs), so the rules below may be too strict; developers may
 explain in PR Comments.
 
+- Conditions:
+  - All changed files are under `test/` or `torch/testing/`.
+  - **And** the PR title and description do not indicate that it is not a
+    test-case refactoring.
 - Rules:
   - Rule 1: One responsibility per test class
   - Rule 2: Correct `hw_classification` on every test class
   - Rule 3: Requirements for `GENERIC` classes
   - Rule 4: Requirements for `ACCELERATOR` classes
   - Rule 5: Requirements for `CPU`/`CUDA`/`MPS`/`XPU` classes
+  - Rule 6: Preserve test coverage
 - Scope: the test classes the change touches
 
-**Scenario 2: Other** (the PR also changes files outside `test/` or
-`torch/testing/`)
+**Scenario 2: Other**
 
 This is the everyday development case; to reduce impact on developers, apply
 the rules only to files not in the allowlist:
+
+- Conditions:
+  - The PR also changes files outside `test/` or `torch/testing/`.
+  - **Or** the PR title or description indicates that it is not a test-case
+    refactoring.
 
 - Case 1: the changed file is in `tools/linter/adapters/test_linter_allowlist.json`
   - Rules: none (not yet migrated; skip checking)
@@ -37,13 +45,16 @@ the rules only to files not in the allowlist:
     - Rule 3: Requirements for `GENERIC` classes
     - Rule 4: Requirements for `ACCELERATOR` classes
     - Rule 5: Requirements for `CPU`/`CUDA`/`MPS`/`XPU` classes
-    - Rule 6: Requirements for the migration allowlist
+    - Rule 6: Preserve test coverage
+    - Rule 7: Requirements for the migration allowlist
   - Scope: the whole file, not just the modified parts
 
 Notes:
 
 - The rules referenced below are defined in the following sections of this
 document; apply the rules listed for a case to the files named in its Scope.
+- The scenario is decided by the PR's changed files and its stated purpose
+  in the title or description, as specified in the Conditions above.
 
 ## Rule 1: One responsibility per test class
 
@@ -90,7 +101,7 @@ responsibilities map to HardwareClassification values as follows:
   - No device-related decorators:
     - `@skipCPUIf`, `@skipCUDAIf`, `@skipXPUIf`, `@skipGPUIf`,
       `@skipMPSIf`, `@skipPRIVATEUSE1If`
-    - `@onlyCPU`, `@onlyCUDA`, `@onlyMPS`, `@onlyXPU`, `onlyOn`
+    - `@onlyCPU`, `@onlyCUDA`, `@onlyMPS`, `@onlyXPU`, `@onlyOn`,
       `@onlyAccelerator`, `@onlyPRIVATEUSE1`, `@onlyNativeDeviceTypes`
     - `@dtypesIfCPU`, `@dtypesIfCUDA`, `@dtypesIfXPU`, `@dtypesIfMPS`,
       `@dtypesIfPRIVATEUSE1`
@@ -158,7 +169,13 @@ available accelerator, and every test receives the device under test via its
 No additional requirements; keeping the existing form or migrating to
 `instantiate_device_type_tests` instantiation are both acceptable.
 
-## Rule 6: Requirements for the migration allowlist
+## Rule 6: Preserve test coverage
+
+Modifying tests must not reduce their existing coverage without an explicit
+explanation. Any coverage reduction must be documented in the PR description
+with the reason for the change; an undocumented reduction is a finding.
+
+## Rule 7: Requirements for the migration allowlist
 
 `tools/linter/adapters/test_linter_allowlist.json` is the list of test files
 that do not yet meet these rules.
