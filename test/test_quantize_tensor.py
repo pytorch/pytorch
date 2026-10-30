@@ -282,7 +282,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = F.quantize_tensor(
             data_hp, **_MXFP8_KWARGS, swizzle_type=swizzle_type
         )
-        # Value equality is intentional; signs of zero and NaN need not match.
+        # Note: we are using assertEqual on float values instead of casting
+        # to uint8 to more clearly express intent and keep the code simple.
+        # This will not catch wrong signs on zero and NaN encodings, and that
+        # is an acceptable price to pay for simpler code.
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales, scales_ref)
