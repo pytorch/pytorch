@@ -1663,13 +1663,23 @@ def _get_object_coll_device(group: ProcessGroup | None = None) -> str:
         return devices[0].type
 
 
+def _get_object_coll_tensor_device(group: ProcessGroup | None = None) -> torch.device:
+    """Return ``group``'s bound device if its type matches ``_get_object_coll_device``, else that device type."""
+    group = group or _get_default_group()
+    device_type = _get_object_coll_device(group)
+    bound_device = getattr(group, "bound_device_id", None)
+    if bound_device is None or bound_device.type != device_type:
+        return torch.device(device_type)
+    return bound_device
+
+
 def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
     """
     .. note:: This method will be deprecated, it only stays for
         backward-compatibility reason. Alternatives:
 
         - If you need to find a device for object collectives, please use
-        `_get_object_coll_device(group)`.
+        `_get_object_coll_tensor_device(group)`.
 
         - If you need to query the device types supported by group, please use
         `_device_capability(group)`.
@@ -1692,7 +1702,7 @@ def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
     warnings.warn(
         "`_get_pg_default_device` will be deprecated, it only stays for "
         "backward-compatibility reason. If you need to find a device for object "
-        "collectives, please use `_get_object_coll_device`. If you need to query "
+        "collectives, please use `_get_object_coll_tensor_device`. If you need to query "
         "the device types supported by group, please use "
         "`_device_capability(group)`. ",
         stacklevel=2,
@@ -4530,10 +4540,16 @@ def all_gather_object(
 
     .. note:: For NCCL-based processed groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (``bound_device_id``) if set. ``device_id`` in ``init_process_group``
+        or ``new_group`` sets it, and subgroups of a bound group inherit it.
+        Else nccl2 (the default ``nccl`` implementation) sets it for each
+        group not created with ``enable_reconfigure=True``, except
+        ``split_group`` children, which copy their parent's. Otherwise it is
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``.
+        ``torch.cuda.set_device()``. Groups with a CPU backend (e.g.
+        ``cpu:gloo,cuda:nccl``) use CPU.
 
     .. warning::
         Object collectives have a number of serious performance and scalability
@@ -4565,7 +4581,7 @@ def all_gather_object(
         _warn_not_in_group("all_gather_object")
         return
 
-    current_device = _get_object_coll_device(group)
+    current_device = _get_object_coll_tensor_device(group)
     input_tensor, local_size = _object_to_tensor(
         obj, current_device, group, weights_only
     )
@@ -4636,10 +4652,16 @@ def gather_object(
 
     .. note:: For NCCL-based processed groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (``bound_device_id``) if set. ``device_id`` in ``init_process_group``
+        or ``new_group`` sets it, and subgroups of a bound group inherit it.
+        Else nccl2 (the default ``nccl`` implementation) sets it for each
+        group not created with ``enable_reconfigure=True``, except
+        ``split_group`` children, which copy their parent's. Otherwise it is
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``.
+        ``torch.cuda.set_device()``. Groups with a CPU backend (e.g.
+        ``cpu:gloo,cuda:nccl``) use CPU.
 
     .. warning::
         Object collectives have a number of serious performance and scalability
@@ -4683,7 +4705,7 @@ def gather_object(
     # Ensure object_gather_list is specified appropriately.
     my_group_rank = group.rank()
     _validate_output_list_for_rank(my_group_rank, group_dst, object_gather_list)
-    current_device = _get_object_coll_device(group)
+    current_device = _get_object_coll_tensor_device(group)
     input_tensor, local_size = _object_to_tensor(
         obj, current_device, group, weights_only
     )
@@ -4778,10 +4800,16 @@ def send_object_list(
 
     .. note:: For NCCL-based process groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (``bound_device_id``) if set. ``device_id`` in ``init_process_group``
+        or ``new_group`` sets it, and subgroups of a bound group inherit it.
+        Else nccl2 (the default ``nccl`` implementation) sets it for each
+        group not created with ``enable_reconfigure=True``, except
+        ``split_group`` children, which copy their parent's. Otherwise it is
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``.
+        ``torch.cuda.set_device()``. Groups with a CPU backend (e.g.
+        ``cpu:gloo,cuda:nccl``) use CPU.
 
     .. warning::
         Object collectives have a number of serious performance and scalability
@@ -4823,12 +4851,10 @@ def send_object_list(
         return
 
     # Current device selection.
-    # To preserve backwards compatibility, ``device`` is default to ``None``
-    # in which case we run current logic of device selection, i.e.
-    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
-    # case it is not ``None`` we move the size and object tensors to be
-    # sent to this device.
-    current_device = device or _get_object_coll_device(group)
+    # ``current_device`` is ``device`` if given, else the group's bound device
+    # if its type matches the object collective device type, else that device
+    # type. The size and object tensors to be sent are moved to this device.
+    current_device = device or _get_object_coll_tensor_device(group)
     # Serialize object_list elements to tensors on src rank.
     tensor_list, size_list = zip(
         *[
@@ -4847,7 +4873,7 @@ def send_object_list(
         send(object_sizes_tensor, group_dst=group_dst, group=group)
 
     # Concatenate and send serialized object tensors
-    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # Note: torch.cat will do an extra memory copy to ``current_device``, if the tensor_list
     # has only one element, we can skip the copy.
     if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
         object_tensor = tensor_list[0]
@@ -4904,10 +4930,16 @@ def recv_object_list(
 
     .. note:: For NCCL-based process groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (``bound_device_id``) if set. ``device_id`` in ``init_process_group``
+        or ``new_group`` sets it, and subgroups of a bound group inherit it.
+        Else nccl2 (the default ``nccl`` implementation) sets it for each
+        group not created with ``enable_reconfigure=True``, except
+        ``split_group`` children, which copy their parent's. Otherwise it is
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``.
+        ``torch.cuda.set_device()``. Groups with a CPU backend (e.g.
+        ``cpu:gloo,cuda:nccl``) use CPU.
 
     .. warning::
         Object collectives have a number of serious performance and scalability
@@ -4949,12 +4981,10 @@ def recv_object_list(
         return -1
 
     # Current device selection.
-    # To preserve backwards compatibility, ``device`` is default to ``None``
-    # in which case we run current logic of device selection, i.e.
-    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
-    # case it is not ``None`` we move the size and object tensors to be
-    # received to this device.
-    current_device = device or _get_object_coll_device(group)
+    # ``current_device`` is ``device`` if given, else the group's bound device
+    # if its type matches the object collective device type, else that device
+    # type. The size and object tensors to be received are moved to this device.
+    current_device = device or _get_object_coll_tensor_device(group)
     object_sizes_tensor = torch.empty(
         len(object_list), dtype=torch.long, device=current_device
     )
@@ -5053,10 +5083,16 @@ def broadcast_object_list(
 
     .. note:: For NCCL-based process groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (``bound_device_id``) if set. ``device_id`` in ``init_process_group``
+        or ``new_group`` sets it, and subgroups of a bound group inherit it.
+        Else nccl2 (the default ``nccl`` implementation) sets it for each
+        group not created with ``enable_reconfigure=True``, except
+        ``split_group`` children, which copy their parent's. Otherwise it is
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``.
+        ``torch.cuda.set_device()``. Groups with a CPU backend (e.g.
+        ``cpu:gloo,cuda:nccl``) use CPU.
 
     .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
@@ -5101,12 +5137,10 @@ def broadcast_object_list(
         return
 
     # Current device selection.
-    # To preserve backwards compatibility, ``device`` is default to ``None``
-    # in which case we run current logic of device selection, i.e.
-    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
-    # case it is not ``None`` we move the size and object tensors to be
-    # broadcasted to this device.
-    current_device = device or _get_object_coll_device(group)
+    # ``current_device`` is ``device`` if given, else the group's bound device
+    # if its type matches the object collective device type, else that device
+    # type. The size and object tensors to be broadcasted are moved to this device.
+    current_device = device or _get_object_coll_tensor_device(group)
     my_group_rank = group.rank()
     # Serialize object_list elements to tensors on src rank.
     if my_group_rank == group_src:
@@ -5126,7 +5160,7 @@ def broadcast_object_list(
     broadcast(object_sizes_tensor, group_src=group_src, group=group)
 
     # Concatenate and broadcast serialized object tensors
-    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # Note: torch.cat will do an extra memory copy to ``current_device``, if the tensor_list
     # has only one element, we can skip the copy.
     if my_group_rank == group_src:
         if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
@@ -5198,6 +5232,19 @@ def scatter_object_list(
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
 
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is the group's bound device
+        (``bound_device_id``) if set. ``device_id`` in ``init_process_group``
+        or ``new_group`` sets it, and subgroups of a bound group inherit it.
+        Else nccl2 (the default ``nccl`` implementation) sets it for each
+        group not created with ``enable_reconfigure=True``, except
+        ``split_group`` children, which copy their parent's. Otherwise it is
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``. Groups with a CPU backend (e.g.
+        ``cpu:gloo,cuda:nccl``) use CPU.
+
     .. warning::
         Object collectives have a number of serious performance and scalability
         limitations.  See :ref:`object_collectives` for details.
@@ -5246,7 +5293,7 @@ def scatter_object_list(
         )
 
     my_group_rank = group.rank()
-    pg_device = _get_object_coll_device(group)
+    pg_device = _get_object_coll_tensor_device(group)
     if my_group_rank == group_src:
         if scatter_object_input_list is None:
             raise ValueError(
