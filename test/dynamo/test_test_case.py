@@ -48,13 +48,13 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
 
     def test_teardown_restores_autocast_nesting_after_increment(self):
         baseline = torch._dynamo.test_case._snapshot_autocast_state()
-        baseline_nesting = torch._dynamo.test_case._autocast_nesting()
+        baseline_nesting = torch.amp.autocast_mode._get_autocast_nesting()
         self.assertEqual(baseline_nesting, 0)
 
         def leak():
             torch.autocast_increment_nesting()
             self.assertEqual(
-                torch._dynamo.test_case._autocast_nesting(), baseline_nesting + 1
+                torch.amp.autocast_mode._get_autocast_nesting(), baseline_nesting + 1
             )
 
         with mock.patch.object(
@@ -65,12 +65,12 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
 
     def test_teardown_restores_autocast_nesting_after_decrement(self):
         baseline = torch._dynamo.test_case._snapshot_autocast_state()
-        baseline_nesting = torch._dynamo.test_case._autocast_nesting()
+        baseline_nesting = torch.amp.autocast_mode._get_autocast_nesting()
 
         def leak():
             torch.autocast_decrement_nesting()
             self.assertEqual(
-                torch._dynamo.test_case._autocast_nesting(), baseline_nesting - 1
+                torch.amp.autocast_mode._get_autocast_nesting(), baseline_nesting - 1
             )
 
         self.assertEqual(self._run_leaking_pair(leak), baseline)
