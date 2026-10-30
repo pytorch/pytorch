@@ -962,7 +962,12 @@ class Module:
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            # C++ fake parameters are Tensor objects with the Parameter marker.
+            # Dynamo traces _apply and skips torch._subclasses helpers and
+            # torch._C._is_fake_tensor, so detect fake parameters by type: a
+            # Python FakeTensor Parameter is a FakeTensor, and a C++ fake
+            # Parameter is a plain Tensor with the Parameter marker. A C++ fake
+            # of exact type Parameter (a materialized lazy module weight) looks
+            # like a real Parameter here and still takes set_data.
             param_is_fake = (
                 isinstance(param, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
                 or (type(param) is Tensor and isinstance(param, Parameter))

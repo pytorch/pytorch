@@ -1146,7 +1146,10 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             and key not in self.py_kernels
             and DispatchKey.Meta in self.py_kernels
         ):
-            return self.py_kernels[DispatchKey.Meta]
+            r = self.py_kernels[DispatchKey.Meta]
+            self._dispatch_cache[key] = r
+            add_cached_op(self)
+            return r
         return super()._get_dispatch(key)
 
     def _fallthrough_keys(self) -> list[DispatchKey]:
