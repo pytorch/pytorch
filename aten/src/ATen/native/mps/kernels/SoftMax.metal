@@ -61,6 +61,27 @@ struct LogSoftmaxBackwardOp {
   }
 };
 
+struct SoftmaxBackwardOp {
+  static constexpr constant bool reduce_max = false;
+  float sum;
+
+  SoftmaxBackwardOp(float, float sum) : sum(sum) {}
+
+  template <typename T, typename idx_t>
+  static float term(
+      device const T* grad,
+      device const T* output,
+      idx_t i,
+      float) {
+    return float(grad[i]) * float(output[i]);
+  }
+
+  template <typename T, typename idx_t>
+  T operator()(device const T* grad, device const T* output, idx_t i) const {
+    return static_cast<T>(float(output[i]) * (float(grad[i]) - sum));
+  }
+};
+
 template <typename idx_t>
 inline idx_t out_row_offset(idx_t row, idx_t dim_size, idx_t out_inner) {
   return (row / out_inner) * dim_size * out_inner + row % out_inner;
@@ -436,7 +457,8 @@ softmax_strided_finalize(
   REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, SoftmaxOp<false>)    \
   REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, SoftmaxOp<true>) \
   REGISTER_SOFTMAX_OP(                                                    \
-      DTYPE, IDX_T, SUFFIX, log_softmax_backward, LogSoftmaxBackwardOp)
+      DTYPE, IDX_T, SUFFIX, log_softmax_backward, LogSoftmaxBackwardOp)   \
+  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax_backward, SoftmaxBackwardOp)
 
 #define REGISTER_SOFTMAX(DTYPE)          \
   REGISTER_SOFTMAX_IDX(DTYPE, uint, u32) \

@@ -171,74 +171,28 @@ TORCH_IMPL_FUNC(log_softmax_mps_out)
   softmax_mps_impl("log_softmax", self, dim, out);
 }
 
-TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
-(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+static void softmax_backward_mps_impl(const std::string& kernel,
+                                      const Tensor& grad,
+                                      const Tensor& output,
+                                      int64_t dim,
+                                      const Tensor& grad_input) {
   TORCH_CHECK(grad_input.scalar_type() == grad.scalar_type() && output.scalar_type() == grad.scalar_type(),
-              "log_softmax_backward with mixed dtypes is not supported on MPS");
+              kernel,
+              " with mixed dtypes is not supported on MPS");
   const bool same_strides = grad.strides() == output.strides();
   const auto grad_ = same_strides ? grad : grad.contiguous();
   const auto output_ = same_strides ? output : output.contiguous();
-  softmax_mps_impl("log_softmax_backward", grad_, dim, grad_input, output_);
+  softmax_mps_impl(kernel, grad_, dim, grad_input, output_);
+}
+
+TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  softmax_backward_mps_impl("log_softmax_backward", grad, output, dim, grad_input);
 }
 
 TORCH_IMPL_FUNC(softmax_backward_mps_out)
-(const Tensor& grad_, const Tensor& output_, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
-  if (output_.numel() == 0) {
-    return;
-  }
-
-  Tensor grad;
-  if (grad_.dim() == 0) {
-    grad = grad_.view(1);
-  } else
-    grad = grad_;
-
-  Tensor output;
-  if (output_.dim() == 0) {
-    output = output_.view(1);
-  } else
-    output = output_;
-
-  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
-  TORCH_CHECK(dim_ >= 0 && dim_ < grad.dim(), "Grad:dim must be non-negative and less than input dimensions");
-
-  using namespace mps;
-  using CachedGraph = MPSUnaryGradCachedGraph;
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    MPSShape* grad_shape = mps::getMPSShape(grad);
-    NSString* ns_shape_key = [[grad_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    std::string key = "softmax_backward_mps_out:" + getMPSTypeString(output) + ":" + [ns_shape_key UTF8String] + ":" +
-        std::to_string(dim_);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* softmaxTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(output), grad_shape);
-      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), grad_shape);
-
-      MPSGraphTensor* mulTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
-                                                            secondaryTensor:gradOutputTensor
-                                                                       name:nil];
-      MPSGraphTensor* mulSumTensor = [mpsGraph reductionSumWithTensor:mulTensor axis:(NSInteger)dim_ name:nil];
-      MPSGraphTensor* gradSubTensor = [mpsGraph subtractionWithPrimaryTensor:gradOutputTensor
-                                                             secondaryTensor:mulSumTensor
-                                                                        name:nil];
-      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
-                                                                  secondaryTensor:gradSubTensor
-                                                                             name:nil];
-
-      newCachedGraph->outputTensor_ = softmaxTensor;
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensor;
-    });
-
-    Placeholder softmaxPlaceholder = Placeholder(cachedGraph->outputTensor_, output, grad_shape);
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad, grad_shape);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    auto feeds = dictionaryFromPlaceholders(softmaxPlaceholder, gradOutputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  softmax_backward_mps_impl("softmax_backward", grad, output, dim, grad_input);
 }
 
 } // namespace at::native
