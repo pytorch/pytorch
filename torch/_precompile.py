@@ -882,8 +882,10 @@ class _DynamoCapture(Capture[_P, _R]):
         each graph-break continuation is bound as a resume function in its module's
         globals. Loading the artifact here binds those same resume names, and an
         installed artifact refuses frames with live entries, so the capturing process
-        could not serve its own artifact. Only what this capture compiled is
-        released; a later torch.compile of these frames recompiles them.
+        could not serve its own artifact. Every cache entry of the frames the capture
+        compiled is dropped, including one an earlier torch.compile of the same frames
+        made (which recompiles on its next call), and so are the resume functions it
+        bound; frames the capture did not compile are untouched.
         """
         from torch._C._dynamo.eval_frame import reset_code
         from torch._dynamo.utils import CleanupHook
@@ -2674,31 +2676,28 @@ def _split_graph_sources(
     """Move each Inductor graph's output code out of a copy of ``backends``.
 
     Returns the copy, its graphs' ``source_code`` emptied, and the code keyed
-    f"{backend_id}.fw" / ".bw". The artifact carries the code once, as editable text
-    (GRAPH_SOURCES), and the driver puts it back before deserializing a graph.
+    f"{backend_id}.fw" / ".bw"; only the objects on the path to each graph are
+    copied. The artifact carries the code as editable text (GRAPH_SOURCES), and the
+    driver puts it back before deserializing a graph. The kernel sources a graph
+    bundles for its precompiled kernels stay in the copy, and are dropped on load
+    when the graph's code was edited.
     """
     stripped = dict(backends)
     sources: dict[str, str] = {}
     for backend_id, artifact in backends.items():
-        parts = [
-            (
-                part,
-                getattr(
-                    getattr(artifact.content, f"compiled_{part}", None), "result", None
-                ),
-            )
-            for part in ("fw", "bw")
-        ]
-        parts = [
-            (p, g) for p, g in parts if isinstance(getattr(g, "source_code", None), str)
-        ]
-        if not parts:
-            continue
-        artifact = stripped[backend_id] = copy.deepcopy(artifact)
-        for part, _ in parts:
-            graph = getattr(artifact.content, f"compiled_{part}").result
+        for part in ("fw", "bw"):
+            compiled = getattr(artifact.content, f"compiled_{part}", None)
+            graph = getattr(compiled, "result", None)
+            if not isinstance(getattr(graph, "source_code", None), str):
+                continue
+            if stripped[backend_id] is artifact:
+                stripped[backend_id] = copy.copy(artifact)
+                stripped[backend_id].content = copy.copy(artifact.content)
             sources[f"{backend_id}.{part}"] = graph.source_code
-            graph.source_code = ""
+            compiled = copy.copy(compiled)
+            compiled.result = copy.copy(graph)
+            compiled.result.source_code = ""
+            setattr(stripped[backend_id].content, f"compiled_{part}", compiled)
     return stripped, sources
 
 
@@ -3564,18 +3563,21 @@ def _read_artifact(
     return python_code, cache
 
 
-def _cache_matches_artifact(
-    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
-) -> bool:
-    """Whether ``cache_path`` holds the cache captured with ``artifact_path``'s current
-    text: False for a missing or unreadable cache, and for an artifact edited after
-    capture (the cache's code_hash covers the exact captured text)."""
+def _matching_cache(
+    python_code: str, cache_path: str | os.PathLike[str]
+) -> bytes | None:
+    """The cache at ``cache_path`` if it was captured with exactly ``python_code``:
+    None for a missing or unreadable cache, and for an artifact edited after capture
+    (the cache's code_hash covers the captured text)."""
     try:
-        python_code, cache = _read_artifact(artifact_path, cache_path)
-        blob = torch.load(io.BytesIO(cast(bytes, cache)), weights_only=True)
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
     except Exception:
-        return False
-    return blob.get("code_hash") == hashlib.sha256(python_code.encode()).hexdigest()
+        return None
+    if blob.get("code_hash") != hashlib.sha256(python_code.encode()).hexdigest():
+        return None
+    return cache
 
 
 def _verified_cache_envelope(
