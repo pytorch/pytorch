@@ -242,6 +242,41 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "eps",
+        (None, -1.0, -1e-100, -(2.0**-149), -(2.0**-150), 2.0**-150, 0.0, 0.1, 0.7),
+    )
+    def test_logit_backward_bounds(self, device, dtype, numerics, eps):
+        x = torch.tensor(
+            [
+                -float("inf"),
+                -1.0,
+                -0.0,
+                0.0,
+                0.1,
+                0.5,
+                0.7,
+                1.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        grad = x.flip(0)
+
+        def fn(grad, x):
+            return torch.ops.aten.logit_backward.default(grad, x, eps)
+
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+            grad, x
+        )
+        self.assertEqual(
+            actual.view(_BIT_VIEW[dtype]), fn(grad, x).view(_BIT_VIEW[dtype])
+        )
+
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_xlogy_scalar_log(self, device, dtype, numerics):
@@ -1901,8 +1936,6 @@ BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 # (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
-        ("special_ndtr", "bfloat16"),
-        ("special_ndtr", "float16"),
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
@@ -1936,44 +1969,15 @@ POINTWISE_XFAIL = frozenset(
 
 BACKWARD_XFAIL = frozenset(
     {
-        ("addcmul", "bfloat16"),
-        ("addcmul", "float16"),
-        ("deg2rad", "bfloat16"),
-        ("deg2rad", "float16"),
-        ("erf", "bfloat16"),
-        ("erf", "float16"),
-        ("erfc", "bfloat16"),
-        ("erfc", "float16"),
-        ("erfinv", "bfloat16"),
-        ("erfinv", "float16"),
-        ("exp2", "bfloat16"),
-        ("exp2", "float16"),
-        ("lerp", "bfloat16"),
-        ("lerp", "float16"),
-        ("log10", "bfloat16"),
-        ("log10", "float16"),
-        ("log2", "bfloat16"),
-        ("log2", "float16"),
-        ("rad2deg", "bfloat16"),
-        ("rad2deg", "float16"),
-        ("sinc", "bfloat16"),
-        ("sinc", "float16"),
-        ("special_ndtr", "bfloat16"),
-        ("special_ndtr", "float16"),
         ("float_power", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
         ("i0", "bfloat16"),
         ("i0", "float16"),
         ("i0", "float32"),
-        ("logit", "bfloat16"),
-        ("logit", "float16"),
-        ("logit", "float32"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
         ("mvlgamma_mvlgamma_p_3", "float32"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("rsqrt", "bfloat16"),
-        ("rsqrt", "float16"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
@@ -1998,6 +2002,20 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "addcmul",
+        "deg2rad",
+        "erf",
+        "erfc",
+        "erfinv",
+        "exp2",
+        "lerp",
+        "log10",
+        "log2",
+        "logit",
+        "rad2deg",
+        "rsqrt",
+        "sinc",
+        "special_ndtr",
         "__rpow__",
         "copysign",
         "special_xlog1py",
