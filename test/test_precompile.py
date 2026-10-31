@@ -6456,6 +6456,12 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+def reads_the_cudagraph_flag(model, x):
+    if not torch._inductor.config.triton.cudagraphs:
+        raise AssertionError("traced outside the capture's CUDA graph config")
+    return breaking_helper(model(x))
+
+
 def overrides_the_backward(model, x):
     with torch._dynamo.override_cudagraphs(bwd=False):
         return step(model, x)
@@ -6511,6 +6517,7 @@ with (
     contextlib.nullcontext() if training else torch.no_grad(),
     torch._inductor.config.patch(saved["config"]),
 ):
+    flag = torch._inductor.config.triton.cudagraphs
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
@@ -6519,6 +6526,7 @@ with (
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
+    restored = int(torch._inductor.config.triton.cudagraphs == flag)
 bumps = int((model.calls - calls).max())
 manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
 nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
@@ -6527,7 +6535,7 @@ for node in nodes:
 recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
 compiles = torch._dynamo.utils.counters["frames"]["ok"]
-print("bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
+print("restored", restored, "bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
 print("recorded", recorded, "captured", captured)
 """
 
@@ -6601,7 +6609,9 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         served = out.stdout.splitlines()[-1].split()
         served = dict(zip(served[::2], map(int, served[1::2])))
-        # The calls compile in the loading process only when they may.
+        # The serve-time config patch is reverted after each call, and the calls
+        # compile in the loading process only when they may.
+        self.assertEqual(served["restored"], 1)
         self.assertEqual(served["compiles"] > 0, serve_time)
         self.assertEqual(served["bumps"], bumps)
         if skips is not None:
@@ -6648,6 +6658,19 @@ class TestPrecompileCudagraphs(TestCase):
         # compiled in the loading process, whose triton.cudagraphs is off.
         miss = torch.randn(6, 8, device="cuda")
         with torch.no_grad():
+            expected = fn(self.model, miss)
+        served = self._serve_in_fresh_process(
+            expected, x=miss, serve_time=True, skips=0
+        )
+        self.assertGreater(served[0], 0)
+
+    def test_a_serve_time_compile_traces_under_the_capture_cudagraph_config(self):
+        fn = self.mod.reads_the_cudagraph_flag
+        # Reading the flag guards on it, a guard the artifact drops.
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        self._capture_step(fn, mode="reduce-overhead", tracer=tracer)
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad(), torch._inductor.config.patch({"triton.cudagraphs": True}):
             expected = fn(self.model, miss)
         served = self._serve_in_fresh_process(
             expected, x=miss, serve_time=True, skips=0
