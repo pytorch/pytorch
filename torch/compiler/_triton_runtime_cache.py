@@ -192,6 +192,14 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                 group = _member_name(name.removeprefix("__grp__"))
                 entry = _read_json(path, path.read_bytes())
                 children = entry.get("child_paths") if isinstance(entry, dict) else None
+                has_paths = isinstance(children, dict)
+                if isinstance(children, list) and all(
+                    isinstance(child, str) for child in children
+                ):
+                    # Triton >= triton-lang/triton#12001 stores just the
+                    # member names, relative to this group's directory,
+                    # instead of each member's full original path.
+                    children = dict.fromkeys(children)
                 if not isinstance(children, dict) or group not in children:
                     raise RuntimeError(f"Incomplete Triton runtime-cache group: {path}")
                 members = list(children)
@@ -202,10 +210,14 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                 for member, original in children.items():
                     member = _member_name(member)
                     # Triton records paths under knobs.cache.dir, which may
-                    # spell the same directory differently.
-                    if not isinstance(original, str) or os.path.normpath(
-                        original
-                    ) != os.path.normpath(directory / member):
+                    # spell the same directory differently. Newer Triton
+                    # records no path at all, only the member name, so
+                    # there is nothing to compare there.
+                    if has_paths and (
+                        not isinstance(original, str)
+                        or os.path.normpath(original)
+                        != os.path.normpath(directory / member)
+                    ):
                         raise RuntimeError(
                             f"Triton runtime-cache group points outside its entry: "
                             f"{path}"
