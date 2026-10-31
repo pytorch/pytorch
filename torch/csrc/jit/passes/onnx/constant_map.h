@@ -2,7 +2,24 @@
 
 #include <c10/macros/Macros.h>
 
+// ONNX shape inference exposes Abseil logging macros through protobuf.
+#pragma push_macro("LOG")
+#pragma push_macro("VLOG")
+#pragma push_macro("LOG_IF")
+#pragma push_macro("DLOG")
+#undef LOG
+#undef VLOG
+#undef LOG_IF
+#undef DLOG
 #include <onnx/shape_inference/implementation.h>
+#undef LOG
+#undef VLOG
+#undef LOG_IF
+#undef DLOG
+#pragma pop_macro("DLOG")
+#pragma pop_macro("LOG_IF")
+#pragma pop_macro("VLOG")
+#pragma pop_macro("LOG")
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export.h>
