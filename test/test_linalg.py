@@ -10904,7 +10904,7 @@ class TestLinalgCudaOnly(TestCase):
         import multiprocessing as mp
 
         with self._tunableop_ctx():
-            os.putenv("PYTORCH_TUNABLEOP_BLAS_LOG", "1")
+            os.environ["PYTORCH_TUNABLEOP_BLAS_LOG"] = "1"
 
             # TunableOp is running in a subprocess
             # online tuning needs filename set through API
@@ -11365,7 +11365,10 @@ class TestLinalgCudaOnly(TestCase):
         # We use the torch profiler to get the call counts on the kernels
 
         # Supported only for: MM, batch MM, and GEMM with bias (linear)
-        from torch.profiler import profile, ProfilerActivity
+        from torch.profiler import profile, ProfilerActivity, supported_activities
+
+        if ProfilerActivity.CUDA not in supported_activities():
+            self.skipTest("CUDA profiling is not supported")
 
         with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code

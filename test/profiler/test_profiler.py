@@ -3160,6 +3160,8 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     def test_dynamic_toggle(self, device):
         device_type = device.split(":")[0]
         gpu_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if gpu_activity not in supported_activities():
+            self.skipTest(f"{device_type.upper()} profiling is not supported")
         activities = get_profiler_activities(device_type)
         with profile(activities=activities) as p:
             with torch.profiler.record_function("test_user_annotation"):
