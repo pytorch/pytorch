@@ -118,10 +118,13 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             fs = frozenset({1, 2, t})
-            return hash(fs), hash(fs)
+            return hash(fs), hash(fs), (hash(fs), frozenset({hash(fs)}))
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        h1, h2, nested = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.tensor(0)
+        )
         self.assertEqual(h1, h2)
+        self.assertEqual(nested, (h1, frozenset({h1})))
 
     # --- Range (RangeVariable) ---
 
