@@ -266,17 +266,24 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
     def test_scatter_copy_back_with_input_view_output(self):
         def f(x, src):
-            out = aten.slice_scatter.default(x, src, 0, 1, 4)
+            out = aten.slice_scatter.default(x, src, 1, 1, 3)
             x.copy_(out)
-            return x[:4]
+            return x[:, :3]
 
-        x = torch.arange(6, device=device, dtype=torch.float)
-        src = torch.tensor([20.0, 30.0, 40.0], device=device)
+        x = torch.arange(32, device=device, dtype=torch.float).reshape(4, 8)
+        src = torch.tensor(
+            [[20.0, 30.0], [40.0, 50.0], [60.0, 70.0], [80.0, 90.0]],
+            device=device,
+        )
         expected_x, actual_x = x.clone(), x.clone()
         expected = f(expected_x, src)
         actual = torch.compile(f)(actual_x, src)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_x, expected_x)
+        self.assertEqual(
+            actual.untyped_storage().data_ptr(),
+            actual_x.untyped_storage().data_ptr(),
+        )
 
     def test_scatter_chain_does_not_alias_mutated_input(self):
         def f(x, src1, src2):
