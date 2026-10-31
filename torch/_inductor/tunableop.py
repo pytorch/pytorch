@@ -553,15 +553,10 @@ _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 # fault; more lets a reproducible hang charge the budget once per layer.
 _TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
 
-# ExternKernelChoice names the ladder covers, matched by string so a double
-# import cannot break the match. _int_mm and the sparse variants are not
-# hipBLASLt-tunable. bias_addmm rewrites its own bias (inp[0]) before
-# dispatching, so the meta the ladder rebuilds is not what aten receives.
-# addmm_dtype is ROCm-only: on CUDA its reduced-input/float-output case stays on
-# the cublasLt path, which hard-errors while TunableOp is enabled ("Tunable GEMM
-# is not supported for float output with reduced float input", cuda/Blas.cpp), so
-# every bucket would raise and cost a worker restart. ROCm disables that Lt path
-# before reaching the check, so the GEMM tunes normally there.
+# ExternKernelChoice names the ladder covers, matched by string. bias_addmm
+# rewrites its own bias (inp[0]) before dispatching, so the rebuilt meta is not
+# what aten receives. addmm_dtype is ROCm-only: on CUDA it stays on the cublasLt
+# path, which hard-errors under TunableOp (cuda/Blas.cpp).
 _TUNABLEOP_GEMM_CHOICES = frozenset(
     [
         "mm",
@@ -990,13 +985,10 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             )
             break
         bucket_start = time.monotonic()
-        # The whole remaining budget, deliberately: a per-bucket slot below
-        # the 15-40s cold-start cost would make the restart cold, time out and
-        # be killed again.
+        # The whole remaining budget: a slot below the 15-40s cold-start cost
+        # would make the restart cold, time out and be killed again.
         outcome = submit(BenchmarkJob(bmreq, tuning=True), timeout=remaining)
-        # The only record of what a bucket costs when it SUCCEEDS: the other
-        # logs here report failures only, and that curve is what a per-bucket
-        # budget would have to be sized against.
+        # The only record of what a bucket costs when it succeeds.
         log.debug(
             "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d wall=%.2fs status=%s",
             winner.name,
