@@ -217,15 +217,15 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
-    XPU_VERSION=2026.0
+    XPU_VERSION=2026.1
+    OMIX_VERSION=0.4.1
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    XPU_VERSION=2026.1
-    OMIX_VERSION=0.4.1
+    XPU_VERSION=2026.2
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
