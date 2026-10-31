@@ -22986,7 +22986,7 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
         # (CompositeCompliantTensor, COW wrapper) or FakeTensor.
         supports_cow_input_no_materialize_forward=False,
         decorators=[
-            DecorateInfo(onlyCUDA),
+            DecorateInfo(onlyOn(["cuda", "xpu"])),
         ],
         skips=(
             DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
