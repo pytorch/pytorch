@@ -52,7 +52,10 @@ from torch.testing._internal.inductor_utils import (
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import (
+    has_datacenter_blackwell_tma_device,
+    has_triton_tma_device,
+)
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -1732,6 +1735,367 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
+        "shape,path,recipes",
+        (
+            # >= NUM_SMS // 2 output tiles of 128x128 and >= 32 K128 steps per
+            # CTA: native block-scaled MMA
+            ((1536, 1280, 4096), "native", "1x128_1x128"),
+            ((1282, 1153, 4208), "native", "1x128_1x128"),
+            ((1282, 1153, 4208), "native", "1x128_128x128"),
+            ((1282, 1153, 4208), "native", "128x128_1x128"),
+            ((1282, 1153, 4208), "native", "128x128_128x128"),
+            ((2048, 1024, 4096), "native", "1x128_128x128"),
+            # underfilled 128x128 grid or too few K steps to amortize the native
+            # path's fixed cost: small-tile fp8 dot with register scaling
+            ((256, 320, 384), "software", "1x128_1x128"),
+            ((258, 321, 400), "software", "1x128_1x128"),
+            ((258, 321, 400), "software", "1x128_128x128"),
+            ((258, 321, 400), "software", "128x128_1x128"),
+            ((258, 321, 400), "software", "128x128_128x128"),
+            ((256, 320, 640), "software", "1x128_128x128"),
+            ((16, 256, 256), "software", "1x128_1x128"),
+            ((65, 321, 128), "software", "1x128_1x128"),
+            ((65, 321, 4208), "software", "1x128_1x128"),
+            ((1536, 1280, 384), "software", "1x128_1x128"),
+        ),
+    )
+    @parametrize("host_side_tma", (False, True))
+    def test_k128_ue8m0_blockwise_scaling_sm100(
+        self, shape, path, recipes, host_side_tma, device
+    ):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = shape
+        k_blocks = ceil_div(K, 128)
+        recipe_names = {
+            "1x128": ScalingType.BlockWise1x128,
+            "128x128": ScalingType.BlockWise128x128,
+        }
+        recipe_a, recipe_b = (recipe_names[r] for r in recipes.split("_"))
+
+        torch.manual_seed(0)
+        a = torch.randint(-4, 5, (M, K), device=device)
+        b_nk = torch.randint(-4, 5, (N, K), device=device)
+        if path == "software":
+            # Make the first partial positive so decoding E8M0 NaN as inf fails.
+            a[0, :128] = 1
+            b_nk[0, :128] = 1
+        a = a.to(torch.float8_e4m3fn)
+        b_nk = b_nk.to(torch.float8_e4m3fn)
+        b = b_nk.t()
+        contraction_dim = (1, 0) if host_side_tma else ()
+
+        def make_scale(outer, recipe, modulus, offset, include_nan=False):
+            # Per-row codes drive the reference; storage holds one code per
+            # (block_rows rows, K block) with the K block fastest: the contiguous
+            # caller-facing v2 layout is [blocks, k_blocks] for both operands.
+            block_rows = 128 if recipe == ScalingType.BlockWise128x128 else 1
+            blocks = ceil_div(outer, block_rows)
+            codes = (
+                torch.arange(blocks * k_blocks, device=device).reshape(blocks, k_blocks)
+                % modulus
+                + offset
+            ).to(torch.uint8)
+            if include_nan:
+                codes[0, 0] = 255
+            storage = codes.view(torch.float8_e8m0fnu)
+            row_codes = codes.repeat_interleave(block_rows, dim=0)[:outer]
+            return storage, row_codes.view(torch.float8_e8m0fnu)
+
+        scale_a, scale_a_values = make_scale(
+            M, recipe_a, 7, 124, include_nan=path == "software"
+        )
+        scale_b, scale_b_values = make_scale(N, recipe_b, 5, 125)
+
+        expected = torch.zeros((M, N), device=device, dtype=torch.float32)
+        for block in range(k_blocks):
+            k_start = block * 128
+            k_end = min(k_start + 128, K)
+            partial = a[:, k_start:k_end].float() @ b[k_start:k_end].float()
+            expected += (
+                partial
+                * scale_a_values[:, block].float()[:, None]
+                * scale_b_values[:, block].float()[None, :]
+            )
+        expected = expected.bfloat16()
+        if path == "software":
+            self.assertTrue(torch.isnan(expected[0, 0]))
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                recipe_a,
+                scale_b,
+                recipe_b,
+                contraction_dim=contraction_dim,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        if path == "native":
+            template_name = "blackwell_ws_persistent_device_tma_main_loop_scaling_"
+            forced_config = (
+                "BLOCK_M=128, BLOCK_N=256",
+                "BLOCK_K=128",
+                "num_stages=3, num_warps=8",
+            )
+        else:
+            template_name = "main_loop_sw_scaled_mm_"
+            forced_config = ()
+        choice_records = []
+
+        def record_and_keep_k128_ue8m0(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            matching = [choice for choice in choices if template_name in choice.name]
+            self.assertTrue(matching, choice_records)
+            self.assertEqual(len(matching), len(choices), choice_records)
+            if not forced_config:
+                return matching
+            forced = [
+                choice
+                for choice in matching
+                if all(field in choice.description for field in forced_config)
+            ]
+            self.assertEqual(len(forced), 1, choice_records)
+            return forced
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_keep_k128_ue8m0)
+        try:
+            with config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_host_side_tma": host_side_tma,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True),
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected)
+        if path == "native":
+            # one scale re-layout kernel per operand, then TMA-loaded 32x4x4
+            # scale blocks feeding the native block-scaled MMA
+            FileCheck().check("def triton_poi_fused").check(
+                "def triton_poi_fused"
+            ).check("disallow_acc_multi_buffer=True").check(
+                "scale_a = a_scale_desc.load("
+            ).check(".trans(0, 3, 2, 1, 4)").check("accumulator = tl.dot_scaled(").run(
+                code
+            )
+            self.assertNotIn("_e8m0_to_fp32(", code)
+            # host-side descriptors arrive as tensordesc kernel args; device-side
+            # ones are built in the kernel from the same shapes and strides
+            self.assertEqual("tl.make_tensor_descriptor(" in code, not host_side_tma)
+        else:
+            FileCheck().check("scale_block = (k_idx * BLOCK_K) // 128").check(
+                "_e8m0_to_fp32("
+            ).check("partial = tl.dot(").run(code)
+            self.assertNotIn("tl.dot_scaled(", code)
+            self.assertNotIn("def triton_poi_fused", code)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("layout", ("logical", "noncontiguous", "transposed_b"))
+    def test_k128_ue8m0_blockwise_scaling_rejects_invalid_layout(self, layout, device):
+        from torch._inductor.exc import InductorError
+
+        M = N = 128
+        K = 256
+        a = torch.ones((M, K), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones((N, K), device=device, dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.ones((M, 2), device=device, dtype=torch.float8_e8m0fnu)
+        scale_b = torch.ones((N, 2), device=device, dtype=torch.float8_e8m0fnu)
+        if layout == "logical":
+            # the 3D cuBLASLt MN_K4 packing
+            scale_a = torch.ones((1, M, 4), device=device, dtype=torch.float8_e8m0fnu)
+        elif layout == "noncontiguous":
+            # right shape, row fastest instead of K-block fastest
+            scale_a = torch.ones((2, M), device=device, dtype=torch.float8_e8m0fnu).t()
+        else:
+            scale_b = scale_b.t()
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise1x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "fx_graph_cache": False,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+            }
+        ):
+            with self.assertRaisesRegex(
+                InductorError,
+                "K128 UE8M0 scales must hold one code per",
+            ):
+                torch.compile(fn, backend="inductor", fullgraph=True)(
+                    a, b, scale_a, scale_b
+                )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("fp32_side", ("a", "b"))
+    def test_k128_ue8m0_blockwise_scaling_rejects_mixed_dtypes(self, fp32_side, device):
+        from torch._inductor.exc import InductorError
+        from torch._inductor.kernel import mm
+
+        M = N = K = 128
+        a = torch.ones((M, K), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones((N, K), device=device, dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.ones((M, 1), device=device, dtype=torch.float8_e8m0fnu)
+        scale_b = torch.ones((N, 1), device=device, dtype=torch.float8_e8m0fnu)
+        if fp32_side == "a":
+            scale_a = torch.ones((M, 1), device=device, dtype=torch.float32)
+        else:
+            scale_b = torch.ones((N, 1), device=device, dtype=torch.float32)
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise1x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(
+                mm,
+                "scaled_mm_v2_fallback",
+                side_effect=RuntimeError("expected scaled_mm_v2 fallback"),
+            ),
+            config.patch({"fx_graph_cache": False}),
+            self.assertRaisesRegex(InductorError, "expected scaled_mm_v2 fallback"),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a, b, scale_a, scale_b
+            )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("api", ("v1", "v2"))
+    def test_blockwise_fp32_scaling_skips_blackwell_epilogue_template(
+        self, api, device
+    ):
+        # https://github.com/pytorch/pytorch/issues/193802: the Blackwell mm
+        # template only scales in its epilogue, and autotuning used to pick it for
+        # blockwise recipes, silently returning wrong results.
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = 512, 1024, 2048
+        torch.manual_seed(0)
+        x = torch.randn(M, K, device=device)
+        w = torch.randn(N, K, device=device)
+        x_fp8, x_scale = _quantize_blockwise(x, torch.float8_e4m3fn, 1, 128)
+        w_fp8, w_scale = _quantize_blockwise(w, torch.float8_e4m3fn, 128, 128)
+        ref = (x_fp8.double() * x_scale.double().repeat_interleave(128, 1)) @ (
+            w_fp8.double()
+            * w_scale.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
+        ).t()
+        x_scale = _prepare_blockwise_scale(x_scale, 1, 128)
+        w_scale = _prepare_blockwise_scale(w_scale, 128, 128)
+
+        def fn(x_fp8, w_t_fp8, x_scale, w_scale):
+            if api == "v1":
+                return torch._scaled_mm(
+                    x_fp8, w_t_fp8, x_scale, w_scale, out_dtype=torch.float32
+                )
+            return scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_scale,
+                ScalingType.BlockWise1x128,
+                w_scale,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.float32,
+            )
+
+        templates = set()
+
+        def record_templates(choices):
+            templates.update(choice.name.rsplit("_", 1)[0] for choice in choices)
+            return choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_templates)
+        try:
+            with config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual = torch.compile(fn, fullgraph=True)(
+                    x_fp8, w_fp8.t(), x_scale, w_scale
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertNotIn("triton_blackwell_ws_persistent_tma", templates)
+        self.assertIn("triton_scaled_mm_device_tma_main_loop_scaling", templates)
+        rel = ((actual.double() - ref).abs().sum() / ref.abs().sum()).item()
+        self.assertLess(rel, 1e-3, f"relative error {rel} against fp64 reference")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
