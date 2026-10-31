@@ -1080,6 +1080,60 @@ class TestFxGraphCache(TestCase):
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "compile_threads": 1,
+            "bundle_triton_into_fx_graph_cache": True,
+            "use_static_triton_launcher": True,
+            "max_autotune_pointwise": True,
+            # Records winners before collect() runs, so snapshots get pruned
+            "triton.autotune_at_compile_time": True,
+        }
+    )
+    def test_static_autotuners_load_without_triton_cache(self):
+        """Warm start without a Triton cache loads and rechecks pruned snapshots."""
+        from torch._inductor.triton_bundler import TritonBundler
+
+        def fn(x, y):
+            return (x * 2 + y).relu().sum(dim=-1)
+
+        a = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
+        b = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
+
+        expected = torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+        self.reset()
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        with (
+            self.assertNoLogs("torch._inductor.triton_bundler", level="WARNING"),
+            mock.patch.object(
+                TritonBundler, "load_autotuners", wraps=TritonBundler.load_autotuners
+            ) as load_autotuners,
+        ):
+            result = torch.compile(fn)(a, b)
+        self.assertEqual(expected, result)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        (snapshots,) = load_autotuners.call_args.args
+        self.assertEqual(
+            counters["inductor"]["triton_bundler_load_static_autotuner"],
+            len(snapshots),
+        )
+        pruned = [s.kernel for s in snapshots if s.kernel.autotune_cache_configs]
+        self.assertGreater(len(pruned), 0)
+        for kernel in pruned:
+            kernel.recheck_autotune_cache(
+                reload_kernel_from_src=lambda: self.fail("winner was not bundled")
+            )
+            self.assertEqual(kernel.autotune_cache_info["autotune_cache_state"], "hit")
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"compile_threads": 1})
@@ -5709,6 +5763,102 @@ class TestRemoteAOTAutogradCache(TestCase):
             compiled_fn(a2, b2).sum().backward()
             self.assertEqual(a.grad, a2.grad)
             self.assertEqual(b.grad, b2.grad)
+
+
+class TestTritonBundlerCollect(TestCase):
+    """The bundle must hold every binary the saved static autotuners name."""
+
+    @config.patch(
+        bundle_triton_into_fx_graph_cache=True,
+        use_static_triton_launcher=True,
+        force_disable_caches=False,
+    )
+    def test_bundle_covers_binaries_demanded_on_load(self):
+        from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
+        from torch._inductor.triton_bundler import (
+            StaticallyLaunchedAutotuner,
+            TritonBundler,
+        )
+
+        def stub_autotuner(cache_key, kernel_name, hashes):
+            # collect() only reaches kernel.compile_results[i].{kernel.hash,config}
+            return StaticallyLaunchedAutotuner(
+                cache_key,
+                kernel_name,
+                types.SimpleNamespace(
+                    compile_results=[
+                        types.SimpleNamespace(
+                            kernel=types.SimpleNamespace(hash=h), config=f"config_{h}"
+                        )
+                        for h in hashes
+                    ],
+                    autotune_cache_configs=None,
+                ),
+            )
+
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, True)
+
+        # owner -> hashes it compiled; "untuned*" never record a winner
+        compiled = {
+            "tuned": ["winner", "loser"],
+            "untuned": ["untuned"],
+            "untuned_dynamic": ["untuned_dynamic"],
+            "coordesc": ["coordesc_a", "coordesc_b", "coordesc_found"],
+        }
+        owners = {name: i for i, name in enumerate(compiled)}
+        keys = {h: triton_hash_to_path_key(h) for hs in compiled.values() for h in hs}
+        for path_key in keys.values():
+            kernel_dir = os.path.join(cache_dir, path_key)
+            os.makedirs(kernel_dir)
+            with open(os.path.join(kernel_dir, "kernel.cubin"), "wb") as f:
+                f.write(b"\x00fake binary\x00")
+            with open(os.path.join(kernel_dir, "kernel.json"), "w") as f:
+                json.dump({"name": "kernel"}, f)
+
+        TritonBundler.begin_compile()
+        self.addCleanup(TritonBundler.end_compile)
+        with mock.patch(
+            "torch._inductor.triton_bundler.triton_cache_dir",
+            return_value=cache_dir,
+        ):
+            for name, hashes in compiled.items():
+                for h in hashes:
+                    TritonBundler.put(keys[h], 0, owners[name])
+            # "untuned_dynamic" is not statically launchable, so has no snapshot
+            TritonBundler._static_autotuners = [
+                stub_autotuner("key_tuned", "tuned", ["winner", "loser"]),
+                stub_autotuner("key_untuned", "untuned", ["untuned"]),
+                stub_autotuner("key_coordesc", "coordesc", compiled["coordesc"][:2]),
+            ]
+            TritonBundler.put_winner(keys["winner"], owners["tuned"])
+            TritonBundler.put_winner(keys["coordesc_found"], owners["coordesc"])
+            bundle, _metadata = TritonBundler.collect()
+
+        bundled = {artifacts.kernel_hash for artifacts in bundle.kernel_artifacts}
+        demanded = {
+            triton_hash_to_path_key(compile_result.kernel.hash)
+            for autotuner in bundle.static_autotuners
+            for compile_result in autotuner.kernel.compile_results
+        }
+        self.assertEqual(demanded - bundled, set())
+
+        # The loser is dropped from the bundle and the snapshot
+        self.assertNotIn(keys["loser"], bundled)
+        tuned = bundle.static_autotuners[0].kernel
+        self.assertEqual([r.kernel.hash for r in tuned.compile_results], ["winner"])
+        # but the autotune cache stays keyed on every config
+        self.assertEqual(len(tuned.autotune_cache_configs), 2)
+
+        # Kernels that never recorded a winner keep their binary
+        self.assertIn(keys["untuned"], bundled)
+        self.assertIn(keys["untuned_dynamic"], bundled)
+
+        # A winner found after the snapshot leaves the snapshot whole
+        self.assertIn(keys["coordesc_found"], bundled)
+        coordesc = bundle.static_autotuners[2].kernel
+        self.assertEqual(len(coordesc.compile_results), 2)
+        self.assertIsNone(coordesc.autotune_cache_configs)
 
 
 class TestUtils(TestCase):
