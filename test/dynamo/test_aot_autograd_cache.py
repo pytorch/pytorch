@@ -97,6 +97,16 @@ device_type = (
 )
 
 
+# Module level so it pickles into the cache key by name: a stale hit is only
+# possible when the key hashes the name but not the body.
+_OPAQUE_SCALE = 2.0
+
+
+@torch._dynamo.allow_in_graph
+def _opaque_scale(x):
+    return x * _OPAQUE_SCALE
+
+
 class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
     Pre-grad pass that removes redundant identity multiplications (1 * x).
@@ -1200,6 +1210,47 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": True})
+    def test_custom_autograd_function_opaque_body_call_bypasses(self):
+        # An allow_in_graph function called from the forward body is not part of
+        # the cache key. Changing it must not give a stale hit.
+        global _OPAQUE_SCALE
+
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return _opaque_scale(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(a):
+            return MyAutogradFunction.apply(a)
+
+        a = torch.randn(5, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        try:
+            result = compiled_fn(a)
+            result.sum().backward()
+            self.assertEqual(result, fn(a))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
+            _OPAQUE_SCALE = 3.0
+            counters.clear()
+            self._clear_dynamo_and_codecache()
+            result = compiled_fn(a)
+            result.sum().backward()
+            self.assertEqual(result, fn(a))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+        finally:
+            _OPAQUE_SCALE = 2.0
 
     @requires_gpu_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -4127,6 +4178,46 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(
                 BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
             )
+
+    @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": True})
+    def test_incompatible_function_in_autograd_function_body(self):
+        # The fwd/bwd bodies of autograd_function_apply are hashed as code, but
+        # an allow_in_graph function they call is not, so it must bypass.
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return _opaque_scale(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return MyAutogradFunction.apply(x)
+
+        config = self.default_config()
+        inputs = [torch.ones(3, requires_grad=True)]
+        self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            "Unsupported call_function target",
+            lambda: self.gen_cache_key(fn, config, inputs),
+        )
+
+    def test_incompatible_function_in_nested_compile_region(self):
+        @torch.compiler.nested_compile_region
+        def region(x):
+            return _opaque_scale(x)
+
+        # Call it twice so the region stays an invoke_subgraph body.
+        def fn(x):
+            return region(x) + region(x * 2)
+
+        config = self.default_config()
+        self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            "Unsupported call_function target",
+            lambda: self.gen_cache_key(fn, config),
+        )
 
     def test_autocast_no_dtype_in_graph_keys_ambient_dtype(self):
         # torch.autocast(device) with no dtype traces _enter_autocast(device,
