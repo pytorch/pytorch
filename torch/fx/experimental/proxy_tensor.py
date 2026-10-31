@@ -52,6 +52,7 @@ from torch._library.opaque_object import (
 )
 from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -715,15 +716,19 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     if functorch.is_batchedtensor(val) or functorch.is_gradtrackingtensor(val):
         # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
         # have no storage and outlive their level. Record a plain fake tensor
-        # with the shape the wrapper reports. Functorch is disabled so that an
-        # outer jvp does not wrap the new tensor again.
+        # with the sizes, strides and storage offset the wrapper reports.
+        # Functorch is disabled so that an outer jvp does not wrap it again.
         fake_mode = maybe_get_fake_mode(val)
         if fake_mode is None:
             raise AssertionError("expected a functorch wrapper of a fake tensor")
+        offset = val.storage_offset()
         with disable_proxy_modes_tracing(), fake_mode, torch._C._DisableFuncTorch():
-            return torch.empty_strided(
-                val.shape, val.stride(), dtype=val.dtype, device=val.device
+            storage = torch.empty(
+                compute_required_storage_length(val.shape, val.stride(), offset),
+                dtype=val.dtype,
+                device=val.device,
             )
+            return storage.as_strided(val.shape, val.stride(), offset)
     return val.detach()
 
 
