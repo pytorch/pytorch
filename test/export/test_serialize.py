@@ -5,9 +5,15 @@ with test_sym_bool)
 
 # Owner(s): ["oncall: export"]
 import copy
+import importlib.util
 import io
+import json
 import math
+import os
+import subprocess
+import sys
 import tempfile
+import types
 import unittest
 import zipfile
 from collections import namedtuple
@@ -38,6 +44,7 @@ from torch._export.serde.serialize import (
     GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
+    SerializedArtifact,
     SerializeError,
 )
 from torch._export.utils import wrap_method
@@ -2049,6 +2056,82 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_save_load_region_without_outputs(self):
+        class UnusedAutocast(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast("cpu", dtype=torch.bfloat16):
+                    x @ x.T
+                return x * 2
+
+        class EmptyAutocastInNoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    y = x * 2
+                    with torch.autocast("cpu", dtype=torch.bfloat16):
+                        pass
+                return y
+
+        class UnusedNoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    x @ x.T
+                return x * 2
+
+        def has_region_without_outputs(ep):
+            return any(
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+                and node.meta.get("val") == ()
+                for gm in ep.graph_module.modules()
+                if isinstance(gm, torch.fx.GraphModule)
+                for node in gm.graph.nodes
+            )
+
+        x = torch.randn(4, 4)
+        for m in (UnusedAutocast(), EmptyAutocastInNoGrad(), UnusedNoGrad()):
+            ep = export(m, (x,))
+            self.assertTrue(has_region_without_outputs(ep))
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = load(buffer)
+            self.assertTrue(has_region_without_outputs(loaded_ep))
+            self.assertEqual(loaded_ep.module()(x), m(x))
+            save(loaded_ep, io.BytesIO())
+
+    @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
+    def test_load_torch_python_ops_in_new_process(self):
+        # These imports define the ops here. The new process below only imports torch.
+        import torch.ao.quantization.fx._decomposed
+        from torch.nn.attention.varlen import varlen_attn
+
+        class M(torch.nn.Module):
+            def forward(self, q, cu, x):
+                attn = varlen_attn(q, q, q, cu, cu, 4, 4)
+                x_int8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, 0.5, 0, -128, 127, torch.int8
+                )
+                return attn, x_int8
+
+        inp = (
+            torch.randn(8, 2, 16, dtype=torch.bfloat16),
+            torch.tensor([0, 4, 8], dtype=torch.int32),
+            torch.randn(4),
+        )
+        ep = export(M(), inp)
+        ops = sorted({str(n.target) for n in ep.graph.nodes if n.op == "call_function"})
+        with TemporaryFileName(suffix=".pt2") as path:
+            save(ep, path)
+            script = (
+                "import torch;"
+                f"ep = torch.export.load(r'{path}');"
+                "print(sorted({str(n.target) for n in ep.graph.nodes"
+                " if n.op == 'call_function'}))"
+            )
+            out = subprocess.check_output(
+                [sys.executable, "-c", script], cwd=os.path.dirname(path), text=True
+            )
+        self.assertEqual(out.strip().splitlines()[-1], str(ops))
+
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
         buf = io.BytesIO()
@@ -2714,6 +2797,311 @@ class TestPredispatchSerialization(TestCase):
         exp_out = ep.module()(*inp)
         actual_out = loaded_ep.module()(*inp)
         self.assertTrue(torch.allclose(exp_out, actual_out))
+
+    def test_predispatch_flat_apply_serialize_roundtrip(self):
+        """Test that flat_apply calls can be saved and then loaded in a new process."""
+        from torch._dynamo._trace_wrapped_higher_order_op import (
+            ModIndex,
+            TransformGetItemToIndex,
+        )
+        from torch._export.serde.serialize import _FLAT_APPLY_MODULES
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(TwoTensor(torch.ones(4), torch.ones(4)))
+
+            def forward(self, types, x):
+                q = torch.arange(types.shape[1])
+                rows = torch.vmap(
+                    torch.vmap(
+                        lambda i, j: types[0, i] & types[0, j], in_dims=(None, 0)
+                    ),
+                    in_dims=(0, None),
+                )
+                # Also inside autocast and no_grad regions, which export
+                # moves into submodules.
+                with torch.autocast("cpu", torch.bfloat16), TransformGetItemToIndex():
+                    mask = rows(q, q)
+                with torch.no_grad():
+                    y = TwoTensor(x, x * 2)
+                return mask, (x + y + self.buffer).b
+
+        m = M()
+        inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
+        expected = m(*inp)
+        ep = export(m, inp, strict=False)
+        # Two indexing calls that share one function spec, and one constructor.
+        flat_apply_nodes = [
+            n
+            for gm in ep.graph_module.modules()
+            if isinstance(gm, torch.fx.GraphModule)
+            for n in gm.graph.nodes
+            if n.target is torch.ops.higher_order.flat_apply
+        ]
+        self.assertEqual(len(flat_apply_nodes), 3)
+
+        with TemporaryFileName(suffix=".pt2") as path:
+            torch.export.save(ep, path)
+            loaded_ep = torch.export.load(path)
+            self.assertEqual(expected, loaded_ep.module()(*inp))
+            torch.export.save(loaded_ep, io.BytesIO())
+
+            # Load and run in a new process. Load imports the modules in its
+            # table, such as the one of ModIndex, which the indexing calls use,
+            # but not the module that defines TwoTensor, so the process
+            # imports that first.
+            self.assertIn(ModIndex.__module__, _FLAT_APPLY_MODULES)
+            # Packaged fbcode test binaries cannot start a plain Python with torch.
+            if not IS_FBCODE:
+                script = (
+                    "import torch, torch.testing._internal.two_tensor;"
+                    f"ep = torch.export.load(r'{path}');"
+                    "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
+                    "print([t.tolist() for t in out])"
+                )
+                out = subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    cwd=os.path.dirname(path),
+                    text=True,
+                )
+                self.assertEqual(
+                    out.strip().splitlines()[-1], str([t.tolist() for t in expected])
+                )
+
+        # A spec that lives on a submodule, as in a hand-built graph, is read
+        # with its dotted get_attr target.
+        spec_node = flat_apply_nodes[0].args[1]
+        owner = spec_node.graph.owning_module
+        owner.sub = torch.nn.Module()
+        owner.sub.spec = getattr(owner, spec_node.target)
+        spec_node.target = "sub.spec"
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(expected, torch.export.load(buffer).module()(*inp))
+
+    def test_predispatch_flat_apply_unloadable_function_raises(self):
+        from torch._export.wrappers import allow_in_pre_dispatch_graph
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class LocalTwoTensor(TwoTensor):
+            pass
+
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+            @classmethod
+            @allow_in_pre_dispatch_graph
+            def apply(cls, *args, **kwargs):
+                return super().apply(*args, **kwargs)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                )
+
+            def forward(self, x):
+                return (x + LocalTwoTensor(x, x) + self.buffer).a
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return Scale.apply(x) + 1
+
+        @dataclass(frozen=True)
+        class Config:
+            factor: int
+
+        pytree.register_constant(Config)
+        self.addCleanup(pytree._deregister_pytree_node, Config)
+
+        class ScaleBy(Scale):
+            @staticmethod
+            def forward(x, config):
+                return x * config.factor
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                return ScaleBy.apply(x, Config(3))
+
+        # A class defined inside a function cannot be found by name.
+        ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+        reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
+        with self.assertRaisesRegex(SerializeError, reason):
+            torch.export.save(ep, io.BytesIO())
+
+        # A pytree constant input cannot be stored in a treespec string.
+        ep = export(Baz(), (torch.randn(4),), strict=False)
+        with self.assertRaisesRegex(SerializeError, "input spec cannot be saved"):
+            torch.export.save(ep, io.BytesIO())
+
+        # An autograd function defined in the main script runs in memory, but
+        # another process could not find it.
+        Scale.__module__, Scale.__qualname__ = "__main__", "Scale"
+        with patch.object(sys.modules["__main__"], "Scale", Scale, create=True):
+            x = torch.randn(4)
+            ep = export(Bar(), (x,), strict=False)
+            self.assertEqual(ep.module()(x), x * 2 + 1)
+            with self.assertRaisesRegex(SerializeError, "__main__ module"):
+                torch.export.save(ep, io.BytesIO())
+
+        # An autograd function from an imported module saves, loads and runs.
+        # A subclass whose name finds a different class cannot be saved.
+        module = types.ModuleType("flat_apply_test_module")
+        Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
+        LocalTwoTensor.__module__, LocalTwoTensor.__qualname__ = module.__name__, "Sub"
+
+        class Other(TwoTensor):
+            pass
+
+        Other.__module__, Other.__qualname__ = module.__name__, "Sub"
+        module.Scale, module.Sub = Scale, Other
+        with patch.dict(sys.modules, {module.__name__: module}):
+            x = torch.randn(4)
+            buffer = io.BytesIO()
+            torch.export.save(export(Bar(), (x,), strict=False), buffer)
+            buffer.seek(0)
+            self.assertEqual(torch.export.load(buffer).module()(x), x * 2 + 1)
+            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+            with self.assertRaisesRegex(SerializeError, "names a different object"):
+                torch.export.save(ep, io.BytesIO())
+
+    def test_predispatch_flat_apply_load_rejects_other_functions(self):
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        class IndexInVmap(torch.nn.Module):
+            def forward(self, x, indices):
+                with TransformGetItemToIndex():
+                    return torch.vmap(lambda i: x[i])(indices)
+
+        ep = export(
+            IndexInVmap(), (torch.arange(4), torch.tensor([3, 1])), strict=False
+        )
+        artifact = serialize(ep)
+        func_name = (
+            b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
+        )
+        cls_name = b'"torch._dynamo._trace_wrapped_higher_order_op.ModIndex"'
+        self.assertIn(func_name, artifact.exported_program)
+        self.assertIn(cls_name, artifact.exported_program)
+        deserialize(artifact)
+
+        def load(payload):
+            return deserialize(
+                SerializedArtifact(
+                    payload,
+                    artifact.state_dict,
+                    artifact.constants,
+                    artifact.example_inputs,
+                )
+            )
+
+        for old, new, reason in [
+            (func_name, b'"builtins.exec"', "cannot be used as a flat_apply function"),
+            (
+                func_name,
+                b'"torch.nn.parameter.Parameter"',
+                "cannot be used as a flat_apply function",
+            ),
+            (func_name, b'"os.system"', "not a class or function defined"),
+            (func_name, b'"torch.os.system"', "not a top-level"),
+            (func_name, b'"torch.builtins.exec"', "not a top-level"),
+            (func_name, b'"torch.does_not_exist.f"', "not a top-level"),
+            (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
+            (func_name, b'"__mp_main__.f"', "__main__ module"),
+            (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
+            (cls_name, b'"torch.autograd.Function"', "not a class or function defined"),
+            (cls_name, b'"torch.os.system"', "not a top-level"),
+        ]:
+            with self.assertRaisesRegex(SerializeError, reason, msg=new):
+                load(artifact.exported_program.replace(old, new))
+
+        # Finding a flat_apply name never runs the code of a module outside
+        # _FLAT_APPLY_MODULES: not for a module that is not imported yet, not
+        # for a lazily loaded one, which runs on its first attribute read, and
+        # not for a module __getattr__.
+        with tempfile.TemporaryDirectory() as tmp:
+            ran = os.path.join(tmp, "ran")
+            path = os.path.join(tmp, "flat_apply_side_effect.py")
+            with open(path, "w") as f:
+                f.write(f"open({ran!r}, 'w').close()\n")
+            spec = importlib.util.spec_from_file_location("flat_apply_lazy", path)
+            spec.loader = importlib.util.LazyLoader(spec.loader)
+            holder = types.ModuleType("flat_apply_holder")
+            holder.lazy = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(holder.lazy)
+
+            def module_getattr(attr):
+                if attr == "F":
+                    open(ran, "w").close()
+                raise AttributeError(attr)
+
+            holder.__getattr__ = module_getattr
+            with (
+                patch.object(sys, "path", [tmp, *sys.path]),
+                patch.dict(sys.modules, {holder.__name__: holder}),
+            ):
+                for new, reason in [
+                    (b'"flat_apply_side_effect.F"', "not a top-level"),
+                    (b'"flat_apply_holder.lazy"', "not a class or function"),
+                    (b'"flat_apply_holder.F"', "not a class or function"),
+                ]:
+                    for old in (func_name, cls_name):
+                        with self.assertRaisesRegex(SerializeError, reason):
+                            load(artifact.exported_program.replace(old, new))
+                        self.assertFalse(os.path.exists(ran))
+
+                # Only a module that _FLAT_APPLY_MODULES lists gets imported.
+                with (
+                    patch(
+                        "torch._export.serde.serialize._FLAT_APPLY_MODULES",
+                        {"flat_apply_side_effect"},
+                    ),
+                    self.assertRaisesRegex(SerializeError, "not a class or function"),
+                ):
+                    load(
+                        artifact.exported_program.replace(
+                            func_name, b'"flat_apply_side_effect.F"'
+                        )
+                    )
+                self.assertTrue(os.path.exists(ran))
+
+        # The input spec decides which input the helper gets as the class name.
+        program = json.loads(artifact.exported_program)
+        (node,) = [
+            n
+            for n in program["graph_module"]["graph"]["nodes"]
+            if n["target"] == "torch.ops.higher_order.flat_apply"
+        ]
+        for args_and_kwargs in [
+            ((0, 0), {"function_cls_name": 0}),
+            # For a dict, *args would pass its keys, not args[0].
+            ({0: 0, 1: 0, 2: [0]}, {}),
+        ]:
+            spec = pytree.tree_flatten(args_and_kwargs)[1]
+            node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
+            with self.assertRaisesRegex(SerializeError, "name as the first input"):
+                load(json.dumps(program).encode())
+        node["inputs"][1]["arg"]["as_string"] = "not a treespec"
+        with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
+            load(json.dumps(program).encode())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
