@@ -1006,6 +1006,26 @@ def forward(self, sin, cos):
     """,
         )
 
+    def test_sequential_split_region_reads_nested_spec(self):
+        # split_module reads a pytree spec that lives on a submodule with a
+        # dotted get_attr at the start of the region.
+        root = torch.nn.Module()
+        root.sub = torch.nn.Module()
+        root.sub.spec = pytree.tree_flatten((0, 0))[1]
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_function(torch._C._set_grad_enabled, (False,))
+        spec = graph.get_attr("sub.spec")
+        out = graph.call_function(pytree.tree_unflatten, ([x, x], spec))
+        graph.call_function(torch._C._set_grad_enabled, (True,))
+        graph.output(out)
+        new_gm = sequential_split(
+            torch.fx.GraphModule(root, graph), _is_set_grad_enabled_node
+        )
+        self.assertEqual(
+            nodes_count(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod), 2
+        )
+
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
         self._check_node_users_in_the_same_graph(mod)

@@ -28,7 +28,10 @@ def _first_call_node(sub_gm: torch.fx.GraphModule) -> torch.fx.Node | None:
         if node.op == "placeholder" or (
             node.op == "get_attr"
             and isinstance(node.target, str)
-            and isinstance(getattr(sub_gm, node.target), torch.utils._pytree.TreeSpec)
+            and isinstance(
+                torch.fx.graph_module._get_attr(sub_gm, node.target),
+                torch.utils._pytree.TreeSpec,
+            )
         ):
             continue
         return node
