@@ -286,6 +286,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     else:
         is_ok &= type(var) is torch.Tensor
     var._grad = torch.ones(5, 5, device=device)
+    # The parent reads var after this message; wait for the writes above.
+    if device != "cpu":
+        torch.accelerator.synchronize()
 
     queue.put(is_ok)
 
@@ -499,6 +502,9 @@ class _MultiprocessingTestMixin:
         ready.wait()
         var.data[0, 0] = 1000
         var.grad.data[:] = torch.ones(5, 5, device=device) * 4
+        # The child reads var after this event; wait for the writes above.
+        if device != "cpu":
+            torch.accelerator.synchronize()
         master_modified.set()
 
         worker_ok = queue.get()
