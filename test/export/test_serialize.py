@@ -3014,8 +3014,8 @@ class TestPredispatchSerialization(TestCase):
                 load(artifact.exported_program.replace(old, new))
 
         # Load never runs a module's code: not for a module that is not
-        # imported yet, and not for a lazily loaded one, which runs on its
-        # first attribute read.
+        # imported yet, not for a lazily loaded one, which runs on its first
+        # attribute read, and not for a module __getattr__.
         with tempfile.TemporaryDirectory() as tmp:
             ran = os.path.join(tmp, "ran")
             path = os.path.join(tmp, "flat_apply_side_effect.py")
@@ -3026,6 +3026,13 @@ class TestPredispatchSerialization(TestCase):
             holder = types.ModuleType("flat_apply_holder")
             holder.lazy = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(holder.lazy)
+
+            def module_getattr(attr):
+                if attr == "F":
+                    open(ran, "w").close()
+                raise AttributeError(attr)
+
+            holder.__getattr__ = module_getattr
             with (
                 patch.object(sys, "path", [tmp, *sys.path]),
                 patch.dict(sys.modules, {holder.__name__: holder}),
@@ -3033,6 +3040,7 @@ class TestPredispatchSerialization(TestCase):
                 for new, reason in [
                     (b'"flat_apply_side_effect.F"', "not a top-level"),
                     (b'"flat_apply_holder.lazy"', "not a class or function"),
+                    (b'"flat_apply_holder.F"', "not a class or function"),
                 ]:
                     for old in (func_name, cls_name):
                         with self.assertRaisesRegex(SerializeError, reason):
