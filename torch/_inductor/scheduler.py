@@ -7288,8 +7288,14 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
+                # aten won this GEMM, so its tuned solutions are what runtime
+                # will look up. Widen the recorded coverage across the dynamic
+                # dim, after output_node() as the select_algorithm sites do.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
+                torch._inductor.select_algorithm._maybe_pretune_tunableop(
+                    min_node_unfused
+                )
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 if not isinstance(out_storage, ir.StorageBox):
                     raise AssertionError("expected out_storage to be an ir.StorageBox")
