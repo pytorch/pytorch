@@ -7,7 +7,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
-#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000
+// Full RVV FP64 vector support. __riscv_v_intrinsic alone is defined for the
+// Zve32x/Zve32f/Zve64f sub-profiles too, which lack the vfloat64m2_t intrinsics
+// that rvv_traits<double> uses, so also require FP64 element width.
+#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000 && \
+    defined(__riscv_v_elen_fp) && __riscv_v_elen_fp >= 64
+#define TORCH_RVV_FP64_ENABLED 1
 #include <riscv_vector.h>
 #endif
 namespace at::native {
@@ -157,7 +162,7 @@ std::enable_if_t<
 }
 
 
-#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000
+#ifdef TORCH_RVV_FP64_ENABLED
 
 // Maps scalar_t to an LMUL=2 RVV vector type plus the small intrinsic set the
 // kernel below needs, so a single kernel body serves float and double.
@@ -179,7 +184,17 @@ struct rvv_traits<float> {
   static v_t fadd(v_t a, v_t b, size_t vl) { return __riscv_vfadd_vv_f32m2(a, b, vl); }
   static v_t fsub(v_t a, v_t b, size_t vl) { return __riscv_vfsub_vv_f32m2(a, b, vl); }
   static v_t fsqrt(v_t a, size_t vl) { return __riscv_vfsqrt_v_f32m2(a, vl); }
-  static v_t fmax(v_t a, v_t b, size_t vl) { return __riscv_vfmax_vv_f32m2(a, b, vl); }
+  // IEEE 754-2019 maximum, which propagates NaN (unlike vfmax, which is
+  // maximumNumber). __riscv_vfmax_vv_f32m2(a, a, vl) is NaN only where a is
+  // NaN, so combine both NaN masks with vmerge to pick the NaN operand.
+  static v_t fmax_nan(v_t a, v_t b, size_t vl) {
+    const vbool16_t an = __riscv_vmfne_vv_f32m2_b16(a, a, vl);
+    const vbool16_t bn = __riscv_vmfne_vv_f32m2_b16(b, b, vl);
+    v_t r = __riscv_vfmax_vv_f32m2(a, b, vl);
+    r = __riscv_vmerge_vvm_f32m2(bn, b, r, vl);
+    r = __riscv_vmerge_vvm_f32m2(an, a, r, vl);
+    return r;
+  }
 };
 
 template <>
@@ -197,7 +212,17 @@ struct rvv_traits<double> {
   static v_t fadd(v_t a, v_t b, size_t vl) { return __riscv_vfadd_vv_f64m2(a, b, vl); }
   static v_t fsub(v_t a, v_t b, size_t vl) { return __riscv_vfsub_vv_f64m2(a, b, vl); }
   static v_t fsqrt(v_t a, size_t vl) { return __riscv_vfsqrt_v_f64m2(a, vl); }
-  static v_t fmax(v_t a, v_t b, size_t vl) { return __riscv_vfmax_vv_f64m2(a, b, vl); }
+  // IEEE 754-2019 maximum, which propagates NaN (unlike vfmax, which is
+  // maximumNumber). __riscv_vfmax_vv_f64m2(a, a, vl) is NaN only where a is
+  // NaN, so combine both NaN masks with vmerge to pick the NaN operand.
+  static v_t fmax_nan(v_t a, v_t b, size_t vl) {
+    const vbool8_t an = __riscv_vmfne_vv_f64m2_b8(a, a, vl);
+    const vbool8_t bn = __riscv_vmfne_vv_f64m2_b8(b, b, vl);
+    v_t r = __riscv_vfmax_vv_f64m2(a, b, vl);
+    r = __riscv_vmerge_vvm_f64m2(bn, b, r, vl);
+    r = __riscv_vmerge_vvm_f64m2(an, a, r, vl);
+    return r;
+  }
 };
 
 // RVV kernel for the float/double adam_math overload. VLA style, runs on any
@@ -252,7 +277,7 @@ inline void adam_math_rvv(
         // grad += param * wd, split into mul then add like the generic path
         grad_v = traits::fadd(
             grad_v, traits::fmul(param_v, static_cast<scalar_t>(weight_decay), vl), vl);
-      } else {
+      } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
         param_v = traits::fmul(param_v, static_cast<scalar_t>(1 - lr * weight_decay), vl);
       }
     }
@@ -275,7 +300,9 @@ inline void adam_math_rvv(
 
     v_t root_v;
     if (amsgrad) {
-      const v_t max_v = traits::fmax(
+      // NaN-propagating maximum, matching the generic path's at::vec::maximum;
+      // vfmax alone would drop a NaN max_exp_avg_sq (see rvv_traits::fmax_nan).
+      const v_t max_v = traits::fmax_nan(
           traits::load(max_exp_avg_sq_ptr + d, vl), exp_avg_sq_v, vl);
       traits::store(max_exp_avg_sq_ptr + d, max_v, vl);
       root_v = traits::fsqrt(max_v, vl);
@@ -300,10 +327,10 @@ inline void adam_math_rvv(
   // Software-pipelined main loop, one tile deep: the next tile's loads issue
   // before the current tile's math, so load latency hides behind the
   // sqrt/div-heavy chain. Consecutive tiles carry independent chains that the
-  // two FP pipes interleave, and each LMUL=2 vector holds 8 fp32 / 4 fp64
-  // elements, so at VLEN=128 a single instruction already spans both 128-bit
-  // pipes. Eight live m2 tiles' streams plus transients fit the 32-vector
-  // register file; m4 would exhaust it.
+  // target core's FP pipes can interleave. LMUL=2 and the one-tile depth are a
+  // tuning choice for a 128-bit-VLEN core (8 fp32 / 4 fp64 elements per vector,
+  // a few live m2 streams plus transients fit its vector register file); the
+  // numbers are not a general RVV guarantee, so revisit them on other VLENs.
   if (nfull > 0) {
     v_t param_v = traits::load(param_ptr, vlmax);
     v_t grad_v = traits::load(grad_ptr, vlmax);
@@ -341,7 +368,7 @@ inline void adam_math_rvv(
   }
 }
 
-#endif  // __riscv_v_intrinsic
+#endif  // TORCH_RVV_FP64_ENABLED
 
 
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
@@ -369,7 +396,7 @@ std::enable_if_t<
   int64_t size
 ){
   double step_size = lr / bias_correction1;
-#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000
+#ifdef TORCH_RVV_FP64_ENABLED
   adam_math_rvv<scalar_t, adam_mode>(
       param_ptr,
       exp_avg_ptr,
@@ -389,8 +416,7 @@ std::enable_if_t<
       grad_scale_ptr,
       size
   );
-  return;
-#endif
+#else
   using Vec = at::vec::Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -471,6 +497,7 @@ std::enable_if_t<
     }
     param_ptr[d] = param_ptr[d] - scalar_t(step_size) * exp_avg_ptr[d] / demon_val;
   }
+#endif  // TORCH_RVV_FP64_ENABLED
 }
 
 
