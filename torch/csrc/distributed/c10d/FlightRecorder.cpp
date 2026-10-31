@@ -125,11 +125,50 @@ bool recordsFlightRecorderNatively(const std::string& backend) {
   return backend == "gloo" || backend == "nccl" || backend == "xccl";
 }
 
+namespace {
+// Function-local so other libraries can register from their static
+// initializers; leaked so a dump during static destruction still works.
+std::mutex& dumpersMutex() {
+  static auto* mutex = new std::mutex();
+  return *mutex;
+}
+
+std::unordered_map<std::string, FlightRecorderDumper>& dumpers() {
+  static auto* dumpers =
+      new std::unordered_map<std::string, FlightRecorderDumper>();
+  return *dumpers;
+}
+
+std::optional<FlightRecorderDumper> getDumper(const std::string& backend) {
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  auto it = dumpers().find(backend);
+  if (it == dumpers().end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+} // namespace
+
+void registerFlightRecorderDumper(
+    const std::string& backend,
+    FlightRecorderDumper dumper) {
+  TORCH_CHECK_VALUE(
+      dumper.dump && dumper.dumpJson && dumper.reset,
+      "FlightRecorderDumper for ",
+      backend,
+      " must set dump, dumpJson and reset");
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  dumpers()[backend] = std::move(dumper);
+}
+
 std::string dump_fr_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->dump(includeCollectives, includeStackTraces, onlyActive);
+  }
   return getFlightRecorder(backend)->dump(
       std::unordered_map<
           std::string,
@@ -143,6 +182,9 @@ std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive,
     const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->dumpJson(includeCollectives, onlyActive);
+  }
   return getFlightRecorder(backend)->dump_json(
       std::unordered_map<
           std::string,
@@ -185,6 +227,10 @@ bool try_dump_fr_trace_file(
 }
 
 void reset_fr_trace(const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    dumper->reset();
+    return;
+  }
   getFlightRecorder(backend)->reset_all();
 }
 } // namespace c10d

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 
 #include <memory>
 #include <mutex>
@@ -383,6 +384,32 @@ TORCH_API FlightRecorder<c10::Event>* getFlightRecorder(
 // _FR_SELF_RECORDING_BACKENDS in distributed_c10d.py, which also lists
 // backends that never communicate.
 TORCH_API bool recordsFlightRecorderNatively(const std::string& backend);
+
+// A backend whose trace is not in a getFlightRecorder() instance (stock
+// ProcessGroupNCCL records into the FlightRecorder<at::cuda::CUDAEvent> in
+// libtorch_cuda) registers how to read it, so dump_fr_trace, dump_fr_trace_json
+// and reset_fr_trace serve it under that name (e.g. "nccl"), like the
+// instances hook-recorded backends use. Only register names the hook does not
+// record into (recordsFlightRecorderNatively()); a dumper hides the instance.
+// All three callbacks are required and must return what dump()/dump_json()
+// would. They run on the dumping thread, outside the registry lock and
+// possibly with the GIL held. Registering again replaces the dumper.
+// dump_fr_trace_file writes the dumper's trace, but try_dump_fr_trace_file
+// (and so the fr_dump_file handler) still reads the rank from
+// getFlightRecorder(backend), which a dumper's backend never sets.
+struct FlightRecorderDumper {
+  std::function<std::string(
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive)>
+      dump;
+  std::function<std::string(bool includeCollectives, bool onlyActive)> dumpJson;
+  std::function<void()> reset;
+};
+
+TORCH_API void registerFlightRecorderDumper(
+    const std::string& backend,
+    FlightRecorderDumper dumper);
 
 // Dumps the fr traces and additional information about the Process
 // Group.

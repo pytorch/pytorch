@@ -1678,6 +1678,14 @@ capability.
 **FlightRecorder NCCL JSON** ``/fr_trace_nccl_json``
   Same data as ``/fr_trace_nccl`` but rendered as raw formatted JSON per rank.
 
+**FlightRecorder nccl2** ``/fr_trace?backend=nccl2``
+  Same as ``/fr_trace`` for the ``nccl2`` backend's recorder. Other recorders
+  (e.g. ``backend=nccl``) can be selected the same way.
+
+**FlightRecorder nccl2 JSON** ``/fr_trace_json?backend=nccl2``
+  Same data as ``/fr_trace?backend=nccl2`` but rendered as raw formatted JSON
+  per rank.
+
 **TorchComms FlightRecorder** ``/torchcomms_fr_trace``
   Fetches TorchComms flight recorder data from ``torchcomms_fr_trace_json``
   (with ``onlyactive=true``) on all workers. Renders the same structured tables

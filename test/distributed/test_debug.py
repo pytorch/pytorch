@@ -105,6 +105,14 @@ class TestDebug(TestCase):
                 self.assertIn("Memberships", fetch("/fr_trace_nccl"))
                 self.assertIn("pg_status", fetch("/fr_trace_nccl_json"))
 
+        with self.subTest("fr_trace dump"):
+            from torch.distributed.debug._debug_handlers import FlightRecorderHandler
+
+            out = FlightRecorderHandler().dump()
+            self.assertIn("=== FR Trace ===", out)
+            self.assertIn("=== FR Trace nccl2 ===", out)
+            self.assertNotIn("Failed to fetch nccl2 trace", out)
+
         with self.subTest("error codes"):
             resp = session.get(f"http://localhost:{port}/blah")
             self.assertEqual(resp.status_code, 404)
@@ -420,6 +428,42 @@ class TestFetchTimeout(TestCase):
 
 class TestHandlerPartialDumps(TestCase):
     import torch.distributed.debug._debug_handlers
+
+    @patch("torch.distributed.debug._debug_handlers.FlightRecorderHandler._dump_tables")
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    def test_fr_handler_dumps_each_recorder(self, mock_fetch_all, mock_tables) -> None:
+        from torch.distributed.debug._debug_handlers import FlightRecorderHandler
+
+        payloads = {
+            ("fr_trace_json",): "cpu",
+            ("dump_nccl_trace_json", "onlyactive=true"): "nccl",
+            ("fr_trace_json", "backend=nccl2"): "nccl2",
+        }
+
+        def fetch(*args, timeout):
+            if payloads[args] is None:
+                raise RuntimeError("boom")
+            return ["http://h0:1"], [Response(200, payloads[args])]
+
+        mock_fetch_all.side_effect = fetch
+        mock_tables.side_effect = lambda title, addrs, resps: [
+            f"=== {title} === {resps[0].text}"
+        ]
+        content = FlightRecorderHandler().dump()
+        for title, payload in (
+            ("FR Trace", "cpu"),
+            ("FR Trace NCCL", "nccl"),
+            ("FR Trace nccl2", "nccl2"),
+        ):
+            self.assertIn(f"=== {title} === {payload}\n", content + "\n")
+        self.assertNotIn("Failed to fetch", content)
+
+        # One failing fetch does not hide the others.
+        payloads[("dump_nccl_trace_json", "onlyactive=true")] = None
+        with self.assertLogs("torch.distributed.debug._debug_handlers", level="DEBUG"):
+            content = FlightRecorderHandler().dump()
+        self.assertIn("=== FR Trace NCCL ===\nFailed to fetch NCCL trace", content)
+        self.assertIn("=== FR Trace nccl2 === nccl2", content)
 
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
     def test_stacks_handler_partial_dump(self, mock_fetch_all) -> None:
