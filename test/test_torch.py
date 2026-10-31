@@ -8338,7 +8338,7 @@ class TestTorch(TestCase):
 
             # Fast path: tensor containing `nan` is not equal to self
             for dtype in floating_and_complex_types():
-                t = torch.tensor([1., float('nan')], dtype=dtype)
+                t = torch.tensor([1., float('nan')], dtype=dtype, device=device)
                 self.assertFalse(torch.equal(t, t))
 
     def test_element_size(self):
