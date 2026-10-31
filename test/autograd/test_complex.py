@@ -1,7 +1,16 @@
 # Owner(s): ["module: autograd"]
 
 import torch
-from torch.testing._internal.common_utils import gradcheck, run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import (
+    gradcheck,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestAutogradComplex(TestCase):
@@ -102,6 +111,53 @@ class TestAutogradComplex(TestCase):
         torch.select(z1, z1.dim() - 2, 0).sum().backward()
 
         self.assertEqual(z.grad, z1.grad)
+
+
+class TestReductionComplexDtypeBackwardDevice(TestCase):
+    @parametrize("op", [torch.sum, torch.mean, torch.prod])
+    @parametrize("dim", [None, 0])
+    def test_real_input_complex_dtype_grad(self, device, op, dim):
+        # #192719: reducing a real input with dtype=<complex> must hand the
+        # input a real gradient (the real part of the complex grad_output)
+        # instead of failing the engine's grad dtype validation. The imaginary
+        # part of grad_output must be dropped, not folded into the values.
+        x = torch.randn(2, 3, dtype=torch.float64, device=device, requires_grad=True)
+        args = () if dim is None else (dim,)
+        y = op(x, *args, dtype=torch.complex128)
+        y.backward(torch.full_like(y, 1 + 2j))
+        self.assertEqual(x.grad.dtype, torch.float64)
+
+        n = x.numel() if dim is None else x.shape[dim]
+        if op is torch.prod:
+            total = x.detach().prod() if dim is None else x.detach().prod(dim)
+            expected = total / x.detach()
+        else:
+            expected = torch.full_like(x, 1.0 / n if op is torch.mean else 1.0)
+        self.assertEqual(x.grad, expected)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_mixed_precision_grad_not_downcast(self, device, dtype):
+        # The real-to-real reduction backward must divide the incoming grad in
+        # the output dtype before converting it to the input dtype. Converting
+        # first rounds the scaled grad before the division and produces a
+        # different gradient.
+        x = torch.randn(2, 3, dtype=dtype, device=device, requires_grad=True)
+        y = x.mean(dtype=torch.float32)
+        y.backward(torch.full_like(y, 2085.0))
+        self.assertEqual(x.grad.dtype, dtype)
+        expected = torch.full_like(x, 2085.0 / x.numel(), dtype=torch.float32)
+        self.assertEqual(x.grad, expected.to(dtype))
+
+    def test_real_to_complex_backward_no_cast_warning(self, device):
+        # at::real drops the imaginary part silently; a plain .to() cast here
+        # would warn on every backward of normal, correct usage.
+        x = torch.randn(2, 3, dtype=torch.float64, device=device, requires_grad=True)
+        y = x.sum(dtype=torch.complex128)
+        self.assertNotWarn(lambda: y.backward(torch.full_like(y, 1 + 2j)))
+        self.assertEqual(x.grad, torch.ones_like(x))
+
+
+instantiate_device_type_tests(TestReductionComplexDtypeBackwardDevice, globals())
 
 
 if __name__ == "__main__":
