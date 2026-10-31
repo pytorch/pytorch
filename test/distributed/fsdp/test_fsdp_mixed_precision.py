@@ -114,20 +114,27 @@ enable_sharded_grad_scaler = ["enable_sharded_grad_scaler", None]
 
 # Parent f22c53dc: common_utils.parametrize._parametrize_test forwards
 # subtest.decorators to DeviceTypeTestBase.instantiate_test via decorator_fn.
-configs = [
-    subtest(
-        config,
-        decorators=[requires_capabilities(Capability.dtype.bf16)],
+configs = []
+for config in product(
+    mp_configs,
+    cpu_offload_config,
+    full_precision_param_dtype_config,
+    enable_sharded_grad_scaler,
+):
+    mp_config, cpu_offload, full_precision_param_dtype, _ = config
+    required_capabilities = []
+    if mp_config is mp_diff_buffer_and_reduce:
+        required_capabilities.append(Capability.dtype.bf16)
+    if full_precision_param_dtype == torch.float64:
+        required_capabilities.append(Capability.dtype.fp64)
+    configs.append(
+        subtest(
+            config,
+            decorators=[requires_capabilities(*required_capabilities)],
+        )
+        if required_capabilities
+        else config
     )
-    if config[0] is mp_diff_buffer_and_reduce
-    else config
-    for config in product(
-        mp_configs,
-        cpu_offload_config,
-        full_precision_param_dtype_config,
-        enable_sharded_grad_scaler,
-    )
-]
 
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
@@ -588,7 +595,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             ],
         }
 
-    @requires_capabilities(Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend, Capability.dtype.fp64)
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
@@ -1138,7 +1145,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             self._test_grads_reduced_precision,
         )
 
-    @requires_capabilities(Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend, Capability.dtype.fp64)
     def test_mixed_precision_no_reshard_after_forward(self):
         # Note that we don't exercise all possible different configs so as to
         # not increase test TTS too much.
@@ -1153,7 +1160,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             enable_sharded_grad_scaler=False,
         )
 
-    @requires_capabilities(Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend, Capability.dtype.fp64)
     def test_mixed_precision_e2e_full_shard(self):
         mp = self._supported_mixed_precision_config()
         self._run_test_mixed_precision_e2e(
