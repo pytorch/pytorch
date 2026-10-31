@@ -723,45 +723,53 @@ if not TEST_WITH_ASAN:
     # inheritance under their original (unsuffixed) names; wrapping a
     # variant's attribute only affects that variant, not the shared template
     # method used by the other device variants.
-    for _name, _failure in test_failures.items():
-        for _suffix in _failure.suffixes:
-            if _suffix == "cpu":
-                # CPU entries are applied by copy_tests above.
+    #
+    # Keep the loops in a function scope: running them at module level leaves
+    # `_variant_cls`/`_cls` bound to generated TestCase subclasses in globals(),
+    # so anything that collects the module (e.g. a direct pytest run) picks up
+    # duplicate test nodes.
+    def _reattach_markers_and_guards():
+        for _name, _failure in test_failures.items():
+            for _suffix in _failure.suffixes:
+                if _suffix == "cpu":
+                    # CPU entries are applied by copy_tests above.
+                    continue
+                _variant_cls = globals().get(
+                    f"DynamicShapesCodegenGPUTests{_suffix.upper()}"
+                )
+                _test = getattr(_variant_cls, _name, None)
+                if _test is None:
+                    # Variant class not generated on this machine (e.g. no XPU).
+                    continue
+
+                # unittest.expectedFailure mutates the test item in place on
+                # Python >= 3.12, which would mark the shared template method for
+                # every device variant. Bind the method into a per-variant copy
+                # first (same technique as copy_tests) so the marker only applies
+                # to this variant.
+                @functools.wraps(_test)
+                def _copy(self, _test=_test):
+                    return _test(self)
+
+                _marker = (
+                    unittest.skip("Skipped!")
+                    if _failure.is_skip
+                    else unittest.expectedFailure
+                )
+                setattr(_variant_cls, _name, _marker(_copy))
+
+        for _name in list(globals().keys()):
+            if not _name.startswith("DynamicShapesCodegenGPUTests"):
                 continue
-            _variant_cls = globals().get(
-                f"DynamicShapesCodegenGPUTests{_suffix.upper()}"
-            )
-            _test = getattr(_variant_cls, _name, None)
-            if _test is None:
-                # Variant class not generated on this machine (e.g. no XPU).
-                continue
+            _cls = globals()[_name]
+            if hasattr(_cls, "test_randint_distribution_dynamic_shapes"):
+                # gfx950 shows a deterministic randint64 distribution mismatch
+                # for high bounds.
+                _cls.test_randint_distribution_dynamic_shapes = skipIfRocmArch(
+                    MI350_ARCH
+                )(_cls.test_randint_distribution_dynamic_shapes)
 
-            # unittest.expectedFailure mutates the test item in place on
-            # Python >= 3.12, which would mark the shared template method for
-            # every device variant. Bind the method into a per-variant copy
-            # first (same technique as copy_tests) so the marker only applies
-            # to this variant.
-            @functools.wraps(_test)
-            def _copy(self, _test=_test):
-                return _test(self)
-
-            _marker = (
-                unittest.skip("Skipped!")
-                if _failure.is_skip
-                else unittest.expectedFailure
-            )
-            setattr(_variant_cls, _name, _marker(_copy))
-
-    for _name in list(globals().keys()):
-        if not _name.startswith("DynamicShapesCodegenGPUTests"):
-            continue
-        _cls = globals()[_name]
-        if hasattr(_cls, "test_randint_distribution_dynamic_shapes"):
-            # gfx950 shows a deterministic randint64 distribution mismatch
-            # for high bounds.
-            _cls.test_randint_distribution_dynamic_shapes = skipIfRocmArch(MI350_ARCH)(
-                _cls.test_randint_distribution_dynamic_shapes
-            )
+    _reattach_markers_and_guards()
 
 
 if __name__ == "__main__":
