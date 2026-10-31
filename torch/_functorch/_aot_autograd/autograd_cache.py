@@ -1065,6 +1065,11 @@ def autograd_cache_key(
                     symint_name_map[str(inp)] = f"s_{j}"
                     j += 1
         with sanitize_gm_for_cache(gm):
+            # Cache hits skip compiled_graph_wrapper, so bypass while it is set.
+            # Install any env-requested wrapper before the cache lookup.
+            torch._utils_internal.maybe_init_compiled_graph_wrapper()
+            if torch._functorch.config.compiled_graph_wrapper is not None:
+                raise BypassAOTAutogradCache("compiled_graph_wrapper is set")
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
@@ -1260,6 +1265,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             (entry, pickled_content) = result
             try:
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
+                if compiler_config_extra is not None:
+                    fx_config["graph_id"] = compiler_config_extra.graph_id
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content
