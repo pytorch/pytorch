@@ -12148,20 +12148,12 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.cfloat, torch.cdouble]),
                        # ValueError: Expected 2D tensor but got tensor with dimension: 1.
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type='cpu', dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
+                           dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type='cpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
+                           dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
@@ -21274,10 +21266,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # Allowed exception: sparse tensors don't have strides
-               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
-               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
-                            'TestSparseCSR', 'test_sparse_csr_consistency'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
