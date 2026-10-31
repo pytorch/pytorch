@@ -2910,14 +2910,18 @@ class GuardBuilder(GuardBuilderBase):
     def NOT_NONE_MATCH(self, guard: Guard, value: object | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
-        if not isinstance(val, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(val)}")
+        if val is None:
+            raise AssertionError("Expected a value that is not None, got None")
         code = f"{ref} is not None"
         self._set_guard_export_info(guard, [code])
 
-        self.get_guard_manager(guard).add_not_none_guard(
-            get_verbose_code_parts(code, guard), guard.user_stack
-        )
+        guard_manager = self.get_guard_manager(guard)
+        # A dict the frame iterates has this manager, which takes no leaf guards
+        # here, and whose own type check already rules out None.
+        if not isinstance(guard_manager, DictGuardManager):
+            guard_manager.add_not_none_guard(
+                get_verbose_code_parts(code, guard), guard.user_stack
+            )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value.raw_repr(),

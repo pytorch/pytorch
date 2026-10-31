@@ -22,6 +22,7 @@ maintaining proper semantics while enabling optimizations where possible.
 """
 
 import _collections  # type: ignore[import-not-found]
+import abc
 import builtins
 import collections
 import contextlib
@@ -29,13 +30,14 @@ import dataclasses
 import enum
 import functools
 import inspect
+import keyword
 import random
 import sys
 import threading
 import types
 import warnings
 import weakref
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, cast, NoReturn, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
@@ -67,6 +69,7 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    GenericAttrSource,
     GetItemSource,
     RandomValueSource,
     TypeMROSource,
@@ -342,6 +345,13 @@ KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
         types.GetSetDescriptorType,
     }
 )
+
+
+def _protocol_non_methods(proto: type, members: Collection[str]) -> Collection[str]:
+    non_methods = getattr(proto, "__non_callable_proto_members__", None)
+    if non_methods is None:  # before 3.12.2
+        return {m for m in members if not callable(getattr(proto, m, None))}
+    return non_methods
 
 
 def is_data_descriptor(obj: object) -> bool:
@@ -4338,6 +4348,166 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except ObservedAttributeError:
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
+
+    def require_live_protocol_members(
+        self, tx: "InstructionTranslatorBase", proto: type, members: Collection[str]
+    ) -> None:
+        """Graph break if the frame changed what the real isinstance() would
+        answer, since it only sees the live object."""
+        # typing accepts an explicit subclass whatever its members hold.
+        if proto in type(self.value).__mro__:
+            return
+        # From 3.12 typing cannot see a threading.local's per-thread attributes.
+        if sys.version_info >= (3, 12) and isinstance(self.value, threading.local):
+            return
+        side_effects = tx.output.side_effects
+        non_methods = _protocol_non_methods(proto, members)
+        instance_dict = self._real_instance_dict()
+
+        def store_changes_answer(name: str) -> bool:
+            if not side_effects.has_pending_mutation_of_attr(self, name):
+                return False
+            stored = side_effects.load_attr(self, name, deleted_ok=True)
+            if isinstance(stored, variables.DeletedVariable):
+                return True
+            live = self.lookup_class_mro_attr(name)
+            # Before 3.12 hasattr() sees whether a slot is set.
+            if sys.version_info < (3, 12) and isinstance(
+                live, types.MemberDescriptorType
+            ):
+                live = NO_SUCH_SUBOBJ
+            if instance_dict is not None and dict.__contains__(instance_dict, name):
+                live = dict.__getitem__(instance_dict, name)
+            if live is NO_SUCH_SUBOBJ:
+                return True
+            if name in non_methods:
+                return False
+            # None opts a method member out of the Protocol.
+            return stored.is_constant_none() or live is None
+
+        if side_effects.has_pending_mutation_of_attr(self, "__dict__") or any(
+            store_changes_answer(name) for name in members
+        ):
+            unimplemented(
+                gb_type="Protocol isinstance() after an in-frame attribute change",
+                context=f"isinstance({self}, {proto})",
+                explanation="A runtime_checkable Protocol check is answered by the "
+                "real object, which does not have the attributes this frame changed.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def _real_instance_dict(self) -> dict[str, Any] | None:
+        """The dict inspect.getattr_static reads. None if the class has none or
+        shadows it, in which case getattr_static skips the instance altogether,
+        and no user code runs here to find that out."""
+        descriptor = self.lookup_class_mro_attr("__dict__")
+        if not isinstance(
+            descriptor, (types.GetSetDescriptorType, types.MemberDescriptorType)
+        ):
+            return None
+        try:
+            instance_dict = object.__getattribute__(self.value, "__dict__")
+        except (AttributeError, TypeError):  # another class's descriptor
+            return None
+        return instance_dict if isinstance(instance_dict, dict) else None
+
+    def _hasattr_runs_user_code(self, name: str) -> bool:
+        attr = self.lookup_class_mro_attr(name)
+        if self._object_has_getattribute:
+            return True
+        # A later object may lack the entry or leave the slot unset and reach the hook.
+        if attr is NO_SUCH_SUBOBJ or isinstance(
+            attr, (types.MemberDescriptorType, types.GetSetDescriptorType)
+        ):
+            hook = self._check_for_getattr()
+            return hook not in (None, unpatched_nn_module_getattr)
+        return hasattr(type(attr), "__get__") and not isinstance(
+            attr, (types.FunctionType, classmethod, staticmethod)
+        )
+
+    def guard_protocol_members(self, proto: type, members: Collection[str]) -> None:
+        """Guard the instance state the real isinstance(self.value, proto) just
+        read, stopping at the first member that settles the answer. What it read
+        off the class is not guarded from 3.12, so changing the class after this
+        compiled keeps the old answer.
+        """
+        if self.source is None:
+            return
+        value = self.value
+        non_methods = _protocol_non_methods(proto, members)
+        if sys.version_info < (3, 12):
+            # typing tries issubclass() first only when every member is callable.
+            if not non_methods and issubclass(value.__class__, proto):
+                return
+            # It then reads hasattr() and, for a method member, getattr(). A guard
+            # makes the same read on every call, so where that runs user code this
+            # stays unguarded. A name that is not an identifier cannot be spelled
+            # as an attribute source.
+            for name in sorted(members):
+                if (
+                    self._hasattr_runs_user_code(name)
+                    or not name.isidentifier()
+                    or keyword.iskeyword(name)
+                ):
+                    continue
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+                if not hasattr(value, name):
+                    return
+                if name not in non_methods:
+                    attr = getattr(value, name)
+                    self._guard_none_or_not(AttrSource(self.source, name), attr)
+                    if attr is None:
+                        return
+            return
+        # typing tries the ABC check first.
+        if abc.ABCMeta.__instancecheck__(proto, value):
+            return
+        instance_dict = self._real_instance_dict()
+        if instance_dict is None:
+            return
+        # object.__getattribute__, as getattr_static reads it. The type check fails a
+        # later object whose __dict__ is a dict subclass before its keys are read.
+        dict_source = GenericAttrSource(self.source, "__dict__")
+        install_guard(dict_source.make_guard(GuardBuilder.TYPE_MATCH))
+        if type(instance_dict) is not dict:
+            return
+        for name in sorted(members):
+            is_method = name not in non_methods
+            class_attr = self.lookup_class_mro_attr(name)
+            # A data member the class provides is present whatever the dict holds,
+            # and getattr_static returns a data descriptor over any dict entry.
+            if is_data_descriptor(class_attr) or (
+                not is_method and class_attr is not NO_SUCH_SUBOBJ
+            ):
+                continue
+            in_dict = name in instance_dict
+            contains = (
+                GuardBuilder.DICT_CONTAINS
+                if in_dict
+                else GuardBuilder.DICT_NOT_CONTAINS
+            )
+            install_guard(dict_source.make_guard(functools.partial(contains, key=name)))
+            if not in_dict and class_attr is NO_SUCH_SUBOBJ:
+                return
+            if is_method:
+                found = instance_dict[name] if in_dict else class_attr
+                if in_dict:
+                    entry_source = DictGetItemSource(dict_source, name)
+                    self._guard_none_or_not(entry_source, found)
+                if found is None:
+                    return
+
+    def _guard_none_or_not(self, source: Source, value: object) -> None:
+        # None opts a method member out of a Protocol; nothing else about the value
+        # matters, so distinct values share a graph.
+        guard = (
+            GuardBuilder.NONE_MATCH if value is None else GuardBuilder.NOT_NONE_MATCH
+        )
+        install_guard(source.make_guard(guard))
 
     def is_hashable(self) -> bool:
         # Mirrors the __hash__ is None check in hash_impl's MRO walk.
