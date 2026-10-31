@@ -1238,11 +1238,11 @@ class TestOptimRenewed(TestCase):
                     if torch.is_tensor(v) and v.shape == param_numel.shape:
                         self.assertEqual(v, ref_state[k].expand(numel))
 
-    # amsgrad's NaN-propagating maximum (fmax_nan on the RVV path) must agree
-    # with the scalar forloop reference, which uses torch.maximum (adam.py) and
-    # propagates NaN. Only Adam/AdamW accept amsgrad; SGD and Adagrad do not.
-    # Non-RVV fused kernels use std::max for the scalar tail, which drops a NaN
-    # exp_avg_sq, so the max_exp_avg_sq equality only holds on the RVV build.
+    # amsgrad's NaN-propagating maximum must agree with the scalar forloop
+    # reference, which uses torch.maximum (adam.py) and propagates NaN. Only
+    # Adam/AdamW accept amsgrad; SGD and Adagrad do not. All fused kernels
+    # (vector bodies and scalar tails) use a NaN-propagating max, so the
+    # max_exp_avg_sq equality holds on CPU.
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=(torch.float32, torch.float64),
@@ -1254,7 +1254,6 @@ class TestOptimRenewed(TestCase):
             )
         if _get_device_type(device) == "mps" and dtype == torch.float64:
             self.skipTest("MPS does not support torch.float64")
-        is_rvv = torch._C._cpu._get_cpu_capability().get("rvv_fp64_kernels", False)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
             kwargs = deepcopy(optim_input.kwargs)
@@ -1281,7 +1280,7 @@ class TestOptimRenewed(TestCase):
                 opt_fused.step()
                 opt_forloop.step()
                 self.assertEqual(param_fused, param_forloop)
-                if is_rvv:
+                if _get_device_type(device) == "cpu":
                     self.assertEqual(
                         opt_fused.state[param_fused]["max_exp_avg_sq"],
                         opt_forloop.state[param_forloop]["max_exp_avg_sq"],

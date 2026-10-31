@@ -152,7 +152,11 @@ std::enable_if_t<
     opmath_t demon_val;
     if (amsgrad) {
       opmath_t max_exp_avg_sq_var = max_exp_avg_sq_ptr[d];
-      max_exp_avg_sq_var = std::max(max_exp_avg_sq_var, exp_avg_sq_var);
+      // NaN-propagating maximum, matching torch.maximum in adam.py and the
+      // vector bodies; std::max would drop a NaN exp_avg_sq.
+      max_exp_avg_sq_var = std::isnan(exp_avg_sq_var)
+          ? exp_avg_sq_var
+          : std::max(max_exp_avg_sq_var, exp_avg_sq_var);
       max_exp_avg_sq_ptr[d] =
           scalar_t(max_exp_avg_sq_var);
       demon_val =
@@ -494,8 +498,11 @@ std::enable_if_t<
         scalar_t(exp_avg_sq_grad_coefficient) * grad_val * grad_val;
     scalar_t demon_val;
     if (amsgrad) {
-      max_exp_avg_sq_ptr[d] =
-          std::max(max_exp_avg_sq_ptr[d], exp_avg_sq_ptr[d]);
+      // NaN-propagating maximum, matching torch.maximum in adam.py and the
+      // vector body; std::max would drop a NaN exp_avg_sq.
+      max_exp_avg_sq_ptr[d] = std::isnan(exp_avg_sq_ptr[d])
+          ? exp_avg_sq_ptr[d]
+          : std::max(max_exp_avg_sq_ptr[d], exp_avg_sq_ptr[d]);
       demon_val =
           std::sqrt(max_exp_avg_sq_ptr[d]) / scalar_t(bias_correction2_sqrt) + scalar_t(eps);
     } else {
