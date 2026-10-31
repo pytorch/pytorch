@@ -212,6 +212,37 @@ class TestScheduler(TestCase):
 
         self.assertEqual(result, [independent, producer, consumer])
 
+    def test_compute_ancestors_grouped_node(self):
+        # Regression test for #201884: compute_ancestors failed with KeyError
+        # when grouped nodes (e.g. foreach) were present because name_to_ancestors
+        # was keyed only by the joined node name (op0_op1) while consumers
+        # looked up ancestors by buffer defining_op_name (op0, op1).
+        scheduler = object.__new__(Scheduler)
+        scheduler.name_to_buf = {
+            "buf0": Mock(defining_op_name=Mock(return_value="op0")),
+            "buf1": Mock(defining_op_name=Mock(return_value="op1")),
+        }
+
+        grouped = self._mock_base_snode("op0_op1")
+        grouped.get_operation_names.return_value = OrderedSet(["op0", "op1"])
+        grouped.unmet_dependencies = OrderedSet(
+            [MemoryDep("buf0", sympy.S.Zero, (), ())]
+        )
+
+        consumer = self._mock_base_snode("op2")
+        consumer.unmet_dependencies = OrderedSet(
+            [
+                MemoryDep("buf0", sympy.S.Zero, (), ()),
+                MemoryDep("buf1", sympy.S.Zero, (), ()),
+            ]
+        )
+
+        scheduler.nodes = [grouped, consumer]
+        scheduler.compute_ancestors()
+
+        self.assertEqual(grouped.ancestors, OrderedSet())
+        self.assertEqual(consumer.ancestors, OrderedSet(["op0", "op1"]))
+
     def _mock_schedule_node(
         self,
         name,
