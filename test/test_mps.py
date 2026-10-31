@@ -1462,6 +1462,18 @@ class TestMPS(TestCaseMPS):
         y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
         self.assertEqual(y_cpu, y_mps)
 
+    def test_conv2d_large_batch(self):
+        # Regression: MPSGraph's 2D convolution silently leaves outputs
+        # unwritten once the batch exceeds 2^16 (#202764). stride=1 breaks at
+        # exactly 65536 (nothing is written), stride=2 at 65537 (batch indices
+        # >= 65536 are left as uninitialized memory).
+        for batch_size, stride in [(65536, 1), (65537, 2)]:
+            x = torch.randn(batch_size, 4, 6, 6)
+            weight = torch.randn(8, 4, 3, 3) * 0.1
+            y_cpu = F.conv2d(x, weight, stride=stride)
+            y_mps = F.conv2d(x.to("mps"), weight.to("mps"), stride=stride)
+            self.assertEqual(y_cpu, y_mps.cpu(), rtol=2.6e-05, atol=2e-04)
+
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
             mask = torch.full((3, 6, 6), float("-inf"))
