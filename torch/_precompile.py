@@ -4088,7 +4088,8 @@ def capture(
     ``mode`` and ``options`` configure Inductor as they do for
     :func:`torch.compile`: at most one of them may be given, and only with
     ``backend="inductor"``. They apply to every graph the capture compiles.
-    ``mode="reduce-overhead"`` (or ``"max-autotune"``, or
+
+    CUDA graphs: ``mode="reduce-overhead"`` (or ``"max-autotune"``, or
     ``options={"triton.cudagraphs": True}``) makes a :class:`DynamoTracer`
     capture serve its loaded graphs as CUDA graphs, as the capture ran them:
     the artifact records ``triton.cudagraphs``, ``triton.cudagraph_trees``
@@ -4109,6 +4110,7 @@ def capture(
     ``triton.cudagraph_dynamic_shape_rerecord_limit``,
     ``triton.cudagraph_or_error``, ...) are the serving process's, as under
     ``torch.compile``, whose options also cover only the compile.
+
     ``cudagraph_policy``, which wraps the graphs again at load and is a Python
     object, is refused in ``options``, and a capture with CUDA graphs on refuses
     one set in ``torch._inductor.config``: unset it while capturing and set it
@@ -4117,20 +4119,25 @@ def capture(
     records that. ``triton.cudagraphs``, ``triton.cudagraph_trees``,
     ``graph_partition`` and ``cpp_wrapper`` are read when ``capture()`` is
     called. A capture with CUDA graphs on compiles every call under them and
-    raises on a call made after one of them changed; one without records only
-    that they are off, compiles the rest as configured, and raises on a call
-    made after ``triton.cudagraphs`` was turned on. As under ``torch.compile``, a
-    graph's outputs are overwritten by its next replay, so clone what you keep
-    across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
-    between iterations; a graph Inductor cannot capture (CPU tensors, mutated
-    inputs, ...) runs without one and logs a cudagraph skip; and a frame served
-    eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. With
+    raises on a call made after one of them changed. One without records only
+    that they are off and compiles the rest as configured; it raises on a call
+    made with ``triton.cudagraphs`` turned on in ``torch._inductor.config``,
+    which it would ignore, unless its ``mode`` or ``options`` set
+    ``triton.cudagraphs`` (they win, as under :func:`torch.compile`). With
     ``backend="inductor"``, a capture is refused when a
     :func:`torch._dynamo.override_cudagraphs` changes whether a graph runs as a
     CUDA graph from what the capture's ``triton.cudagraphs`` decides (``fwd``
     differing from it, or ``bwd=False`` under a CUDA-graphed forward): the
-    artifact records the capture's CUDA graph config, not each graph's. A
-    :class:`DynamoTracer` capture refuses ``freezing`` and
+    artifact records the capture's CUDA graph config, not each graph's.
+
+    As under ``torch.compile``, a
+    graph's outputs are overwritten by its next replay, so clone what you keep
+    across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
+    between iterations; a graph Inductor cannot capture (CPU tensors, mutated
+    inputs, ...) runs without one and logs a cudagraph skip; and a frame served
+    eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph.
+
+    Refused options: a :class:`DynamoTracer` capture refuses ``freezing`` and
     ``force_disable_caches``, whose compiles file no AOTAutograd cache entry
     for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does not
     cache, and ``bundled_autotune_remote_cache`` on, which the capture turns

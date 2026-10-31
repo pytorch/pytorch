@@ -1983,11 +1983,13 @@ class PrecompileSession(Generic[_P, _R]):
         # graph_partition is in it because post-compile picks the wrapper for a
         # partitioned graph by it, while the graph was partitioned at compile.
         self._cudagraph_config: dict[str, bool] = {}
-        # The ambient settings the record was derived from, which the calls of a
-        # CUDA graph capture must not change.
+        # The ambient settings the record was derived from, which _call checks
+        # each call against.
         self._cudagraph_inputs: dict[str, Any] = {}
-        # Whether the capture asked for CUDA graphs, before a cpp_wrapper downgrade.
+        # Whether the capture asked for CUDA graphs, before a cpp_wrapper downgrade,
+        # and whether its options decide that rather than the ambient flag.
         self._requests_cudagraphs = False
+        self._options_set_cudagraphs = False
         if self._backend_name == "inductor":
             inputs = self._cudagraph_inputs = _cudagraph_inputs()
             config = self._cudagraph_config = {
@@ -1997,6 +1999,7 @@ class PrecompileSession(Generic[_P, _R]):
             if not isinstance(backend, str):
                 config.update((k, v) for k, v in backend.config.items() if k in config)
                 cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
+                self._options_set_cudagraphs = "triton.cudagraphs" in backend.config
             self._requests_cudagraphs = config["triton.cudagraphs"]
             from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
@@ -2132,11 +2135,11 @@ class PrecompileSession(Generic[_P, _R]):
             snapshot = self._cudagraph_inputs
             changed = [k for k, v in snapshot.items() if ambient[k] != v]
             if not self._requests_cudagraphs:
-                # Only turning CUDA graphs on would compile what the record says
-                # is off.
-                changed = [
-                    k for k in changed if k == "triton.cudagraphs" and ambient[k]
-                ]
+                # The calls compile with CUDA graphs off, as recorded: refuse an
+                # ambient request for them, which would be silently ignored,
+                # unless the capture's options decide it, as under torch.compile.
+                on = ambient["triton.cudagraphs"] and not self._options_set_cudagraphs
+                changed = [k for k in ("triton.cudagraphs",) if on]
             if changed:
                 raise PackageError(
                     f"{changed} changed since capture() began: the artifact "

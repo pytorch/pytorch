@@ -4990,6 +4990,16 @@ class TestPrecompileDynamoCapture(TestCase):
         # It records only that CUDA graphs are off.
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], {"triton.cudagraphs": False})
 
+    def test_a_capture_whose_options_turn_cudagraphs_off_keeps_them_off(self):
+        # The options win over an ambient request, as under torch.compile.
+        off = {"triton.cudagraphs": False}
+        with self._capture(self.mod.single, options=off) as cap:
+            with torch._inductor.config.patch({"triton.cudagraphs": True}):
+                cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            meta = _parse_artifact_metadata(f.read())
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], off)
+
     @parametrize("key", ["cpp_wrapper", "graph_partition", "triton.cudagraph_trees"])
     def test_a_capture_without_cudagraphs_compiles_under_an_inner_patch(self, key):
         from torch._dynamo import callback
@@ -6664,6 +6674,9 @@ class TestPrecompileCudagraphs(TestCase):
         # Some CUDA graph decisions (force_disable_cudagraph_TESTING_ONLY) are made
         # only by a fresh compile and are not in the cache key.
         self.enterContext(fresh_cache())
+        # Captures with CUDA graphs on leave cudagraph trees, which this clears.
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
 
     def _capture_step(self, fn, grad=False, **kwargs):
         with torch.set_grad_enabled(grad):
@@ -6852,7 +6865,6 @@ class TestPrecompileCudagraphs(TestCase):
         from torch._inductor import cudagraph_trees
 
         torch._dynamo.reset()
-        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
         compiled = torch.compile(fn, mode="reduce-overhead")
         for _ in range(3):
             torch.compiler.cudagraph_mark_step_begin()
