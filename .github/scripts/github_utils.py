@@ -38,6 +38,7 @@ def gh_fetch_url_and_headers(
     data: dict[str, Any] | None | str = None,
     method: str | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
+    timeout: float | None = None,
 ) -> tuple[Any, Any]:
     if headers is None:
         headers = {}
@@ -50,7 +51,10 @@ def gh_fetch_url_and_headers(
         data_ = data.encode() if isinstance(data, str) else json.dumps(data).encode()
 
     try:
-        with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
+        request = Request(url, headers=headers, data=data_, method=method)
+        # urlopen's own default applies when no timeout is given.
+        kwargs = {} if timeout is None else {"timeout": timeout}
+        with urlopen(request, **kwargs) as conn:
             return conn.headers, reader(conn)
     except HTTPError as err:
         if (
@@ -81,9 +85,10 @@ def gh_fetch_url(
     data: dict[str, Any] | None | str = None,
     method: str | None = None,
     reader: Callable[[Any], Any] = json.load,
+    timeout: float | None = None,
 ) -> Any:
     return gh_fetch_url_and_headers(
-        url, headers=headers, data=data, reader=reader, method=method
+        url, headers=headers, data=data, reader=reader, method=method, timeout=timeout
     )[1]
 
 
