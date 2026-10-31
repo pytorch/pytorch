@@ -1965,6 +1965,15 @@ class PrecompileSession(Generic[_P, _R]):
             if not isinstance(backend, str):
                 config = self._cudagraph_config
                 config.update((k, v) for k, v in backend.config.items() if k in config)
+            policy = inductor_config.cudagraph_policy
+            if self._cudagraph_config["triton.cudagraphs"] and policy is not None:
+                raise PackageError(
+                    "a DynamoTracer capture cannot record "
+                    "torch._inductor.config.cudagraph_policy: it decides how the "
+                    "capture wraps each graph, while a loaded artifact wraps them "
+                    "by CUDAGRAPH_CONFIG. Unset it while capturing and set it in "
+                    "the loading process."
+                )
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2352,14 +2361,15 @@ class PrecompileSession(Generic[_P, _R]):
         # graphed forward's backward out, if there is one.
         overrides = package.cudagraph_overrides
         inductor = self._backend_name == "inductor"
-        shipped: set[str] = backends.keys() & overrides.keys() if inductor else set()
         flag = self._cudagraph_config.get("triton.cudagraphs", False)
-        for backend_id in shipped:
+        for backend_id, artifact in backends.items():
+            if not (inductor and backend_id in overrides):
+                continue
+            # A graph pruned to a no-op never reaches Inductor: no CUDA graph.
+            if not isinstance(artifact, BundledAOTAutogradCacheArtifact):
+                continue
             fwd, bwd = overrides[backend_id]
-            artifact = backends[backend_id]
-            backward = isinstance(artifact, BundledAOTAutogradCacheArtifact) and (
-                artifact.content.compiled_bw is not None
-            )
+            backward = artifact.content.compiled_bw is not None
             forward = flag if fwd is None else fwd
             if forward != flag or (forward and backward and bwd is False):
                 raise PackageError(

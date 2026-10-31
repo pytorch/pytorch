@@ -5007,6 +5007,10 @@ class TestPrecompileDynamoCapture(TestCase):
             self._capture(single, options={"cudagraph_policy": None})
         with self.assertRaisesRegex(PrecompileError, "cannot record"):
             self._capture(single, options={"cudagraph-policy": None})
+        on = {"triton.cudagraphs": True}
+        with torch._inductor.config.patch(cudagraph_policy=object()):
+            with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
+                self._capture(single, options=on)
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
@@ -6698,8 +6702,14 @@ class TestPrecompileCudagraphs(TestCase):
             served = self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
             # The forward and backward graphs, as the flag decides them.
             self.assertEqual(served[0], 2 if flag else 0)
-        # An eager capture records no CUDA graph config for an override to contradict.
-        self._capture_step(fn, grad=True, backend="eager")
+
+    def test_an_eager_capture_records_no_cudagraph_config_to_contradict(self):
+        m = self.mod
+        for fn in (m.overrides_the_forward, m.overrides_the_backward):
+            _, meta = self._capture_step(fn, grad=True, backend="eager")
+            self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
+        _, meta = self._capture_step(m.turns_cudagraphs_on, grad=True, backend="eager")
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
 
     def test_an_inference_capture_keeping_out_a_backward_it_lacks_serves(self):
         fn = self.mod.overrides_the_backward
