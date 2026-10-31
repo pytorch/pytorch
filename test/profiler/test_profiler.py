@@ -5371,6 +5371,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+@instantiate_parametrized_tests
 class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
@@ -5548,6 +5549,36 @@ class TestMetadataJsonFormatCUDA(TestCase):
             [md.get("bytes") for md in sizes],
             f"no {nbytes}-byte copy in {sizes}",
         )
+        for act in gpu_acts:
+            if act.type() == "kernel":
+                self.assertNotIn("__amd_rocclr_", act.name())
+
+    @parametrize("numel", [5, 1024])
+    def test_runtime_memsets_are_not_kernels(self, numel):
+        # zero_() on a dense tensor calls cudaMemsetAsync, which ROCm
+        # implements with fill kernels.  They must be reported as memsets that
+        # add up to the requested size, never as kernels.  20 bytes is not a
+        # multiple of 16, which some runtimes split into two dispatches.
+        x = torch.empty(numel, device="cuda")
+        gpu_acts = []
+        for _ in range(3):
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                x.zero_()
+                torch.cuda.synchronize()
+            gpu_acts = [
+                act
+                for act in prof.profiler.kineto_results.trace_activities()
+                if act.type() in ("kernel", "gpu_memset")
+            ]
+            if any(act.type() == "gpu_memset" for act in gpu_acts):
+                break
+
+        memsets = [act for act in gpu_acts if act.type() == "gpu_memset"]
+        self.assertTrue(memsets, f"expected a gpu_memset event, got {gpu_acts}")
+        metadata = [json.loads("{" + act.metadata_json() + "}") for act in memsets]
+        self.assertEqual(sum(md.get("bytes", 0) for md in metadata), x.nbytes)
         for act in gpu_acts:
             if act.type() == "kernel":
                 self.assertNotIn("__amd_rocclr_", act.name())

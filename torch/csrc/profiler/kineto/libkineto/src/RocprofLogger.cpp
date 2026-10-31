@@ -172,6 +172,7 @@ struct memset_args {
   size_t sizeBytes{0};
   size_t width{0};
   size_t height{0};
+  size_t depth{1};
   size_t count{0};
 };
 auto extract_memset_args =
@@ -194,6 +195,12 @@ auto extract_memset_args =
     args.height = *(reinterpret_cast<const size_t*>(arg_value_addr));
   else if (strcmp("count", arg_name) == 0)
     args.count = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  else if (strcmp("extent", arg_name) == 0) {
+    const auto& extent = *(reinterpret_cast<const hipExtent*>(arg_value_addr));
+    args.width = extent.width;
+    args.height = extent.height;
+    args.depth = extent.depth;
+  }
   return 0;
 };
 
@@ -201,8 +208,10 @@ auto extract_memset_args =
 size_t memsetTotalBytes(uint32_t operation, const memset_args& args) {
   if (args.sizeBytes > 0)
     return args.sizeBytes;
+  // 2D and 3D fills.  clr fills width * height bytes for hipMemsetD2D16/32
+  // too (ihipMemset3D does not scale width by the element size).
   if (args.width > 0 && args.height > 0)
-    return args.width * args.height;
+    return args.width * args.height * args.depth;
   // hipMemsetD8/D16/D32 fill 'count' elements of known width.
   switch (operation) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8:
@@ -847,10 +856,12 @@ void RocprofLogger::api_callback(
             ,
             &args);
         RocprofLogger& dis = singleton();
-        std::lock_guard<std::mutex> lock(dis.memsetMutex_);
-        dis.memsetOps_.emplace(
-            record.correlation_id.internal,
-            memsetTotalBytes(record.operation, args));
+        {
+          std::lock_guard<std::mutex> lock(dis.memsetMutex_);
+          dis.memsetOps_.emplace(
+              record.correlation_id.internal,
+              memsetTotalBytes(record.operation, args));
+        }
         rocprofRow* row = new rocprofRow(
             record.correlation_id.internal,
             record.kind,
@@ -957,9 +968,12 @@ void RocprofLogger::buffer_callback(
         // never dispatched through a HIP launch API (graph replays, and
         // runtime-internal fill kernels).  The SDK reports grid_size as the
         // global work size (CUPTI reports the number of workgroups), so
-        // divide by the workgroup size.
+        // divide by the workgroup size, rounding up for a partial last
+        // workgroup.
         const auto divdim = [](uint32_t global, uint32_t local) -> uint32_t {
-          return local > 0 ? global / local : 0;
+          return local > 0
+              ? static_cast<uint32_t>((uint64_t{global} + local - 1) / local)
+              : 0;
         };
         row->gridX = divdim(dispatch.grid_size.x, dispatch.workgroup_size.x);
         row->gridY = divdim(dispatch.grid_size.y, dispatch.workgroup_size.y);

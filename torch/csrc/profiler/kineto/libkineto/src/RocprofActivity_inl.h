@@ -165,13 +165,15 @@ inline void GpuActivity::visitTypedMetadata(
           std::string{
               getGpuActivityKindString(memcpyKindDomain(), gpuActivity.op)});
     }
-    visitor.visit(
-        RocmMetadataFields::kBytes,
-        static_cast<uint64_t>(gpuActivity.internalBytes));
-    addBandwidthTypedMetadata(
-        visitor,
-        gpuActivity.internalBytes,
-        gpuActivity.end - gpuActivity.begin);
+    if (gpuActivity.internalBytes > 0) {
+      visitor.visit(
+          RocmMetadataFields::kBytes,
+          static_cast<uint64_t>(gpuActivity.internalBytes));
+      addBandwidthTypedMetadata(
+          visitor,
+          gpuActivity.internalBytes,
+          gpuActivity.end - gpuActivity.begin);
+    }
     return;
   }
 

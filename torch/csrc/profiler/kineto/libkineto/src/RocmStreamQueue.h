@@ -203,6 +203,9 @@ inline void classifyRuntimeInternalDispatches(
   if (memsetOps.empty() && copyByCorrelation.empty()) {
     return;
   }
+  // The runtime can split one fill or copy into several dispatches (unaligned
+  // head and tail, one per 3D slice); only the first carries the API's bytes.
+  std::unordered_set<uint64_t> sized;
   for (auto* item : rows) {
     if (item->type != ROCTRACER_ACTIVITY_ASYNC) {
       continue;
@@ -215,7 +218,9 @@ inline void classifyRuntimeInternalDispatches(
     const auto copyIt = copyByCorrelation.find(async->id);
     if (copyIt != copyByCorrelation.end()) {
       async->internalApi = RocLogger::RuntimeInternalMemcpy;
-      async->internalBytes = copyIt->second->size;
+      if (sized.insert(async->id).second) {
+        async->internalBytes = copyIt->second->size;
+      }
       async->op =
           copyOperationFromApi(copyIt->second->kind, copyIt->second->cid);
       continue;
@@ -223,7 +228,9 @@ inline void classifyRuntimeInternalDispatches(
     const auto memsetIt = memsetOps.find(async->id);
     if (memsetIt != memsetOps.end()) {
       async->internalApi = RocLogger::RuntimeInternalMemset;
-      async->internalBytes = memsetIt->second;
+      if (sized.insert(async->id).second) {
+        async->internalBytes = memsetIt->second;
+      }
     }
   }
 }
