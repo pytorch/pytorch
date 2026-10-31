@@ -48,6 +48,7 @@ from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.amp.autocast_mode import _autocast_entries
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -100,7 +101,6 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
 from .ctx_manager import (
-    _autocast_entries,
     AutocastModeVariable,
     ProfilerContextVariable,
     ProfilerRecordFunctionContextVariable,

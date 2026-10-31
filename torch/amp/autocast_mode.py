@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import functools
+import inspect
 import warnings
 from typing import Any
 
@@ -378,6 +379,35 @@ class autocast:
                 f"        output = model(input)"
             )
         return autocast_decorator(self, func)
+
+
+# Legacy device-specific autocast entry points (e.g. torch.cuda.amp.autocast)
+# that omit device_type from their signature, mapped to their device_type.
+# Third-party backends (e.g. PrivateUse1 devices) extend this through
+# torch.utils.register_device_autocast_entry at import time. This lives here
+# rather than in torch._dynamo so that the registration hook does not import
+# Dynamo during ``import torch``. Dynamo seeds the built-in cuda/cpu aliases
+# when it loads (torch/_dynamo/variables/ctx_manager.py) so that this module
+# does not eagerly import the deprecated per-device autocast modules.
+_autocast_entries: dict[Any, str | None] = {
+    autocast: None,
+}
+
+
+def _autocast_signature(func: Any) -> inspect.Signature:
+    """Signature AutocastModeVariable binds against when tracing func.
+
+    Registration validates and tracing binds the ``__init__`` signature rather
+    than ``inspect.signature(func)``: on Python < 3.13 a class decorated with
+    ``typing_extensions.deprecated`` is reported as ``(*args, **kwargs)``
+    (torch/cuda/amp/autocast_mode.py works around this with an explicit
+    ``__new__``), so a backend that mirrors only the deprecated alias would
+    otherwise fail registration and trace.
+    """
+    signature = inspect.signature(func.__init__)
+    return signature.replace(
+        parameters=[p for p in signature.parameters.values() if p.name != "self"]
+    )
 
 
 # Subclass to distinguish autocast variables created by _enter_autocast (and not managed by a with statement)

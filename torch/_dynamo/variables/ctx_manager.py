@@ -19,7 +19,6 @@ restoring state changes.
 """
 
 import contextlib
-import inspect
 import logging
 import types
 import warnings
@@ -31,6 +30,7 @@ import torch._C
 from torch._dynamo import config
 from torch._guards import Guard
 from torch._logging import warning_once
+from torch.amp.autocast_mode import _autocast_entries, _autocast_signature
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
@@ -1146,31 +1146,15 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return contextlib._GeneratorContextManager
 
 
-# Legacy device-specific autocast entry points (e.g. torch.cuda.amp.autocast)
-# that omit device_type from their signature, mapped to their device_type.
-# Third-party backends (e.g. PrivateUse1 devices) extend this through
-# torch.utils.register_device_autocast_entry at import time.
-_autocast_entries: dict[Any, str | None] = {
-    torch.amp.autocast_mode.autocast: None,
-    torch.cuda.amp.autocast: "cuda",
-    torch.cpu.amp.autocast: "cpu",
-}
-
-
-def _autocast_signature(func: Any) -> inspect.Signature:
-    """Signature AutocastModeVariable binds against when tracing func.
-
-    Registration validates and tracing binds the ``__init__`` signature rather
-    than ``inspect.signature(func)``: on Python < 3.13 a class decorated with
-    ``typing_extensions.deprecated`` is reported as ``(*args, **kwargs)``
-    (torch/cuda/amp/autocast_mode.py works around this with an explicit
-    ``__new__``), so a backend that mirrors only the deprecated alias would
-    otherwise fail registration and trace.
-    """
-    signature = inspect.signature(func.__init__)
-    return signature.replace(
-        parameters=[p for p in signature.parameters.values() if p.name != "self"]
-    )
+# Built-in legacy device-specific autocast entry points (torch.cuda/cpu.amp.
+# autocast) omit device_type from their signature; the registry itself lives in
+# torch.amp.autocast_mode so that torch.utils.register_device_autocast_entry can
+# extend it without importing torch._dynamo. Seed the aliases here (Dynamo load
+# time) instead of in autocast_mode.py: importing the deprecated per-device
+# autocast modules is fine once Dynamo is loaded, but should not happen during
+# ``import torch``.
+_autocast_entries.setdefault(torch.cuda.amp.autocast, "cuda")
+_autocast_entries.setdefault(torch.cpu.amp.autocast, "cpu")
 
 
 class AutocastModeVariable(ContextWrappingVariable):

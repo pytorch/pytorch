@@ -170,12 +170,14 @@ def register_device_autocast_entry(fn: Any, device_type: str) -> None:
     ``torch.amp._exit_autocast`` directly, so any overrides of those methods
     (or ``__call__``) are bypassed under ``torch.compile``.
 
+    ``device_type`` must already support autocast: ``torch.autocast(
+    device_type, ...)`` has to work in eager mode. Tracing emits
+    ``torch.amp._enter_autocast(device_type, ...)``, which raises at compile
+    time if the device does not support autocast.
+
     Note: this API is experimental and may change in future releases.
     """
-    from torch._dynamo.variables.ctx_manager import (
-        _autocast_entries,
-        _autocast_signature,
-    )
+    from torch.amp.autocast_mode import _autocast_entries, _autocast_signature
 
     if not (inspect.isclass(fn) and issubclass(fn, torch.amp.autocast_mode.autocast)):
         raise TypeError(

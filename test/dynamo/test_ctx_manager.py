@@ -445,7 +445,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         # device_type parameter) gets its device_type from registration.
         from unittest import mock
 
-        from torch._dynamo.variables import ctx_manager
         from torch._dynamo.variables.constant import ConstantVariable
         from torch._dynamo.variables.ctx_manager import AutocastModeVariable
 
@@ -455,7 +454,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     "npu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
                 )
 
-        with mock.patch.dict(ctx_manager._autocast_entries, {}):
+        with mock.patch.dict(torch.amp.autocast_mode._autocast_entries, {}):
             torch.utils.register_device_autocast_entry(LegacyAutocast, "npu")
             var = AutocastModeVariable.create(
                 LegacyAutocast,
@@ -474,15 +473,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         # subclass of the generic autocast whose signature omits device_type.
         from unittest import mock
 
-        from torch._dynamo.variables import ctx_manager
-
         class LegacyAutocast(torch.amp.autocast_mode.autocast):
             def __init__(self, enabled=True, dtype=torch.bfloat16, cache_enabled=True):
                 super().__init__(
                     "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
                 )
 
-        with mock.patch.dict(ctx_manager._autocast_entries, {}):
+        with mock.patch.dict(torch.amp.autocast_mode._autocast_entries, {}):
             torch.utils.register_device_autocast_entry(LegacyAutocast, "cpu")
             cnt = torch._dynamo.testing.CompileCounter()
 
@@ -504,7 +501,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         from typing_extensions import deprecated
         from unittest import mock
 
-        from torch._dynamo.variables import ctx_manager
         from torch._dynamo.variables.constant import ConstantVariable
         from torch._dynamo.variables.ctx_manager import AutocastModeVariable
 
@@ -517,7 +513,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
                 )
 
-        with mock.patch.dict(ctx_manager._autocast_entries, {}):
+        with mock.patch.dict(torch.amp.autocast_mode._autocast_entries, {}):
             torch.utils.register_device_autocast_entry(DeprecatedLegacyAutocast, "cpu")
             var = AutocastModeVariable.create(
                 DeprecatedLegacyAutocast,
