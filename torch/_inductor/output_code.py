@@ -930,8 +930,9 @@ class CompiledFxGraph(OutputCode):
             elif self.cudagraph_info is None:
                 # Compiled with cudagraphs off: this graph never requested capture,
                 # so treat it like a fresh compile would. Only an AOTAutograd cache
-                # hit gets here, with a box that can be shared with the forward, so
-                # leave that box alone and continue with a local one.
+                # hit gets here, with a box that can be shared with the forward
+                # (see CompilerConfigExtra.backward_cudagraphs), so leave that box
+                # alone and continue with a local one.
                 log.debug("not capturing a graph that was compiled without cudagraphs")
                 cudagraphs = BoxedBool(False)
             else:

@@ -1083,9 +1083,14 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    # AOTAutograd cache hits only: the backward's box (see
+    # CompilerConfigExtra.backward_cudagraphs).
+    backward_cudagraphs: BoxedBool | None
+    # A nested region's cudagraph setting differs from cudagraphs_top_level.
     cudagraphs_region_aware: bool
     cudagraphs_top_level: bool
-    # Graph partitioning was turned on only to isolate a nested region.
+    # Set by compile_fx_inner: graph partitioning was turned on only to isolate a
+    # nested region.
     cudagraph_region_forced_partition: bool
     static_input_idxs: Sequence[int]
     is_backward: bool
@@ -2911,12 +2916,29 @@ class CompilerConfigExtra:
     top_level_cudagraphs: bool
     backward_top_level_cudagraphs: bool
     forward_cudagraphs_requested: bool
+    # Whether the backward may request capture, judged from the pre-AOT graph
+    # since an AOTAutograd cache hit never sees the backward graph. It can
+    # overestimate (a region whose inputs don't need grad has no backward); a
+    # cached backward compiled without capture refuses it in post_compile.
+    backward_may_request_cudagraphs: bool
     has_regional_cudagraphs: bool
     forward_has_regional_cudagraphs: bool
     graph_id: int
     forward_device_index: BoxedDeviceIndex
     forward_is_cudagraph_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+
+    def backward_cudagraphs(self, requested: bool) -> BoxedBool:
+        """The backward's cudagraphs box; requested is its own request."""
+        if not self.has_regional_cudagraphs:
+            if self.cudagraphs_bwd_override is not None:
+                return BoxedBool(self.cudagraphs_bwd_override)
+            return self.cudagraphs
+        # Sharing the forward's box keeps a backward from bringing back capture
+        # that its forward requested and lost.
+        if requested and self.forward_cudagraphs_requested:
+            return self.cudagraphs
+        return BoxedBool(requested)
 
 
 def create_compiler_config_extra(
@@ -2983,10 +3005,14 @@ def create_compiler_config_extra(
         forward_has_regional_cudagraphs or backward_has_regional_cudagraphs
     )
 
-    forward_cudagraphs_requested = top_level_cudagraphs or bool(
-        pre_aot_graph is not None and _any_subgraph_enables_cudagraphs(pre_aot_graph)
+    forward_cudagraphs_requested = (
+        top_level_cudagraphs or _any_subgraph_enables_cudagraphs(pre_aot_graph)
     )
     cudagraphs = BoxedBool(forward_cudagraphs_requested)
+    backward_may_request_cudagraphs = (
+        backward_top_level_cudagraphs
+        or _any_subgraph_enables_cudagraphs(pre_aot_graph, backward=True)
+    )
 
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
@@ -3007,6 +3033,7 @@ def create_compiler_config_extra(
         top_level_cudagraphs=top_level_cudagraphs,
         backward_top_level_cudagraphs=backward_top_level_cudagraphs,
         forward_cudagraphs_requested=forward_cudagraphs_requested,
+        backward_may_request_cudagraphs=backward_may_request_cudagraphs,
         has_regional_cudagraphs=has_regional_cudagraphs,
         forward_has_regional_cudagraphs=forward_has_regional_cudagraphs,
         graph_id=graph_id,
@@ -3211,20 +3238,9 @@ def compile_fx_backward(
                 gm, backward_top_level_cudagraphs
             )
         )
-        if not compiler_config_extra.has_regional_cudagraphs:
-            cudagraphs = compiler_config_extra.cudagraphs
-            if compiler_config_extra.cudagraphs_bwd_override is not None:
-                cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
-        else:
-            backward_cudagraphs_requested = (
-                backward_top_level_cudagraphs or _any_subgraph_enables_cudagraphs(gm)
-            )
-            if (
-                compiler_config_extra.forward_cudagraphs_requested
-                and not compiler_config_extra.cudagraphs
-            ):
-                backward_cudagraphs_requested = False
-            cudagraphs = BoxedBool(backward_cudagraphs_requested)
+        cudagraphs = compiler_config_extra.backward_cudagraphs(
+            backward_top_level_cudagraphs or _any_subgraph_enables_cudagraphs(gm)
+        )
 
         # Static backward inputs (see Note: [static_input_idxs semantics])
         # are the saved tensors, minus two over-approximations of the
