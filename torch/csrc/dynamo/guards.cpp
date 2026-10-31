@@ -5352,7 +5352,49 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     return check_nopybind_template(value);
   }
 
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    if (len != _ref_stack.size()) {
+      return failure(fmt::format(
+          "Number of active TorchFunctionMode instances changed: expected {}, "
+          "found {}. Call the compiled function under the same mode contexts "
+          "as when it was compiled.",
+          _ref_stack.size(),
+          len));
+    }
+
+    for (size_t idx = 0; idx < len; idx++) {
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      if (mode_type != _ref_stack.at(idx)) {
+        return failure(fmt::format(
+            "TorchFunctionMode at stack index {} changed class: expected {}, "
+            "found {}. Mode classes are compared by identity; reuse the "
+            "original class at each position, even if a redefined class has "
+            "the same name.",
+            idx,
+            mode_type_name(_ref_stack.at(idx)),
+            mode_type_name(mode_type)));
+      }
+    }
+
+    return GuardDebugInfo(true, 1);
+  }
+
  private:
+  static std::string mode_type_name(PyTypeObject* type) {
+    py::handle cls(reinterpret_cast<PyObject*>(type));
+    return cls.attr("__module__").cast<std::string>() + "." +
+        cls.attr("__qualname__").cast<std::string>();
+  }
+
+  GuardDebugInfo failure(const std::string& reason) {
+    py::list parts;
+    parts.append(reason);
+    return GuardDebugInfo(false, std::move(parts), 0, get_user_stack());
+  }
+
   std::vector<PyTypeObject*> _ref_stack;
 };
 
