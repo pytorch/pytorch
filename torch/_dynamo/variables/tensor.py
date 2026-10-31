@@ -117,6 +117,13 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+def _create_internal_torch_function(value: Any) -> VariableTracker:
+    from .builder import SourcelessBuilder
+
+    return SourcelessBuilder.create_internal_torch_function(value)
+
+
 # Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -283,6 +290,10 @@ def _current_device_index_variable(
 class CurrentDeviceVariable(VariableTracker):
     """A CooR device with a static accelerator type and runtime-relative index."""
 
+    @classmethod
+    def create(cls, value: torch.device) -> "CurrentDeviceVariable":
+        return cls(value)
+
     def __init__(self, value: torch.device, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -341,8 +352,10 @@ class CurrentDeviceVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if other_device.type != self.value.type or other_device.index is None:
             return ConstantVariable.create(op == "__ne__")
+        from .builder import SourcelessBuilder
+
         compare = operator.eq if op == "__eq__" else operator.ne
-        return variables.BuiltinVariable(compare).call_function(
+        return SourcelessBuilder.create_internal_builtin(compare).call_function(
             tx,
             [
                 _current_device_index_variable(tx),
@@ -705,11 +718,9 @@ class TensorVariable(VariableTracker):
         owns the base, so inside a higher order op it lands in the parent graph
         and then has to be lifted back in as a subgraph input.
         """
-        from .torch import TorchInGraphFunctionVariable
-
-        return TorchInGraphFunctionVariable(_VIEW_ATTR_TO_ATEN_OP[name]).call_function(
-            tx, [self], {}
-        )
+        return _create_internal_torch_function(
+            _VIEW_ATTR_TO_ATEN_OP[name]
+        ).call_function(tx, [self], {})
 
     def method_attr_T(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self._view_attr(tx, "T")
@@ -755,7 +766,7 @@ class TensorVariable(VariableTracker):
             # Keep the device type static so type predicates and device-consuming
             # operations remain traceable, while index-dependent observations are
             # represented by CurrentDeviceVariable at runtime.
-            return CurrentDeviceVariable(torch.device(device.type))
+            return CurrentDeviceVariable.create(torch.device(device.type))
         return VariableTracker.build(tx, device)
 
     def method_attr_layout(
@@ -831,7 +842,7 @@ class TensorVariable(VariableTracker):
         return None
 
     def method_attr_data(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return variables.TorchInGraphFunctionVariable(
+        return _create_internal_torch_function(
             torch._C._autograd._get_data_attr  # type: ignore[attr-defined]
         ).call_function(tx, [self], {})
 
@@ -851,7 +862,7 @@ class TensorVariable(VariableTracker):
     def method_attr__version(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from ..tensor_version_op import _tensor_version
 
-        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+        return _create_internal_torch_function(_tensor_version).call_function(
             tx, [self], {}
         )
 
@@ -1827,7 +1838,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self)
+        return DataPtrVariable.create(self)
 
     def method_const_data_ptr(
         self,
@@ -1835,7 +1846,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self, method_name="const_data_ptr")
+        return DataPtrVariable.create(self, method_name="const_data_ptr")
 
     def method_record_stream(
         self,
@@ -2119,8 +2130,8 @@ class TensorVariable(VariableTracker):
         if value is not None and config.enable_dynamo_decompositions:
             from torch._inductor import inductor_prims
 
-            mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
-            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
+            mul_var = _create_internal_torch_function(torch.mul)
+            fma_var = _create_internal_torch_function(inductor_prims.fma)
             product = mul_var.call_function(tx, [tensor1, tensor2], {})
             result = fma_var.call_function(tx, [product, value, self], {})
             return self.call_method(tx, "copy_", [result], {})
@@ -2259,7 +2270,7 @@ class TensorVariable(VariableTracker):
         ):
             from torch._inductor import inductor_prims
 
-            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
+            fma_var = _create_internal_torch_function(inductor_prims.fma)
             result = fma_var.call_function(tx, [other, alpha, self], {})
             return self.call_method(tx, "copy_", [result], {})
         return None
@@ -2273,12 +2284,12 @@ class TensorVariable(VariableTracker):
         value: VariableTracker | None = None,
     ) -> VariableTracker | None:
         if value is not None and config.enable_dynamo_decompositions:
-            result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
+            result = _create_internal_torch_function(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
             )
             from torch._inductor import inductor_prims
 
-            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
+            fma_var = _create_internal_torch_function(inductor_prims.fma)
             fma_result = fma_var.call_function(tx, [result, value, self], {})
             return self.call_method(tx, "copy_", [fma_result], {})
         return None
@@ -2290,10 +2301,10 @@ class TensorVariable(VariableTracker):
         # without dealing with unbacked symbool. Roughly the code we translate is:
         # def __contains__(self, x):
         #     return (x == self).any().item()
-        result = variables.TorchInGraphFunctionVariable(torch.eq).call_function(
+        result = _create_internal_torch_function(torch.eq).call_function(
             tx, [self, item], {}
         )
-        result = variables.TorchInGraphFunctionVariable(torch.any).call_function(
+        result = _create_internal_torch_function(torch.any).call_function(
             tx, [result], {}
         )
         return result.call_method(tx, "item", [], {})
@@ -2442,13 +2453,9 @@ class TensorVariable(VariableTracker):
             ]
             self.proxy = hooked_proxy
             self.synchronize_attributes(tx)
-            return variables.RemovableHandleVariable(
-                mutation_type=variables.base.ValueMutationNew(),
-            )
+            return variables.RemovableHandleVariable.create()
 
-        handle_variable = variables.RemovableHandleVariable(
-            mutation_type=variables.base.ValueMutationNew(),
-        )
+        handle_variable = variables.RemovableHandleVariable.create()
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
@@ -2603,7 +2610,7 @@ class TensorVariable(VariableTracker):
         fwd_kwargs.pop("layout", None)
         fwd_kwargs.setdefault("dtype", self.tp_getattro_impl(tx, "dtype"))
         fwd_kwargs.setdefault("device", self.tp_getattro_impl(tx, "device"))
-        return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
+        return _create_internal_torch_function(torch.tensor).call_function(
             tx,
             [data_arg],
             fwd_kwargs,
@@ -2612,7 +2619,7 @@ class TensorVariable(VariableTracker):
     def method_untyped_storage(
         self, tx: "InstructionTranslatorBase"
     ) -> "UntypedStorageVariable":
-        return UntypedStorageVariable(
+        return UntypedStorageVariable(  # noqa: RVT001
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
@@ -3763,7 +3770,7 @@ class UnspecializedPythonVariable(TensorVariable):
         need_unwrap: bool = True,
     ) -> "UnspecializedPythonVariable":
         # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
-        return UnspecializedPythonVariable(
+        return cls(
             **dict(tensor_variable.__dict__),
             raw_value=raw_value,
             need_unwrap=need_unwrap,
@@ -3788,7 +3795,7 @@ class FakeItemVariable(TensorVariable):
     def from_tensor_variable(
         cls, tensor_variable: TensorVariable
     ) -> "FakeItemVariable":
-        return FakeItemVariable(**dict(tensor_variable.__dict__))
+        return cls(**dict(tensor_variable.__dict__))
 
 
 class TensorSubclassVariable(UserDefinedClassVariable):
@@ -3919,6 +3926,14 @@ class DataPtrVariable(VariableTracker):
         ("call_method", "detach"),
         ("call_function", torch.ops.aten.detach.default),
     }
+
+    @staticmethod
+    def create(
+        from_tensor: TensorVariable,
+        method_name: str = "data_ptr",
+        **kwargs: Any,
+    ) -> "DataPtrVariable":
+        return DataPtrVariable(from_tensor, method_name=method_name, **kwargs)
 
     def __init__(
         self,
