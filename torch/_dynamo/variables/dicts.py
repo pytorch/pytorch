@@ -664,9 +664,19 @@ class ConstDictVariable(VariableTracker):
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
-        if not self.items and isinstance(item, variables.LazyConstantVariable):
-            # These primitive types hash without side effects. Empty global hook
-            # flag dictionaries must not specialize a module's current hook ID.
+        if (
+            not self.items
+            and isinstance(item, variables.LazyConstantVariable)
+            and isinstance(self.source, AttrSource)
+            and self.source.member
+            in (
+                "_global_forward_hooks_with_kwargs",
+                "_global_forward_hooks_always_called",
+            )
+            and self.source.base == tx.import_source("torch.nn.modules.module")
+        ):
+            # Empty global hook flags must not specialize a module's hook ID.
+            # Other dictionaries use membership guards to allow unrelated inserts.
             item.python_type()
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(False)
@@ -1205,12 +1215,14 @@ class OrderedDictVariable(ConstDictVariable):
         view: "DictViewVariable | None" = None,
     ) -> None:
         super().install_dict_order_guard(tx, view=view)
+        # Even one linked key needs a guard: raw dict writes can leave the same
+        # storage without its OrderedDict link.
         if (
             self.source
             and not is_constant_source(self.source)
             and issubclass(self.python_type(), collections.OrderedDict)
             and (view is None or view.is_ordered)
-            and len(self.original_items) > 1
+            and self.original_items
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
