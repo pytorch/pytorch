@@ -24,8 +24,8 @@ from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 import sympy
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
@@ -530,12 +530,14 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "error")
 
 
-# Per-process record of laddered GEMMs: (kernel name, traced input/output meta
-# signatures, worker scope). A transformer with N identical layers would
-# otherwise run the whole ladder N times, and again on every recompile;
-# TunableOp turns repeat signatures into lookups, but each submission still
-# pickles a job, materializes full-size tensors in the worker and runs the
-# benchmark loop. Cleared with the other inductor caches (fresh_cache).
+# Per-process record of tuned ladder BUCKETS: (kernel name, worker scope,
+# rebuilt input metas, rebuilt output meta). A transformer with N identical
+# layers would otherwise run every bucket N times, and again on every
+# recompile; TunableOp turns repeat signatures into lookups, but each
+# submission still pickles a job, materializes full-size tensors in the worker
+# and runs the benchmark loop. Per bucket rather than per GEMM so a run that
+# ran out of budget part-way does not mark the untuned rungs done. Cleared with
+# the other inductor caches (fresh_cache).
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
@@ -601,22 +603,9 @@ def _as_buffer(node: Any) -> Any:
     return ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
 
 
-def _node_sig(n: Any) -> Any:
-    """(dtype, sizes, strides) as strings, or None if the node cannot be read.
-
-    Goes through _as_buffer because winner.layout is a Layout: reading its
-    stride any other way drops it, and two GEMMs differing only in output
-    layout then share a memo key.
-    """
-    try:
-        b = _as_buffer(n)
-        return (
-            str(b.get_dtype()),
-            tuple(str(x) for x in b.get_size()),
-            tuple(str(x) for x in b.get_stride()),
-        )
-    except (AttributeError, TypeError):
-        return None
+def _meta_sig(m: Any) -> Any:
+    """A rebuilt meta as a hashable key: dtype, sizes, strides."""
+    return (str(m.dtype), tuple(m.sizes), tuple(m.strides))
 
 
 def _declared(expr: Any) -> tuple[int | None, int | None]:
@@ -817,16 +806,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
 
     # The ladder walks the SYMBOL, not the dim: for a dim like 200*s, stepping
     # the dim through powers of two would tune sizes it can never take.
-    # Skip repeat GEMMs: identical layers in one model (and recompiles) share
-    # traced metas, so the first ladder already recorded every bucket. Keyed on
-    # the SYMBOLIC sizes and strides (not hints: mm([s,256],[256,512]) and
-    # mm([512,256],[256,s]) hint identically at 512 but ladder different dims,
-    # as do s and 200*s), the dtypes, and the (device, resolved filename) the
-    # worker is keyed on -- a second compile targeting another device or file
-    # must not skip. Strides included: mm(A,B) and mm(A,B_colmajor) are both
-    # dense with different TunableOp signatures (NN vs NT).
-    sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
-
     try:
         sym_hint = V.graph.sizevars.optimization_hint(s)
     except (AttributeError, TypeError, ValueError, KeyError):
@@ -840,25 +819,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     sym_ceiling = max(_TUNABLEOP_MAX_DYN_SYM, sym_hint)
     sym_hi = sym_ceiling if sym_hi is None else min(sym_hi, sym_ceiling)
     if sym_hi < 2:
-        return
-
-    def _memo_key() -> Any:
-        """Identifies a ladder already recorded in this process.
-
-        Rebuilt at the check and again at the record: submit() resolves and
-        pins the results file, so its name is only known after one succeeds.
-        The bounds are part of the key because a larger hint or a narrower
-        declared range produces a different ladder for the same operands.
-        """
-        if not all(x is not None for x in sigs):
-            return None
-        scope = (
-            (layout_device.type, layout_device.index),
-            torch.cuda.tunable.get_filename(),
-        )
-        return (winner.name, tuple(sigs), scope, sym_hint, sym_lo, sym_hi)
-
-    if (key := _memo_key()) is not None and key in _pretuned_gemms.seen:
         return
 
     # The "too small to tune" threshold applies in DIM space, not symbol space:
@@ -998,9 +958,34 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not bmreqs:
         return
 
+    # Per-bucket memo. Identical layers and recompiles re-enter with the same
+    # metas for most rungs, so only the rungs actually tuned may be skipped:
+    # keying the whole GEMM meant one successful bucket marked the rest done,
+    # and a recompile at a new hint resubmitted rungs that had not changed.
+    # Scoped by (device, resolved filename) so a compile targeting another
+    # device or results file does not skip.
+    scope = (
+        (layout_device.type, layout_device.index),
+        torch.cuda.tunable.get_filename(),
+    )
+    keys = [
+        (
+            winner.name,
+            scope,
+            tuple(_meta_sig(m) for m in b.input_tensor_meta),
+            _meta_sig(b.output_tensor_meta),
+        )
+        for b in bmreqs
+    ]
+    fresh = [i for i, k in enumerate(keys) if k not in _pretuned_gemms.seen]
+    if not fresh:
+        return
+    bmreqs = [bmreqs[i] for i in fresh]
+    dim_vals = [dim_vals[i] for i in fresh]
+    keys = [keys[i] for i in fresh]
+
     # One job per bucket so a fault costs a single size, but one budget for the
     # whole GEMM so compile time does not scale with the bucket count.
-    recorded = False
     deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
@@ -1034,7 +1019,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             outcome.status,
         )
         if outcome.status == "ok":
-            recorded = True
+            _pretuned_gemms.seen.add(keys[i])
         else:
             # Solutions found before the fault are already flushed to the
             # results file, and the worker restarts on the next submission.
@@ -1045,6 +1030,3 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
                 i + 1,
                 len(bmreqs),
             )
-
-    if recorded and (key := _memo_key()) is not None:
-        _pretuned_gemms.seen.add(key)
