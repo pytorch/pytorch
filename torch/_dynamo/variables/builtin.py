@@ -3725,12 +3725,7 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
             return variables.FrozenDictVariable.create(result.storage)
         if name == "fromkeys":
-            unimplemented(
-                gb_type="frozendict fromkeys",
-                context=name,
-                explanation="Dynamo does not yet support frozendict.fromkeys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
             check_positional(tx, name, len(args), 1, sys.maxsize)
             if not pyfrozendict_check(args[0]):
@@ -3748,6 +3743,20 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 )
             return args[0].call_method(tx, name, args[1:], kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "frozendict.fromkeys", kwargs)
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.frozendict_fromkeys),
+            [self, *args],
+            kwargs,
+        )
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):
