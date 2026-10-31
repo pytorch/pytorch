@@ -1083,6 +1083,10 @@ This class does not support ``__members__`` property.)");
             TORCH_CHECK(
                 self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
                 "Only PREMUL_SUM supports accessing factor");
+            // `op` is writable, so a PREMUL_SUM may have no supplement.
+            TORCH_CHECK(
+                self.supplement_.defined(),
+                "PREMUL_SUM ReduceOp has no factor");
             const auto* preMulSupplement =
                 reinterpret_cast<::c10d::PreMulSumSupplement*>(
                     self.supplement_.get());
@@ -3204,12 +3208,7 @@ This API is experimental and subject to change.)")
                  py::object backend_obj) {
                 std::optional<c10::intrusive_ptr<::c10d::Backend>> backend;
                 if (!backend_obj.is_none()) {
-                  backend =
-                      backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
-                  auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
-                      **backend,
-                      [&]() { return Py_NewRef(backend_obj.ptr()); });
-                  Py_DECREF(pyobj);
+                  backend = ::c10d::PyBackend::initSlotAndCast(backend_obj);
                 }
                 py::gil_scoped_release nogil{};
                 self->setBackend(device.type(), backendType, backend);
@@ -4289,6 +4288,9 @@ supported.
               py::init(
                   [](const c10::intrusive_ptr<::c10d::Backend>& backend,
                      const c10::intrusive_ptr<::c10d::Backend>& gloo_backend) {
+                    // Keep the backend's Python object alive while the wrapper
+                    // holds it.
+                    ::c10d::PyBackend::initSlotAndCast(py::cast(backend));
                     // gil_scoped_release is not safe as a call_guard in init.
                     // https://github.com/pybind/pybind11/issues/5473
                     py::gil_scoped_release nogil{};
@@ -5170,56 +5172,12 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             return ivalue.toCustomClass<::c10d::Work>();
           });
 
-  auto fakeProcessGroup =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
-          module, "FakeProcessGroup", backend);
-  intrusive_ptr_class_<::c10d::FakeProcessGroup::Options>(
-      fakeProcessGroup, "Options", backendOptions)
-      .def(py::init())
-      .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
-      .def_readwrite(
-          "error_on_collective",
-          &::c10d::FakeProcessGroup::Options::error_on_collective)
-      .def_readwrite(
-          "simulate_uniform_ranks",
-          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
-      .def(
-          "__copy__",
-          [](const ::c10d::FakeProcessGroup::Options& self) {
-            return ::c10d::FakeProcessGroup::Options(self);
-          })
-      .def(
-          "__deepcopy__",
-          [](const ::c10d::FakeProcessGroup::Options& self,
-             const py::dict& memo) {
-            return ::c10d::FakeProcessGroup::Options(self);
-          },
-          py::arg("memo"));
-  fakeProcessGroup
-      .def_static(
-          "_create_internal",
-          [](int rank, int size) {
-            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
-          },
-          py::arg("rank"),
-          py::arg("world_size"))
-      .def_static(
-          "_create_internal",
-          [](int rank,
-             int size,
-             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
-            return ::c10d::FakeProcessGroup::_create_internal(
-                rank, size, std::move(options));
-          },
-          py::arg("rank"),
-          py::arg("world_size"),
-          py::arg("options"))
-      .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
-          .def(py::init<>())
+          .def(
+              py::init<std::vector<at::Tensor>>(),
+              py::arg("result") = std::vector<at::Tensor>())
           .def_readwrite("seq_id", &::c10d::FakeWork::seq_id) // Expose seq_id
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
@@ -5479,7 +5437,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       Returns:
             Stringified json work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
-            Includes nccl2 and nccl-lazy groups. Their record_ids are numbered separately and their pg_ids are shifted past ProcessGroupNCCL's, so pg_ids are only consistent within one dump.
       )");
   module.def(
       "_dump_nccl_trace",
@@ -5502,12 +5459,11 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         Returns:
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
-            Includes nccl2 and nccl-lazy groups. Their record_ids are numbered separately and their pg_ids are shifted past ProcessGroupNCCL's, so pg_ids are only consistent within one dump.
       )");
   module.def(
       "_reset_fr_recording_nccl",
       []() { ::c10d::reset_nccl_trace(); },
-      "API to reset Flight recorder recording when it comes fault tolerance. Also resets the nccl2 and nccl-lazy recorders.");
+      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   py::class_<
@@ -5598,7 +5554,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the recorder instance to dump: "gloo" for ProcessGroupGloo, "nccl" for ProcessGroupNCCL (on builds with NCCL), or the backend name with ':' replaced by '_' for backends the flight recorder hook records (e.g. "nccl2"). Default is "gloo", the instance ProcessGroupGloo records into.
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5624,7 +5580,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the recorder instance to dump: "gloo" for ProcessGroupGloo, "nccl" for ProcessGroupNCCL (on builds with NCCL), or the backend name with ':' replaced by '_' for backends the flight recorder hook records (e.g. "nccl2"). Each has its own instance, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
@@ -5659,7 +5615,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
+                backend (str, optional): Name of the backend whose recorder instance to dump, as for ``_dump_fr_trace``. Default is "gloo".
         )");
   module.def(
       "_reset_fr_trace",
@@ -5671,7 +5627,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
             counterpart of _reset_fr_recording_nccl.
 
             Arguments:
-                backend (str, optional): Name of the backend whose recorder instance to reset. Default is "gloo".
+                backend (str, optional): Name of the backend whose recorder instance to reset, as for ``_dump_fr_trace``. Default is "gloo".
         )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(

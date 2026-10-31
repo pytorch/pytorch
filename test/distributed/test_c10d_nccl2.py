@@ -1245,13 +1245,19 @@ class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
         self.assertEqual(shrunk.size(), 1)
         dist.all_reduce(tensor, group=shrunk)
         self.assertEqual(tensor, torch.ones_like(tensor))
-        # Present only on NCCLX/ROCm builds with NCCL_COMM_DUMP; keyed like
-        # pg_config, so by the renamed child rather than the destroyed parent.
-        trace = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        comm_state = trace.get("nccl_comm_state")
-        if comm_state:
-            self.assertIn(shrunk.group_name, comm_state)
-            self.assertNotIn(group.group_name, comm_state)
+        # Filled on NCCLX (and ROCm with NCCL_COMM_DUMP), keyed like pg_config,
+        # so by the renamed child rather than the destroyed parent. Stock NCCL
+        # has no provider and the pickle omits the empty map.
+        backend = shrunk._get_backend(self.device).name()
+        trace = pickle.loads(torch._C._distributed_c10d._dump_fr_trace(backend=backend))
+        state = trace.get("nccl_comm_state", {})
+        self.assertNotIn(group.group_name, state)
+        if torch.cuda.nccl.version()[-1] == "x":
+            self.assertIn(shrunk.group_name, state)
+        elif not TEST_WITH_ROCM:
+            self.assertNotIn("nccl_comm_state", trace)
+        elif state:
+            self.assertIn(shrunk.group_name, state)
         dist.destroy_process_group(shrunk)
 
 

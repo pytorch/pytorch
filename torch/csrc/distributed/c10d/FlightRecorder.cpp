@@ -125,39 +125,105 @@ bool recordsFlightRecorderNatively(const std::string& backend) {
   return backend == "gloo" || backend == "nccl" || backend == "xccl";
 }
 
+namespace {
+// Function-local so other libraries can register from their static
+// initializers; leaked so a dump during static destruction still works.
+std::mutex& dumpersMutex() {
+  static auto* mutex = new std::mutex();
+  return *mutex;
+}
+
+std::unordered_map<std::string, FlightRecorderDumper>& dumpers() {
+  static auto* dumpers =
+      new std::unordered_map<std::string, FlightRecorderDumper>();
+  return *dumpers;
+}
+
+std::optional<FlightRecorderDumper> getDumper(const std::string& backend) {
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  auto it = dumpers().find(backend);
+  if (it == dumpers().end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+std::unordered_map<std::string, std::function<FlightRecorderCommState()>>&
+commStates() {
+  static auto* commStates = new std::
+      unordered_map<std::string, std::function<FlightRecorderCommState()>>();
+  return *commStates;
+}
+
+// Called outside the lock: collecting communicator state may block. A
+// failing provider costs the comm state, not the trace.
+FlightRecorderCommState getCommState(const std::string& backend) {
+  std::function<FlightRecorderCommState()> commState;
+  {
+    std::lock_guard<std::mutex> lock(dumpersMutex());
+    auto it = commStates().find(backend);
+    if (it == commStates().end()) {
+      return {};
+    }
+    commState = it->second;
+  }
+  try {
+    return commState();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Flight Recorder comm state for " << backend
+                 << " failed: " << e.what();
+  } catch (...) {
+    LOG(WARNING) << "Flight Recorder comm state for " << backend << " failed";
+  }
+  return {};
+}
+} // namespace
+
+void registerFlightRecorderDumper(
+    const std::string& backend,
+    FlightRecorderDumper dumper) {
+  TORCH_CHECK_VALUE(
+      dumper.dump && dumper.dumpJson && dumper.reset,
+      "FlightRecorderDumper for ",
+      backend,
+      " must set dump, dumpJson and reset");
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  dumpers()[backend] = std::move(dumper);
+}
+
+void registerFlightRecorderCommState(
+    const std::string& backend,
+    std::function<FlightRecorderCommState()> commState) {
+  TORCH_CHECK_VALUE(
+      commState, "FlightRecorderCommState provider for ", backend, " is empty");
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  commStates()[backend] = std::move(commState);
+}
+
 std::string dump_fr_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->dump(includeCollectives, includeStackTraces, onlyActive);
+  }
   return getFlightRecorder(backend)->dump(
-      std::unordered_map<
-          std::string,
-          std::unordered_map<std::string, std::string>>{},
+      getCommState(backend),
       includeCollectives,
       includeStackTraces,
       onlyActive);
-}
-
-c10::Dict<c10::IValue, c10::IValue> dump_fr_trace_dict(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive,
-    const std::string& backend) {
-  return getFlightRecorder(backend)->dump_dict(
-      std::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive,
     const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->dumpJson(includeCollectives, onlyActive);
+  }
   return getFlightRecorder(backend)->dump_json(
-      std::unordered_map<
-          std::string,
-          std::unordered_map<std::string, std::string>>{},
-      includeCollectives,
-      onlyActive);
+      getCommState(backend), includeCollectives, onlyActive);
 }
 
 void dump_fr_trace_file(
@@ -194,6 +260,10 @@ bool try_dump_fr_trace_file(
 }
 
 void reset_fr_trace(const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    dumper->reset();
+    return;
+  }
   getFlightRecorder(backend)->reset_all();
 }
 } // namespace c10d

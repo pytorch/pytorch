@@ -8,7 +8,6 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
-#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -22,11 +21,14 @@
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/CommDump.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
+#endif
 
 namespace c10d::nccl2 {
 
@@ -54,11 +56,13 @@ void checkSameDtype(
 }
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-// A communicator listed for dumpNcclComms(). Dumps hold mutex shared.
-// unlistComm() clears live before the communicator is aborted, revoked or
-// destroyed, then waits (bounded) for dumps to release mutex.
+// A communicator listed for dumpNcclComms(). A dump holds mutex while in
+// ncclCommDump, and other dumps skip the communicator meanwhile, so a hung
+// ncclCommDump stalls only the first dump. unlistComm() clears live before the
+// communicator is aborted, revoked or destroyed, then waits (bounded) for a
+// dump to release mutex.
 struct LiveComm {
-  std::shared_timed_mutex mutex;
+  std::timed_mutex mutex;
   std::atomic<bool> live{true};
   ncclComm_t comm{};
   // How long unlistComm() waits for a dump. Read at publish, as reading the
@@ -379,6 +383,19 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
+  // Cleanup after a failure below; its own errors are logged so the original
+  // one propagates.
+  auto cleanup = [this](const char* what, auto&& fn) {
+    try {
+      fn();
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << what
+                          << " failed during init cleanup: " << e.what();
+    } catch (...) {
+      TC_LOG(ERROR, this) << what << " failed during init cleanup";
+    }
+  };
+
   // Attach before publishing, so a failure leaves the symmetric-memory
   // registry (keyed by group name, which a shrink child shares with its live
   // parent) untouched.
@@ -386,7 +403,7 @@ void ProcessGroupNCCL::initNcclResources() {
     attachMemoryHook();
   } catch (...) {
     // Deregisters any addresses registered before the failure.
-    detachMemoryHook();
+    cleanup("detachMemoryHook", [this] { detachMemoryHook(); });
     throw;
   }
 
@@ -399,9 +416,11 @@ void ProcessGroupNCCL::initNcclResources() {
       timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
     }
   } catch (...) {
-    // Undoes whatever publishComm() registered, then the attach.
-    retireComm();
-    detachMemoryHook();
+    // Undoes whatever publishComm() registered, then the attach. For a shrink
+    // child this also drops its live parent's symmetric-memory entry (same
+    // group name); only a failed thread start gets here after a publish.
+    cleanup("retireComm", [this] { retireComm(); });
+    cleanup("detachMemoryHook", [this] { detachMemoryHook(); });
     throw;
   }
 }
@@ -851,21 +870,22 @@ void ProcessGroupNCCL::publishComm() {
   auto entry = std::make_shared<LiveComm>();
   entry->comm = nccl_comm_;
   entry->unlistTimeout = std::chrono::milliseconds(
-      getCvarInt(::c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000));
-  entry->name = getGroupUid();
+      getCvarInt(::c10d::TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000));
 #endif
   ::c10d::publishNCCLComm(
       getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::lock_guard<std::mutex> lock(liveCommsMutex());
+  entry->name = getGroupUid();
   liveComms()[this] = std::move(entry);
 #endif
 }
 
 void ProcessGroupNCCL::retireComm() {
+  // Unlist first, so a throwing retire hook cannot leave the comm dumpable.
+  unlistComm();
   ::c10d::retireNCCLComm(
       getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
-  unlistComm();
 }
 
 void ProcessGroupNCCL::unlistComm() {
@@ -877,19 +897,26 @@ void ProcessGroupNCCL::unlistComm() {
     if (it == liveComms().end()) {
       return;
     }
-    entry = std::move(it->second);
-    liveComms().erase(it);
+    entry = it->second;
   }
   // New dumps skip the communicator. One already in ncclCommDump might hang, so
-  // wait for it only as long as the abort path waits for a dump; past that the
-  // communicator is torn down under it, as in ProcessGroupNCCL.
+  // wait for it only as long as FlightRecorderHook waits for a dump
+  // (TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC); past that the communicator is torn
+  // down under it, as in ProcessGroupNCCL. The entry stays listed until then,
+  // so a concurrent unlist waits too instead of tearing down early.
   entry->live = false;
-  std::unique_lock<std::shared_timed_mutex> lock(
-      entry->mutex, entry->unlistTimeout);
-  if (!lock.owns_lock()) {
-    TC_LOG(WARNING, this) << "Tearing down NCCL communicator after waiting "
-                          << entry->unlistTimeout.count()
-                          << "ms for an ncclCommDump";
+  {
+    std::unique_lock<std::timed_mutex> lock(entry->mutex, entry->unlistTimeout);
+    if (!lock.owns_lock()) {
+      TC_LOG(WARNING, this)
+          << "Tearing down NCCL communicator after waiting "
+          << entry->unlistTimeout.count() << "ms for an ncclCommDump";
+    }
+  }
+  std::lock_guard<std::mutex> lock(liveCommsMutex());
+  auto it = liveComms().find(this);
+  if (it != liveComms().end() && it->second == entry) {
+    liveComms().erase(it);
   }
 #endif
 }
@@ -908,10 +935,12 @@ void ProcessGroupNCCL::setGroupUid(const std::string& pg_uid) {
 }
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-dumpNcclComms() {
+namespace {
+// ncclCommDump of every live (not aborted, revoked or destroyed)
+// communicator, keyed by group name ("#<address>" if unnamed or taken).
+FlightRecorderCommState dumpNcclComms() {
   // Snapshot under the registry lock and dump outside it, as a dump might
-  // hang. Skip communicators being torn down; concurrent dumps share the lock.
+  // hang. Skip communicators being torn down or in another dump.
   std::vector<std::pair<std::shared_ptr<LiveComm>, std::string>> entries;
   {
     std::lock_guard<std::mutex> lock(liveCommsMutex());
@@ -922,11 +951,9 @@ dumpNcclComms() {
           entry->name.empty() ? c10::str('#', entry.get()) : entry->name);
     }
   }
-  std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-      dumps;
+  FlightRecorderCommState dumps;
   for (const auto& [entry, name] : entries) {
-    std::shared_lock<std::shared_timed_mutex> lock(
-        entry->mutex, std::try_to_lock);
+    std::unique_lock<std::timed_mutex> lock(entry->mutex, std::try_to_lock);
     if (!lock.owns_lock() || !entry->live) {
       continue;
     }
@@ -937,10 +964,24 @@ dumpNcclComms() {
                       << ncclGetErrorString(result);
       continue;
     }
-    dumps[name] = std::move(dump);
+    // A shrink child shares its parent's name until renamed.
+    auto key = dumps.count(name) ? c10::str(name, '#', entry.get()) : name;
+    dumps[key] = std::move(dump);
   }
   return dumps;
 }
+
+// nccl_comm_state of dump_fr_trace{,_json}. Both backends get every live
+// communicator: nccl-lazy wraps ProcessGroupNCCL, and the registry does not
+// record which backend owns a communicator.
+[[maybe_unused]] const bool registeredCommState = [] {
+  registerFlightRecorderCommState(
+      std::string(ProcessGroupNCCL::kBackendName), dumpNcclComms);
+  registerFlightRecorderCommState(
+      std::string(ProcessGroupNCCLLazy::kBackendName), dumpNcclComms);
+  return true;
+}();
+} // namespace
 #endif
 
 // Point-to-Point Operations

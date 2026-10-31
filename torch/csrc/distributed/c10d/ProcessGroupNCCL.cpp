@@ -1,7 +1,6 @@
 #ifdef USE_C10D_NCCL
 
 #include <nlohmann/json.hpp>
-#include <array>
 #include <exception>
 #include <map>
 #include <memory>
@@ -32,7 +31,6 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/CommDump.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
@@ -419,7 +417,6 @@ static std::
   for (auto& ncclComm : allNCCLComms) {
     ncclDumpMap[ncclComm->getUniqueHash()] = ncclComm->ncclCommDump();
   }
-  ncclDumpMap.merge(nccl2::dumpNcclComms());
   return ncclDumpMap;
 #else
   return std::unordered_map<
@@ -428,51 +425,8 @@ static std::
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 }
 
-// ProcessGroupNCCL::local_id_ source; also bounds every legacy pg_id below.
-static std::atomic<size_t> process_group_id = 0;
-
-// The in-tree NCCL backends recorded by FlightRecorderHook, each into its own
-// recorder (getFlightRecorder(<backend name>)). The NCCL dump APIs fold them
-// into this backend's trace so callers see every NCCL group in the process.
-// They hold disjoint groups (the hook skips natively recording backends) with
-// unique group names, so pg_config and entries merge as is. record_id is
-// numbered per recorder. pg_status is keyed by str(pg_id), and hooked pg_ids
-// come from FlightRecorderHook's own counter and collide with local_id_, so
-// they are shifted past every legacy id.
-static constexpr std::array<const char*, 2> kHookedNCCLBackends = {
-    "nccl2",
-    "nccl-lazy"};
-
 void reset_nccl_trace() {
   FlightRecorderCUDA::get()->reset_all();
-  for (const char* backend : kHookedNCCLBackends) {
-    reset_fr_trace(backend);
-  }
-}
-
-static void mergeNCCLTrace(
-    c10::Dict<c10::IValue, c10::IValue>& trace,
-    const c10::Dict<c10::IValue, c10::IValue>& other,
-    int64_t pgIdOffset) {
-  auto pgConfig = trace.at(pg_config_key).toGenericDict();
-  for (const auto& item : other.at(pg_config_key).toGenericDict()) {
-    pgConfig.insert(item.key(), item.value());
-  }
-  auto pgStatus = trace.at(pg_status_key).toGenericDict();
-  for (const auto& item : other.at(pg_status_key).toGenericDict()) {
-    auto pgId = std::stoll(item.key().toStringRef()) + pgIdOffset;
-    pgStatus.insert(std::to_string(pgId), item.value());
-  }
-  auto it = other.find(entries_key);
-  if (it == other.end()) {
-    return;
-  }
-  auto dst = trace.at(entries_key).toList();
-  for (const auto& entry : it->value().toList()) {
-    auto dict = c10::IValue(entry).toGenericDict();
-    dict.insert_or_assign(pg_id_key, dict.at(pg_id_key).toInt() + pgIdOffset);
-    dst.push_back(dict);
-  }
 }
 
 std::string dump_nccl_trace(
@@ -485,49 +439,14 @@ std::string dump_nccl_trace(
     printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
   }
 #endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.FlightRecorder__dump);
-  auto trace = FlightRecorderCUDA::get()->dump_dict(
+  return FlightRecorderCUDA::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
-  // Read after the legacy dump so it bounds every pg_id in it.
-  auto pgIdOffset = static_cast<int64_t>(process_group_id.load());
-  for (const char* backend : kHookedNCCLBackends) {
-    auto other = dump_fr_trace_dict(
-        includeCollectives, includeStackTraces, onlyActive, backend);
-    mergeNCCLTrace(trace, other, pgIdOffset);
-  }
-  return pickle_str(trace);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  auto json = FlightRecorderCUDA::get()->dump_json(
+  return FlightRecorderCUDA::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
-  auto pgIdOffset = static_cast<int64_t>(process_group_id.load());
-  std::optional<nlohmann::json> trace;
-  for (const char* backend : kHookedNCCLBackends) {
-    auto other = nlohmann::json::parse(
-        dump_fr_trace_json(includeCollectives, onlyActive, backend));
-    // Nothing recorded; skips re-serializing the legacy trace.
-    if (other[pg_config_key_str].empty() && other[pg_status_key_str].empty() &&
-        other.value(entries_key_str, nlohmann::json::array()).empty()) {
-      continue;
-    }
-    if (!trace) {
-      trace = nlohmann::json::parse(json);
-    }
-    for (const auto& item : other[pg_config_key_str].items()) {
-      (*trace)[pg_config_key_str].emplace(item.key(), item.value());
-    }
-    for (const auto& item : other[pg_status_key_str].items()) {
-      auto pgId = std::stoll(item.key()) + pgIdOffset;
-      (*trace)[pg_status_key_str].emplace(std::to_string(pgId), item.value());
-    }
-    for (auto& entry : other[entries_key_str]) {
-      entry[pg_id_key_str] = entry[pg_id_key_str].get<int64_t>() + pgIdOffset;
-      (*trace)[entries_key_str].push_back(entry);
-    }
-  }
-  return trace ? trace->dump() : json;
 }
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
@@ -998,6 +917,8 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
     ncclCommMemPoolMap.erase(ncclComm_);
   }
 }
+
+static std::atomic<size_t> process_group_id = 0;
 
 constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "Expecting one tensor only but got multiple. You are probably using multiple "
