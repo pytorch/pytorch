@@ -22,6 +22,7 @@ from typing import NoReturn, TYPE_CHECKING
 import torch
 from torch._C._dynamo import (
     get_type_slots,
+    get_type_tp_name,
     has_slot,
     PyMappingSlots,
     PyNumberSlots,
@@ -2498,6 +2499,19 @@ def object_generic_getattr(
     getattr_result = obj.call_getattr_fallback(tx, name)
     if getattr_result is not None:
         return getattr_result
+
+    # The MRO and instance lookup above found no attribute. Builtin iterable
+    # trackers with no instance storage cannot acquire one dynamically.
+    if (
+        (obj.tp_iter is not None or obj.tp_as_sequence.sq_item is not None)
+        and not py_type.__dictoffset__
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+    ):
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"],
+        )
 
     # Step 7: Attribute not found -- signal to caller to fall back.
     raise _UnhandledDescriptorError(

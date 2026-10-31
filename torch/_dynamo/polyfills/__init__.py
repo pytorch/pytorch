@@ -490,6 +490,7 @@ def mutable_mapping_update(
     /,
     **kwargs: Any,
 ) -> None:
+    # Unlike odict_update's keys-attribute probe, this requires a Mapping instance.
     if isinstance(data, Mapping):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
@@ -521,6 +522,47 @@ def mutable_mapping_update(
     if kwargs:
         for key, value in kwargs.items():
             self[key] = value
+
+
+def odict_update(
+    self: Any,
+    data: Any = (),
+    /,
+    **kwargs: Any,
+) -> None:
+    # CPython's mutablemapping_update_arg in Objects/odictobject.c snapshots
+    # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
+    if type(data) is dict:
+        data = list(data.items())
+    else:
+        try:
+            keys = data.keys
+        except AttributeError:
+            try:
+                items = data.items
+            except AttributeError:
+                pass
+            else:
+                data = items()
+        else:
+            for key in keys():
+                self[key] = data[key]
+            data = ()
+    missing = object()
+    for pair in data:
+        # CPython's mutablemapping_add_pairs consumes at most three items per pair.
+        pair = iter(pair)
+        key = next(pair, missing)
+        if key is missing:
+            raise ValueError("need more than 0 values to unpack")
+        value = next(pair, missing)
+        if value is missing:
+            raise ValueError("need more than 1 value to unpack")
+        if next(pair, missing) is not missing:
+            raise ValueError("too many values to unpack (expected 2)")
+        self[key] = value
+    for key, value in kwargs.items():
+        self[key] = value
 
 
 # Used with something like dict(obj)
