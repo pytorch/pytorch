@@ -10034,6 +10034,121 @@ instantiate_device_type_tests(
 
 @skipIfNoCuteDSL
 @unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmPackedSelectDevice(FlexGemmTestCase):
+    """A terminal BF16 ``where`` against a scalar selects packed BF16 words."""
+
+    B, M, K, N = 3, 200, 64, 272
+    # name: (batched, gate shape, epilogue, uses packed select)
+    CASES = {
+        "bmm_row_gate": (
+            True,
+            (B, M, 1),
+            lambda acc, gate: torch.where(gate, acc, -1024.0),
+            True,
+        ),
+        "col_gate_nan_fill": (
+            False,
+            (M, 1),
+            lambda acc, gate: torch.where(gate, acc, float("nan")),
+            True,
+        ),
+        "col_gate_signed_zero": (
+            False,
+            (M, 1),
+            lambda acc, gate: torch.where(gate, acc.float(), -0.0).to(torch.bfloat16),
+            True,
+        ),
+        # Neighboring lanes of one packed word take different predicates.
+        "tile_gate_true_arm": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(gate, float("-inf"), acc),
+            True,
+        ),
+        "compare_cast_chain": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(acc > 0, acc.float() * 0.5, -2.0).to(
+                torch.bfloat16
+            ),
+            True,
+        ),
+        "later_fp32_math": (
+            False,
+            (M, N),
+            lambda acc, gate: (
+                torch.where(gate, acc.float() + 2**-8, -1.0) - acc.float()
+            ).to(torch.bfloat16),
+            False,
+        ),
+        "fp32_output": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(gate, acc.float(), -1.0),
+            False,
+        ),
+        "intervening_fp16_cast": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(gate, acc.float(), -1.0)
+            .to(torch.float16)
+            .to(torch.bfloat16),
+            False,
+        ),
+        "aux_output": (
+            False,
+            (M, N),
+            lambda acc, gate: (torch.where(gate, acc, -1.0), acc.float()),
+            False,
+        ),
+    }
+
+    @parametrize("case", tuple(CASES))
+    def test_terminal_bf16_where_matches_exact_reference(self, device, case):
+        batched, gate_shape, epilogue, packed = self.CASES[case]
+        gemm = torch.bmm if batched else torch.mm
+        batch = (self.B,) if batched else ()
+        # Integer operands keep every FP32 accumulation order exact.
+        a = torch.randint(-4, 5, (*batch, self.M, self.K), device=device).bfloat16()
+        b = torch.randint(-4, 5, (*batch, self.K, self.N), device=device).bfloat16()
+        gate = torch.rand(gate_shape, device=device) > 0.5
+
+        def fn(a, b, gate):
+            return flex_gemm(
+                gemm,
+                (a, b),
+                lambda acc: epilogue(acc, gate),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        # Keep the intervening FP16 cast visible to exercise the lowering guard.
+        with inductor_config.patch(
+            emulate_precision_casts=case == "intervening_fp16_cast"
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b, gate
+            )
+
+        # FlexGEMM evaluates the epilogue in FP32 and rounds once when storing.
+        expected = epilogue(gemm(a.double(), b.double()).float(), gate)
+        if not isinstance(actual, tuple):
+            actual, expected = (actual,), (expected,)
+        for result, reference in zip(actual, expected, strict=True):
+            reference = reference.to(result.dtype)
+            self.assertEqual(result, reference, atol=0, rtol=0)
+            if case == "col_gate_signed_zero":
+                self.assertEqual(result.view(torch.int16), reference.view(torch.int16))
+        self.assertFlexGemmGeneratedCode(code)
+        self.assertEqual("packed_bf16_select(" in code, packed)
+
+
+instantiate_device_type_tests(
+    TestFlexGemmPackedSelectDevice, globals(), only_for="cuda"
+)
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
 class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
     """Dense ``torch.mm`` reading an interleaved ``[M, 2N]`` capture and writing one."""
 
