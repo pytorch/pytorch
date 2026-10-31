@@ -1823,6 +1823,15 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
+          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
+          an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1857,19 +1866,12 @@ def use_deterministic_algorithms(
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
-        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
-          when called on an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
-          when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
-          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2999,18 +3001,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -3340,11 +3336,6 @@ def compile(
             backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
-        # Start the one-time source hashing for Inductor's cache keys now, so
-        # it overlaps with whatever runs before the first compile.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
