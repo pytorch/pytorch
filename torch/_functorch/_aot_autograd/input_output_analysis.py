@@ -24,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
+from .functional_utils import has_lazy_neg_bit
 from .schemas import (
     AOTConfig,
     BackwardSignature,
@@ -160,7 +161,7 @@ def create_synthetic_base_metadata(
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     # pyrefly: ignore [implicit-any]
     input_infos = []
-    for outer_indices in synthetic_base_to_indices.values():
+    for inner_idx, outer_indices in synthetic_base_to_indices.items():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
@@ -215,6 +216,7 @@ def create_synthetic_base_metadata(
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,
+            is_neg=has_lazy_neg_bit(inner_args[inner_idx]),
         )
         input_infos.append(inpt_info)
 
