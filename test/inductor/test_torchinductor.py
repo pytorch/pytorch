@@ -9169,6 +9169,19 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    def test_cat_slice_of_cat(self):
+        # b's first slice reads exactly what t's copy writes into a; the two
+        # copies must not be fused into one kernel that loads before it stores.
+        def fn(t, x, y):
+            a = torch.cat([t, x + 1], 1)
+            b = torch.cat([a[:, :1], y + 1], 1)
+            return a.sum(-1), b
+
+        self.common(
+            fn,
+            (torch.randn(4, 1, 8), torch.randn(4, 6, 8), torch.randn(4, 6, 8)),
+        )
+
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
