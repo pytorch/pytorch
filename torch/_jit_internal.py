@@ -382,6 +382,10 @@ def get_closure(fn):
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
 # values global in the function.
+# Before Python 3.14, a name used only in a local variable annotation (like
+# `a_local_capture : Foo`) was still captured as a closure variable. Since 3.14
+# it is not; use `a_local_capture = torch.jit.annotate(Foo, ...)` instead, which
+# references `Foo` as a value.
 # In Python 3.9 declaring class as global will make it invisible to
 # `inspect.getsource`, see https://bugs.python.org/issue42666 .
 # This could be worked around by manually adding it to `global()` dictionary.
