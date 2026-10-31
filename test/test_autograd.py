@@ -19290,6 +19290,17 @@ from autograd.test_functional import TestAutogradFunctional  # noqa: F401
 from autograd.test_logging import TestAutogradLogging  # noqa: F401
 
 
+if not TEST_WITH_TORCHDYNAMO:
+    # These assertions inspect native nodes and lifetimes changed by compilation.
+    from autograd.test_node_lifecycle import (
+        TestChainLifecycle,  # noqa: F401
+        TestLeafNodeLifecycle,  # noqa: F401
+        TestNodeLifecycle,  # noqa: F401
+        TestSavedVariableLifecycle,  # noqa: F401
+        TestSharedGradFn,  # noqa: F401
+    )
+
+
 instantiate_device_type_tests(
     TestAutogradDeviceType, globals(), except_for=None, allow_xpu=True
 )
