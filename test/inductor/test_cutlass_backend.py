@@ -207,6 +207,15 @@ use_evt_config = config.patch(
     }
 )
 
+
+def _make_scaled_mm_bias(bias_shape, n, device, dtype):
+    """Build an N-element bias with the given layout; eager reads it as a flat vector."""
+    if bias_shape is None:
+        return None
+    view_shapes = {"n": (n,), "1_n": (1, n), "n_1": (n, 1), "1_1_n": (1, 1, n)}
+    return torch.randn(n, device=device, dtype=dtype).reshape(view_shapes[bias_shape])
+
+
 fp8_config = config.patch(
     {
         "max_autotune": True,
@@ -2830,14 +2839,14 @@ class TestCutlassBackend(TestCase):
         ),
     )
     @xfailIfSM120OrLater
-    @parametrize("has_bias", (False, True))
+    @parametrize("bias_shape", (None, "n", "1_n", "n_1", "1_1_n"))
     @parametrize("use_fast_accum", (False, True))
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_rowwise_scaling(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
-        has_bias: bool,
+        bias_shape: str | None,
         use_fast_accum: bool,
         input_dtype: torch.dtype,
     ):
@@ -2845,11 +2854,13 @@ class TestCutlassBackend(TestCase):
         output_dtype: torch.dtype = torch.bfloat16
         device = GPU_TYPE
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        if bias_shape not in (None, "n"):
+            M = N  # A bias read per row instead of per column stays in bounds.
         x = torch.randn(M, K, dtype=input_dtype, device=device)
         w = torch.randn(N, K, dtype=input_dtype, device=device)
-        bias = None
-        if has_bias:
-            bias = torch.randn(N, device=device, dtype=input_dtype).to(torch.bfloat16)
+        bias = _make_scaled_mm_bias(bias_shape, N, device, input_dtype)
+        if bias is not None:
+            bias = bias.to(torch.bfloat16)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
@@ -3008,14 +3019,14 @@ class TestCutlassBackend(TestCase):
         ),
     )
     @xfailIfSM120OrLater
-    @parametrize("has_bias", (False, True))
+    @parametrize("bias_shape", (None, "n", "1_n", "n_1", "1_1_n"))
     @parametrize("use_fast_accum", (False,))
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_tensorwise_scaling(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
-        has_bias: bool,
+        bias_shape: str | None,
         use_fast_accum: bool,
         input_dtype: torch.dtype,
     ):
@@ -3024,11 +3035,11 @@ class TestCutlassBackend(TestCase):
         output_dtype = input_dtype
         # input and output dtypes of _scaled_mm do not need to be the same, but
         # typically in a model they are
+        if bias_shape not in (None, "n"):
+            M = N  # A bias read per row instead of per column stays in bounds.
         x = torch.randn(M, K, dtype=input_dtype, device=device)
         w = torch.randn(N, K, dtype=input_dtype, device=device)
-        bias = None
-        if has_bias:
-            bias = torch.randn(N, device=device, dtype=input_dtype)
+        bias = _make_scaled_mm_bias(bias_shape, N, device, input_dtype)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, float8_dtype)
