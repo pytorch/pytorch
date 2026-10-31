@@ -4774,6 +4774,26 @@
       ]
     }
   ],
+  "GB1208": [
+    {
+      "Gb_type": "Unsupported generator frame f_back",
+      "Context": "{state}",
+      "Explanation": "f_back is only modeled for created or suspended generators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0949": [
+    {
+      "Gb_type": "Unsupported generator frame attribute",
+      "Context": "frame.{name}",
+      "Explanation": "Dynamo does not model the frame attribute {name}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",

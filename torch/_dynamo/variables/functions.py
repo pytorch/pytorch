@@ -105,6 +105,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .exception import FrameVariable
 from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
@@ -1351,6 +1352,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
+        self.frame = FrameVariable(inline_tracer)
         inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
@@ -1706,11 +1708,18 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         return throw_here()
 
+    def _gen_getframe(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L734
+        if self._frame_state_finished():
+            return ConstantVariable.create(None)
+        return self.frame
+
     tp_methods = {
         "send": Method(gen_send),
         "close": Method(gen_close),
         "throw": Method(gen_throw),
     }
+    tp_getset = {"gi_frame": GetSet(_gen_getframe, readonly_setter)}
 
 
 class ContextlibContextManagerLocalGeneratorObjectVariable(
