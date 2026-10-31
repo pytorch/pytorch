@@ -109,6 +109,7 @@ from torch.testing._internal.common_utils import (
     TEST_MPS,
     TEST_WITH_ROCM,
     TEST_XPU,
+    xfailIfROCm,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
@@ -10617,6 +10618,266 @@ class AOTInductorTestsTemplate:
 
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
+
+    @xfailIfROCm
+    def test_aot_cudagraphs_accepts_capturable_model(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class CpuConstant(torch.nn.Module):
+            def forward(self, x):
+                # Folded into a CUDA constant at compile time. Larger than
+                # the constants Inductor inlines as literals.
+                return x + torch.arange(16.0).view(4, 4).to(x.device)
+
+        @torch.compiler.nested_compile_region
+        def scale(x):
+            return x * 2
+
+        class NestedRegion(torch.nn.Module):
+            def forward(self, x):
+                return scale(x) + scale(x + 1)
+
+        class UnusedInput(torch.nn.Module):
+            def forward(self, x, y):
+                return x + 1
+
+        class Attention(torch.nn.Module):
+            def forward(self, q):
+                # Tagged random for its dropout, which is 0 here.
+                return torch.nn.functional.scaled_dot_product_attention(q, q, q)
+
+        class StreamsAttribute(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.streams = torch.nn.ModuleList([torch.nn.Linear(4, 4)])
+
+            def forward(self, x):
+                return self.streams[0](x)
+
+        x = torch.randn(4, 4, device=self.device)
+        q = torch.randn(1, 2, 16, 64, device=self.device)
+        for model, inputs in (
+            (torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU()), (x,)),
+            (CpuConstant(), (x,)),
+            (NestedRegion(), (x,)),
+            (UnusedInput(), (x, torch.randn(3, device=self.device))),
+            (StreamsAttribute().to(self.device), (x,)),
+            # Different attention backends.
+            (Attention(), (q,)),
+            (Attention(), (q.bfloat16(),)),
+        ):
+            with self.subTest(type(model).__name__):
+                self.check_model(
+                    model, inputs, options={"aot_inductor.cudagraphs": True}
+                )
+
+    @runOnRocm
+    def test_aot_cudagraphs_rejects_rocm(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        with self.assertRaisesRegex(Exception, "ROCm isn't supported yet"):
+            AOTIRunnerUtil.compile(
+                torch.nn.Linear(4, 4).to(self.device),
+                (torch.randn(2, 4, device=self.device),),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
+
+    def test_aot_cudagraphs_rejects_non_cuda_model(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("requires a non-CUDA device")
+        with self.assertRaisesRegex(Exception, "doesn't run on CUDA"):
+            AOTIRunnerUtil.compile(
+                torch.nn.Linear(4, 4).to(self.device),
+                (torch.randn(2, 4, device=self.device),),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
+
+    @xfailIfROCm
+    def test_aot_cudagraphs_rejects_uncapturable_models(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class CpuOp(torch.nn.Module):
+            def forward(self, x):
+                return (x.cpu() * 2).to(x.device)
+
+        class Item(torch.nn.Module):
+            def forward(self, x):
+                return x * x.sum().item()
+
+        class MutatesInput(torch.nn.Module):
+            def forward(self, x):
+                x.add_(1)
+                return x * 2
+
+        class Cond(torch.nn.Module):
+            def forward(self, x):
+                return torch.cond(x.sum() > 0, lambda x: x + 1, lambda x: x - 1, (x,))
+
+        class SyncsEvent(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                event = s.record_event()
+                event.synchronize()
+                return y * 2
+
+        class SyncsStream(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.synchronize()
+                return y * 2
+
+        class SyncsDevice(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                torch.cuda.synchronize()
+                return y * 2
+
+        class Random(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand_like(x)
+
+        class AttentionDropout(torch.nn.Module):
+            def forward(self, x):
+                q = x.view(1, 1, 4, 4)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, q, q, dropout_p=0.5
+                )
+
+        class SideStream(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.record_event().wait()
+                return y * 2
+
+        class Effectful(torch.nn.Module):
+            def forward(self, x):
+                # Checks for errors with an effectful op.
+                return torch.linalg.inv(x)
+
+        class WhileLoop(torch.nn.Module):
+            def forward(self, x):
+                return torch._higher_order_ops.while_loop(
+                    lambda i, x: i < 3,
+                    lambda i, x: (i + 1, x * 2),
+                    (x.new_zeros(()), x),
+                )[1]
+
+        for model, reason, configs in (
+            (CpuOp(), "cpu device", {}),
+            # AOT mode lowers without graph partitioning, which skips CPU ops.
+            (CpuOp(), "cpu device", {"triton.cudagraphs": True}),
+            (Item(), "incompatible op", {}),
+            (MutatesInput(), r"mutated inputs \(1 instances\)\. Found from", {}),
+            (Cond(), "control flow operator: torch.cond", {}),
+            (SyncsEvent(), "incompatible op streams.synchronize_event", {}),
+            (SyncsStream(), "incompatible op streams.synchronize_stream", {}),
+            (SyncsDevice(), "incompatible op streams.synchronize_device", {}),
+            (Random(), r"it uses random numbers \(prims.inductor_seeds", {}),
+            (AttentionDropout(), "it uses random numbers", {}),
+            (SideStream(), "it uses a side stream", {}),
+            (Effectful(), "_linalg_check_errors.* has side effects", {}),
+            (WhileLoop(), "control flow operator: torch.while_loop", {}),
+        ):
+            with (
+                self.subTest(type(model).__name__, **configs),
+                self.assertRaisesRegex(Exception, f"CUDA graph: .*{reason}"),
+            ):
+                AOTIRunnerUtil.compile(
+                    model,
+                    (torch.randn(4, 4, device=self.device),),
+                    inductor_configs={"aot_inductor.cudagraphs": True, **configs},
+                )
+
+        class MutatesOut(torch.nn.Module):
+            def forward(self, x, out):
+                torch.add(x, 1, out=out)
+                return out * 2
+
+        class UnusedInput(torch.nn.Module):
+            def forward(self, x, unused):
+                return x.relu()
+
+        x = torch.randn(4, 4, device=self.device)
+        # The write-back copy_, out's only user, has no stack trace.
+        with self.assertRaisesRegex(
+            Exception, r"mutated inputs \(1 instances\)\. Found from"
+        ):
+            AOTIRunnerUtil.compile(
+                MutatesOut(),
+                (x, torch.randn(4, 4, device=self.device)),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
+        devices = ["cpu"]
+        if torch.cuda.device_count() >= 2:
+            devices.append(f"{GPU_TYPE}:1")
+        for device in devices:
+            msg = f"CUDA graph: input 1 is on {device}"
+            with (
+                self.subTest("UnusedInput", device=device),
+                self.assertRaisesRegex(Exception, msg),
+            ):
+                AOTIRunnerUtil.compile(
+                    UnusedInput(),
+                    (x, torch.randn(4, device=device)),
+                    inductor_configs={"aot_inductor.cudagraphs": True},
+                )
+
+    @xfailIfROCm
+    def test_aot_cudagraphs_checks_subgraphs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        def cpu_op(x):
+            return (x.cpu() * 2).to(x.device)
+
+        def item(x):
+            return x * x.sum().item()
+
+        for fn, reason in ((cpu_op, "cpu device"), (item, "incompatible op")):
+            with (
+                self.subTest(fn.__name__),
+                torch._dynamo.config.patch(
+                    enable_invoke_subgraph_regional_compile=True,
+                    inline_single_use_invoke_subgraph=False,
+                ),
+            ):
+                region = torch.compiler.nested_compile_region(fn)
+
+                class Model(torch.nn.Module):
+                    def forward(self, x):
+                        return region(x) + region(x * 2)
+
+                with self.assertRaisesRegex(Exception, f"CUDA graph: .*{reason}"):
+                    AOTIRunnerUtil.compile(
+                        Model(),
+                        (torch.randn(4, 4, device=self.device),),
+                        inductor_configs={"aot_inductor.cudagraphs": True},
+                    )
+
+    @xfailIfROCm
+    @requires_multigpu()
+    def test_aot_cudagraphs_rejects_multi_device_model(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return (x.to(f"{GPU_TYPE}:1") * 2).to(x.device)
+
+        with self.assertRaisesRegex(Exception, "CUDA graph: .*multiple devices"):
+            AOTIRunnerUtil.compile(
+                Model(),
+                (torch.randn(4, 4, device=self.device),),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
 
     def test_custom_op_in_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
