@@ -6,6 +6,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
+#include <utility>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -273,51 +274,10 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
-
-    auto& const_folded = active().fold_state;
-    if (const_folded == ConstantState::INITIALIZED) {
-      // Do NOT call get_available_model() before upgrading to exclusive lock.
-      // Holding a model across the upgrade causes a deadlock when another
-      // thread holds a shared lock and waits for the model.
-      model_lk.unlock();
-      std::unique_lock constants_folding_lk(model_exec_mutex_);
-      // Double locking to make sure constant folding is only ran once.
-      if (const_folded == ConstantState::INITIALIZED) {
-        auto* model = pool_.get_available_model();
-        try {
-          auto folded_const_map = model->run_const_fold(
-              stream, proxy_executor, /* initialization = */ true);
-          update_constant_buffer(
-              std::move(folded_const_map),
-              /* use_inactive = */ false,
-              /* validate_full_update = */ false);
-          const_folded = ConstantState::FOLDED;
-        } catch (...) {
-          pool_.return_model_to_available(model);
-          throw;
-        }
-        pool_.return_model_to_in_flight(model);
-      }
-      constants_folding_lk.unlock();
-      model_lk.lock();
-    } else {
-      AOTI_RUNTIME_CHECK(
-          const_folded == ConstantState::FOLDED,
-          "Unknown constant state: " + toStringConstantState(const_folded));
-    }
-
-    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-    auto* model = pool_.get_available_model(stream);
-
-    try {
-      model->run(input_handles, output_handles, stream, proxy_executor);
-    } catch (...) {
-      pool_.return_model_to_available(model);
-      throw;
-    }
-
-    pool_.return_model_to_in_flight(model);
+    run_on_available_model(
+        stream, proxy_executor, [&](AOTInductorModel* model) {
+          model->run(input_handles, output_handles, stream, proxy_executor);
+        });
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -977,6 +937,66 @@ class AOTInductorModelContainer {
     return buffers_[1 - active_idx_];
   }
 
+  // Folds the active constants if their state is INITIALIZED (after the .so
+  // constants load, an update of the active buffer, or a swap to an updated
+  // buffer that wasn't folded), throws unless they are then FOLDED, and runs
+  // fn on a model instance checked out of the pool, holding model_exec_mutex_
+  // shared and the stream lock. fn must record the instance's run_finished_
+  // event after the work it enqueues, as AOTInductorModel::run() does: the
+  // pool reclaims an in-flight instance only through that event. If fn throws,
+  // the instance goes back to the pool without waiting for that work.
+  template <typename Fn>
+  void run_on_available_model(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      Fn&& fn) {
+    std::shared_lock model_lk(model_exec_mutex_);
+
+    auto& const_folded = active().fold_state;
+    if (const_folded == ConstantState::INITIALIZED) {
+      // Do NOT call get_available_model() before upgrading to exclusive lock.
+      // Holding a model across the upgrade causes a deadlock when another
+      // thread holds a shared lock and waits for the model.
+      model_lk.unlock();
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Double locking to make sure constant folding is only ran once.
+      if (const_folded == ConstantState::INITIALIZED) {
+        auto* model = pool_.get_available_model();
+        try {
+          auto folded_const_map = model->run_const_fold(
+              stream, proxy_executor, /* initialization = */ true);
+          update_constant_buffer(
+              std::move(folded_const_map),
+              /* use_inactive = */ false,
+              /* validate_full_update = */ false);
+          const_folded = ConstantState::FOLDED;
+        } catch (...) {
+          pool_.return_model_to_available(model);
+          throw;
+        }
+        pool_.return_model_to_in_flight(model);
+      }
+      constants_folding_lk.unlock();
+      model_lk.lock();
+    } else {
+      AOTI_RUNTIME_CHECK(
+          const_folded == ConstantState::FOLDED,
+          "Unknown constant state: " + toStringConstantState(const_folded));
+    }
+
+    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
+    auto* model = pool_.get_available_model(stream);
+
+    try {
+      std::forward<Fn>(fn)(model);
+    } catch (...) {
+      pool_.return_model_to_available(model);
+      throw;
+    }
+
+    pool_.return_model_to_in_flight(model);
+  }
+
   // This mutex is used to protect execution of model.
   // We acquire the mutex in shared mode if we allow concurrent execution.
   // We acquire the mutex in unique mode when we want exclusive access of the
@@ -987,9 +1007,9 @@ class AOTInductorModelContainer {
   // thread holding this mutex shared must not lock it again, and must not
   // block on work that needs another thread to take it: either deadlocks as
   // soon as a swap or fold is waiting. Waiting for threads that already hold
-  // it is fine. run() and the inactive-buffer branch of run_const_fold() rely
-  // on this when they block in pool_.get_available_model() for a model another
-  // holder has checked out.
+  // it is fine. run_on_available_model() and the inactive-buffer branch of
+  // run_const_fold() rely on this when they block in
+  // pool_.get_available_model() for a model another holder has checked out.
   WritePrioritySharedMutex model_exec_mutex_;
 };
 
