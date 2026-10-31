@@ -9,7 +9,9 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 from torch._inductor.test_case import run_tests
-from torch._inductor.utils import run_fw_bw_and_get_code
+from torch._inductor.utils import (
+    run_fw_bw_and_get_code,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -17,7 +19,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_gpu_and_triton,
+)
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
@@ -251,8 +255,8 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         graph = torch.fx.Graph()
         meta = torch.device("meta")
-        cuda0 = torch.device("cuda", 0)
-        cuda1 = torch.device("cuda", 1)
+        cuda0 = torch.device(GPU_TYPE, 0)
+        cuda1 = torch.device(GPU_TYPE, 1)
         cpu = torch.device("cpu")
 
         for mapping, partition, expected in (
