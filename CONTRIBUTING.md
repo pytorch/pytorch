@@ -669,6 +669,8 @@ Once your PR is approved and CI is green, you can merge it in by entering a comm
 
 The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it, reopens them, and merges `main` into their branches when needed so that each shows only its own changes again. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
 
+In a stack, ghstack or GitHub-native, pytorchbot puts a path-based `ciflow/*` label only on the top-most PR that needs it, because that PR's CI also tests the PRs below it; `ciflow/docker` is the exception and stays on every PR that needs it. `@pytorchbot merge` on a lower PR that needs the label waits for that run and refuses if it failed. It also refuses if no PR above runs the label on the lower PR's current changes; add the label to the lower PR so it runs there.
+
 ## GreenLight
 
 GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
