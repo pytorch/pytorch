@@ -87,6 +87,7 @@ from .linear_cross_entropy_options import LinearCrossEntropyOptions
 from .loss import (
     BCELoss,
     BCEWithLogitsLoss,
+    BPRLoss,
     CosineEmbeddingLoss,
     CrossEntropyLoss,
     CTCLoss,
@@ -182,6 +183,7 @@ __all__ = [
     "AvgPool3d",
     "BCELoss",
     "BCEWithLogitsLoss",
+    "BPRLoss",
     "BatchNorm1d",
     "BatchNorm2d",
     "BatchNorm3d",
