@@ -136,8 +136,7 @@ constexpr bool isSubByteIntType(ScalarType t) {
 // ints. They have no defined value conversion to or from any other dtype.
 inline bool isShellType(ScalarType t) {
   return t == ScalarType::Float4_e2m1fn_x2 ||
-      t == ScalarType::Float6_e2m3fn_x4 || isBitsType(t) ||
-      isSubByteIntType(t);
+      t == ScalarType::Float6_e2m3fn_x4 || isBitsType(t) || isSubByteIntType(t);
 }
 
 // Dtypes whose element size is not a power of two (Float6_e2m3fn_x4 is 3
