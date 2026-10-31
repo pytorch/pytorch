@@ -295,9 +295,11 @@ class Guard:
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
 
-        is_duplicate_input = (
-            isinstance(self.create_fn, functools.partial)
-            and self.create_fn.func is torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT
+        is_duplicate_input = isinstance(
+            self.create_fn, functools.partial
+        ) and self.create_fn.func in (
+            torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT,
+            torch._dynamo.guards.GuardBuilder.IDENTITY_COMPARE,
         )
         return (
             is_duplicate_input,

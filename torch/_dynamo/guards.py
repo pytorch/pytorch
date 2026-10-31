@@ -1603,6 +1603,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
+        self.identity_compare_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
@@ -3707,6 +3708,28 @@ class GuardBuilder(GuardBuilderBase):
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
+
+    # Multi-source guard: `source_b is source_a` (is_same) or `is not`. Unlike
+    # DUPLICATE_INPUT it has no C++ leaf and is always an epilogue lambda, so
+    # it can relate a local to a global.
+    @skip_guard_check_spec
+    def IDENTITY_COMPARE(self, guard: Guard, source_b: Source, is_same: bool) -> None:
+        if is_from_skip_guard_source(
+            guard.originating_source
+        ) or is_from_skip_guard_source(source_b):
+            return
+
+        if self.save_guards:
+            if name := get_local_source_name(source_b):
+                self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(source_b):
+                self.check_fn_manager.additional_used_global_vars.add(name)
+
+        op = "is" if is_same else "is not"
+        code = [f"{self.arg_ref(source_b.name)} {op} {self.arg_ref(guard)}"]
+        self._set_guard_export_info(guard, code)
+        verbose_code_part = get_verbose_code_parts(code[0], guard)[0]
+        self.identity_compare_guard_codes.append((code[0], verbose_code_part))
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
@@ -6481,6 +6504,14 @@ class CheckFunctionManager:
             )
             builder.add_python_lambda_leaf_guard_to_root(
                 aliasing_code_parts, aliasing_verbose_code_parts
+            )
+
+        if builder.identity_compare_guard_codes:
+            identity_code_parts, identity_verbose_code_parts = map(
+                list, zip(*builder.identity_compare_guard_codes)
+            )
+            builder.add_python_lambda_leaf_guard_to_root(
+                identity_code_parts, identity_verbose_code_parts
             )
 
         aotautograd_guards: list[GuardEnvExpr] = (

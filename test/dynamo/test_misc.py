@@ -247,6 +247,9 @@ def _load_pybind11_enum_mod(*, load_inline):
     return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
 
 
+_IS_TEST_SENTINEL = object()
+
+
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_storage_offset_scalar_output(self):
         def fn(x):
@@ -3185,6 +3188,44 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn2({"a": v1, "b": v2}), 302)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
+
+    @parametrize("make", [object, list, lambda: lambda: None])
+    def test_is_guards_identity_of_sourced_objects(self, make):
+        # https://github.com/pytorch/pytorch/issues/196173
+        class Holder:
+            def __init__(self):
+                self.left = make()
+                self.right = make()
+                self.current = self.left
+
+        def fn(x, holder):
+            is_left = holder.current is holder.left
+            holder.current = holder.right if is_left else holder.left
+            if is_left:
+                return x.square()
+            return -x
+
+        x = torch.tensor([2.0, 3.0])
+        ref, opt = Holder(), Holder()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        for _ in range(4):
+            self.assertEqual(opt_fn(x, opt), fn(x, ref))
+            self.assertIs(opt.current is opt.left, ref.current is ref.left)
+        # One entry per identity relation, not per object address.
+        opt_fn(x, Holder())
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_guards_local_against_global_sentinel(self):
+        def fn(x, opt=_IS_TEST_SENTINEL):
+            if opt is _IS_TEST_SENTINEL:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        for arg in [(), (object(),), (), (_IS_TEST_SENTINEL,), (object(),)]:
+            self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
 
     def test_is_floating_point(self):
         def fn(a, b):

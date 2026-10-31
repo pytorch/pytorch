@@ -54,7 +54,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
@@ -1121,6 +1121,27 @@ class BuiltinVariable(BaseBuiltinVariable):
                     if result is None:
                         return None
                     is_same = result.as_python_constant()
+                    # The answer was read off two real objects and is baked
+                    # into the graph, so guard the relation between their
+                    # sources. Constants are already guarded by value.
+                    a, b = left.realize(), right.realize()
+                    if (
+                        a is not b
+                        and a.source
+                        and b.source
+                        and not isinstance(a, ConstantVariable)
+                        and not isinstance(b, ConstantVariable)
+                        and a.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
+                        and b.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
+                    ):
+                        relation_guard = (
+                            make_dupe_guard(a.source, b.source) if is_same else None
+                        ) or functools.partial(
+                            GuardBuilder.IDENTITY_COMPARE,
+                            source_b=b.source,
+                            is_same=is_same,
+                        )
+                        install_guard(a.source.make_guard(relation_guard))
                     return VariableTracker.build(
                         tx, is_same if op.__name__ == "is_" else not is_same
                     )
