@@ -28,10 +28,13 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfWindows,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -162,6 +165,7 @@ def _run(winner, **kwargs):
     return submitted
 
 
+@instantiate_parametrized_tests
 class TestTunableOpPretune(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -196,39 +200,36 @@ class TestTunableOpPretune(TestCase):
             return _FakeWinner(name, [mat1, mat2, scale_a, scale_b], [m, n])
         return _FakeWinner(name, [mat1, mat2], [m, n])
 
-    def test_supported_ops_produce_buckets(self):
-        for name in ("mm", "addmm", "bmm", "baddbmm", "_scaled_mm"):
-            s = sympy.Symbol(f"s_{name}", positive=True, integer=True)
-            submitted = _run(self._mm_winner(name, s), sym=s)
-            self.assertTrue(submitted, f"{name} produced no buckets")
-            if name == "_scaled_mm":
-                metas = submitted[0].input_tensor_meta
-                self.assertEqual(len(metas), 4, "scales must reach the worker")
-                # scale_a carries the symbol, so it is rebuilt with the matrices
-                self.assertEqual(metas[2].sizes[0], metas[0].sizes[0])
+    @parametrize("name", ("mm", "addmm", "bmm", "baddbmm", "_scaled_mm"))
+    def test_supported_ops_produce_buckets(self, name):
+        s = sympy.Symbol(f"s_{name}", positive=True, integer=True)
+        submitted = _run(self._mm_winner(name, s), sym=s)
+        self.assertTrue(submitted, f"{name} produced no buckets")
+        if name == "_scaled_mm":
+            metas = submitted[0].input_tensor_meta
+            self.assertEqual(len(metas), 4, "scales must reach the worker")
+            # scale_a carries the symbol, so it is rebuilt with the matrices
+            self.assertEqual(metas[2].sizes[0], metas[0].sizes[0])
 
     def test_unsupported_op_is_skipped(self):
         s = sympy.Symbol("s_other", positive=True, integer=True)
-        # Control first: an identical winner under a supported name DOES bucket,
-        # so an empty result below means the op gate, not a broken harness.
+        # Control first, so an empty result means the op gate, not the harness.
         self.assertTrue(_run(self._mm_winner("mm", s), sym=s))
         self.assertEqual(_run(self._mm_winner("convolution", s), sym=s), [])
 
-    def test_bias_first_ops_read_the_right_operands(self):
-        """addmm and baddbmm take [bias, mat1, mat2]; reading nodes[0] as A would
-        make the bias the left matrix and bucket the wrong dim."""
-        for name in ("addmm", "baddbmm"):
-            s = sympy.Symbol(f"s_{name}", positive=True, integer=True)
-            # Bias carries the dynamic dim too, so a wrong operand pick still
-            # yields buckets -- the tell is the SHAPE that gets submitted.
-            submitted = _run(self._mm_winner(name, s), sym=s)
-            self.assertTrue(submitted)
-            for bmreq in submitted:
-                bias, mat1, mat2 = bmreq.input_tensor_meta
-                # mat2 is static; mat1 and bias scale on the dynamic dim.
-                self.assertEqual(mat2.sizes, [256, 512])
-                self.assertEqual(mat1.sizes[1], 256)
-                self.assertEqual(bias.sizes[0], mat1.sizes[0])
+    @parametrize("name", ("addmm", "baddbmm"))
+    def test_bias_first_ops_read_the_right_operands(self, name):
+        """Bias-first ops take [bias, mat1, mat2]; reading nodes[0] as A would
+        bucket the wrong dim. The bias carries the symbol too, so the tell is
+        the submitted SHAPE, not whether anything was submitted."""
+        s = sympy.Symbol(f"s_{name}", positive=True, integer=True)
+        submitted = _run(self._mm_winner(name, s), sym=s)
+        self.assertTrue(submitted)
+        for bmreq in submitted:
+            bias, mat1, mat2 = bmreq.input_tensor_meta
+            self.assertEqual(mat2.sizes, [256, 512])
+            self.assertEqual(mat1.sizes[1], 256)
+            self.assertEqual(bias.sizes[0], mat1.sizes[0])
 
     def test_dynamic_reduction_dim_is_rejected(self):
         """A solution is only valid for the K it was tuned at."""
@@ -292,23 +293,18 @@ class TestTunableOpPretune(TestCase):
             return _FakeWinner(name, [bias, mat1, mat2], [b, m, n])
         return _FakeWinner(name, [mat1, mat2], [b, m, n])
 
-    def test_batched_ops_reconstruct_batched_metadata(self):
-        # _mm_winner hands bmm 2-D operands, so a reconstruction that dropped or
-        # mangled the batch axis would still pass the bucket-count assertions.
-        for name in ("bmm", "baddbmm"):
-            s = sympy.Symbol(f"b_{name}", positive=True, integer=True)
-            submitted = _run(self._bmm_winner(name, s), sym=s)
-            self.assertTrue(submitted, f"{name} produced no buckets")
-            for bmreq in submitted:
-                metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
-                for meta in metas:
-                    self.assertEqual(
-                        len(meta.sizes), 3, f"{name}: operand lost its batch axis"
-                    )
-                batches = {meta.sizes[0] for meta in metas}
-                self.assertEqual(
-                    len(batches), 1, f"{name}: operands disagree on batch {batches}"
-                )
+    @parametrize("name", ("bmm", "baddbmm"))
+    def test_batched_ops_reconstruct_batched_metadata(self, name):
+        # Every operand keeps its batch axis, and they agree on it.
+        s = sympy.Symbol(f"b_{name}", positive=True, integer=True)
+        submitted = _run(self._bmm_winner(name, s), sym=s)
+        self.assertTrue(submitted, f"{name} produced no buckets")
+        for bmreq in submitted:
+            metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
+            for meta in metas:
+                self.assertEqual(len(meta.sizes), 3, "operand lost its batch axis")
+            batches = {meta.sizes[0] for meta in metas}
+            self.assertEqual(len(batches), 1, f"operands disagree on batch {batches}")
 
     def test_symbol_spanning_two_axes_is_rejected(self):
         # M = 1000*s and N = s share one symbol. The ceiling is derived from a
@@ -343,9 +339,8 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(padded, sym=s), [])
 
     def test_expanded_bias_still_produces_buckets(self):
-        # mm_args expands a broadcast bias, so addmm/baddbmm arrive stride-0.
-        # No Signature() carries the bias, so requiring density there would
-        # drop almost all of them. mat1/mat2/output are still checked.
+        # A broadcast bias arrives stride-0 and is exempt from the density
+        # check; mat1/mat2/output are not.
         s = sympy.Symbol("s_expbias", positive=True, integer=True)
         b, m, k, n = s, 32, 256, 512
         mat1 = _buffer("mat1", [b, m, k], _contiguous_strides([b, m, k]))
@@ -379,9 +374,8 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(winner2, sym=s2), [])
 
     def test_memo_distinguishes_output_stride(self):
-        # The key carries the rebuilt output meta, so two GEMMs differing only
-        # in output layout get different keys. winner.layout is a Layout, which
-        # has no get_stride, so the stride has to come through _as_buffer.
+        # Two GEMMs differing only in output layout get different keys;
+        # winner.layout is a Layout, so its stride comes via _as_buffer.
         s = sympy.Symbol("s_outstride", positive=True, integer=True)
         m, k, n = s, 256, 512
         inputs = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
@@ -400,9 +394,8 @@ class TestTunableOpPretune(TestCase):
             )
 
     def test_unbacked_symbol_is_skipped(self):
-        # optimization_hint() returns config.unbacked_symint_fallback rather
-        # than raising, so the ladder would tune around an invented size.
-        # Unbacked ints are the "u" prefix (torch/utils/_sympy/symbol.py).
+        # optimization_hint() invents a fallback rather than raising. Unbacked
+        # ints are the "u" prefix (torch/utils/_sympy/symbol.py).
         u = sympy.Symbol("u0", positive=True, integer=True)
         self.assertEqual(_run(self._mm_winner("mm", u), sym=u), [])
 
@@ -445,9 +438,8 @@ class TestTunableOpPretune(TestCase):
         )
 
     def test_memo_does_not_depend_on_an_unpinned_filename(self):
-        # get_filename() reads "" until something pins it, so keying on it
-        # directly files the first GEMM's buckets under a different scope from
-        # every later one and re-runs the whole ladder.
+        # get_filename() reads "" until pinned; keying on it directly would
+        # scope the first GEMM apart from every later one.
         s = sympy.Symbol("s_pin", positive=True, integer=True)
         with _ladder(s) as submitted:
             with mock.patch("torch.cuda.tunable.get_filename", return_value=""):
@@ -461,8 +453,7 @@ class TestTunableOpPretune(TestCase):
             self.assertEqual(len(submitted), first, "pinning must not rekey")
 
     def test_memo_distinguishes_extern_kwargs(self):
-        # use_fast_accum is in ScaledGemmParams::Signature() but not in the
-        # metas, so the key must carry kwargs or the second variant is skipped.
+        # use_fast_accum is in the signature but not the metas.
         s = sympy.Symbol("s_kwargs", positive=True, integer=True)
         m, k, n = s, 256, 512
         nodes = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
@@ -479,33 +470,18 @@ class TestTunableOpPretune(TestCase):
                 len(submitted), first, "use_fast_accum must not share a memo key"
             )
 
-    def test_choice_variants_produce_buckets(self):
-        # Matching runs on winner.choice.name, which covers the _dtype
-        # out-variants and _scaled_mm_v2.
-        # addmm_dtype is in the set on ROCm only (it hard-errors under
-        # TunableOp on CUDA), so drive it only where the ladder accepts it.
-        variants = ["mm_dtype", "bmm_dtype", "_scaled_mm_v2"]
-        if torch.version.hip is not None:
-            variants.append("addmm_dtype")
-        for choice_name in variants:
-            s = sympy.Symbol(f"s_{choice_name}", positive=True, integer=True)
-            m, k, n = s, 256, 512
-            if choice_name == "addmm_dtype":
-                # Bias-first like addmm: [bias, mat1, mat2].
-                winner = _FakeWinner(
-                    choice_name,
-                    [
-                        _buffer("bias", [m, n], [n, 1]),
-                        _buffer("mat1", [m, k], [k, 1]),
-                        _buffer("mat2", [k, n], [n, 1]),
-                    ],
-                    [m, n],
-                    choice_name=choice_name,
-                )
-            else:
-                winner = self._mm_winner(choice_name, s)
-            submitted = _run(winner, sym=s)
-            self.assertTrue(submitted, f"{choice_name} produced no buckets")
+    @parametrize("choice_name", ("mm_dtype", "bmm_dtype", "_scaled_mm_v2"))
+    def test_choice_variants_produce_buckets(self, choice_name):
+        # Matching runs on winner.choice.name, covering the _dtype out-variants.
+        s = sympy.Symbol(f"s_{choice_name}", positive=True, integer=True)
+        submitted = _run(self._mm_winner(choice_name, s), sym=s)
+        self.assertTrue(submitted, f"{choice_name} produced no buckets")
+
+    @unittest.skipIf(torch.version.hip is None, "addmm_dtype is tunable on ROCm only")
+    def test_addmm_dtype_produces_buckets(self):
+        s = sympy.Symbol("s_addmm_dtype", positive=True, integer=True)
+        submitted = _run(self._mm_winner("addmm_dtype", s), sym=s)
+        self.assertTrue(submitted, "addmm_dtype produced no buckets")
 
     def test_traced_hint_is_always_tuned(self):
         # The traced shape is the size actually served: it must be a rung even
@@ -822,7 +798,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_dynamic_mm_records_every_bucket(self):
         def fn(a, b):
