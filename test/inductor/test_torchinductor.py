@@ -8786,6 +8786,20 @@ for dtype in (torch.int32, torch.int64):
         # if we have a copy there will be more than 1 kernel
         assertGeneratedKernelCountEqual(self, 1)
 
+    def test_arange_bool_rejected(self):
+        def fn_out(out):
+            return torch.arange(0.0, 5.0, out=out)
+
+        out = torch.empty(5, dtype=torch.bool, device=self.device)
+        with self.assertRaises(NotImplementedError):
+            torch.compile(fn_out, backend="inductor")(out)
+
+        def fn_dtype():
+            return torch.arange(5, dtype=torch.bool, device=self.device)
+
+        with self.assertRaises(NotImplementedError):
+            torch.compile(fn_dtype, backend="inductor")()
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
