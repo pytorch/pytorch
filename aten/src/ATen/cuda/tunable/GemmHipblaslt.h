@@ -596,6 +596,24 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         }
       }
 
+# if ROCM_VERSION >= 100000
+      const auto smCarveout = at::globalContext()._SMCarveout_EXPERIMENTAL();
+      if (smCarveout.has_value()) {
+        const int smCount =
+          at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+        const int carveout = smCarveout.value();
+        TORCH_CHECK(
+          carveout >= 0 && carveout < smCount,
+          "SM carveout must be between 0 and ",
+          smCount - 1,
+          " (num_sms-1), got ",
+          carveout);
+        matmul.setAttribute(
+          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+          smCount - carveout);
+      }
+#endif
+
       size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
 
       auto op_handle = at::cuda::getCurrentCUDABlasLtHandle();
