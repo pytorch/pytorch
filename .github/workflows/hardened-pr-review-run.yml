@@ -969,13 +969,19 @@ jobs:
 
             - `verdict`: from the review's Recommendation. Request Changes is
               "changes_requested". Approve and Needs Discussion are
-              "ready_for_human_review".
+              "ready_for_human_review", unless the review names a defect that
+              must be fixed before approval: then it is "changes_requested". An
+              open question, a request for data or discussion, or files left
+              unreviewed is not such a defect.
             - `summary`: the review's one-sentence summary and its
-              Recommendation, in at most three sentences.
+              Recommendation, in at most three sentences. If such a defect
+              made the verdict "changes_requested" under Approve or Needs
+              Discussion, say so in words.
             - `findings`: one per problem the review raises, in the review's
               words. `severity` is `major` for each point the review gives as a
-              reason for Request Changes, `minor` for other problems, `info`
-              for suggestions.
+              reason for Request Changes or as a defect that must be fixed
+              before approval, `minor` for other problems, `info` for
+              suggestions.
 
             Keep each finding's `message` to at most 1200 characters, counting
             each `&`, `<` and `>` as five, since posting escapes them. A longer
@@ -985,8 +991,11 @@ jobs:
 
             Every finding must name a file this PR changed (listed in
             /tmp/pr-files.txt) and a line its diff (/tmp/pr-diff.txt) touches;
-            findings that do not are DISCARDED. When a point is not about one
-            changed line (a missing test, say), anchor it to the most relevant
+            findings that do not are DISCARDED. A file whose diff shows no added
+            or context line (a deletion, a pure rename, a mode-only change, a
+            binary file) has no such line, even though /tmp/pr-files.txt lists
+            it. When a point is not about one changed line (a missing test,
+            say), or is about such a file, anchor it to the most relevant
             changed line rather than drop it.
 
             `line` IS A LINE NUMBER IN THE FILE AS IT EXISTS AT THE HEAD COMMIT,
