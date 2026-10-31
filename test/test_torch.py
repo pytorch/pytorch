@@ -1825,6 +1825,119 @@ class TestTorchDeviceType(TestCase):
         cumsum = torch.cumsum(x, dim=1)
         self.assertEqual(cumsum.max().item(), 0., atol=0., rtol=0.)
 
+    @onlyCUDA
+    @largeTensorTest('48GB')
+    @parametrize(
+        "shape",
+        [
+            (262145, 1, 16384),
+            (131073, 2, 16384),
+            (2**32 - 1, 1, 1),
+            (2, 1, 2**31 + 1),
+            (1, 1, 2**32 - 1),
+        ],
+    )
+    def test_cummax_cummin_outer_dim_64bit_indexing(self, device, shape):
+        # https://github.com/pytorch/pytorch/issues/167086
+        # scan_outer_dim_with_indices had uint32 overflow when
+        # num_orows * row_size * num_irows > UINT_MAX.
+        # Use int8 to keep memory within 48GB (input + vals + int64 indices).
+        # Shapes above UINT_MAX elements exercise wide offsets. Shapes at
+        # UINT_MAX exercise the uint32 kernel's row and column boundaries.
+        # The cases also cover nontrivial row sizes and irows above INT_MAX.
+        x = torch.zeros(shape, dtype=torch.int8, device=device)
+        vals = torch.ones_like(x)
+        indices = torch.full_like(x, -1, dtype=torch.int64)
+        expected_indices = torch.arange(shape[1], device=device)
+        torch.cummax(x, dim=1, out=(vals, indices))
+        self.assertEqual(vals.max().item(), 0)
+        self.assertEqual(indices.amin(dim=(0, 2)), expected_indices)
+        self.assertEqual(indices.amax(dim=(0, 2)), expected_indices)
+        vals.fill_(1)
+        indices.fill_(-1)
+        torch.cummin(x, dim=1, out=(vals, indices))
+        self.assertEqual(vals.max().item(), 0)
+        self.assertEqual(indices.amin(dim=(0, 2)), expected_indices)
+        self.assertEqual(indices.amax(dim=(0, 2)), expected_indices)
+
+    @onlyCUDA
+    @largeTensorTest('48GB')
+    @parametrize(
+        "num_rows,row_size",
+        [(262144, 16384), (2**31 + 1, 2), (2**32 - 1, 1), (1, 2**32 - 1)],
+    )
+    def test_cummax_cummin_inner_dim_64bit_indexing(self, device, num_rows, row_size):
+        # Exercises the innermost-dim _with_indices path when
+        # num_rows * row_size > UINT_MAX (scan along the last dimension).
+        # Shapes above UINT_MAX elements exercise wide offsets. Shapes at
+        # UINT_MAX exercise the uint32 kernel's row and column boundaries.
+        # The cases also cover more than INT_MAX rows.
+        x = torch.zeros(num_rows, row_size, dtype=torch.int8, device=device)
+        vals = torch.ones_like(x)
+        indices = torch.full_like(x, -1, dtype=torch.int64)
+        torch.cummax(x, dim=-1, out=(vals, indices))
+        self.assertEqual(vals.max().item(), 0)
+        self.assertEqual(indices.min().item(), 0)
+        self.assertEqual(indices[:, -1].min().item(), row_size - 1)
+        self.assertEqual(indices[:, -1].max().item(), row_size - 1)
+        vals.fill_(1)
+        indices.fill_(-1)
+        torch.cummin(x, dim=-1, out=(vals, indices))
+        self.assertEqual(vals.max().item(), 0)
+        self.assertEqual(indices.min().item(), 0)
+        self.assertEqual(indices[:, -1].min().item(), row_size - 1)
+        self.assertEqual(indices[:, -1].max().item(), row_size - 1)
+
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/triton-lang/triton/issues/12384")
+    @largeTensorTest('20GB')
+    @parametrize(
+        "shape",
+        [
+            (2, 1, 2**31 + 1),
+            (1, 2, 2**32 - 2**24),
+            (1, 1, 2**32 - 1),
+            (2**32 - 1, 1, 1),
+        ],
+    )
+    def test_cumsum_outer_dim_large_rows(self, device, shape):
+        # scan_outer_dim narrowed num_irows > INT_MAX to int when choosing
+        # the block size, which produced an invalid launch configuration.
+        # Near UINT_MAX inner or outer rows, the uint32 grid-stride counters
+        # could wrap, which hung or rescanned rows. The in-place scan turns
+        # a rescanned row into wrong values; the poisoned out= buffer
+        # catches skipped writes.
+        x = torch.ones(shape, dtype=torch.int8, device=device)
+        expected = torch.arange(1, shape[1] + 1, dtype=torch.int8, device=device)
+        out = torch.zeros_like(x)
+        torch.cumsum(x, dim=1, out=out)
+        self.assertEqual(out.amin(dim=(0, 2)), expected)
+        self.assertEqual(out.amax(dim=(0, 2)), expected)
+        del out
+        x.cumsum_(1)
+        self.assertEqual(x.amin(dim=(0, 2)), expected)
+        self.assertEqual(x.amax(dim=(0, 2)), expected)
+
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/triton-lang/triton/issues/12384")
+    @largeTensorTest('20GB')
+    @parametrize("num_rows,row_size", [(2**32 - 1, 1), (2**32 - 16, 2)])
+    def test_cumsum_inner_dim_large_rows(self, device, num_rows, row_size):
+        # Near UINT_MAX rows, the innermost scan's grid stride
+        # blockDim.y * gridDim.x overflowed unsigned int; for these shapes it
+        # is exactly 2**32, so it became 0, the row loop never advanced, and
+        # the kernel hung.
+        x = torch.ones(num_rows, row_size, dtype=torch.int8, device=device)
+        expected = torch.arange(1, row_size + 1, dtype=torch.int8, device=device)
+        out = torch.zeros_like(x)
+        torch.cumsum(x, dim=-1, out=out)
+        self.assertEqual(out.amin(dim=0), expected)
+        self.assertEqual(out.amax(dim=0), expected)
+        del out
+        x.cumsum_(-1)
+        self.assertEqual(x.amin(dim=0), expected)
+        self.assertEqual(x.amax(dim=0), expected)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
