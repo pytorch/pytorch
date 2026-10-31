@@ -85,6 +85,7 @@ from torch._inductor.cpp_builder import (
     get_cpp_compiler,
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
+    GNU_STACK_NOTE_ASM,
     normalize_path_separator,
     run_asm_build_object,
 )
@@ -2957,11 +2958,16 @@ class AotCodeCompiler:
                 else:
                     section_attr = '.lrodata, "a"'
                 symbol_prefix = ""
+                # Without this, the .so may need an executable stack, which
+                # glibc 2.41+ refuses to dlopen.
+                asm_epilogue = GNU_STACK_NOTE_ASM
             elif platform == "darwin":
                 section_attr = "__DATA,__data"
                 symbol_prefix = "_"
+                asm_epilogue = ""
             elif platform == "win32":
                 symbol_prefix = ""
+                asm_epilogue = ""
                 # ASM build is not supported on Windows, force use CPP build.
                 use_asm_build = False
             else:
@@ -2997,6 +3003,7 @@ class AotCodeCompiler:
                     consts_asm += f"\t.space {len(consts) - 8}\n"
                 consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                consts_asm += asm_epilogue
                 return consts_asm, "weights.S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
@@ -3069,6 +3076,7 @@ end
                     asm_code += f"{symbol_prefix}_binary_constants_bin_start:\n"
                     asm_code += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                     asm_code += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                    asm_code += asm_epilogue
                     asm_ext = "S"
                 return asm_code, asm_ext
 
