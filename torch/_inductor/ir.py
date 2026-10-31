@@ -10764,6 +10764,9 @@ class MultiOutput(ExternKernel):
         )
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
+        parent = self.inputs[0]
+        if isinstance(parent, InvokeSubgraph):
+            return parent.get_output_aliases(self.indices[0][1])
         return [
             inp.get_name()
             for inp in self.inputs
@@ -11301,6 +11304,21 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
 
 
+def _mark_unaligned_subgraph_output(
+    multi_output: MultiOutput, subgraph_outputs: Sequence[tuple[Subgraph, IRNode]]
+) -> None:
+    # The MultiOutput's layout has offset 0 relative to the tensor the subgraph
+    # returns, so record when that tensor is unaligned, as fallback outputs do.
+    for subgraph, output in subgraph_outputs:
+        if subgraph.graph is None:
+            raise AssertionError("Expected a lowered subgraph")
+        with V.set_graph_handler(subgraph.graph):
+            unaligned = is_unaligned(output)
+        if unaligned:
+            V.graph.unaligned_buffers.add(multi_output.get_name())
+            return
+
+
 @ir_dataclass(frozen=False)
 class InvokeSubgraph(ExternKernel):
     """
@@ -11325,6 +11343,48 @@ class InvokeSubgraph(ExternKernel):
 
     def get_subgraphs(self) -> list[Subgraph]:
         return [self.subgraph] if self.subgraph else []
+
+    @cache_on_self
+    def _output_storages(self) -> list[OrderedSet[str]]:
+        if self.subgraph is None or self.subgraph.graph is None:
+            raise AssertionError("Expected a lowered invoke_subgraph body")
+        graph = self.subgraph.graph
+        storages: list[OrderedSet[str]] = []
+        for output in graph.graph_outputs:
+            names: OrderedSet[str] = OrderedSet()
+            pending: list[str] = []
+            if not isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                pending.append(output.get_name())
+            # Views use their storage's name; nested calls and fallback outputs
+            # can reach other buffers through additional alias edges.
+            while pending:
+                name = pending.pop()
+                if name in names:
+                    continue
+                names.add(name)
+                if (buffer := graph.name_to_buffer.get(name)) is not None:
+                    pending.extend(buffer.get_inputs_that_alias_output())
+            storages.append(names)
+        return storages
+
+    def get_output_aliases(self, index: int) -> list[str]:
+        # A partitioned forward returns saved inputs and saved outputs next to
+        # its fresh outputs, so aliases are tracked per output: the operands and
+        # sibling outputs that share its storage.
+        if self.subgraph is None or self.subgraph.graph is None or self.outputs is None:
+            raise AssertionError("Expected a lowered invoke_subgraph body")
+        storages = self._output_storages()
+        storage = storages[index]
+        names = self.subgraph.graph.graph_input_names
+        aliases = [self.input_name(i) for i, n in enumerate(names) if n in storage]
+        aliases.extend(
+            output.get_name()
+            for i, output in enumerate(self.outputs)
+            if i != index
+            and isinstance(output, MultiOutput)
+            and not storage.isdisjoint(storages[i])
+        )
+        return aliases
 
     @classmethod
     def create(
@@ -11435,19 +11495,22 @@ class InvokeSubgraph(ExternKernel):
                 if device is None:
                     raise AssertionError("Expected device is not None")
 
-                return MultiOutput(
+                multi_output = MultiOutput(
                     FixedLayout(
                         device=device,
                         dtype=output.get_dtype(),
                         size=output.get_size(),
                         stride=output.get_stride(),
-                        offset=output.get_layout().offset,
+                        # The returned tensor already starts at the view's offset.
+                        offset=0,
                         is_pinned=output.get_layout().is_pinned,
                     ),
                     invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
                     skip_size_stride_alignment_checks=True,
                 )
+                _mark_unaligned_subgraph_output(multi_output, [(subgraph, output)])
+                return multi_output
 
         outs = [create_output(output, i) for i, output in enumerate(outputs)]
         invoke_subgraph.outputs = outs  # type: ignore[assignment]
@@ -11660,7 +11723,8 @@ class Switch(ExternKernel):
                     dtype=output.get_dtype(),
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],
-                    offset=output.get_layout().offset,
+                    # The returned tensor already starts at the view's offset.
+                    offset=0,
                     is_pinned=output.get_layout().is_pinned,
                 ),
                 switch,
@@ -11674,6 +11738,9 @@ class Switch(ExternKernel):
         ]
 
         switch.outputs = outputs  # type: ignore[assignment]
+        for i, multi_output in enumerate(outputs):
+            branch_outs = [(b, outs[i]) for b, outs in zip(branches, branch_outputs)]
+            _mark_unaligned_subgraph_output(multi_output, branch_outs)
 
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_outputs,
@@ -12037,11 +12104,13 @@ class WhileLoop(ExternKernel):
                             dtype=output.get_dtype(),
                             size=output.get_size(),
                             stride=output.get_stride(),
-                            offset=output.get_layout().offset,
+                            # The returned tensor already starts at the view's offset.
+                            offset=0,
                         ),
                         while_loop,
                         [(list, idx)],
                     )
+                    _mark_unaligned_subgraph_output(multi_out, [(body_fn, output)])
                     while_loop.outputs.append(multi_out)
                     all_outputs.append(multi_out)
 
