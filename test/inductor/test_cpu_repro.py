@@ -4034,6 +4034,25 @@ class CPUReproTests(TestCase):
             check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_remainder_float_edge_cases(self):
+        # https://github.com/pytorch/pytorch/issues/198057
+        inf = float("inf")
+        a = torch.tensor([5.5, -5.5, 0.0, 1e20, 2147483648.0, 7.0, 1.0, -0.0, 5.5])
+        b = torch.tensor([inf, -inf, inf, 3.0, 3.0, 0.7, 0.1, 1.0, -inf])
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for dtype in [torch.bfloat16, torch.float16, torch.float32, torch.float64]:
+            x, y = a.to(dtype).repeat(8), b.to(dtype).repeat(8)
+            for simdlen in bit_widths:
+                with config.patch({"cpp.simdlen": simdlen}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    actual = torch.compile(torch.remainder)(x, y)
+                    expected = torch.remainder(x, y)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual.signbit(), expected.signbit())
+                    check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
     def test_vec_remainder_tail(self):
         # 131 leaves a masked tail for every integer dtype width on every
         # supported ISA, and the tail load zero-fills the padded lanes. A
