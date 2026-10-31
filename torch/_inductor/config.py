@@ -2302,6 +2302,14 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
+    # Extends CUDA graph kernel tracing with nn.Module FQN (fully qualified name)
+    # annotations on a best-effort basis. Requires cuda-python and CUDA >= 13.1.
+    # Covers fused pointwise/reduction kernels and extern kernels; template,
+    # combo/foreach, mix-order reduction and user-defined Triton kernels are
+    # left unannotated.
+    # Python wrapper only (not cpp_wrapper or fx_wrapper).
+    cudagraph_kernel_annotations: bool = False
+
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
