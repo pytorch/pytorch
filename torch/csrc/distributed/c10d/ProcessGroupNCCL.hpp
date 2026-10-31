@@ -1409,6 +1409,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   bool writeDebugInfo_ = false;
 
+  // groupRanks() is not known to map to global ranks, so this group leaves the
+  // Flight Recorder rank alone: merge() and shrink() children, groups with an
+  // empty global_ranks_in_group built once the rank is set (e.g. stateless
+  // groups), and groups split from any of these. Known gap: a stateless group
+  // built first is trusted as the world mapping.
+  bool groupRanksNotGlobal_ = false;
+
   // Vector to store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
 
