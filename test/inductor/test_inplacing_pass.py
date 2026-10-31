@@ -390,7 +390,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             updated = aten.index_put.default(x, [idx], values, False)
             x.copy_(updated)
             result = aten._foreach_add.List([updated], [other])
-            updated.copy_(result[0])
             return result[0]
 
         x = torch.randn(8, device=device)
@@ -398,6 +397,11 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         values = torch.randn(2, device=device)
         other = torch.randn(8, device=device)
         gm = make_fx(f, tracing_mode="fake")(x, idx, values, other)
+        foreach = next(
+            node for node in gm.graph.nodes if node.target is aten._foreach_add.List
+        )
+        # Model a downstream rewrite that has already happened in the pass.
+        foreach.target = aten._foreach_add_.List
         reinplace_inplaceable_ops_core(gm.graph)
         targets = [node.target for node in gm.graph.nodes]
         self.assertIn(aten.index_put.default, targets)
