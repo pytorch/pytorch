@@ -2705,6 +2705,25 @@ except RuntimeError as e:
                 r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
             )
 
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_my_is_privateuseone(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        t = torch.rand(2, 7, device=device)
+        self.assertFalse(libtorch_agnostic.ops.my_is_privateuseone(t))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_device_is_privateuseone(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        is_pu1 = libtorch_agnostic.ops.test_device_is_privateuseone
+        # Constructing torch.device objects needs no registered backend or GPU.
+        self.assertTrue(is_pu1(torch.device("privateuseone", 0)))
+        self.assertFalse(is_pu1(torch.device("cpu")))
+        self.assertFalse(is_pu1(torch.device("cuda", 0)))
+        self.assertFalse(is_pu1(torch.device("meta")))
+
 
 @unittest.skipIf(
     sysconfig.get_config_var("Py_GIL_DISABLED") == 1,

@@ -345,6 +345,20 @@ class Tensor {
   }
 
   /**
+   * @brief Checks if the tensor is on a PrivateUse1 device.
+   *
+   * @return true if the tensor is on a PrivateUse1 device, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.16.
+   */
+  bool is_privateuseone() const {
+    int32_t device_type = 0;
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_device_type(ath_.get(), &device_type));
+    return device_type == aoti_torch_device_type_privateuse1();
+  }
+
+  /**
    * @brief Checks if the tensor is on the CPU.
    *
    * @return true if the tensor is on the CPU, false otherwise.
