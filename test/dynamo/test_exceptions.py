@@ -1021,90 +1021,50 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertEqual(ref, res)
 
-    def test_linalg_inv_singular_in_try_except(self):
-        # Data-dependent error: fake tracing succeeds for a square input,
-        # so without a graph break the handler would be dropped and the
-        # error would escape at runtime instead of reaching the except.
+    @parametrize(
+        "op_name, exc_type",
+        [
+            ("inv", RuntimeError),
+            ("inv", torch.linalg.LinAlgError),
+            ("inverse", RuntimeError),
+            ("inverse", torch.linalg.LinAlgError),
+            ("cholesky", RuntimeError),
+            ("cholesky", torch.linalg.LinAlgError),
+        ],
+    )
+    def test_linalg_data_dependent_error_in_try_except(self, op_name, exc_type):
+        # Data-dependent error: fake tracing succeeds for a square singular
+        # (inv, inverse) or non-positive-definite (cholesky) input, so
+        # without a graph break the handler would be dropped and the error
+        # would escape at runtime instead of reaching the except. The
+        # frame count pins the break: these shapes must not compile.
+        if op_name == "cholesky":
+            x = torch.tensor([[-1.0, 0.0], [0.0, 1.0]])
+        else:
+            x = torch.zeros(2, 2)
+
         def fn(x):
             try:
-                return torch.linalg.inv(x)
-            except RuntimeError:
-                return torch.linalg.pinv(x)
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.zeros(2, 2)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-    def test_linalg_inv_singular_in_try_except_linalg_error(self):
-        def fn(x):
-            try:
-                return torch.linalg.inv(x)
-            except torch.linalg.LinAlgError:
-                return torch.linalg.pinv(x)
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.zeros(2, 2)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-    def test_linalg_inverse_singular_in_try_except(self):
-        # torch.inverse fails with the same linalg.inv error and goes through
-        # the same call funnel, so it needs the same graph break.
-        def fn(x):
-            try:
-                return torch.inverse(x)
-            except RuntimeError:
-                return torch.linalg.pinv(x)
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.zeros(2, 2)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-    def test_linalg_inverse_singular_in_try_except_linalg_error(self):
-        def fn(x):
-            try:
-                return torch.inverse(x)
-            except torch.linalg.LinAlgError:
-                return torch.linalg.pinv(x)
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.zeros(2, 2)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-
-    def test_linalg_cholesky_non_pd_in_try_except(self):
-        def fn(x):
-            try:
+                if op_name == "inv":
+                    return torch.linalg.inv(x)
+                if op_name == "inverse":
+                    return torch.inverse(x)
                 return torch.linalg.cholesky(x)
-            except RuntimeError:
-                return torch.eye(x.shape[0])
+            except exc_type:
+                if op_name == "cholesky":
+                    return torch.eye(x.shape[0])
+                return torch.linalg.pinv(x)
 
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.tensor([[-1.0, 0.0], [0.0, 1.0]])
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-    def test_linalg_cholesky_non_pd_in_try_except_linalg_error(self):
-        def fn(x):
-            try:
-                return torch.linalg.cholesky(x)
-            except torch.linalg.LinAlgError:
-                return torch.eye(x.shape[0])
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.tensor([[-1.0, 0.0], [0.0, 1.0]])
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_linalg_inv_in_try_except_with_preceding_op(self):
+        cnt = CompileCounter()
+
         def fn(x):
             y = x + 1
             try:
@@ -1112,13 +1072,19 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             except RuntimeError:
                 return torch.linalg.pinv(y)
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend=cnt)
         x = torch.zeros(2, 2)
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_linalg_inv_in_try_except_via_helper(self):
+        # No frame count pin here: when the break fires inside an inlined
+        # helper, Dynamo outlines the helper into its own graph (one
+        # compiled frame) while the caller runs eagerly, so the frame
+        # count is machinery-dependent. Correctness alone pins the path:
+        # without the break the inlined graph would drop the handler.
         def helper(x):
             return torch.linalg.inv(x)
 
@@ -1135,15 +1101,101 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     def test_linalg_inv_singular_without_try_still_raises(self):
+        cnt = CompileCounter()
+
         def fn(x):
             return torch.linalg.inv(x)
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend=cnt)
         x = torch.zeros(2, 2)
         with self.assertRaises(torch.linalg.LinAlgError):
             fn(x)
         with self.assertRaises(torch.linalg.LinAlgError):
             opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_linalg_inv_in_with_does_not_break(self):
+        # A with block catches nothing, so a linalg call inside one must
+        # still compile; only an except handler forces the break.
+        cnt = CompileCounter()
+
+        def fn(x):
+            with torch.no_grad():
+                return torch.linalg.inv(x)
+
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(2, 2)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            fn(x)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_linalg_inv_in_bare_comprehension_does_not_break(self):
+        # A bare comprehension has no except handler, so a linalg call
+        # inside one must still compile.
+        cnt = CompileCounter()
+
+        def fn(ms):
+            return [torch.linalg.inv(m) for m in ms]
+
+        opt_fn = torch.compile(fn, backend=cnt)
+        ms = [torch.eye(2), torch.zeros(2, 2)]
+        with self.assertRaises(torch.linalg.LinAlgError):
+            fn(ms)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            opt_fn(ms)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_linalg_inv_in_try_except_fullgraph_raises(self):
+        # With fullgraph=True no resume function can be created for the
+        # try region, so the break surfaces as Unsupported instead of a
+        # silent handler drop.
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            try:
+                return torch.linalg.inv(x)
+            except RuntimeError:
+                return torch.linalg.pinv(x)
+
+        x = torch.zeros(2, 2)
+        with self.assertRaises(Unsupported) as ctx:
+            fn(x)
+        self.assertIn("Data-dependent exception in try block", str(ctx.exception))
+
+    def test_tensor_inverse_in_try_except_breaks(self):
+        # The Tensor.inverse method form goes through TensorVariable
+        # .call_method, not the function path, and needs the same break.
+        cnt = CompileCounter()
+
+        def fn(x):
+            try:
+                return x.inverse()
+            except RuntimeError:
+                return torch.linalg.pinv(x)
+
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(2, 2)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_tensor_inverse_without_try_compiles(self):
+        cnt = CompileCounter()
+
+        def fn(x):
+            return x.inverse()
+
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.zeros(2, 2)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            fn(x)
+        with self.assertRaises(torch.linalg.LinAlgError):
+            opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_runtime_error_graph_break(self):
         cnt = CompileCounter()

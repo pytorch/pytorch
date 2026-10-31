@@ -65,6 +65,9 @@ from ..device_interface import (
     get_registered_device_interfaces,
 )
 from ..exc import (
+    DATA_DEPENDENT_LINALG_EXPLANATION,
+    DATA_DEPENDENT_LINALG_GB_TYPE,
+    DATA_DEPENDENT_LINALG_HINTS,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -334,6 +337,25 @@ methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
     for fn in ops_consuming_unbacked_scalars
     for name in (fn.__name__, fn.__name__ + "_")
     if hasattr(torch.Tensor, name)
+)
+
+
+# Linalg ops whose errors depend on tensor data: a square singular input
+# (inv, inverse) or a non-positive-definite input (cholesky) traces
+# successfully under fake tensors, so the compiled graph would drop an
+# enclosing exception handler. Callers break when one of these runs inside
+# an except handler region (see InstructionTranslatorBase
+# .in_except_handler_region). torch.cholesky is deliberately absent: it is
+# a removed API that always raises RuntimeError, so the existing handler
+# path already covers it. Other data-dependent linalg ops (solve, svd,
+# eigh, lu_factor, lstsq, matrix_power) are absent pending Dynamo
+# maintainer sign-off on where such ops get recognized.
+DATA_DEPENDENT_LINALG_FUNCTIONS: frozenset[Callable[..., Any]] = frozenset(
+    {
+        torch.linalg.inv,
+        torch.linalg.cholesky,
+        torch.inverse,
+    }
 )
 
 
@@ -4294,6 +4316,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
+
+        # Data-dependent linalg errors (singular matrix, non-positive-definite
+        # input) trace successfully under fake tensors, so a call inside an
+        # except handler region would compile into a graph that drops the
+        # handler. Break so the region runs eagerly, where the handler works.
+        # Errors fake tracing does catch (e.g. non-square input) raise before
+        # this point and still take the handler path.
+        if (
+            self.value in DATA_DEPENDENT_LINALG_FUNCTIONS
+            and tx.in_except_handler_region()
+        ):
+            unimplemented(
+                gb_type=DATA_DEPENDENT_LINALG_GB_TYPE,
+                context=f"called {self.value.__name__} inside a try block",
+                explanation=DATA_DEPENDENT_LINALG_EXPLANATION,
+                hints=[*DATA_DEPENDENT_LINALG_HINTS],
+            )
 
         return tensor_variable
 

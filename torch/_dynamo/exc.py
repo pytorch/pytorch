@@ -771,6 +771,29 @@ def get_gbid_documentation_link(gb_type: str) -> str | None:
 _NOTHING = object()
 
 
+# Graph-break message for linalg ops whose errors depend on tensor data
+# (a singular matrix for inv/inverse, a non-positive-definite input for
+# cholesky). Fake-tensor tracing succeeds for these inputs, so the compiled
+# graph would drop an enclosing exception handler; breaking lets the try
+# block and the code after it run eagerly instead, where the handler works.
+DATA_DEPENDENT_LINALG_GB_TYPE = "Data-dependent exception in try block"
+DATA_DEPENDENT_LINALG_EXPLANATION = (
+    "Dynamo cannot trace an exception handler for errors "
+    "that depend on tensor data (for example, a singular "
+    "matrix for torch.linalg.inv or torch.inverse, or a "
+    "non-positive-definite input for torch.linalg.cholesky): "
+    "fake-tensor tracing succeeds, so the compiled graph "
+    "would drop the handler and the error would escape at "
+    "runtime instead of reaching the except block. "
+    "Graph-breaking so the try block and the code after it run eagerly, "
+    "where the handler works."
+)
+DATA_DEPENDENT_LINALG_HINTS = [
+    "Use torch.linalg.inv_ex or torch.linalg.cholesky_ex and branch on info.",
+    "Move the try/except outside the compiled region.",
+]
+
+
 def unimplemented(
     *,
     gb_type: str,
