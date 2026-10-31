@@ -15,6 +15,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace at::native {
@@ -409,7 +410,7 @@ namespace {
 
   // Channel and launch-size limits: channels-last tensors pay off from C=2,
   // other layouts from C=32. rocm_grid_sampler_2d_backward_dispatch applies the
-  // remaining dtype, layout and architecture rules.
+  // remaining layout and architecture rules.
   bool rocm_grid_sampler_2d_backward_use_channel_lane(
       int64_t num_channels, bool channels_last, int64_t nblocks_nhw) {
     const bool enough_channels =
@@ -435,15 +436,6 @@ namespace {
     }
     static const std::vector<std::string> supported_archs = {"gfx1250"};
     return at::detail::getCUDAHooks().isGPUArch(supported_archs, device);
-  }
-
-  // The generic kernel accumulates the grid gradient in scalar_t, which loses
-  // or overflows FP16/BF16 sums across channels; the channel-lane kernel
-  // accumulates and reduces in opmath_t. Reduced-precision calls keep the
-  // channel-lane kernel even where FP32 timing favours the generic kernel, so
-  // that requesting grad_input does not change grad_grid.
-  bool rocm_grid_sampler_2d_backward_needs_opmath_reduction(ScalarType dtype) {
-    return dtype == ScalarType::Half || dtype == ScalarType::BFloat16;
   }
 
   // ROCm channel-lane mapping with a parallel grid-gradient reduction.
@@ -817,6 +809,17 @@ namespace {
       bool align_corners,
       const index_t grad_input_memory_span,
       const bool input_requires_grad) {
+    // The grid gradient sums over channels in opmath_t and is scaled before
+    // its single rounding to scalar_t. Reduced precision sums each channel's
+    // taps into a partial first, so that large terms cancelling within one
+    // channel cannot absorb another channel's contribution; FP32/FP64 keep the
+    // original accumulation order. Across channels this is a serial sum, while
+    // the ROCm channel-parallel kernel sums per lane and then over a tree. The
+    // two orders can round differently, and when partial sums exceed the
+    // opmath_t range one of them can overflow where the other cancels; neither
+    // order is exact for every input.
+    using opmath_t = at::opmath_type<scalar_t>;
+    constexpr bool kChannelPartials = !std::is_same_v<opmath_t, scalar_t>;
 
     index_t C = input.sizes[1];
     index_t inp_H = input.sizes[2];
@@ -882,11 +885,14 @@ namespace {
         scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
         scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
-        scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
+        opmath_t gix = static_cast<opmath_t>(0), giy = static_cast<opmath_t>(0);
         const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, gOut_ptr_NCHW += gOut_sC) {
           const scalar_t gOut = *gOut_ptr_NCHW;
+          opmath_t gix_c = static_cast<opmath_t>(0), giy_c = static_cast<opmath_t>(0);
+          opmath_t &gx = kChannelPartials ? gix_c : gix;
+          opmath_t &gy = kChannelPartials ? giy_c : giy;
 
           if (input_requires_grad) {
             const index_t NC_offset = n * gInp_sN + c * gInp_sC;
@@ -900,23 +906,27 @@ namespace {
           // calculate grad_grid
           if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
             scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
-            gix -= nw_val * (iy_se - iy) * gOut;
-            giy -= nw_val * (ix_se - ix) * gOut;
+            gx -= nw_val * (iy_se - iy) * gOut;
+            gy -= nw_val * (ix_se - ix) * gOut;
           }
           if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
             scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
-            gix += ne_val * (iy_sw - iy) * gOut;
-            giy -= ne_val * (ix - ix_sw) * gOut;
+            gx += ne_val * (iy_sw - iy) * gOut;
+            gy -= ne_val * (ix - ix_sw) * gOut;
           }
           if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
             scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
-            gix -= sw_val * (iy - iy_ne) * gOut;
-            giy += sw_val * (ix_ne - ix) * gOut;
+            gx -= sw_val * (iy - iy_ne) * gOut;
+            gy += sw_val * (ix_ne - ix) * gOut;
           }
           if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
             scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
-            gix += se_val * (iy - iy_nw) * gOut;
-            giy += se_val * (ix - ix_nw) * gOut;
+            gx += se_val * (iy - iy_nw) * gOut;
+            gy += se_val * (ix - ix_nw) * gOut;
+          }
+          if constexpr (kChannelPartials) {
+            gix += gix_c;
+            giy += giy_c;
           }
         }
 
@@ -925,8 +935,8 @@ namespace {
         //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
         //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
+        gGrid_ptr_NHW[0] = static_cast<scalar_t>(static_cast<opmath_t>(gix_mult) * gix);
+        gGrid_ptr_NHW[1] = static_cast<scalar_t>(static_cast<opmath_t>(giy_mult) * giy);
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         if (input_requires_grad) {
           index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
@@ -969,8 +979,8 @@ namespace {
         get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
         get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
 
-        scalar_t gix = static_cast<scalar_t>(0);
-        scalar_t giy = static_cast<scalar_t>(0);
+        opmath_t gix = static_cast<opmath_t>(0);
+        opmath_t giy = static_cast<opmath_t>(0);
 
         const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
@@ -979,6 +989,9 @@ namespace {
           const scalar_t gOut = *gOut_ptr_NCHW;
           // Only read when input_requires_grad; the strides are unset otherwise.
           const index_t NC_offset = input_requires_grad ? n * gInp_sN + c * gInp_sC : 0;
+          opmath_t gix_c = static_cast<opmath_t>(0), giy_c = static_cast<opmath_t>(0);
+          opmath_t &gx = kChannelPartials ? gix_c : gix;
+          opmath_t &gy = kChannelPartials ? giy_c : giy;
 
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
@@ -999,15 +1012,19 @@ namespace {
               scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
                 inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
 
-              gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
-              giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
+              gx -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
+              gy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
             }
+          }
+          if constexpr (kChannelPartials) {
+            gix += gix_c;
+            giy += giy_c;
           }
         }
 
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
+        gGrid_ptr_NHW[0] = static_cast<scalar_t>(static_cast<opmath_t>(gix_mult) * gix);
+        gGrid_ptr_NHW[1] = static_cast<scalar_t>(static_cast<opmath_t>(giy_mult) * giy);
       }
     }
   }
@@ -1361,7 +1378,7 @@ void launch_grid_sampler_3d_forward_kernel(
 
 // Portable launcher: one thread per (n, h, w), looping over channels. This is
 // the long-standing implementation, factored out of the launcher below so that
-// the ROCm channel-parallel mappings can delegate to it for shapes they do not
+// the ROCm channel-parallel mapping can delegate to it for shapes it does not
 // cover.
 static void launch_grid_sampler_2d_backward_generic(
     const TensorBase &grad_input, const TensorBase &grad_grid,
@@ -1428,17 +1445,15 @@ RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
   if (C < 2) {
     return {};
   }
-  const bool reduced_precision =
-      rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type());
   const bool input_channels_last =
       input.is_contiguous(at::MemoryFormat::ChannelsLast);
   // grad_input is returned contiguous. Channels-last input accumulates into a
   // channels-last scratch, which coalesces the atomics, and is copied out. At
   // C=2 the zeroing and copy cost more than the channel parallelism gains, so
-  // FP32/FP64 start at C=3; reduced precision keeps the scratch from C=2 for
-  // the opmath reduction.
+  // the scratch starts at C=3. An input that is also contiguous (1x1 spatial
+  // size) needs no scratch: its contiguous gradient is already channels-last.
   const bool wants_scratch = input_requires_grad && input_channels_last &&
-      C >= (reduced_precision ? 2 : 3);
+      !input.is_contiguous() && C >= 3;
   // Layout the kernel writes and reads: a contiguous 1x1 gradient is also
   // channels-last.
   const bool channels_last = input_channels_last &&
@@ -1447,11 +1462,12 @@ RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
   const int64_t nblocks_nhw = input.size(0) * grid.size(1) * grid.size(2);
   RocmGridSampler2dBackwardDispatch dispatch;
   // Without channels-last tensors, FP32 grid-gradient-only calls measured
-  // slower than the generic kernel, so FP32/FP64 use it; reduced precision
-  // keeps the channel-lane kernel so that requesting grad_input does not
-  // change grad_grid.
+  // slower than the generic kernel, so grid-gradient-only calls use it. The
+  // choice depends on layout, sizes, the output mask and the architecture, not
+  // on the dtype: both kernels sum in opmath_t and round once, differing only
+  // in channel summation order (see grid_sampler_2d_backward_kernel).
   dispatch.channel_lane =
-      (channels_last || input_requires_grad || reduced_precision) &&
+      (channels_last || input_requires_grad) &&
       rocm_grid_sampler_2d_backward_use_channel_lane(C, channels_last, nblocks_nhw) &&
       rocm_grid_sampler_2d_backward_arch_supported(input.get_device());
   dispatch.scratch = dispatch.channel_lane && wants_scratch;
@@ -1477,15 +1493,29 @@ void launch_grid_sampler_2d_backward_kernel(
   // is always computed.)
   const auto input_requires_grad = output_mask[0];
 
+  launch_grid_sampler_2d_backward_generic(
+      grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
+      padding_mode, align_corners, input_requires_grad);
+}
+
 #ifdef USE_ROCM
-  const auto dispatch =
-      rocm_grid_sampler_2d_backward_dispatch(input, grid, input_requires_grad);
+void launch_grid_sampler_2d_backward_kernel_rocm(
+    const TensorBase &grad_input, const TensorBase &grad_grid,
+    const TensorBase &grad_output, const TensorBase &input,
+    const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
+    bool align_corners, std::array<bool,2> output_mask,
+    const RocmGridSampler2dBackwardDispatch &dispatch) {
   if (!dispatch.channel_lane) {
-    launch_grid_sampler_2d_backward_generic(
+    launch_grid_sampler_2d_backward_kernel(
         grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
-        padding_mode, align_corners, input_requires_grad);
+        padding_mode, align_corners, output_mask);
     return;
   }
+  // The same checks as launch_grid_sampler_2d_backward_kernel.
+  check_grid_sampler_2d_backward(input, grid, grad_output);
+  globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
+  const auto input_requires_grad = output_mask[0];
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !dispatch.scratch ||
       grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
@@ -1530,12 +1560,8 @@ void launch_grid_sampler_2d_backward_kernel(
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
-#else  // CUDA path
-  launch_grid_sampler_2d_backward_generic(
-      grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
-      padding_mode, align_corners, input_requires_grad);
-#endif  // USE_ROCM
 }
+#endif  // USE_ROCM
 
 void launch_grid_sampler_3d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
