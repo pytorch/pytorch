@@ -7,6 +7,7 @@ from ctypes import byref, c_int, c_size_t, c_void_p
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -43,6 +44,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
+        self.device_interface = get_interface_for_device(self.output_tensor_meta.device)
         self.hash_key, self.source_file = ROCmCodeCache.write(self.source_code, "so")
 
     def precompile(self):
@@ -70,7 +72,9 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        stream_ptr = c_void_p(
+            self.device_interface.get_raw_stream(self.device_interface.current_device())
+        )
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -99,7 +103,9 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        stream_ptr = c_void_p(
+            self.device_interface.get_raw_stream(self.device_interface.current_device())
+        )
 
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
@@ -114,7 +120,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
-        torch.cuda.synchronize()  # shake out any CUDA errors
+        self.device_interface.synchronize()  # shake out any device errors
         self.workspace_size = c_workspace_size.value
         log.debug(
             "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
