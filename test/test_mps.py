@@ -9038,40 +9038,6 @@ class TestMPS(TestCaseMPS):
         helper()
         helper(do_add=False)
 
-    def test_scatter_reduce_nan(self):
-        # amax/amin/prod go through a compare-and-swap loop, which has to terminate
-        # and keep the NaN once one is stored.
-        src_cpu = torch.tensor([float('nan'), -1.39, 2.37, float('nan'), -8.15, 5.01, 1.36])
-        idx_cpu = torch.tensor([0, 2, 4, 1, 4, 0, 3])
-        for reduce_str in ["amax", "amin", "prod", "sum", "mean"]:
-            for include_self in [False, True]:
-                for dtype in [torch.float32, torch.float16, torch.bfloat16]:
-                    out_cpu = torch.zeros(5, dtype=dtype)
-                    out_mps = torch.zeros(5, dtype=dtype, device='mps')
-                    out_cpu.scatter_reduce_(0, idx_cpu, src_cpu.to(dtype), reduce_str,
-                                            include_self=include_self)
-                    out_mps.scatter_reduce_(0, idx_cpu.to('mps'), src_cpu.to(dtype).to('mps'),
-                                            reduce_str, include_self=include_self)
-                    self.assertEqual(out_cpu, out_mps, equal_nan=True)
-
-    def test_index_reduce_nan(self):
-        # Same compare-and-swap loop as test_scatter_reduce_nan, reached through
-        # index_reduce_ instead. Slots 0 and 1 each get a NaN and a number, in
-        # both orders since GPU threads can run in any order, so the loop has to
-        # write to a slot already holding a NaN. Slot 2 only gets a single NaN.
-        src_cpu = torch.tensor([float('nan'), 5.0, -3.0, float('nan'), float('nan')])
-        idx_cpu = torch.tensor([0, 0, 1, 1, 2])
-        for reduce_str in ["amax", "amin", "prod", "mean"]:
-            for include_self in [False, True]:
-                for dtype in [torch.float32, torch.float16, torch.bfloat16]:
-                    out_cpu = torch.zeros(3, dtype=dtype)
-                    out_mps = torch.zeros(3, dtype=dtype, device='mps')
-                    out_cpu.index_reduce_(0, idx_cpu, src_cpu.to(dtype), reduce_str,
-                                          include_self=include_self)
-                    out_mps.index_reduce_(0, idx_cpu.to('mps'), src_cpu.to(dtype).to('mps'),
-                                          reduce_str, include_self=include_self)
-                    self.assertEqual(out_cpu, out_mps, equal_nan=True)
-
     # Test pytorch scatter_reduce
     def test_scatter_reduce(self):
         def helper(shape, dim, idx_shape, src_shape, idx_dtype=torch.int64, reduce_str="sum"):

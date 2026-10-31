@@ -28,28 +28,6 @@ static inline void atomic_binary_op_helper(
       ::metal::memory_order_relaxed));
 }
 
-// Exchanges the bit patterns through atomic<uint>, so termination doesn't
-// depend on how atomic_compare_exchange on ::metal::atomic<float> treats a
-// stored NaN. The uint-backed overload further down does the same for half and
-// bfloat.
-static inline void atomic_binary_op_bitwise_helper(
-    device ::metal::atomic<float>* data,
-    long offset,
-    float value,
-    float (*op)(float, float)) {
-  auto ptr = reinterpret_cast<device ::metal::atomic<uint>*>(data) + offset;
-  auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
-  uint desired;
-  do {
-    desired = as_type<uint>(op(as_type<float>(old), value));
-  } while (!::metal::atomic_compare_exchange_weak_explicit(
-      ptr,
-      &old,
-      desired,
-      ::metal::memory_order_relaxed,
-      ::metal::memory_order_relaxed));
-}
-
 template <>
 struct AtomicType<float> {
   using type = ::metal::atomic<float>;
@@ -62,7 +40,7 @@ struct AtomicType<float> {
       long offset,
       float value,
       float (*op)(float, float)) {
-    atomic_binary_op_bitwise_helper(data, offset, value, op);
+    atomic_binary_op_helper(data, offset, value, op);
   }
 };
 
