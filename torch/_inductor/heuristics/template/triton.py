@@ -4152,6 +4152,19 @@ class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic
         self.exhaustive_configs = self.scaled_mm_configs
 
 
+@register_template_heuristic(
+    scaled_mm_device_tma_epilogue_scaling_template.uid, "xpu", op_name="scaled_mm"
+)
+class XPUScaledTMAEpilogueScalingTemplateConfigHeuristic(
+    ScaledTMAConfigMixin, XPUConfigHeuristic
+):
+    """Scaled TMA template heuristic for XPU: epilogue scaling variants (TensorWise, RowWise)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = self.scaled_persistent_mm_configs
+
+
 @register_template_heuristic(mm_template.uid, "xpu", op_name="int_mm")
 class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuristic):
     """Int8 MM template heuristic for XPU"""
