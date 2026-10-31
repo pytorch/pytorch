@@ -1984,9 +1984,12 @@ class PrecompileSession(Generic[_P, _R]):
             if not isinstance(backend, str):
                 config.update((k, v) for k, v in backend.config.items() if k in config)
                 cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
-            if cpp_wrapper and config["graph_partition"]:
-                # compile_fx compiles a partitioned cpp_wrapper graph without CUDA
-                # graphs (get_cpp_wrapper_config), so record what it compiles.
+            from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
+
+            # Record what compile_fx compiles (get_cpp_wrapper_config).
+            if cpp_wrapper and not cpp_wrapper_supports_cudagraphs(
+                config["graph_partition"]
+            ):
                 config["triton.cudagraphs"] = False
             _check_cudagraph_policy(config)
         self._recompile_limit = recompile_limit

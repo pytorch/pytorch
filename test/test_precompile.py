@@ -4959,7 +4959,12 @@ class TestPrecompileDynamoCapture(TestCase):
 
     def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
         single = self.mod.single
-        options = {"triton.cudagraphs": True, "cpp_wrapper": True}
+        # cpp_wrapper compiles no CUDA graphs under graph_partition.
+        options = {
+            "triton.cudagraphs": True,
+            "cpp_wrapper": True,
+            "graph_partition": True,
+        }
         with self._capture(single, options=options) as cap:
             y = cap(self.model, self.x2)
         with open(self.artifact) as f:
@@ -6781,8 +6786,22 @@ class TestPrecompileCudagraphs(TestCase):
         fn(self.model, self.x).sum().backward()
         grad = self.model.lin.weight.grad.clone()
         recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
-        # As torch.compile(mode="reduce-overhead") records for the same step.
-        self.assertEqual(recorded, 7)
+        # As many as torch.compile(mode="reduce-overhead") records for the step.
+        from torch._inductor import cudagraph_trees
+
+        torch._dynamo.reset()
+        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
+        compiled = torch.compile(fn, mode="reduce-overhead")
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            self.model.zero_grad(set_to_none=True)
+            compiled(self.model, self.x).sum().backward()
+        manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
+        todo, baseline = [n for ns in manager.roots.values() for n in ns], 0
+        while todo:
+            baseline += 1
+            todo.extend(c for cs in todo.pop().children.values() for c in cs)
+        self.assertEqual(recorded, baseline)
 
     def test_a_cudagraph_policy_set_in_the_loading_process_wraps_the_graphs(self):
         options = {"triton.cudagraphs": True}
