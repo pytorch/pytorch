@@ -73,6 +73,10 @@ elif TEST_XPU:
     DEVICE = "xpu"
 elif TEST_CUDA:
     devices.append("cuda")
+elif acc := torch.accelerator.current_accelerator(check_available=True):
+    # Any other accelerator, for example an out-of-tree backend.
+    devices.append(acc.type)
+    DEVICE = acc.type
 
 
 def new_subgroups(group_size: int, pg_tag=None):
