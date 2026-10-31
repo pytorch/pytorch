@@ -1240,9 +1240,13 @@ class TestOptimRenewed(TestCase):
 
     # amsgrad's NaN-propagating maximum must agree with the scalar forloop
     # reference, which uses torch.maximum (adam.py) and propagates NaN. Only
-    # Adam/AdamW accept amsgrad; SGD and Adagrad do not. All fused kernels
-    # (vector bodies and scalar tails) use a NaN-propagating max, so the
-    # max_exp_avg_sq equality holds on CPU.
+    # Adam/AdamW accept amsgrad; SGD and Adagrad do not. The max_exp_avg_sq
+    # equality is checked on CPU only: the CPU fused kernel (vector bodies and
+    # scalar tails) uses a NaN-propagating max, but the CUDA and MPS fused
+    # kernels use std::max(max_exp_avg_sq, exp_avg_sq) (e.g.
+    # aten/src/ATen/native/cuda/fused_adam_utils.cuh), which drops a NaN
+    # exp_avg_sq, so their max_exp_avg_sq diverges from the forloop path under
+    # a NaN gradient.
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=(torch.float32, torch.float64, torch.float16, torch.bfloat16),

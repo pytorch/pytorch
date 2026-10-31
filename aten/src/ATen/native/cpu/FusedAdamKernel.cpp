@@ -7,8 +7,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
-// Full RVV FP64 vector support, gated locally so no internal kernel macro leaks
-// into the public ATen/cpu/Utils.h header. __riscv_v_intrinsic alone is defined
+// Full RVV FP64 vector support. __riscv_v_intrinsic alone is defined
 // for the Zve32x/Zve32f/Zve64f sub-profiles too, which lack the vfloat64m2_t
 // intrinsics that the FP64 RVV kernels use, so also require FP64 element width.
 #if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000 && \
@@ -192,8 +191,8 @@ struct rvv_traits<float> {
   static v_t fsub(v_t a, v_t b, size_t vl) { return __riscv_vfsub_vv_f32m2(a, b, vl); }
   static v_t fsqrt(v_t a, size_t vl) { return __riscv_vfsqrt_v_f32m2(a, vl); }
   // IEEE 754-2019 maximum, which propagates NaN (unlike vfmax, which is
-  // maximumNumber). __riscv_vfmax_vv_f32m2(a, a, vl) is NaN only where a is
-  // NaN, so combine both NaN masks with vmerge to pick the NaN operand.
+  // maximumNumber). vmfne(a, a) is a NaN mask (a != a iff a is NaN); build one
+  // for each operand, then vmerge picks the NaN operand where its mask is set.
   static v_t fmax_nan(v_t a, v_t b, size_t vl) {
     const vbool16_t an = __riscv_vmfne_vv_f32m2_b16(a, a, vl);
     const vbool16_t bn = __riscv_vmfne_vv_f32m2_b16(b, b, vl);
@@ -221,8 +220,8 @@ struct rvv_traits<double> {
   static v_t fsub(v_t a, v_t b, size_t vl) { return __riscv_vfsub_vv_f64m2(a, b, vl); }
   static v_t fsqrt(v_t a, size_t vl) { return __riscv_vfsqrt_v_f64m2(a, vl); }
   // IEEE 754-2019 maximum, which propagates NaN (unlike vfmax, which is
-  // maximumNumber). __riscv_vfmax_vv_f64m2(a, a, vl) is NaN only where a is
-  // NaN, so combine both NaN masks with vmerge to pick the NaN operand.
+  // maximumNumber). vmfne(a, a) is a NaN mask (a != a iff a is NaN); build one
+  // for each operand, then vmerge picks the NaN operand where its mask is set.
   static v_t fmax_nan(v_t a, v_t b, size_t vl) {
     // f64m2's mask is vbool32_t (SEW/LMUL = 64/2)
     const vbool32_t an = __riscv_vmfne_vv_f64m2_b32(a, a, vl);
@@ -235,10 +234,12 @@ struct rvv_traits<double> {
   }
 };
 
-// RVV kernel for the float/double adam_math overload. VLA style, runs on any
-// VLEN >= 128. Computation order matches the generic Vectorized path below
-// operation for operation (IEEE-exact vfsqrt/vfdiv, no reciprocal
-// approximation), so results are bit-identical to it.
+// RVV kernel for the float/double adam_math overload. VLA style: every vector
+// op is vsetvl'd, so it works on any VLEN (the TORCH_RVV_FP64_ENABLED guard
+// only requires FP64 element width, i.e. VLEN >= 64 via Zve64d). Computation
+// order matches the generic Vectorized path below operation for operation
+// (IEEE-exact vfsqrt/vfdiv, no reciprocal approximation), so results are
+// bit-identical to it.
 template <typename scalar_t, ADAM_MODE adam_mode>
 inline void adam_math_rvv(
     scalar_t* param_ptr,
