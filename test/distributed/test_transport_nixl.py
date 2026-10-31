@@ -893,6 +893,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                     peer,
                     store=store,
                     rank=rank,
+                    tag="nixl",
                     timeout=5,
                 )
                 for rank, peer in calls

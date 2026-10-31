@@ -195,7 +195,7 @@ class Transport(ABC):
         *,
         store: dist.Store | None = None,
         rank: int | None = None,
-        tag: str = "default",
+        tag: str,
         timeout: float | timedelta | None = None,
     ) -> int:
         """Connect to the peer identified by ``peer_rank`` through a Store.
@@ -211,13 +211,14 @@ class Transport(ABC):
                 defaults to the default process group's Store. No collectives are
                 performed. ``bind()`` bytes may describe registered memory, such
                 as NIXL agent metadata; each peer deletes the peer bytes it reads,
-                best effort. Per-pair attempt counters persist, as do bytes the
-                peer never reads, such as after its bind failure or timeout.
+                best effort. Per-pair attempt counters persist, as can endpoint
+                bytes and small markers after timeouts and other failures. The
+                Store must implement an atomic ``compare_set``.
             rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
                 explicit override requires no initialized process group. Identities
                 need not be contiguous, but must be distinct for the two peers.
             tag: Rendezvous namespace; both peers must pass the same tag. Use
-                a distinct tag for each transport connecting the same rank pair.
+                a distinct tag for each component connecting the same rank pair.
             timeout: Timeout for each of bind, the Store wait, and connect, in
                 seconds or as a ``timedelta``, from 1 ms to about 24.8 days (Store
                 waits use 32-bit milliseconds). ``None`` uses the transport's
@@ -235,8 +236,10 @@ class Transport(ABC):
         thread-safe, as NIXL's are. Give each thread its own Store client, such
         as ``store.clone()``: a ``TCPStore`` client blocks other calls while it
         waits, and ``store=None`` shares the default Store's client. Cyclic
-        waits time out. A failure on one side does not imply that the peer's
-        call failed.
+        waits time out. A call whose wait fails, such as by timing out, claims
+        the peer's slot, so the peer's matching call fails too, unless the peer
+        already published and both proceed. Other failures, such as in
+        ``connect``, do not imply that the peer's call failed.
         """
         if type(tag) is not str:
             raise TypeError("tag must be a string")
@@ -264,21 +267,38 @@ class Transport(ABC):
         pair = f"transport_connect_rank/{tag}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
         attempt = store.add(f"{pair}/attempts/{rank}", 1)
         root, store = store, dist.PrefixStore(f"{pair}/{attempt}", store)
-        # Store.set accepts bytes; the stub only declares str.
+        url = b"\x01" + self.bind(timeout=timeout)
+
+        def discard(*keys):
+            # Best effort: some Stores do not implement delete_key or raise
+            # for missing keys, and PrefixStore's deleteKey does not reach
+            # Python overrides.
+            for key in keys:
+                with contextlib.suppress(Exception):
+                    root.delete_key(f"{pair}/{attempt}/{key}")
+
+        # compare_set decides whether our bytes or the b"\x00" of a peer that
+        # stopped waiting land; the prefix keeps them distinct. Waiters wait on
+        # a separate flag: legacy TCPStore's compare_set does not wake them.
         # pyrefly: ignore [bad-argument-type]
-        store.set(str(rank), self.bind(timeout=timeout))
-        if wait is None:
-            store.wait([str(peer_rank)])
+        if store.compare_set(str(rank), b"", url) != url:
+            discard(rank)
+            raise RuntimeError(f"peer {peer_rank} stopped waiting for this call")
+        store.set(f"{rank}/ready", "1")
+        try:
+            store.wait([f"{peer_rank}/ready"], *([] if wait is None else [wait]))
+        except Exception:
+            # Fail the peer's late call too, keeping attempts matched.
+            # pyrefly: ignore [bad-argument-type]
+            peer_url = store.compare_set(str(peer_rank), b"", b"\x00")
+            if peer_url == b"\x00":
+                discard(rank, f"{rank}/ready")
+                raise
         else:
-            store.wait([str(peer_rank)], wait)
-        peer_url = store.get(str(peer_rank))
+            peer_url = store.get(str(peer_rank))
         # Only this call reads the peer's bytes; later calls use new attempts.
-        # Cleanup is best effort: some Stores do not implement delete_key.
-        # Call it unprefixed: PrefixStore's deleteKey does not reach Python
-        # delete_key overrides.
-        with contextlib.suppress(RuntimeError):
-            root.delete_key(f"{pair}/{attempt}/{peer_rank}")
-        return self.connect(peer_url, timeout=timeout)
+        discard(peer_rank, f"{peer_rank}/ready")
+        return self.connect(peer_url[1:], timeout=timeout)
 
     @abstractmethod
     def connected(self) -> bool:
