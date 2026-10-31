@@ -289,12 +289,12 @@ struct IndexReduceOp {
 
   template <typename T>
   static T amin(T a, T b) {
-    return min(a, b);
+    return ::c10::metal::min(a, b);
   }
 
   template <typename T>
   static T amax(T a, T b) {
-    return max(a, b);
+    return ::c10::metal::max(a, b);
   }
 };
 
