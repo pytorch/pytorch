@@ -6,6 +6,8 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
+from collections.abc import Iterator
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 import torch
@@ -19,6 +21,11 @@ from .base import VariableTracker
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_identity_key_iteration: ContextVar[bool] = ContextVar(
+    "identity_key_iteration", default=False
+)
 
 
 def raise_unhashable(
@@ -184,6 +191,23 @@ class HashableTracker:
     def __hash__(self) -> int:
         return self._hash
 
+    @staticmethod
+    def iter_keys_by_identity(
+        mapping: dict["HashableTracker", VariableTracker],
+    ) -> Iterator["HashableTracker"]:
+        # OrderedDict's iterator looks up each stored key. Those internal lookups
+        # must not trace user equality; the iterator's current key is already known.
+        iterator = iter(mapping)
+        while True:
+            token = _identity_key_iteration.set(True)
+            try:
+                key = next(iterator)
+            except StopIteration:
+                return
+            finally:
+                _identity_key_iteration.reset(token)
+            yield key
+
     def __eq__(self, other: object) -> bool:
         """
         Checks equality between two HashableTracker instances.
@@ -197,6 +221,8 @@ class HashableTracker:
         Returns:
             True if the underlying variable trackers are Python-equal, False otherwise
         """
+        if _identity_key_iteration.get():
+            return self is other
         if not isinstance(other, HashableTracker):
             return False
         if self.vt is other.vt:

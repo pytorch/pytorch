@@ -24,7 +24,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -42,6 +42,7 @@ from ..exc import (
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
+    TorchDynamoException,
     unimplemented,
     Unsupported,
 )
@@ -152,6 +153,30 @@ def pyodict_check(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
 
 def pyodict_checkexact(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
     return obj.python_type() is collections.OrderedDict
+
+
+_T = TypeVar("_T")
+
+
+def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
+    while True:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return
+        except TorchDynamoException:
+            # User-exception sentinels and graph breaks also inherit RuntimeError;
+            # propagate them before handling iterator mutation errors.
+            raise
+        except RuntimeError as error:
+            unimplemented(
+                gb_type="Dictionary mutated during iteration",
+                context=str(error),
+                explanation="Dynamo cannot trace dictionary iteration that changes its keys.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # Keep user code outside the handler so its exceptions propagate.
+        yield item
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -755,7 +780,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_order_guard(tx)
-        return self._new_dict(self.items.copy())
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        if self.items:
+            # `PyDict_Copy` falls back to `PyDict_Merge` when `tp_iter` differs.
+            result.dict_merge(tx, self)
+        return result
 
     def dict_get(
         self,
@@ -1197,6 +1226,26 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
+    def dict_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self.install_dict_order_guard(tx)
+        if not pyodict_checkexact(self):
+            # odict_copy calls the subclass constructor, then its get/setitem hooks.
+            cls = VariableTracker.build(tx, type).call_function(tx, [self], {})
+            result = cls.call_function(tx, [], {})
+            # CPython's _odict_FOREACH walks nodes without comparing keys.
+            for key in _iter_detecting_mutation(
+                HashableTracker.iter_keys_by_identity(self.items)
+            ):
+                value = generic_getitem(tx, self, key.vt)
+                generic_setitem(tx, result, key.vt, value)
+            return result
+        return self._new_dict(self.items.copy())
+
     def tp_init_impl(
         self: ConstDictVariable,
         tx: "InstructionTranslatorBase",
@@ -1329,6 +1378,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "copy": Method(dict_copy),
         "update": Method(odict_update),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
