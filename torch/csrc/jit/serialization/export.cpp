@@ -26,6 +26,7 @@
 #include <onnx/proto_utils.h>
 #include <onnx/shape_inference/implementation.h>
 
+#include <bit>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -38,32 +39,34 @@
 namespace torch::jit {
 
 static std::string get_little_endian_data(const at::Tensor& t) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  return std::string(
-      static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-  const size_t element_size = t.element_size();
-  const size_t num_elements = t.numel();
+  static_assert(
+      std::endian::native == std::endian::little ||
+          std::endian::native == std::endian::big,
+      "mixed-endian platforms are not supported");
+  if constexpr (std::endian::native == std::endian::little) {
+    return std::string(
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
+  } else {
+    const size_t element_size = t.element_size();
+    const size_t num_elements = t.numel();
 
-  std::vector<char> data_copy{
-      static_cast<char*>(t.data_ptr()),
-      static_cast<char*>(t.data_ptr()) + element_size * num_elements};
+    std::vector<char> data_copy{
+        static_cast<char*>(t.data_ptr()),
+        static_cast<char*>(t.data_ptr()) + element_size * num_elements};
 
-  for (size_t i = 0; i < num_elements; ++i) {
-    char* start_byte = data_copy.data() + i * element_size;
-    char* end_byte = start_byte + element_size - 1;
-    /* keep swapping */
-    for (size_t count = 0; count < element_size / 2; ++count) {
-      std::swap(*start_byte, *end_byte);
-      ++start_byte;
-      --end_byte;
+    for (size_t i = 0; i < num_elements; ++i) {
+      char* start_byte = data_copy.data() + i * element_size;
+      char* end_byte = start_byte + element_size - 1;
+      /* keep swapping */
+      for (size_t count = 0; count < element_size / 2; ++count) {
+        std::swap(*start_byte, *end_byte);
+        ++start_byte;
+        --end_byte;
+      }
     }
-  }
 
-  return std::string(data_copy.data(), element_size * num_elements);
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
+    return std::string(data_copy.data(), element_size * num_elements);
+  }
 }
 
 void writeArchiveAndTensors(
