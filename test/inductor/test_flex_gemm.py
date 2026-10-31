@@ -1207,6 +1207,67 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         self.assertEqual(len(shape_env.guards), 1)
 
+    @parametrize(
+        "case",
+        (
+            ("capture", 1, lambda x, r, acc, row, col: r - x * col.view(1, 8, 2), None),
+            ("transform", 1, lambda x, r, acc, row, col: r - x.exp(), None),
+            ("sibling", 1, lambda x, r, acc, row, col: r - acc.view(4, 8, 2) * 2, None),
+            ("m_scale", 0, lambda x, r, acc, row, col: x * 2.0 - r, None),
+            (
+                "m_row_capture",
+                0,
+                lambda x, r, acc, row, col: x * row.view(2, 2, 1) - r,
+                None,
+            ),
+            (
+                "m_column_capture",
+                0,
+                lambda x, r, acc, row, col: x * col.view(1, 1, 16) - r,
+                "different grouped layouts",
+            ),
+            (
+                "mixed_views",
+                1,
+                lambda x, r, acc, row, col: r - x * acc.view(4, 8, 2).exp(),
+                "recognized broadcast",
+            ),
+            (
+                "second_reduction",
+                1,
+                lambda x, r, acc, row, col: r - x * x.amax(-1, keepdim=True),
+                "one generated physical reduction",
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_feed_main_scaled_source_analysis(self, case):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, axis, combine, error = case
+        shape, dim = ((2, 2, 16), 1) if axis == 0 else ((4, 8, 2), -1)
+
+        def body(a, b, row, col):
+            acc = torch.mm(a, b)
+            x = acc.view(shape)
+            return combine(x, x.sum(dim, keepdim=True), acc, row, col).view(4, 16)
+
+        a, b = torch.randn(4, 8), torch.randn(8, 16)
+        graph_module = make_fx(body)(a, b, torch.randn(4, 1), torch.randn(1, 16))
+        gemm = gemm_node(graph_module, torch.ops.aten.mm.default)
+        if error is not None:
+            with self.assertRaisesRegex(NotImplementedError, error):
+                analyze_flex_gemm_epilogue(graph_module, gemm)
+            return
+        analysis = analyze_flex_gemm_epilogue(graph_module, gemm)
+        local_reduce = analysis.outputs.local_reduce
+        self.assertTrue(local_reduce.feeds_main)
+        self.assertEqual(local_reduce.match.geometry.axis, axis)
+
     def test_output_contraction_does_not_contract_other_axes(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
@@ -5973,6 +6034,97 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ).check("feeds_main=True").check("combine='add'").check(
             "prepass_combine='add'"
         ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("form", ("r_minus_xw", "xw_minus_r", "affine"))
+    def test_mm_local_reduce_feeds_main_through_scaled_source(self, form):
+        # A 2-point Hadamard per column pair: y0 = (x0 + x1) / sqrt(2) and
+        # y1 = (x0 - x1) / sqrt(2) = (r - 2 * x1) / sqrt(2), with r the pair sum.
+        # The grouped source meets the reduced value only after a capture scale.
+        m, n, k = 256, 256, 64
+        odd = (torch.arange(n, device="cuda") % 2).float()[None, :]
+        scale = 2**-0.5
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, 2)
+            r = x.sum(-1, keepdim=True)
+            w = (2 * odd).view(1, -1, 2)
+            if form == "r_minus_xw":
+                y = (r - x * w) * scale
+            elif form == "xw_minus_r":
+                y = (x * w - r) * -scale
+            else:
+                y = r * scale + x * (-w * scale)
+            return y.view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        FileCheck().check("feeds_main=True").check("combine='add'").run(code)
+
+        pairs = (a.double() @ b.double()).view(m, -1, 2)
+        hadamard = torch.stack(
+            (pairs[..., 0] + pairs[..., 1], pairs[..., 0] - pairs[..., 1]), -1
+        ).view(m, n)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b), hadamard * scale, k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feeds_main_through_scaled_source(self):
+        m, n, k, group = 256, 128, 64, 8
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            r = x.sum(1, keepdim=True)
+            return (x * 2.0 - r).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b), epilogue_fn(a.double() @ b.double()), k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_reduce_feed_main_rejects_source_mixing_grouped_views(self):
+        m, n = 128, 128
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, 2)
+            r = x.sum(-1, keepdim=True)
+            # The operand multiplies two grouped views; neither is "the" source.
+            return (r - x * acc.float().view(m, -1, 2).exp()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(
+            InductorError, "feed the main output through a recognized broadcast"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
