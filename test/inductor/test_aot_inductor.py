@@ -651,6 +651,9 @@ class AOTInductorTestsTemplate:
             "AOTI_LOG_LOADING": "1",
         },
     )
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_constants_pinned_async_parallel_copy_tasks(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -680,16 +683,36 @@ class AOTInductorTestsTemplate:
         ):
             package_path = AOTIRunnerUtil.compile(model, example_inputs)
 
-        original_stderr_fd = os.dup(2)
-        with tempfile.TemporaryFile(mode="w+") as captured_stderr:
-            try:
-                os.dup2(captured_stderr.fileno(), 2)
-                optimized = torch._inductor.aoti_load_package(package_path)
-            finally:
-                os.dup2(original_stderr_fd, 2)
-                os.close(original_stderr_fd)
-            captured_stderr.seek(0)
-            loading_log = captured_stderr.read()
+        # Inline runtime functions can cache environment settings across model DSOs.
+        # Load in a fresh process so earlier tests cannot initialize those settings.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inputs_path = pathlib.Path(tmpdir) / "inputs.pt"
+            outputs_path = pathlib.Path(tmpdir) / "outputs.pt"
+            torch.save(example_inputs, inputs_path)
+            script = """
+import sys
+import torch
+
+inputs = torch.load(sys.argv[2])
+optimized = torch._inductor.aoti_load_package(sys.argv[1])
+torch.save(optimized(*inputs), sys.argv[3])
+"""
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    script,
+                    str(package_path),
+                    str(inputs_path),
+                    str(outputs_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            loading_log = result.stderr
+            optimized_output = torch.load(outputs_path)
 
         self.assertIn("copy_tasks=1 cpu_copy_threads=2", loading_log)
         self.assertRegex(
@@ -706,7 +729,7 @@ class AOTInductorTestsTemplate:
         # threshold regardless of constant emission order.
         self.assertGreaterEqual(parallel_windows, 1)
         self.assertGreater(task_count, parallel_windows)
-        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+        self.assertEqual(optimized_output, model(*example_inputs))
 
     def test_output_path_1(self):
         class Model(torch.nn.Module):
