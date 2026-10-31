@@ -313,6 +313,12 @@ class TestCompilerBisector(TestCase):
                 get_env_val.cache_clear()
 
 
+def _triton_available_for(device: str) -> bool:
+    # Per-device view; has_triton() is an any-device aggregate.
+    interface = get_interface_for_device(device.split(":")[0])
+    return interface.is_available() and interface.is_triton_capable()
+
+
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -380,12 +386,7 @@ class TestCompilerBisectorDevice(TestCase):
         }
     )
     def test_bisect_pre_grad_graph(self, device):
-        # has_triton() is an any-device aggregate; gate on the instantiated
-        # device via the DeviceInterface registry. MTIA keeps no coverage
-        # here: the old HAS_GPU guard admitted it via HAS_MTIA_AND_TRITON,
-        # but instantiate_device_type_tests has no MTIA device-type base,
-        # so the PR description records the drop explicitly.
-        if not get_interface_for_device(device.split(":")[0]).is_triton_capable():
+        if not _triton_available_for(device):
             self.skipTest(f"requires Triton on {device}")
 
         def f(x):
