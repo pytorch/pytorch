@@ -7,6 +7,7 @@ from importlib import import_module
 import torch
 import torch._prims_common as utils
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
@@ -323,8 +324,6 @@ def _triton_available_for(device: str | torch.device) -> bool:
         return False
     if not (interface.is_available() and interface.is_triton_capable()):
         return False
-    from torch._dynamo.exc import TritonUnavailableError
-
     try:
         interface.raise_if_triton_unavailable()
     except TritonUnavailableError:
