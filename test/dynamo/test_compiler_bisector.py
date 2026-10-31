@@ -371,6 +371,10 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
 
+    # Device-aware Triton gating awaits a Triton Capability in the device
+    # registry; this mirrors the existing gate convention in this file.
+    # MTIA remains covered: `except_for="cpu"` instantiates it whenever the
+    # backend is registered, like the old HAS_MTIA_AND_TRITON guard allowed.
     @unittest.skipIf(not has_triton(), "requires Triton")
     @config.patch(
         {
