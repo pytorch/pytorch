@@ -1245,7 +1245,7 @@ class TestOptimRenewed(TestCase):
     # max_exp_avg_sq equality holds on CPU.
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
-        dtypes=(torch.float32, torch.float64),
+        dtypes=(torch.float32, torch.float64, torch.float16, torch.bfloat16),
     )
     def test_fused_matches_forloop_nan_amsgrad(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
@@ -1271,10 +1271,14 @@ class TestOptimRenewed(TestCase):
             for step in range(2):
                 grad = torch.rand_like(param_fused)
                 if step == 1:
-                    # NaN gradient in a middle tile: the fused amsgrad update
-                    # must propagate it into max_exp_avg_sq exactly like the
-                    # forloop path.
+                    # NaN gradient in a middle tile (index 33): the fused
+                    # amsgrad update must propagate it into max_exp_avg_sq
+                    # exactly like the forloop path. Index 33 lands in a full
+                    # vector block; index 64 is always in the scalar remainder
+                    # for a 65-element param, so it exercises the scalar-tail
+                    # max (and, on RVV, the masked tail).
                     grad[33] = float("nan")
+                    grad[64] = float("nan")
                 param_fused.grad = grad.clone()
                 param_forloop.grad = grad.clone()
                 opt_fused.step()
