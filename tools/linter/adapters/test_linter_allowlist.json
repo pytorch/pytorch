@@ -103,7 +103,6 @@
   "test/distributed/fsdp/test_fsdp_apply.py",
   "test/distributed/fsdp/test_fsdp_backward_prefetch.py",
   "test/distributed/fsdp/test_fsdp_checkpoint.py",
-  "test/distributed/fsdp/test_fsdp_clip_grad_norm.py",
   "test/distributed/fsdp/test_fsdp_comm.py",
   "test/distributed/fsdp/test_fsdp_comm_hooks.py",
   "test/distributed/fsdp/test_fsdp_core.py",
