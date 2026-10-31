@@ -251,6 +251,9 @@ class Vectorized<float> {
         vshlq_u32(vandq_u32(is_zero_vec, vdupq_n_u32(1)), shift);
     return vaddvq_u32(bits_vec);
   }
+  float reduce_add() const {
+    return vaddvq_f32(values);
+  }
   float reduce_max() const {
     return vmaxvq_f32(values);
   }
