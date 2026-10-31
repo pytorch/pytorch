@@ -255,6 +255,27 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
         )
 
+    def test_scatter_chain_preserves_escaping_result(self):
+        def f(x, first_src, second_src):
+            first = aten.slice_scatter.default(x, first_src, 0, 1, 4)
+            x.copy_(first)
+            second = aten.slice_scatter.default(x, second_src, 0, 2, 5)
+            x.copy_(second)
+            return second, x[:5]
+
+        x = torch.arange(6, device=device, dtype=torch.float)
+        first_src = torch.tensor([20.0, 30.0, 40.0], device=device)
+        second_src = torch.tensor([50.0, 60.0, 70.0], device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, first_src, second_src)
+        actual = torch.compile(f)(actual_x, first_src, second_src)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual[0].untyped_storage().data_ptr(),
+            actual_x.untyped_storage().data_ptr(),
+        )
+
     def test_index_put_result_does_not_alias_mutated_input(self):
         def f(x, idx, val):
             out = torch.index_put(x, (idx,), val)
