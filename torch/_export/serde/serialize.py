@@ -1376,7 +1376,8 @@ class GraphModuleSerializer(metaclass=Final):
         owner = node.graph.owning_module
         func_spec, in_spec_value = (
             torch.fx.graph_module._get_attr(owner, arg.target)
-            if isinstance(arg, torch.fx.Node)
+            if owner is not None
+            and isinstance(arg, torch.fx.Node)
             and arg.op == "get_attr"
             and isinstance(arg.target, str)
             else None
