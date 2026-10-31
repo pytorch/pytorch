@@ -163,6 +163,33 @@ If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
 will update the source id automatically when needed.
 
+# Separating refactors from behavior changes
+
+When a change needs both a refactor and a behavior change, put a
+behavior-preserving refactor first, in its own PR where practical: in a
+ghstack stack, its own commit below the behavior change; with plain branches,
+a refactor PR that lands before the behavior PR goes up. The point is that the
+behavior PR's diff shows only the semantic change, and reviewers can check the
+refactor as a no-op. So move into the refactor everything that can be done
+without changing behavior: moving or extracting code, renaming, and adding the
+helpers, parameters, hooks and call structure the behavior change will use.
+The refactor may look a little odd on its own (a hook with one
+implementation, a parameter no caller passes yet), because it reshapes the
+code toward a design the next PR completes. Say so in its description, so
+reviewers judge it by whether it preserves behavior, not by whether each piece
+is needed yet.
+
+If you may not commit (see "Commit messages" and "ghstack Workflow"), do the
+refactor first, then stop and ask the user to commit it as its own commit
+before you make the behavior change. If the behavior change lives in, or will
+be amended into, an existing commit (such as the ghstack commit you were asked
+to work on), the refactor has to go below that commit, which is a stack edit
+(see "Editing earlier commits / splitting"), so propose it instead of doing
+it.
+
+Skip the split when the refactor is only a few lines that are easy to read in
+the behavior diff.
+
 # ghstack Workflow
 
 ghstack commits follow a different workflow than the conventional GitHub branch
