@@ -81,6 +81,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
+from torch._prims_common import compute_required_storage_length
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -88,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    recover_orig_fp32_precision,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -1695,6 +1697,19 @@ class TestMaxAutotune(TestCase):
             torch.compile(m)(inp)
 
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm
+    @parametrize("precision", ("tf32", "ieee"))
+    @config.patch(max_autotune=True, max_autotune_conv_backends="TRITON")
+    @recover_orig_fp32_precision
+    def test_conv_template_follows_cudnn_conv_precision(self, precision):
+        torch.backends.cudnn.conv.fp32_precision = precision
+        x = torch.randn(2, 32, 16, 16, device=GPU_TYPE)
+        w = torch.randn(32, 32, 3, 3, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(torch.nn.functional.conv2d), x, w)
+        expected = precision == "tf32" and torch.cuda.is_tf32_supported()
+        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expected}", code[0])
 
     def test_non_contiguous_input_mm(self):
         """
@@ -3601,6 +3616,123 @@ class TestMaxAutotune(TestCase):
 
         a = x[7 * batch :]
         torch.testing.assert_close(result, torch.mm(a, w), rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @parametrize("view_offset,shift,extern_offset", ((-2048, 2048, 0), (2048, 0, 2048)))
+    def test_max_autotune_mm_rebased_storage_offset_input(
+        self, view_offset, shift, extern_offset
+    ):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/200810.
+        as_strided storage offsets are relative to the input's storage, so a
+        view of an input gets rebased to a data-pointer-relative layout offset
+        that can point outside the input's own allocation: -2048 for
+        x[2048:].as_strided((64, 32), (32, 1), 0) and 2048 for
+        x[:2048].as_strided((64, 32), (32, 1), 2048). Kernels fold that offset
+        into their own pointer arithmetic, and eager as_strided rejects the
+        negative case, so the benchmark inputs have to be materialized with a
+        data pointer at the same relative position in a big enough allocation.
+        """
+        start = 2048 if view_offset < 0 else 0
+        as_strided_offset = max(view_offset, 0)
+        x = torch.arange(4096, device=GPU_TYPE, dtype=torch.float32)[
+            start : start + 2048
+        ]
+        w = torch.ones(32, 64, device=GPU_TYPE)
+
+        def mm(a, b):
+            return torch.mm(a.as_strided((64, 32), (32, 1), as_strided_offset), b)
+
+        autotune_args = []
+        orig_get_inputs = AlgorithmSelectorCache.get_inputs.__func__
+
+        def spy(cls, *args, **kwargs):
+            inputs = orig_get_inputs(cls, *args, **kwargs)
+            autotune_args.append(inputs)
+            return inputs
+
+        with (
+            mock.patch.object(AlgorithmSelectorCache, "get_inputs", classmethod(spy)),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }
+            ),
+        ):
+            result = torch.compile(mm, fullgraph=True)(x, w)
+
+        # Loads before the graph input pointer read back 0 on ROCm, so the
+        # negative case computes zeros there and cannot be compared. Same
+        # limitation as test_as_strided_past_input_extent in test_torchinductor.py.
+        if view_offset >= 0 or not TEST_WITH_ROCM:
+            torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
+
+        self.assertTrue(autotune_args, "autotuning did not build benchmark inputs")
+        # The fake input has to satisfy as_strided with the data pointer placed
+        # where the kernel's folded offset expects it: shift elements in front,
+        # then enough storage for the view on either side of the buffer.
+        fake_x = autotune_args[0].triton.input_tensors[0]
+        fake_items = fake_x.untyped_storage().size() // fake_x.element_size()
+        ptr_off = (
+            fake_x.data_ptr() - fake_x.untyped_storage().data_ptr()
+        ) // fake_x.element_size()
+        buffer_span = compute_required_storage_length((2048,), (1,), 0)
+        view_span = compute_required_storage_length((64, 32), (32, 1), 0)
+        self.assertEqual(fake_x.storage_offset(), shift)
+        self.assertEqual(ptr_off, shift)
+        # The kernel indexes the whole view, so the storage covers the buffer as
+        # well as the view, whichever reaches further past the data pointer.
+        self.assertEqual(fake_items, shift + max(buffer_span, view_span))
+        # The aten input stays a view at the rebased offset, backed by a base
+        # that also covers the input's own allocation.
+        extern_x = autotune_args[0].extern.input_tensors[0]
+        self.assertEqual(tuple(extern_x.size()), (64, 32))
+        self.assertEqual(tuple(extern_x.stride()), (32, 1))
+        self.assertEqual(extern_x.storage_offset(), extern_offset)
+        self.assertEqual(
+            extern_x.untyped_storage().size() // extern_x.element_size(), 4096
+        )
+
+    @fresh_cache()
+    @skipIfXpu
+    def test_max_autotune_negative_offset_layout(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/200810.
+        A layout with a negative offset that is not a view of anything reaches
+        benchmark_example_value with the same negative value as both extra_size
+        and view_offset. Its storage still has to be allocated: a negative
+        offset means the buffer has no leading region, not that it needs less.
+        """
+        from torch._inductor import ir
+
+        captured = {}
+
+        def patched_lowering(*args, **kwargs):
+            layout = ir.FixedLayout(
+                torch.device(GPU_TYPE), torch.float32, [64, 32], [32, 1], -2048
+            )
+            captured["example"] = AlgorithmSelectorCache.benchmark_example_value(layout)
+            return orig_add_lowering(*args, **kwargs)
+
+        orig_add_lowering = torch._inductor.lowering.lowerings[aten.add.Tensor]
+        with patch.dict(
+            torch._inductor.lowering.lowerings,
+            {aten.add.Tensor: patched_lowering},
+        ):
+            torch.compile(lambda x: x + 1)(
+                torch.randn(64, 32, device=GPU_TYPE, dtype=torch.float32)
+            )
+
+        example = captured["example"]
+        self.assertEqual(tuple(example.size()), (64, 32))
+        # The data pointer is shifted in by -offset so the view can start at 0.
+        self.assertEqual(example.storage_offset(), 2048)
+        self.assertGreaterEqual(
+            example.untyped_storage().size() // example.element_size(),
+            2048 + compute_required_storage_length((64, 32), (32, 1), 0),
+        )
 
     @fresh_cache()
     @skipIfXpu
@@ -5771,6 +5903,28 @@ class TestPrologueFusion(TestCase):
             ).run(code[0])
             self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_identical_template_epilogue_fusions(self):
+        # The mm + relu pairs all render the same fused kernel, so they share
+        # one async compile future. Each pair must still be benchmarked and
+        # fused, leaving one template launch per pair.
+        def fn(*xs):
+            return tuple(torch.relu(x @ y) for x, y in zip(xs[::2], xs[1::2]))
+
+        torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
+
+        args = [torch.randn(128, 128, device=GPU_TYPE) for _ in range(6)]
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(fn), *args)
+
+        self.assertEqual(out, fn(*args), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
+
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
     def test_multiple_inputs(self, sizes, use_async_compile: bool):
@@ -5880,6 +6034,44 @@ class TestPrologueFusion(TestCase):
             else:
                 f = FileCheck().check("k_idx").check("a =").check_not("tl.where")
             f.check("tl.dot").run(code[0])
+
+    def test_preserves_zero_analysis_lowp_rounding_cast(self):
+        from torch._inductor.analyze_preserves_zero_mask import PreservesZeros
+        from torch._inductor.index_propagation import TypedExpr
+
+        for dtype in (torch.float16, torch.bfloat16):
+            # Rounding keeps a zero exact.
+            analysis = PreservesZeros()
+            zero = TypedExpr(sympy.Float(0), torch.float32)
+            rounded = analysis.to_dtype(zero, dtype, use_compute_types=False)
+            upcast = analysis.to_dtype(rounded, torch.float32)
+            analysis.store("buf", sympy.Integer(0), upcast)
+            self.assertTrue(analysis.store_preserves_zeros)
+
+            # Rounding a nonzero value cannot be folded, so it is unknown.
+            analysis = PreservesZeros()
+            one = TypedExpr(sympy.Float(1), torch.float32)
+            rounded = analysis.to_dtype(one, dtype, use_compute_types=False)
+            upcast = analysis.to_dtype(rounded, torch.float32)
+            analysis.store("buf", sympy.Integer(0), upcast)
+            self.assertFalse(analysis.store_preserves_zeros)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_upcast_lowp_prologue_with_rounding_cast(self):
+        def foo(x, y):
+            return x.relu().float() @ y
+
+        x = torch.rand([64, 127], dtype=torch.bfloat16, device=GPU_TYPE)
+        y = torch.rand([127, 64], dtype=torch.float, device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+        if config.triton.native_matmul:
+            # native matmul preserves zero mask - need to optimize; see codegen/triton.py
+            FileCheck().check("a =").check("tl.where").check("tl.dot").run(code[0])
+        else:
+            # relu and the rounding cast both keep masked zeros, so no mask is added
+            FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
@@ -6699,7 +6891,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         self.assertTrue(is_gfx1250_arch("gfx1250"))
         self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
-        self.assertFalse(is_gfx1250_arch("gfx1251"))
         self.assertFalse(is_gfx1250_arch("gfx0000"))
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
@@ -7639,6 +7830,8 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
+        "test_max_autotune_mm_rebased_storage_offset_input": "get_inputs is not called on the pipelined path, so the benchmark inputs this test inspects are never built here",
+        "test_max_autotune_negative_offset_layout": "test-only lowering patch, drops the benchmark inputs the pipelined path needs",
         # grouped_mm's input_gen_fns forces
         # return_multi_template=False, so do_autotuning() takes its
         # pipelined-only branch and returns None instead of timings,

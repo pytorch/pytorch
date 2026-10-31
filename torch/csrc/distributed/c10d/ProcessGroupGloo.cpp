@@ -1582,7 +1582,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
     auto outputShape = outputTensors[i].sizes().vec();
     TORCH_CHECK_EQ(outputTensors[i].dtype(), inputTensors[i].dtype());
     TORCH_CHECK_EQ(outputShape[0] * worldSize, inputShape[0]);
-    for (size_t i = 1; i < outputShape.size(); ++i) {
+    for (const auto i : c10::irange(1, outputShape.size())) {
       TORCH_CHECK_EQ(outputShape[i], inputShape[i]);
     }
     buffers.push_back(inputTensors[i].clone());
