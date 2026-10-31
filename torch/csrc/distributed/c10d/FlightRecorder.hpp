@@ -72,6 +72,10 @@ class TORCH_API DebugInfoWriter {
   virtual void write(const std::string& trace);
   static DebugInfoWriter& getWriter(int rank);
   static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
+  // Callers of getWriter() and write() must hold this so dumps of different
+  // recorders to the same file cannot interleave. registerWriter() doesn't
+  // take it.
+  static std::mutex& writeMutex();
   virtual std::string getWriterTarget() {
     return filename_;
   }

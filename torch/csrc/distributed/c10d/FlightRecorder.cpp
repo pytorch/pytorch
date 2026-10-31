@@ -87,6 +87,11 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   writer_ = std::move(writer);
 }
 
+std::mutex& DebugInfoWriter::writeMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
@@ -209,10 +214,9 @@ void dump_fr_trace_file(
   // Serialize writes so concurrent dumps cannot interleave into the same
   // file, but take the trace before locking: dump() can block on device APIs
   // and must not hold up an unrelated caller.
-  static std::mutex writeDebugInfoMutex;
   auto trace = dump_fr_trace(
       includeCollectives, includeStackTraces, onlyActive, backend);
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
+  std::lock_guard<std::mutex> lock(DebugInfoWriter::writeMutex());
   DebugInfoWriter& writer = DebugInfoWriter::getWriter(rank);
   LOG(INFO) << "Dumping Flight Recorder trace to " << writer.getWriterTarget();
   writer.write(trace);
