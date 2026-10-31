@@ -52,7 +52,6 @@ from torch._library.opaque_object import (
 )
 from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
-from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -712,24 +711,23 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # (snapshot_fake is called a lot)
     if is_fake_tensor(val):
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
+    # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
+    # have no storage and outlive their level. Record a view of the fake tensor
+    # they wrap, with the sizes, strides and storage offset the wrapper reports,
+    # so passes still see which storage it aliases. Functorch is disabled so
+    # that an outer jvp does not wrap the view again.
     functorch = torch._C._functorch
-    if functorch.is_batchedtensor(val) or functorch.is_gradtrackingtensor(val):
-        # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
-        # have no storage and outlive their level. Record a plain fake tensor
-        # with the sizes, strides and storage offset the wrapper reports.
-        # Functorch is disabled so that an outer jvp does not wrap it again.
-        fake_mode = maybe_get_fake_mode(val)
+    inner = val
+    while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(inner):
+        inner = functorch.get_unwrapped(inner)
+    if inner is not val:
+        fake_mode = maybe_get_fake_mode(inner)
         if fake_mode is None:
             raise AssertionError("expected a functorch wrapper of a fake tensor")
-        offset = val.storage_offset()
         with disable_proxy_modes_tracing(), fake_mode, torch._C._DisableFuncTorch():
-            storage = torch.empty(
-                # pyrefly: ignore [bad-argument-type]
-                compute_required_storage_length(val.shape, val.stride(), offset),
-                dtype=val.dtype,
-                device=val.device,
+            return inner.detach().as_strided(
+                val.shape, val.stride(), val.storage_offset()
             )
-            return storage.as_strided(val.shape, val.stride(), offset)
     return val.detach()
 
 

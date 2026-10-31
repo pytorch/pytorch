@@ -73,6 +73,7 @@ from torch.export.graph_signature import (
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -964,6 +965,15 @@ class TestExport(TestCase):
         for node in ep.graph.nodes:
             if isinstance(node.meta.get("val"), torch.Tensor):
                 self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+        # A batched value is a view of the tensor it wraps, as in eager. Loading
+        # a saved program does not keep aliasing, so export directly here.
+        graph = torch.export.export(JvpInVmap(), inp).graph
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        for node in graph.find_nodes(op="call_function", target=add_batch_dim):
+            self.assertEqual(
+                StorageWeakRef(node.meta["val"].untyped_storage()),
+                StorageWeakRef(node.args[0].meta["val"].untyped_storage()),
+            )
         self.assertEqual(ep.module()(*inp), JvpInVmap()(*inp))
         if is_training_ir_test(self._testMethodName):
             return  # run_decompositions removes the functorch calls
