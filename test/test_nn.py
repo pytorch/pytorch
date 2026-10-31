@@ -13609,18 +13609,39 @@ class TestNNDeviceType(NNTestCase):
         # at size 2, the per-column result is exactly +/-0.1875 in fp16, so the
         # last column provides a clean check that the wide offset is computed
         # correctly.
-        inner_size = 2147483649  # > INT_MAX; with dim_size==2, 2*inner_size > 2**32 so uint32_t offsets would wrap
-        out = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
-        out[0, 0].fill_(0.25)
-        out[0, 1].fill_(0.75)
-        grad = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
-        grad[0, 0].fill_(1.0)
-        grad[0, 1].fill_(0.0)
-        gI = torch._softmax_backward_data(grad, out, 1, out.dtype)
-        self.assertEqual(gI[0, 0, 0], 0.1875)
-        self.assertEqual(gI[0, 1, 0], -0.1875)
-        self.assertEqual(gI[0, 0, -1], 0.1875)
-        self.assertEqual(gI[0, 1, -1], -0.1875)
+        # inner_size > INT_MAX; with dim_size==2, 2*inner_size > 2**32 so uint32_t
+        # offsets would wrap. 2**31 + 8 is divisible by the fp16 vector size and
+        # hits XPU's vectorized spatial kernel; CUDA has no vectorized spatial path.
+        inner_sizes = (2147483649, 2147483656) if self.device_type == "xpu" else (2147483649,)
+        for inner_size in inner_sizes:
+            out = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
+            out[0, 0].fill_(0.25)
+            out[0, 1].fill_(0.75)
+            grad = torch.empty([1, 2, inner_size], device=device, dtype=torch.float16)
+            grad[0, 0].fill_(1.0)
+            grad[0, 1].fill_(0.0)
+            gI = torch._softmax_backward_data(grad, out, 1, out.dtype)
+            self.assertEqual(gI[0, 0, 0], 0.1875)
+            self.assertEqual(gI[0, 1, 0], -0.1875)
+            self.assertEqual(gI[0, 0, -1], 0.1875)
+            self.assertEqual(gI[0, 1, -1], -0.1875)
+            del out, grad, gI
+
+    @skipMPS
+    @onlyAccelerator
+    @largeTensorTest("20GB")
+    def test_spatial_softmax_forward_64bit_indexing(self, device):
+        expected = torch.softmax(torch.tensor([0.0, 1.0]), 0).half()
+        # 2**31 + 8 is divisible by the fp16 vector size and hits XPU's
+        # vectorized spatial kernel; CUDA has no vectorized spatial path.
+        inner_sizes = (2147483649, 2147483656) if self.device_type == "xpu" else (2147483649,)
+        for inner_size in inner_sizes:
+            x = torch.zeros([1, 2, inner_size], device=device, dtype=torch.float16)
+            x[0, 1].fill_(1.0)
+            out = torch.softmax(x, 1)
+            self.assertEqual(out[0, :, 0].cpu(), expected)
+            self.assertEqual(out[0, :, -1].cpu(), expected)
+            del x, out
 
     @skipMPS
     @onlyAccelerator
