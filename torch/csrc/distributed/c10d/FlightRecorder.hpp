@@ -416,6 +416,20 @@ TORCH_API void registerFlightRecorderDumper(
     const std::string& backend,
     FlightRecorderDumper dumper);
 
+// Communicator state (e.g. ncclCommDump output, keyed by a backend-chosen
+// communicator name) that dump_fr_trace and dump_fr_trace_json include as
+// nccl_comm_state for a backend recording into getFlightRecorder(backend).
+// The provider runs on the dumping thread, outside the registry lock and
+// possibly with the GIL held; concurrent dumps call it concurrently. It may
+// block. If it throws, the dump omits the state. Registering again replaces
+// it. It is not called for a backend with a FlightRecorderDumper.
+using FlightRecorderCommState = std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>;
+
+TORCH_API void registerFlightRecorderCommState(
+    const std::string& backend,
+    std::function<FlightRecorderCommState()> commState);
+
 // Dumps the fr traces and additional information about the Process
 // Group.
 TORCH_API std::string dump_fr_trace(

@@ -115,12 +115,14 @@ void NCCLCachingAllocatorHook::regDeregMem(
 void NCCLCachingAllocatorHook::registerComm(ProcessGroupNCCL* comm) {
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_CHECK(!registeredComms_.count(comm), "Communicator already registered");
+  // Listed first so that, if a registration below throws, deregisterComm()
+  // still deregisters the addresses registered before it.
+  registeredComms_.insert(comm);
   for (const auto& [addr, mem_info] : registeredMemMap_) {
     if (mem_info.device == comm->getDevice().index()) {
       comm->register_address(addr, mem_info.len);
     }
   }
-  registeredComms_.insert(comm);
 }
 
 void NCCLCachingAllocatorHook::deregisterComm(ProcessGroupNCCL* comm) {

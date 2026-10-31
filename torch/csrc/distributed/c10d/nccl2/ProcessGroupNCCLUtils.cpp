@@ -667,6 +667,11 @@ void ProcessGroupNCCL::detachMemoryHook() {
   NCCLCachingAllocatorHook::getInstance().deregisterComm(this);
 }
 
+void ProcessGroupNCCL::dropMemoryRegistrations() {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  memoryRegistrationHandles_.clear();
+}
+
 void ProcessGroupNCCL::registerAddressLocked(void* addr, size_t len) {
   void* handle = nullptr;
   NCCL_CHECK(

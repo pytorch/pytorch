@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <list>
 #include <map>
 #include <memory>
@@ -65,6 +66,8 @@ TORCH_API void waitForNcclCompletion(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+// On failure, aborts the child and, if the split/shrink was issued, the parent,
+// calling before_parent_abort first.
 TORCH_API void waitForNcclChildComm(
     NcclApi& nccl_api,
     ncclComm_t parent_comm,
@@ -72,7 +75,8 @@ TORCH_API void waitForNcclChildComm(
     ncclResult_t status,
     bool expect_child,
     std::chrono::milliseconds timeout,
-    std::string_view operation);
+    std::string_view operation,
+    const std::function<void()>& before_parent_abort = {});
 
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
@@ -143,6 +147,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     return std::string(kBackendName);
   }
   c10::intrusive_ptr<::c10d::Backend::Options> getBackendOptions() override;
+  void setGroupUid(const std::string& pg_uid) override;
 
   c10::intrusive_ptr<::c10d::Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -655,13 +660,25 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   void attachMemoryHook();
   void detachMemoryHook();
+  // Forgets memoryRegistrationHandles_ without NCCL calls, after a failed
+  // split/shrink dropped nccl_comm_: its handles cannot be deregistered through
+  // a later communicator.
+  void dropMemoryRegistrations();
 
   // Publish/retire nccl_comm_ to the symmetric-memory registry via the NCCL
   // comm-registration hook (NCCLCommRegistrationHook.hpp), so this class does
-  // not depend on the symm_mem DevCommManager header. Fired from
-  // initNcclResources() and the comm-teardown paths, respectively.
+  // not depend on the symm_mem DevCommManager header, and on
+  // (IS_NCCLX || USE_ROCM) && NCCL_COMM_DUMP builds add/drop it in the
+  // comm-dump registry (dumpNcclComms). Published by initNcclResources(),
+  // which retires it if publishing or starting the watchdog throws; retired by
+  // the comm-teardown paths.
   void publishComm();
   void retireComm();
+  // Drops nccl_comm_ from the comm-dump registry (dumpNcclComms), waiting
+  // (bounded) for an in-flight dump. Part of retireComm(); called alone before
+  // a failed split/shrink aborts or reconfigure revokes nccl_comm_, and by the
+  // destructor.
+  void unlistComm();
 
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};
