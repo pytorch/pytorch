@@ -39,8 +39,9 @@ bool isAsyncKernel(const rocprofAsyncRow& async) {
 } // namespace
 
 RocprofActivityApi& RocprofActivityApi::singleton() {
-  static RocprofActivityApi instance;
-  return instance;
+  // Intentionally leaky singleton
+  static auto* instance = new RocprofActivityApi{};
+  return *instance;
 }
 
 RocprofActivityApi::RocprofActivityApi() : d(&RocprofLogger::singleton()) {}
@@ -79,6 +80,10 @@ void RocprofActivityApi::setMaxEvents(uint32_t maxEvents) {
 
 void RocprofActivityApi::setPerThreadBuffers(bool enabled) {
   d->setPerThreadBuffers(enabled);
+}
+
+void RocprofActivityApi::setDispatchRecordWait(std::chrono::milliseconds wait) {
+  d->setDispatchRecordWait(wait);
 }
 
 void RocprofActivityApi::setMaxBufferSize([[maybe_unused]] int64_t size) {
