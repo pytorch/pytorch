@@ -3,6 +3,7 @@
 # types.  See https://github.com/python/mypy/issues/4146 for why these
 # workarounds is necessary
 import os
+import warnings
 from builtins import (  # noqa: F401
     bool as _bool,
     bytes as _bytes,
@@ -126,3 +127,16 @@ class Storage:
         element_size: int,
     ) -> Self:
         raise NotImplementedError
+
+
+def __getattr__(name: str) -> Any:
+    # The old runtime tuple, kept for a deprecation period.
+    if name == "_Number":
+        warnings.warn(
+            "torch.types._Number is deprecated; use torch.types.Number, which "
+            "isinstance() accepts directly.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return (int, float, bool)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
