@@ -46,10 +46,15 @@
   _(UInt32, 28, uint32_t)              \
   _(UInt64, 29, uint64_t)
 
+#define C10_METAL_SERIAL_SUFFIX_false ""
+#define C10_METAL_SERIAL_SUFFIX_true "_serial"
+#define C10_METAL_SERIAL_SUFFIX(SERIAL) C10_METAL_SERIAL_SUFFIX_##SERIAL
+
 namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
+C10_METAL_CONSTEXPR unsigned max_threadgroup_size = 1024;
 // Number of elements each thread processes in dense elementwise kernels.
 // Reading/writing a small array of values per thread improves memory-level
 // parallelism vs. a one-element-per-thread kernel.
