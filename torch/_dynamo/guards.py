@@ -4661,13 +4661,39 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = (
 )
 
 
+class _DeadReferent:
+    """Sole purpose is to be immediately collected so a weakref to it is dead.
+
+    The hash is drawn from a counter rather than left to id(): every instance
+    is freed the moment it is made, so the allocator hands back the same
+    address over and over and id-derived hashes would nearly all collide.
+    """
+
+    __slots__ = ("_hash", "__weakref__")
+
+    _counter = itertools.count()
+
+    def __init__(self) -> None:
+        self._hash = next(self._counter)
+
+    def __hash__(self) -> int:
+        return self._hash
+
+
+def _make_dead_weakref() -> weakref.ref:  # type: ignore[type-arg]
+    obj = _DeadReferent()
+    ref = weakref.ref(obj)
+    # A weakref is only hashable while its referent is alive, or if it was
+    # hashed before the referent died; weak containers keyed on refs need this.
+    hash(ref)
+    del obj
+    return ref
+
+
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
-    ret: tuple[type, ...] = (
-        torch._C.Stream,
-        weakref.ReferenceType,
-    )
+    ret: tuple[type, ...] = (torch._C.Stream,)
     try:
         # A concrete C++ backend such as ProcessGroupNCCL is bound as
         # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
@@ -5416,6 +5442,26 @@ class GuardsStatePickler(FunctionPicklerBase):
         ):
             # Skipping PyCapsule since there isn't much to be guarded about them.
             return _Missing, ("capsule",)
+
+        elif isinstance(obj, weakref.ReferenceType):
+            if id(obj) in self.guard_tree_values:
+                # Refused like the unsupported types below: a dead weakref.ref
+                # would let the rebuilt TYPE_MATCH and referent guards pass, and
+                # would erase subclasses like KeyedRef or WeakMethod.
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads a {type(obj).__name__}, which cannot be serialized"
+                )
+            # The referent isn't serialized, so restore a weakref that is
+            # already dead rather than a live-looking placeholder. Code holding
+            # a weakref universally spells the liveness check as
+            # `obj = ref(); if obj is None: ...`, and a placeholder that is not
+            # None slips past it. This matters most for the removal callbacks
+            # of weak containers, which are restored from their pickled closure
+            # and would otherwise run against a bogus self.
+            #
+            # No callback is attached, so a restored container's len()/bool()
+            # still count the dead entry even though iteration skips it.
+            return _make_dead_weakref, ()
 
         elif isinstance(obj, _get_unsupported_types()):
             # Only when no guard reads it: a guarded one (a TYPE_MATCH on a
