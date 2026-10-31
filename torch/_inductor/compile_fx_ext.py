@@ -229,6 +229,9 @@ class _WireProtocolInput:
     logger_state: _LoggerState
     lowering: _LoweringSerializer
     fake_tensor_mode: _FakeTensorModeSerializer
+    # WOQ int8pack fusion device allowlist snapshot from the parent;
+    # applied in the child via _patch_woq_int8pack_fusion_devices.
+    woq_int8pack_fusion_devices: tuple[str, ...]
 
     def serialize(self) -> _WireProtocolPickledInput:
         """
@@ -519,6 +522,9 @@ class _SerializedFxCompile(FxCompile):
 
         from pickle import PicklingError
 
+        # Allowlist snapshot, kept identical to the cache-key snapshot.
+        from .fx_passes.quantization import _get_woq_int8pack_fusion_devices
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -537,6 +543,7 @@ class _SerializedFxCompile(FxCompile):
                 logger_state,
                 lowering,
                 fake_tensor_mode,
+                _get_woq_int8pack_fusion_devices(),
             ).serialize()
             return (input, constants)
         except (AttributeError, BypassFxGraphCache, PicklingError):
@@ -584,6 +591,12 @@ class _SerializedFxCompile(FxCompile):
             stack.enter_context(config.patch(input.config))
             for name, values in input.backend_configs.items():
                 stack.enter_context(importlib.import_module(name).patch(values))
+            # Keep the worker's pattern matching on the parent's allowlist.
+            from .fx_passes.quantization import _patch_woq_int8pack_fusion_devices
+
+            stack.enter_context(
+                _patch_woq_int8pack_fusion_devices(input.woq_int8pack_fusion_devices)
+            )
             captured_logs = stack.enter_context(input.logger_state)
             if input.deterministic_guard_for_testing:
                 stack.enter_context(input.deterministic_guard_for_testing)

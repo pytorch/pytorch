@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo
@@ -26,6 +27,7 @@ except ImportError:
     )
 
 import torch._inductor.config as config
+from torch._dynamo.utils import counters
 from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen.common import (
     device_op_overrides_dict,
@@ -37,6 +39,12 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
+from torch._inductor.compile_fx import FxCompileMode
+from torch._inductor.compile_fx_ext import _SerializedFxCompile
+from torch._inductor.fx_passes.quantization import (
+    register_woq_int8pack_fusion_device,
+    unregister_woq_int8pack_fusion_device,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -256,6 +264,110 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionCppWrapperCodegen,
         )
         self.assertTrue(has_cpp_wrapper_for_device(device))
+
+    @xfailIfS390X
+    @skipIfWindows
+    def test_woq_int8pack_fusion_on_registered_device(self):
+        # End-to-end check that a third-party (non-default) device type gains
+        # the WOQ int8pack-mm fusion once it opts in via
+        # register_woq_int8pack_fusion_device(). Runs under SERIALIZE with the
+        # FX graph cache on (the cache key must track the allowlist). A spy
+        # on serialize_compile pins that WOQ graphs bypass serialization
+        # today - the pattern's prims.convert_element_type is rejected by
+        # GraphPickler's _ops_filter_safe, so compiles fall back in-process;
+        # wire-level allowlist propagation is covered by
+        # test_compile_options.py::test_compile_fx_ext_propagates_woq_allowlist.
+        torch.utils.rename_privateuse1_backend("extension_device")
+        torch._register_device_module("extension_device", self.module)
+        register_backend_for_device(
+            "extension_device",
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+            ExtensionCppWrapperCodegen,
+        )
+        register_device_op_overrides("extension_device", ExtensionDeviceOpOverrides())
+        # Reset the shared op counter when this test ends so tests that run
+        # after it (e.g. test_open_device_registration) observe a clean state;
+        # addCleanup also runs when an assertion below fails.
+        self.addCleanup(self.module.custom_op_called)
+        device = self.module.custom_device()
+
+        def fn(x, weight, scales):
+            return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+
+        x_cpu = torch.randn(1, 1, 256, dtype=torch.bfloat16)
+        w_cpu = torch.randint(-128, 127, (12, 256), dtype=torch.int8)
+        s_cpu = torch.randn(12, dtype=torch.bfloat16)
+        ref = fn(x_cpu, w_cpu, s_cpu)
+        x, w, s = x_cpu.to(device), w_cpu.to(device), s_cpu.to(device)
+        int8pack_calls = self.module.int8pack_mm_call_count()
+
+        serialize_bypassed = []
+        real_serialize_compile = _SerializedFxCompile.serialize_compile
+
+        def serialize_compile_spy(
+            self, gm, example_inputs, inputs_to_check, graph_kwargs
+        ):
+            result = real_serialize_compile(
+                self, gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+            serialize_bypassed.append(result is None)
+            return result
+
+        with (
+            config.patch({"fx_graph_cache": True}),
+            mock.patch(
+                "torch._inductor.compile_fx.fx_compile_mode",
+                FxCompileMode.SERIALIZE,
+            ),
+            mock.patch.object(
+                _SerializedFxCompile, "serialize_compile", serialize_compile_spy
+            ),
+        ):
+            # Before registration the generic (non-fused) path is used.
+            counters.clear()
+            torch._dynamo.reset()
+            res = torch.compile()(fn)(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls)
+
+            # Registering the device type turns the fusion on (new cache key).
+            register_woq_int8pack_fusion_device("extension_device")
+            self.addCleanup(unregister_woq_int8pack_fusion_device, "extension_device")
+            counters.clear()
+            torch._dynamo.reset()
+            res = torch.compile()(fn)(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 1)
+
+            # Recompiling with the same allowlist state reuses the artifact.
+            counters.clear()
+            torch._dynamo.reset()
+            res = torch.compile()(fn)(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 2)
+
+            # Unregistering returns to the pre-registration key: its generic
+            # artifact is reused and the fused op is not dispatched.
+            unregister_woq_int8pack_fusion_device("extension_device")
+            counters.clear()
+            torch._dynamo.reset()
+            res = torch.compile()(fn)(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 2)
+
+        # Every compile above that reached codegen bypassed serialization.
+        self.assertEqual(serialize_bypassed, [True, True])
+
+        # Values that can never match the device-type check are rejected.
+        with self.assertRaisesRegex(ValueError, "expected a bare device type"):
+            register_woq_int8pack_fusion_device("extension_device:0")
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)
