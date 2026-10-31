@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
+    dtypesIfCPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -1108,9 +1108,6 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy may have the same behavior.
     @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
-    # XPU float->int finite conversion differs for int32/int64; see:
-    # https://github.com/intel/torch-xpu-ops/issues/5054
-    @dtypesIfXPU(torch.bool, torch.uint8, torch.int8, torch.int16)
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
@@ -1135,6 +1132,10 @@ class TestTensorCreation(TestCase):
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
                 vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+        elif self.device_type == 'xpu' and dtype in (torch.int32, torch.int64):
+            # out-of-range float->int is UB
+            # note: "min" passes but is also UB
+            vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
         elif dtype == torch.uint8:
             # Note: CPU max float -> uint8 conversion is divergent
             vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
