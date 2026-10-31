@@ -4,13 +4,19 @@
 
 import math
 import unittest
+from collections import OrderedDict
 from collections.abc import Iterable
 
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    munge_exc,
+    parametrize,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -202,7 +208,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref[0], [n] * 5)
 
 
+@instantiate_parametrized_tests
 class TestSetGuards(LoggingTestCase):
+    @parametrize("mapping_type", (dict, OrderedDict))
+    @parametrize(
+        "operation",
+        ("set", "frozenset", "update", "union", "symmetric_difference", "isdisjoint"),
+    )
+    def test_dict_operand_keys(self, mapping_type, operation):
+        def fn(x, mapping):
+            if operation == "set":
+                result = set(mapping)
+            elif operation == "frozenset":
+                result = frozenset(mapping)
+            else:
+                result = {"a", "z"}
+                if operation == "update":
+                    result.update(mapping)
+                else:
+                    result = getattr(result, operation)(mapping)
+            return x + 1, result
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        frame_counts = []
+        for value, keys in enumerate(
+            (
+                ("a", "b"),
+                ("a", "b"),  # values are irrelevant to set operations
+                ("a",),
+                (),
+                ("a", "c"),
+                ("a", "b", "c"),
+                ("b", "a"),
+                ("a", "b"),
+            )
+        ):
+            mapping = mapping_type.fromkeys(keys, value)
+            expected = fn(x, mapping)
+            actual = compiled(x, mapping)
+            self.assertEqual(actual, expected)
+            self.assertIs(type(actual[1]), type(expected[1]))
+            frame_counts.append(counter.frame_count)
+        self.assertEqual(frame_counts, [1, 1, 2, 3, 4, 5, 6, 6])
+
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
