@@ -17,8 +17,8 @@
       "comment": "Thanks for the report! To help us investigate:\n\n1. Can you reproduce this without the external files? (e.g., using random weights or synthetic data)\n2. Are there any extreme or special values in the weights/inputs? (e.g., very large values, NaN, inf)\n\nA self-contained script that doesn't require downloading files helps maintainers reproduce and debug the issue faster."
     },
     "numerical_accuracy": {
-      "action": "Close clearly expected numerical behavior and add comment",
-      "use_when": "Documented behavior explains this particular report with no unresolved evidence or impact requiring human review; only with decision close_expected_behavior",
+      "action": "Close clearly expected numerical behavior with this comment",
+      "use_when": "Only with decision close_expected_behavior: documented behavior explains this particular report and no unresolved evidence or impact needs human review",
       "comment": "This appears to be related to numerical accuracy limitations in floating point computation. PyTorch documents expected behavior for extremal values and precision differences in the [Numerical Accuracy](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) documentation.\n\nKey points:\n- Floating point provides limited accuracy (~7 decimal digits for fp32, ~16 for fp64)\n- Results may differ between CPU and GPU backends\n- Extremal values (near dtype max/min) can cause overflow in intermediate computations\n\nIf you believe this is a bug beyond expected numerical behavior, please provide a reproducer with values well within the normal range."
     }
   }

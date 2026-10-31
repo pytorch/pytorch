@@ -91,8 +91,8 @@ That issue belongs to the sub-oncall team. They own their queue.
 
 ### 1) Question vs Bug/Feature
 
-A substantive numerical investigation can be phrased as a question. Assess its evidence
-and practical impact before treating it as a usage question or stopping for missing information.
+A substantive numerical investigation may be phrased as a question. Assess evidence and practical
+impact before classifying it as a usage question or stopping for missing information.
 
 - If it is a question (not a bug report or feature request): use `decision: "close_question"`, which closes the issue with the `redirect_to_forum` template.
 - If unclear whether it is a bug/feature vs a question: use `decision: "request_info"` with the `request_more_info` template and stop.
@@ -116,12 +116,11 @@ It uses a fixed URL policy; do not submit a rewritten body or download the files
 
 ### 1.55) Missing Reproduction — Other Cases
 
-Missing reproduction must not suppress escalation. If a report gives credible mechanistic or
-comparative evidence of a consequential correctness problem, add `triage review` and relevant
-component labels while requesting the missing information. Judge practical reach and importance
-in context, including commonly used features and training workloads; do not require a fixed list
-of APIs. Keep it open without `triaged`. This also applies to external-file requests in Step 1.5;
-keep `decision: "request_reproduction"` there so the download links are still redacted.
+Missing reproduction must not block escalation. For credible mechanistic or comparative
+evidence of a consequential correctness problem, add `triage review` and component labels
+alongside the information request; keep it open without adding `triaged`. Judge importance in
+context (widely used features, training workloads), not from an API list. For external files,
+this rule still applies; keep `decision: "request_reproduction"` so Step 1.5 redaction still runs.
 
 Otherwise, request a self-contained reproduction and stop when:
 - The user reports a hardware-specific issue (e.g., specific GPU model) without a self-contained repro script
@@ -152,22 +151,20 @@ Label based on the **root cause**, not keywords that appear in the error or titl
 Ask: "Where would the fix need to be made?" That determines the label.
 
 **Action:**
-- The patterns above are reasons to investigate, not evidence that the behavior is expected.
-  Add `module: edge cases` only when the actual inputs or usage justify it; add `topic: fuzzer`
-  for fuzzer reports. Neither label is a reason to close an issue.
-- Use `decision: "triage_review"` with relevant component labels for substantive evidence that
-  needs numerical judgment: controlled reference/backend/layout comparisons, an unstable
-  formulation, an accuracy-contract concern, a concrete non-rounding mechanism, or meaningful
-  model/training impact. Assess evidence and feature importance, not issue length or keywords.
-  A plausible rounding-amplification explanation does not resolve a strong comparative study.
-  Review asks for judgment; it does not assert that a bug or high priority has been proved.
-- Reserve `close_expected_behavior` and the `numerical_accuracy` template for clear documented
-  behavior that explains the particular report, with no unresolved evidence or impact needing
-  review. State that mechanism and why the evidence is consistent with it in the plan reasoning.
-  A simple request for bitwise-identical CPU/GPU arithmetic can qualify; a controlled study of
-  substantial training divergence should be reviewed. When uncertain, keep it open for review.
-- Do not send the numerical template to review-worthy reports or request normal-range inputs
-  when an appropriate reproduction or control is already present.
+- These patterns warrant investigation, not dismissal. Use `module: edge cases` only when
+  inputs or usage justify it; add `topic: fuzzer` for fuzzing. Neither label justifies closing.
+- Use `decision: "triage_review"` plus component labels for substantive evidence needing numerical
+  judgment: controlled reference/backend/layout comparisons, unstable formulations, accuracy-contract concerns,
+  concrete non-rounding mechanisms, or meaningful model/training impact. Weigh evidence and
+  feature importance, not length or keywords. Plausible rounding amplification does not settle
+  a strong comparative study; review does not assert a proven bug or high priority.
+- Use `close_expected_behavior` with `numerical_accuracy` only when clearly documented behavior
+  explains the report, with no unresolved evidence or impact needing review. Explain the
+  mechanism and why the evidence fits in the plan reasoning. A simple bitwise CPU/GPU equality
+  question can qualify; a controlled study of substantial training divergence needs review.
+  When uncertain, leave it open for review.
+- Never send the numerical template to review-worthy reports or request normal-range inputs
+  when an adequate reproduction or control already exists.
 
 ### 2) Transfer (domain library or ExecuTorch)
 
