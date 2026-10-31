@@ -2813,6 +2813,22 @@ class TestSympyMod(TestCase):
         # unaffected by the plain-scalar normalization above.
         self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), sympy.Integer(8)), 4)
 
+    def test_mod_of_sym_max_with_even_args(self):
+        # This used to fold to the constant 0 without a guard, because
+        # sympy < 1.15 reports Max(6, 2*s0 - 12) / 6 as an integer.
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 10)
+        r = torch.sym_max(6, 2 * s0 - 12) % 6
+        self.assertEqual(guard_int(r), 2)
+
+    def test_python_mod_of_sum_with_even_args(self):
+        # The sign of the dividend is unknown, so % lowers to PythonMod, whose
+        # sympy.Mod fallback used to fold this to 0 on sympy < 1.15.
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 10)
+        r = (3 * s0 * (s0 + 1) + torch.sym_max(6, 2 * s0 - 12) - 996) % 6
+        self.assertEqual(guard_int(r), 2)
+
 
 class TestDimConstraints(TestCase):
     hw_classification = HardwareClassification.GENERIC
