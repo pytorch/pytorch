@@ -12,14 +12,14 @@ from torch.multiprocessing.reductions import reduce_tensor
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    requires_cuda_p2p_access,
+    requires_accelerator_p2p_access,
     run_tests,
     TEST_WITH_ROCM,
 )
 
 
 # So that tests are written in device-agnostic way
-device_type = "cuda"
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 device_module = torch.get_device_module(device_type)
 
 
@@ -37,7 +37,7 @@ def _scoped_env(key: str, value: str):
             os.environ[key] = prior
 
 
-@requires_cuda_p2p_access()
+@requires_accelerator_p2p_access()
 class P2PIpcTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
@@ -139,8 +139,9 @@ class P2PIpcTest(MultiProcContinuousTest):
             torch.distributed.barrier()  # consumer released before producer frees
             if self.rank == 0:
                 del tensor_meta, tensor
-                torch.cuda.ipc_collect()
-                torch.cuda.empty_cache()
+                if device_type == "cuda":
+                    torch.cuda.ipc_collect()
+                device_module.empty_cache()
 
         torch.distributed.barrier()
 
@@ -180,8 +181,8 @@ class P2PIpcTest(MultiProcContinuousTest):
         # Enable IPC handles for expandable segments (disabled by default in
         # fbcode). Use a scoped env so state does not leak across tests.
         with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
-            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-            torch.cuda.empty_cache()
+            torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
+            device_module.empty_cache()
             # 8MB > the 2MB default segment size, forcing an expandable segment.
             self._test_p2p_ipc_impl(
                 tensor_size=2 * 1024 * 1024,
@@ -191,7 +192,7 @@ class P2PIpcTest(MultiProcContinuousTest):
 
     @classmethod
     def tearDownClass(cls):
-        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:False")
         super().tearDownClass()
 
 

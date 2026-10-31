@@ -163,10 +163,16 @@ class _StorageBase:
 
     @classmethod
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
+        if isinstance(device, torch.device) and device.type == "xpu":
+            return cls._release_ipc_counter_xpu(*args, **kwargs)
         return cls._release_ipc_counter_cuda(*args, **kwargs)
 
     @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
+        raise NotImplementedError
+
+    @classmethod
+    def _release_ipc_counter_xpu(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     @classmethod
@@ -194,11 +200,18 @@ class _StorageBase:
     def _share_cuda_(self, *args, **kwargs):
         raise NotImplementedError
 
+    def _share_xpu_(self, *args, **kwargs):
+        raise NotImplementedError
+
     def is_shared(self) -> _bool:
         raise NotImplementedError
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs) -> Self:
+        raise NotImplementedError
+
+    @classmethod
+    def _new_shared_xpu(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     def _shared_incref(self, *args, **kwargs):
@@ -1462,6 +1475,9 @@ class TypedStorage:
     def _share_cuda_(self, *args, **kwargs):
         return self._untyped_storage._share_cuda_(*args, **kwargs)
 
+    def _share_xpu_(self, *args, **kwargs):
+        return self._untyped_storage._share_xpu_(*args, **kwargs)
+
     def is_shared(self):
         _warn_typed_storage_removal()
         return self._is_shared()
@@ -1473,6 +1489,10 @@ class TypedStorage:
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
         return torch.UntypedStorage._new_shared_cuda(*args, **kwargs)
+
+    @classmethod
+    def _new_shared_xpu(cls, *args, **kwargs):
+        return torch.UntypedStorage._new_shared_xpu(*args, **kwargs)
 
     def _share_filename_cpu_(self, *args, **kwargs):
         (
@@ -1488,7 +1508,9 @@ class TypedStorage:
 
     @classmethod
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
-        return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+        return torch.UntypedStorage._release_ipc_counter(
+            *args, device=device, **kwargs
+        )
 
     def _shared_incref(self, *args, **kwargs):
         return self._untyped_storage._shared_incref(*args, **kwargs)

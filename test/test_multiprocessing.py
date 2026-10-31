@@ -356,6 +356,8 @@ class leak_checker:
     def __exit__(self, *args):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
+        if torch.xpu.is_available():
+            torch.xpu.ipc_collect()
         if args[0] is None:
             # Check that the 10th available file-descriptor at the end of the
             # test is no more than 4 higher than the 10th available at the
@@ -564,7 +566,6 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
             return mp
         return mp.get_context("spawn")
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     def test_simple_sharing(self, device):
         ctx = self._get_ctx(device)
         self._test_sharing(ctx, device, torch.float)
@@ -574,7 +575,6 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     def test_empty_tensor_sharing(self, device, dtype):
         self._test_empty_tensor_sharing(dtype, torch.device(device))
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "non-deterministically hangs with ASAN "
@@ -590,17 +590,14 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
             )
             self._test_autograd_sharing(var, ctx)
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     def test_parameter_sharing(self, device):
         ctx = self._get_ctx(device)
         param = Parameter(torch.arange(1.0, 26, device=device).view(5, 5))
         self._test_autograd_sharing(param, ctx, is_parameter=True)
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5219")
     def test_integer_parameter_serialization(self, device):
         self._test_integer_parameter_serialization(device=device)
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5219")
     # See https://github.com/pytorch/pytorch/issues/14997
     @unittest.skipIf(TEST_WITH_ASAN, "non-deterministically hangs with ASAN")
     def test_leaf_variable_sharing(self, device):
