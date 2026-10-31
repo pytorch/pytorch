@@ -149,34 +149,40 @@ def foreach_map_adam(
     return
 
 
-# Note: we use atypical values to amplify error
+# Constructor kwargs and step kwargs. We use atypical values to amplify error.
 LR_SCHEDULER_TO_KWARGS = {
-    LambdaLR: {"lr_lambda": lambda x: 10},
-    MultiplicativeLR: {"lr_lambda": lambda x: 10},
-    StepLR: {"step_size": 1, "gamma": 100},
-    MultiStepLR: {"milestones": [1, 2], "gamma": 100},
-    ExponentialLR: {"gamma": 100},
-    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
-    CosineAnnealingLR: {"T_max": 7},
-    ChainedScheduler: {"schedulers": None},
-    CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
-    CosineAnnealingWarmRestarts: {"T_0": 1},
-    OneCycleLR: {
-        "max_lr": 0.02,
-        "cycle_momentum": False,
-        "steps_per_epoch": 1,
-        "epochs": 10,
-    },
-    ConstantLR: {"factor": 0.001},
-    LinearLR: {},
-    PlateauLR: {"factor": 0.99, "patience": 0},
-    ReduceLROnPlateau: {"factor": 0.99, "patience": 1},
-    PolynomialLR: {},
+    LambdaLR: ({"lr_lambda": lambda x: 10}, {}),
+    MultiplicativeLR: ({"lr_lambda": lambda x: 10}, {}),
+    StepLR: ({"step_size": 1, "gamma": 100}, {}),
+    MultiStepLR: ({"milestones": [1, 2], "gamma": 100}, {}),
+    ExponentialLR: ({"gamma": 100}, {}),
+    SequentialLR: ({"schedulers": None, "milestones": [1, 2]}, {}),
+    CosineAnnealingLR: ({"T_max": 7}, {}),
+    ChainedScheduler: ({"schedulers": None}, {}),
+    CyclicLR: (
+        {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
+        {},
+    ),
+    CosineAnnealingWarmRestarts: ({"T_0": 1}, {}),
+    OneCycleLR: (
+        {
+            "max_lr": 0.02,
+            "cycle_momentum": False,
+            "steps_per_epoch": 1,
+            "epochs": 10,
+        },
+        {},
+    ),
+    ConstantLR: ({"factor": 0.001}, {}),
+    LinearLR: ({}, {}),
+    PlateauLR: ({"factor": 0.99, "patience": 0}, {"metrics": 1.0}),
+    ReduceLROnPlateau: ({"factor": 0.99, "patience": 1}, {"metrics": 1.0}),
+    PolynomialLR: ({}, {}),
 }
 
 
 def create_scheduler(scheduler, optim):
-    kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler])
+    kwargs, _ = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler])
     if "schedulers" in kwargs:
         kwargs["schedulers"] = [
             create_scheduler(torch.optim.lr_scheduler.ConstantLR, optim)
@@ -644,6 +650,7 @@ class CompiledOptimizerParityTests(TestCase):
                 )
                 opt_eager = optim_cls(model_eager.parameters(), **deepcopy(kwargs))
                 if scheduler_cls:
+                    _, step_kwargs = LR_SCHEDULER_TO_KWARGS[scheduler_cls]
                     scheduler_compiled = create_scheduler(scheduler_cls, opt_compiled)
                     scheduler_eager = create_scheduler(scheduler_cls, opt_eager)
                     # some schedulers only change after at least an epoch has passed
@@ -665,7 +672,7 @@ class CompiledOptimizerParityTests(TestCase):
 
                         opt_compiled.step(closure)
                         if scheduler_cls:
-                            call_scheduler(scheduler_compiled)
+                            scheduler_compiled.step(**step_kwargs)
 
                     def closure_eager():
                         loss = model_eager(input).sum()
@@ -679,19 +686,19 @@ class CompiledOptimizerParityTests(TestCase):
                     for _ in range(num_steps):
                         opt_eager.step(closure_eager)
                         if scheduler_cls:
-                            call_scheduler(scheduler_eager)
+                            scheduler_eager.step(**step_kwargs)
                 else:
 
                     @torch.compile()
                     def fn():
                         opt_compiled.step()
                         if scheduler_cls:
-                            call_scheduler(scheduler_compiled)
+                            scheduler_compiled.step(**step_kwargs)
 
                     for _ in range(num_steps):
                         opt_eager.step()
                         if scheduler_cls:
-                            call_scheduler(scheduler_eager)
+                            scheduler_eager.step(**step_kwargs)
 
                 for _ in range(num_steps):
                     fn()
