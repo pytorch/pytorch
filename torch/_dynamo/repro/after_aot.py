@@ -427,7 +427,7 @@ def wrap_compiler_debug(
                 try:
                     # Call the compiled function with real inputs
                     out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
-                    # sync cuda kernels to ensure IMA detection
+                    # sync accelerator kernels to ensure IMA detection
                     if (
                         any(
                             isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
@@ -538,6 +538,108 @@ def generate_custom_triton_kernel(kernel: Any) -> str:
     return res
 
 
+# Mapping from device type to the environment variable that restricts which
+# devices minifier subprocesses can see. Only non-CUDA accelerators need an
+# entry: "cuda" (and everything unmapped) keeps the historical
+# CUDA_VISIBLE_DEVICES behavior in _minifier_env_variables below.
+# TODO(#189137): replace with DeviceInterface.visible_devices_env() once it
+# lands upstream.
+_VISIBLE_DEVICES_ENV_VARS: dict[str, str] = {
+    "npu": "ASCEND_RT_VISIBLE_DEVICES",
+}
+
+
+def _infer_repro_device_type(args: Sequence[Any]) -> str:
+    """
+    Best-effort device type of a repro: the device type of the first
+    non-cpu tensor argument, or "cpu" if there is none.
+    """
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
+            return arg.device.type
+    return "cpu"
+
+
+def _repro_system_info_comment(args: Sequence[Any]) -> str:
+    """
+    Device system info comment for the repro header. CUDA and CPU keep the
+    original collector verbatim; other accelerator devices fall back to
+    generic collection. Display-only: every failure degrades to comment text
+    so that debug tooling never breaks repro generation.
+    """
+    device_type = _infer_repro_device_type(args)
+    if device_type in ("cpu", "cuda"):
+        return _cuda_system_info_comment()
+    try:
+        lines: list[str] = []
+        version = getattr(torch.version, device_type, None)
+        if version is not None:
+            lines.append(f"# torch {device_type} version: {version}")
+        device_module = getattr(torch, device_type, None)
+        if device_module is None or not device_module.is_available():
+            lines.append(f"# {device_type} is not available")
+            return "\n".join(lines) + "\n"
+        lines.append(f"# {device_type} device count: {device_module.device_count()}")
+        get_device_name = getattr(device_module, "get_device_name", None)
+        if get_device_name is not None:
+            try:
+                lines.append(f"# {device_type} device 0: {get_device_name(0)}")
+            except Exception:
+                pass
+        return "\n".join(lines) + "\n"
+    except Exception:
+        return f"# Failed to collect {device_type} system info\n"
+
+
+def _oot_backend_imports(device_type: str) -> str:
+    """
+    Import lines the generated repro needs for out-of-tree devices:
+    `import torch_<backend>` so tensors can be created on that device when
+    the repro script runs standalone. Built-in devices (and any device type
+    that is not the registered PrivateUse1 backend) need nothing.
+    """
+    try:
+        privateuse1_name = torch._C._get_privateuse1_backend_name()
+    except (AttributeError, RuntimeError):
+        return ""
+    if device_type != privateuse1_name:
+        return ""
+    return (
+        textwrap.dedent(
+            f"""
+            try:
+                import torch_{device_type}  # noqa: F401
+            except ImportError:
+                pass
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def _minifier_env_variables(args: Sequence[Any]) -> dict[str, str]:
+    """
+    Environment variables used to pin minifier subprocesses to a single
+    device. The historical behavior (CUDA_VISIBLE_DEVICES, second device
+    when two or more are visible) is kept verbatim for CUDA, CPU and any
+    device type without an explicit mapping above.
+    """
+    device_type = _infer_repro_device_type(args)
+    env_name = _VISIBLE_DEVICES_ENV_VARS.get(device_type)
+    if env_name is None:
+        favored_device = 1 if torch.cuda.device_count() >= 2 else 0
+        return {"CUDA_VISIBLE_DEVICES": str(favored_device)}
+    device_count = 0
+    device_module = getattr(torch, device_type, None)
+    if device_module is not None:
+        try:
+            device_count = device_module.device_count()
+        except Exception:
+            device_count = 0
+    favored_device = 1 if device_count >= 2 else 0
+    return {env_name: str(favored_device)}
+
+
 def generate_compiler_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
@@ -569,6 +671,8 @@ import triton.language as tl
         """
         ).strip()
 
+    oot_imports = _oot_backend_imports(_infer_repro_device_type(args))
+
     model_str = textwrap.dedent(
         f"""
 {generate_env_vars_string(stable_output=stable_output)}
@@ -591,6 +695,7 @@ isolate_fails_code_str = None
 {maybe_fbcode_instructions()}
      """
     )
+    model_str += oot_imports
     model_str += textwrap.dedent(
         """
 if "__compile_source__" in globals():
@@ -611,7 +716,7 @@ if "__compile_source__" in globals():
             model_str += f"# torch cuda version: {torch.version.cuda}\n"
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-        model_str += _cuda_system_info_comment()
+        model_str += _repro_system_info_comment(args)
 
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
@@ -1367,8 +1472,7 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     mod, args = repro_common(options, mod, load_args)
     compiler_name = "inductor_accuracy" if options.accuracy != "" else "inductor"
 
-    favored_device = 1 if torch.cuda.device_count() >= 2 else 0
-    env_variables = {"CUDA_VISIBLE_DEVICES": str(favored_device)}
+    env_variables = _minifier_env_variables(args)
 
     module_fails: Any
     if options.isolate:
