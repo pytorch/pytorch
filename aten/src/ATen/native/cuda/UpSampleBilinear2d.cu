@@ -129,6 +129,12 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
 }
 
 #ifdef USE_ROCM
+// Prefer gather on channels_last when 4*o_numel/i_numel is high (contended
+// atomics). One cutoff is shared by all ROCm architectures: gather wins above
+// ~6 atomics/addr and loses below ~5 on the parts measured so far. It can be
+// tuned for individual architectures later.
+constexpr int64_t kNhwcGatherMinContributions = 6;
+
 // Helper function to compute output pixel range that can contribute to input pixel
 template <typename accscalar_t>
 __device__ __forceinline__ void compute_output_range(
@@ -149,6 +155,102 @@ __device__ __forceinline__ void compute_output_range(
   min_output = max(0, static_cast<int>(std::ceil(lo)));
   max_output = min(output_size - 1, static_cast<int>(std::floor(hi)));
 }
+
+// Atomic-free gather: one thread per grad_input element. channels_last selects
+// NHWC vs NCHW index decode / odata layout.
+template <typename scalar_t, typename accscalar_t, typename index_t, bool channels_last>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_bilinear2d_backward_gather_out_frame(
+    const int height1,
+    const int width1,
+    const int height2,
+    const int width2,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    scalar_t* __restrict__ idata,
+    const scalar_t* __restrict__ odata,
+    const int channels,
+    const index_t i_numel) {
+  const index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (index >= i_numel) {
+    return;
+  }
+
+  index_t n, c;
+  int h1, w1;
+  if constexpr (channels_last) {
+    // NHWC: index = ((n * H + h) * W + w) * C + c
+    c = index % channels;
+    index_t index_temp = index / channels;
+    w1 = index_temp % width1;
+    index_temp /= width1;
+    h1 = index_temp % height1;
+    n = index_temp / height1;
+  } else {
+    // NCHW: index = ((n * C + c) * H + h) * W + w  (nc packed as n*C+c)
+    index_t index_temp = index;
+    w1 = index_temp % width1;
+    index_temp /= width1;
+    h1 = index_temp % height1;
+    const index_t nc_idx = index_temp / height1;
+    n = nc_idx / channels;
+    c = nc_idx % channels;
+  }
+
+  accscalar_t grad_sum = 0;
+
+  int h2_min, h2_max, w2_min, w2_max;
+  compute_output_range<accscalar_t>(h1, rheight, height2, align_corners, h2_min, h2_max);
+  compute_output_range<accscalar_t>(w1, rwidth, width2, align_corners, w2_min, w2_max);
+
+  for (int h2 = h2_min; h2 <= h2_max; h2++) {
+    for (int w2 = w2_min; w2 <= w2_max; w2++) {
+      const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+          rheight, h2, align_corners, /*cubic=*/false);
+      const int h1_base = (int)h1r;
+      const int h1p = (h1_base < height1 - 1) ? 1 : 0;
+      const accscalar_t h1lambda = h1r - h1_base;
+      const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+
+      const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+          rwidth, w2, align_corners, /*cubic=*/false);
+      const int w1_base = (int)w1r;
+      const int w1p = (w1_base < width1 - 1) ? 1 : 0;
+      const accscalar_t w1lambda = w1r - w1_base;
+      const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+      // At boundaries, h1p=0 or w1p=0 causes some sampling positions to collapse
+      // to the same pixel, so accumulate weights from all matching positions.
+      accscalar_t weight = 0;
+      if (h1 == h1_base && w1 == w1_base) {
+        weight += h0lambda * w0lambda;  // top-left
+      }
+      if (h1 == h1_base && w1 == w1_base + w1p) {
+        weight += h0lambda * w1lambda;  // top-right
+      }
+      if (h1 == h1_base + h1p && w1 == w1_base) {
+        weight += h1lambda * w0lambda;  // bottom-left
+      }
+      if (h1 == h1_base + h1p && w1 == w1_base + w1p) {
+        weight += h1lambda * w1lambda;  // bottom-right
+      }
+
+      if (weight > 0) {
+        index_t output_idx;
+        if constexpr (channels_last) {
+          output_idx = idx_cl<index_t>(n, h2, w2, c, height2, width2, channels);
+        } else {
+          const index_t nc_idx = n * channels + c;
+          output_idx = nc_idx * height2 * width2 + h2 * width2 + w2;
+        }
+        grad_sum += weight * static_cast<accscalar_t>(odata[output_idx]);
+      }
+    }
+  }
+
+  idata[index] = static_cast<scalar_t>(grad_sum);
+}
 #endif
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
@@ -167,71 +269,6 @@ __global__ void upsample_bilinear2d_backward_out_frame(
     const scalar_t* __restrict__ odata) {
   // In C++, integer multiplication, like in standard arithmetic, is generally commutative.
   const size_t i_numel = nc * width1 * height1;
-#ifdef USE_ROCM
-  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < i_numel;
-       index += blockDim.x * gridDim.x) {
-    // Decode input pixel coordinates
-    size_t index_temp = index;
-    const int w1 = index_temp % width1;
-    index_temp /= width1;
-    const int h1 = index_temp % height1;
-    const size_t nc_idx = index_temp / height1;
-
-    accscalar_t grad_sum = 0;
-
-    // Find range of output pixels that could interpolate from this input pixel
-    int h2_min, h2_max, w2_min, w2_max;
-    compute_output_range<accscalar_t>(h1, rheight, height2, align_corners, h2_min, h2_max);
-    compute_output_range<accscalar_t>(w1, rwidth, width2, align_corners, w2_min, w2_max);
-
-    // Iterate over potential output pixels
-    for (int h2 = h2_min; h2 <= h2_max; h2++) {
-      for (int w2 = w2_min; w2 <= w2_max; w2++) {
-        // Compute source coordinates for this output pixel
-        const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
-            rheight, h2, align_corners, /*cubic=*/false);
-        const int h1_base = (int)h1r;
-        const int h1p = (h1_base < height1 - 1) ? 1 : 0;
-        const accscalar_t h1lambda = h1r - h1_base;
-        const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
-
-        const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
-            rwidth, w2, align_corners, /*cubic=*/false);
-        const int w1_base = (int)w1r;
-        const int w1p = (w1_base < width1 - 1) ? 1 : 0;
-        const accscalar_t w1lambda = w1r - w1_base;
-        const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
-
-        // Check if our input pixel participates in this interpolation and accumulate all weights
-        // At boundaries, h1p=0 or w1p=0 causes some sampling positions to collapse
-        // to the same pixel, so we need to accumulate weights from all matching positions
-        accscalar_t weight = 0;
-
-        // Check all four interpolation positions and accumulate weights
-        if (h1 == h1_base && w1 == w1_base) {
-          weight += h0lambda * w0lambda;  // top-left
-        }
-        if (h1 == h1_base && w1 == w1_base + w1p) {
-          weight += h0lambda * w1lambda;  // top-right (may be same as top-left if w1p=0)
-        }
-        if (h1 == h1_base + h1p && w1 == w1_base) {
-          weight += h1lambda * w0lambda;  // bottom-left (may be same as top-left if h1p=0)
-        }
-        if (h1 == h1_base + h1p && w1 == w1_base + w1p) {
-          weight += h1lambda * w1lambda;  // bottom-right (may collapse to other positions)
-        }
-
-        if (weight > 0) {
-          const size_t output_idx = nc_idx * height2 * width2 + h2 * width2 + w2;
-          grad_sum += weight * static_cast<accscalar_t>(odata[output_idx]);
-        }
-      }
-    }
-
-    // Write accumulated gradient (no atomics needed)
-    idata[index] = static_cast<scalar_t>(grad_sum);
-  }
-#else
   const size_t o_numel = nc * width2 * height2;
   for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < o_numel;
        index += blockDim.x * gridDim.x) {
@@ -281,7 +318,6 @@ __global__ void upsample_bilinear2d_backward_out_frame(
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);
   }
-#endif
 }
 
 template <typename scalar_t, typename accscalar_t, typename index_t>
@@ -299,7 +335,6 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     const int channels,
     const index_t o_numel,
     const index_t i_numel) {
-
   const index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (index < o_numel) {
@@ -486,11 +521,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   const auto memory_format = grad_output_.suggest_memory_format();
 
-  // initialization to zero is required here. As we launch one thread per output
-  // element, and atomicAdd to input gradient. Given a sparse sampling case, our
-  // threads are not covering the whole input tensor.
-  grad_input.zero_();
-
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -500,17 +530,28 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     return;
   }
 
+  const bool use_nhwc = memory_format == at::MemoryFormat::ChannelsLast &&
+      channels >= 4 && grad_input.is_contiguous(memory_format);
+
 #ifdef USE_ROCM
-  constexpr bool use_input = true;
+  // Prefer NHWC gather when atomics/addr (= 4 * o_numel / i_numel) is high.
+  const bool use_nhwc_gather = use_nhwc &&
+      (4 * grad_output_.numel() >=
+       kNhwcGatherMinContributions * grad_input.numel());
 #else
-  constexpr bool use_input = false;
+  constexpr bool use_nhwc_gather = false;
 #endif
+
+  // Zero-init is required for scatter (atomicAdd into grad_input). The ROCm
+  // NHWC gather writes every grad_input element, so it can skip the fill.
+  if (!use_nhwc_gather) {
+    grad_input.zero_();
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
-    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
-          grad_input.is_contiguous(memory_format)) {
+    if (use_nhwc) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
@@ -523,14 +564,39 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
-      const size_t num_kernels = static_cast<size_t>(nbatch) * channels * output_height * output_width;
-
-      // One thread per output element, so the grid is bounded by maxGridSize[0].
+      // Gather: one thread per grad_input element; scatter: one per grad_output.
+      const size_t num_kernels = static_cast<size_t>(nbatch) * channels *
+          (use_nhwc_gather ? input_height * input_width
+                           : output_height * output_width);
       const size_t num_blocks = ceil_div(num_kernels, static_cast<size_t>(num_threads));
       TORCH_CHECK(
           num_blocks <= static_cast<size_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[0]),
           "upsample_bilinear2d_backward: grad_output ", grad_output.sizes(),
           " is too large for the channels_last CUDA kernel launch");
+
+#ifdef USE_ROCM
+      if (use_nhwc_gather) {
+        if (canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output)) {
+          upsample_bilinear2d_backward_gather_out_frame<
+              scalar_t, accscalar_t, int32_t, /*channels_last=*/true>
+              <<<num_blocks, num_threads, 0, stream>>>(
+                  input_height, input_width, output_height, output_width,
+                  rheight, rwidth, align_corners,
+                  idata, odata, channels,
+                  static_cast<int32_t>(grad_input.numel()));
+        } else {
+          upsample_bilinear2d_backward_gather_out_frame<
+              scalar_t, accscalar_t, int64_t, /*channels_last=*/true>
+              <<<num_blocks, num_threads, 0, stream>>>(
+                  input_height, input_width, output_height, output_width,
+                  rheight, rwidth, align_corners,
+                  idata, odata, channels,
+                  grad_input.numel());
+        }
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        return;
+      }
+#endif
 
       if (canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output)) {
         upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t, int32_t>
@@ -565,7 +631,31 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
-      const size_t num_kernels = static_cast<size_t>(nbatch) * channels * (use_input ? input_height * input_width : output_height * output_width);
+#ifdef USE_ROCM
+      const size_t num_kernels =
+          static_cast<size_t>(nbatch) * channels * input_height * input_width;
+      const size_t num_blocks =
+          ceil_div(num_kernels, static_cast<size_t>(num_threads));
+      if (canUse32BitIndexMath(grad_input_c) && canUse32BitIndexMath(grad_output)) {
+        upsample_bilinear2d_backward_gather_out_frame<
+            scalar_t, accscalar_t, int32_t, /*channels_last=*/false>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                input_height, input_width, output_height, output_width,
+                rheight, rwidth, align_corners,
+                idata, odata, channels,
+                static_cast<int32_t>(grad_input_c.numel()));
+      } else {
+        upsample_bilinear2d_backward_gather_out_frame<
+            scalar_t, accscalar_t, int64_t, /*channels_last=*/false>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                input_height, input_width, output_height, output_width,
+                rheight, rwidth, align_corners,
+                idata, odata, channels,
+                grad_input_c.numel());
+      }
+#else
+      const size_t num_kernels =
+          static_cast<size_t>(nbatch) * channels * output_height * output_width;
 
       upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
           <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)),
@@ -582,6 +672,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
               align_corners,
               idata,
               odata);
+#endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
 
       if (!grad_input.is_contiguous()) {
