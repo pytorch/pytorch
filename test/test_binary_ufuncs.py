@@ -2033,8 +2033,8 @@ class TestBinaryUfuncsDevice(TestCase):
         p = complex(-0.53125, -0.53125) if dtype.is_complex else -0.53125
         alpha = 0.1
 
-        # Tensor sizes cover scalar-only (< vector size), vector boundary, scalar tail, and large tail paths
-        # across vector widths (e.g. AVX2 width 32 and AVX512 width 64 for 16-bit types):
+        # Tensor sizes cover scalar-only (< vector size), loop boundary, scalar tail, and large tail paths.
+        # The sizes straddle the 2 * Vectorized<scalar_t>::size() unroll (e.g. 32 on AVX2, 64 on AVX512):
         # 1, 31, 32, 33, 63, 64, 65, and 4096 + 67.
         for n in [1, 31, 32, 33, 63, 64, 65, 4096 + 67]:
             x = torch.full((n,), g, device=device, dtype=dtype)

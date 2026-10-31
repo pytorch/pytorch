@@ -24,6 +24,9 @@ C10_ALWAYS_INLINE Vectorized<T> add(Vectorized<T> self, Vectorized<T> other, at:
   using opmath_t = at::opmath_type<T>;
   // Note: Only Half and BFloat16 take this branch; ComplexHalf must stay ScalarOnly in native_functions.yaml until vectorized complex half is supported.
   if constexpr (!std::is_same_v<T, opmath_t>) {
+    if (alpha == opmath_t(1.0)) {
+      return self + other;
+    }
     Vectorized<opmath_t> vec_alpha(alpha);
     auto [self0, self1] = convert_to_float<T>(self);
     auto [other0, other1] = convert_to_float<T>(other);
