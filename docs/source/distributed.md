@@ -1769,7 +1769,7 @@ without stack traces, goes to the same per-rank file
 (``<TORCH_FR_DUMP_TEMP_FILE><rank>``, prefix ``~/.cache/torch/comm_lib_trace_rank_``
 if unset) that every backend's dump and ProcessGroupNCCL's timeout dump write,
 so it overwrites any earlier dump there, including the watchdog's. Copy that
-file first to keep it. The first dump in the process fixes the file name.
+file first to keep it.
 
 ```bash
 curl -X POST \
