@@ -8,10 +8,11 @@ import inspect
 import itertools
 import logging
 import operator
+import re
 import types
 import typing
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
@@ -415,6 +416,8 @@ class Op:
     # used for tt.elementwise_inline_asm
     # `is_pure = True` assumes the asm block has no side-effects
     is_pure: bool = False
+    inline_asm: str | None = None
+    asm_constraints: str | None = None
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -829,11 +832,76 @@ def ttir_to_functions(
 
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
+        elif name in ("scf.for", "scf.while"):
+            if name == "scf.for":
+                if len(child_block_ids) != 1 or len(operand_ids) < 3:
+                    raise RuntimeError("Expected one body and three bounds for scf.for")
+                body_id = child_block_ids[0]
+                body_ops = op_stack.pop(body_id)
+                _, yield_ops = body_ops.popitem()
+                block_args = block_id_to_block_arg_ids[body_id]
+                if not block_args:
+                    raise RuntimeError("Expected an induction variable for scf.for")
+                next_fake_intermediate -= 1
+                replacements[block_args[0]] = Intermediate(next_fake_intermediate)
+                state_args = block_args[1:]
+                initial_ids = operand_ids[3:]
+                result_args = [Intermediate(idx) for idx in state_args]
+                forwarded_ids = []
+                forwarded_args = []
+                block_ops_to_inline = (body_ops,)
+            else:
+                if len(child_block_ids) != 2:
+                    raise RuntimeError(
+                        "Expected one before and one after block for scf.while"
+                    )
+                before_id, after_id = child_block_ids
+                before_ops = op_stack.pop(before_id)
+                after_ops = op_stack.pop(after_id)
+                _, condition_ops = before_ops.popitem()
+                _, yield_ops = after_ops.popitem()
+                if len(condition_ops) != 1 or condition_ops[0].name != "scf.condition":
+                    raise RuntimeError(
+                        "Expected scf.condition terminator for scf.while"
+                    )
+                state_args = block_id_to_block_arg_ids[before_id]
+                initial_ids = operand_ids
+                result_args = condition_ops[0].args[1:]
+                forwarded_ids = block_id_to_block_arg_ids[after_id]
+                forwarded_args = result_args
+                block_ops_to_inline = (before_ops, after_ops)
+            if len(yield_ops) != 1 or yield_ops[0].name != "scf.yield":
+                raise RuntimeError(f"Expected scf.yield terminator for {name}")
+            yield_args = yield_ops[0].args
+            if (
+                len(state_args) != len(initial_ids)
+                or len(yield_args) != len(state_args)
+                or len(result_ids) != len(result_args)
+                or len(forwarded_ids) != len(forwarded_args)
+            ):
+                raise RuntimeError(f"Inconsistent {name} block arguments and results")
+
+            for block_ops in block_ops_to_inline:
+                for result, child_ops in block_ops.items():
+                    op_stack[parent_block_id][result].extend(child_ops)
+
+            # Loop state joins initial operands and backedges, including cycles.
+            for idx, initial_id, yield_arg in zip(state_args, initial_ids, yield_args):
+                state = Intermediate(idx)
+                args = list(dict.fromkeys([Intermediate(initial_id), yield_arg]))
+                op_stack[parent_block_id][state].append(Op(name, None, args, state))
+
+            # While conditions forward values to the body and to the exit. For
+            # results use the joined body state, including zero-iteration exits.
+            replacements.update(zip(forwarded_ids, forwarded_args))
+            for idx, result_arg in zip(result_ids, result_args):
+                result = Intermediate(idx)
+                op_stack[parent_block_id][result].append(
+                    Op(name, None, [result_arg], result)
+                )
         elif child_block_ids:
             structured_region_ops = {
                 "scf.if",
-                "scf.for",
-                "scf.while",
                 "tt.reduce",
                 "tt.scan",
             }
@@ -847,27 +915,7 @@ def ttir_to_functions(
                 # child block to return the block result
                 return_ops = []
                 for block_id in child_block_ids:
-                    if name == "scf.for":
-                        # example:
-                        # %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %init) -> (i32) ...
-                        # block args: 2 (%iv, %arg)
-                        # op operands: 4 (%lb, %ub, %step, %init)
-                        # `%arg` is mapping to `%init`
-                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
-                            if i == 0:
-                                next_fake_intermediate -= 1
-                                replacements[idx] = Intermediate(next_fake_intermediate)
-                            else:
-                                replacements[idx] = Intermediate(operand_ids[i + 2])
-                    elif name == "scf.while":
-                        # example:
-                        # %3:3 = scf.while (%arg2 = %1, %arg3 = %2, %arg4 = %c0_i32_8) ...
-                        # block args: 3 (%arg2, %arg3, %arg4)
-                        # op operands: 3 (%1, %2, %c0_i32_8)
-                        # `%arg2` is mapping to `%1`, `%arg3` is mapping to `%2`, ...
-                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
-                            replacements[idx] = Intermediate(operand_ids[i])
-                    elif name == "scf.if":
+                    if name == "scf.if":
                         # the scf block args are ignored by the pass. but, as they
                         # may be used as operands of the ops inside the block
                         # (and nested blocks inlined in the current block by now),
@@ -983,7 +1031,7 @@ def ttir_to_functions(
                     # looks at the mutated arg in tt.store; then looks for its source ops; and then recurses on the
                     # arguments to each of the source ops.
                     #
-                    # In the case of scf.if/scf.for, we may have multiple return ops, each passed as an arg
+                    # In the case of scf.if, we may have multiple return ops, each passed as an arg
                     # to scf.yield:
                     #
                     # %18:2 = scf.if %... -> (!tt.ptr<f32>, !tt.ptr<f32>) {
@@ -1034,19 +1082,41 @@ def ttir_to_functions(
             block_ops = op_stack[parent_block_id]
 
             is_pure = False
+            inline_asm = None
+            asm_constraints = None
             # Handle the case for tt.elementwise_inline_asm to set `is_pure` for mutation analysis
             if name == "tt.elementwise_inline_asm":
                 is_pure = op.get_bool_attr("pure")
+                inline_asm = op.get_str_attr("asm_string")
+                asm_constraints = op.get_str_attr("constraints")
 
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
+                    block_ops[res].append(
+                        Op(
+                            name,
+                            callee,
+                            args,
+                            res,
+                            is_pure=is_pure,
+                            inline_asm=inline_asm,
+                            asm_constraints=asm_constraints,
+                        )
+                    )
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
                 block_ops[fake_res].append(
-                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                    Op(
+                        name,
+                        callee,
+                        args,
+                        fake_res,
+                        is_pure=is_pure,
+                        inline_asm=inline_asm,
+                        asm_constraints=asm_constraints,
+                    )
                 )
 
     ttir_module.walk(mlir_to_functions)
@@ -1080,6 +1150,37 @@ class MemoizeWithCycleCheck:
         self.cache = {}
 
 
+def _forwarded_addresses(
+    ops: dict[Intermediate, list[Op]], roots: Iterable[Intermediate | Param]
+) -> set[Intermediate | Param]:
+    """Return roots plus the values they forward through descriptor
+    reinterpretation, loop state, scf.yield and arith.select. Address arithmetic
+    is not followed, so separate descriptor slots in one workspace stay distinct.
+    """
+    result = set(roots)
+    stack = list(result)
+    while stack:
+        val = stack.pop()
+        if not isinstance(val, Intermediate):
+            continue
+        for op in ops.get(val, []):
+            if op.name == "tt.reinterpret_tensor_descriptor":
+                if not op.args:
+                    raise AssertionError(f"{op.name} expected at least 1 arg, got 0")
+                forwarded_args = op.args[:1]
+            elif op.name in ("scf.for", "scf.while", "scf.yield"):
+                forwarded_args = op.args
+            elif op.name == "arith.select":
+                forwarded_args = op.args[1:]
+            else:
+                continue
+            for arg in forwarded_args:
+                if arg not in result:
+                    result.add(arg)
+                    stack.append(arg)
+    return result
+
+
 @MemoizeWithCycleCheck
 def get_tma_stores(
     functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str
@@ -1087,9 +1188,8 @@ def get_tma_stores(
     """
     Identifies all intermediates and parameters that are written to by a
     `tt.experimental_descriptor_store`. It tracks only the specific values
-    written to via experimental_descriptor_store and the input values to
-    `tt.reinterpret_tensor_descriptor` used to construct the direct inputs
-    to tt.experimental_descriptor_store - not any recursive values
+    written to via experimental_descriptor_store and the values they are
+    forwarded from (see `_forwarded_addresses`) - not any recursive values
     used to construct those values.
 
     For example: for
@@ -1132,20 +1232,7 @@ def get_tma_stores(
                 ):
                     result.update(op.args[idx] for idx in op_info.write_indexes(op))
 
-    for val in list(result):
-        if val in ops:
-            if not isinstance(val, Intermediate):
-                continue
-            for op in ops[val]:
-                if op.name == "tt.reinterpret_tensor_descriptor":
-                    if len(op.args) < 1:
-                        raise AssertionError(
-                            "tt.reinterpret_tensor_descriptor expected at least 1 arg, "
-                            f"got {len(op.args)}"
-                        )
-                    result.add(op.args[0])
-
-    return result
+    return _forwarded_addresses(ops, result)
 
 
 @dataclasses.dataclass
@@ -1176,6 +1263,31 @@ def first_arg(op: Op) -> list[int]:
 def first_two_args(op: Op) -> list[int]:
     """Cover descriptor positions with and without an optional multicast target."""
     return list(range(min(2, len(op.args))))
+
+
+def _classify_inline_asm(op: Op) -> tuple[int, ...] | None:
+    """Return (0,) for an impure asm op that only polls operand 0, else None."""
+    if op.name != "tt.elementwise_inline_asm" or op.is_pure:
+        return None
+
+    # Only .gpu.global.b32 acquire/relaxed loads, optionally preceded by a
+    # literal nanosleep, are supported. Other scopes/types, volatile loads,
+    # brace-wrapped asm, dynamic sleeps, and extra instructions/operands retain
+    # conservative handling.
+    if (
+        len(op.args) == 1
+        and op.asm_constraints is not None
+        and op.asm_constraints.replace(" ", "") == "=r,l"
+        and op.inline_asm is not None
+        and re.fullmatch(
+            r"\s*(?:nanosleep\.u32\s+[0-9]+;\s*)?"
+            r"ld\.(?:relaxed|acquire)\.gpu\.global\.b32\s+\$0,\s*\[\$1\];\s*",
+            op.inline_asm,
+        )
+        is not None
+    ):
+        return (0,)
+    return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1299,8 +1411,13 @@ def analyze_kernel_access(
 
     for op_list in ops.values():
         for op in op_list:
-            # If we encounter an operation with effects that cannot be reliably analyzed
-            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
+            if op.name == "tt.elementwise_inline_asm":
+                read_indexes = _classify_inline_asm(op)
+                if read_indexes is not None:
+                    # Also a write: the polled flag carries the kernel's synchronization.
+                    read_stack.extend(op.args[idx] for idx in read_indexes)
+                    write_stack.extend(op.args[idx] for idx in read_indexes)
+                    continue
             op_info = _KERNEL_ACCESS_OPS.get(op.name)
             if op_info is not None and op_info.ignore_if is not None:
                 if op_info.ignore_if(op):
@@ -1323,7 +1440,7 @@ def analyze_kernel_access(
                         f"tt.experimental_tensormap_create expected at least 2 args, "
                         f"got {len(op.args)}"
                     )
-                if op.args[0] in tma_stores:
+                if not tma_stores.isdisjoint(_forwarded_addresses(ops, op.args[:1])):
                     write_stack.append(op.args[1])
 
             if op.name == "tt.call":
@@ -1373,30 +1490,35 @@ def analyze_kernel_access(
         initial_stack: list[Param | Intermediate],
         skip_loads: bool,
     ) -> dict[int, int]:
-        """DFS traversal to find argument indices that are accessed (and how many times they are accessed)."""
+        """DFS traversal to find accessed argument indices and how many access sites reach each."""
         access_count = dict()
-        stack = initial_stack[:]
-
-        while stack:
-            arg = stack.pop()
-
-            if isinstance(arg, Param):
-                if arg.idx >= num_args:
+        for site in initial_stack:
+            # Count each argument once per access site; loop state makes the graph cyclic.
+            visited: set[Param | Intermediate] = set()
+            stack = [site]
+            while stack:
+                arg = stack.pop()
+                if arg in visited:
                     continue
-                if tensor_arg_indices is not None and arg.idx not in tensor_arg_indices:
-                    continue
-                if arg.idx not in access_count:
-                    access_count[arg.idx] = 1
-                else:
-                    access_count[arg.idx] += 1
-            elif isinstance(arg, Intermediate) and not arg.fake():
-                for op in ops[arg]:
-                    if skip_loads and op.name == "tt.load":
+                visited.add(arg)
+
+                if isinstance(arg, Param):
+                    if arg.idx >= num_args:
                         continue
-                    if op.name in POINTER_ONLY_OPS:
-                        stack.append(op.args[0])
-                    else:
-                        stack.extend(op.args)
+                    if (
+                        tensor_arg_indices is not None
+                        and arg.idx not in tensor_arg_indices
+                    ):
+                        continue
+                    access_count[arg.idx] = access_count.get(arg.idx, 0) + 1
+                elif isinstance(arg, Intermediate) and not arg.fake():
+                    for op in ops[arg]:
+                        if skip_loads and op.name == "tt.load":
+                            continue
+                        if op.name in POINTER_ONLY_OPS:
+                            stack.append(op.args[0])
+                        else:
+                            stack.extend(op.args)
 
         return access_count
 
