@@ -241,36 +241,43 @@ CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 
 
+def _ends_with_harness_suffix(test_name: str, suffix: str) -> bool:
+    # instantiate_device_type_tests appends _<device> after harness suffixes
+    # (e.g. ..._training_ir_to_decomp_strict_cuda), so plain endswith misses.
+    if test_name.endswith(suffix):
+        return True
+    base, sep, _ = test_name.rpartition("_")
+    return bool(sep) and base.endswith(suffix)
+
+
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
 def is_non_strict_test(test_name):
-    return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
-        STRICT_EXPORT_V2_SUFFIX
-    )
+    return not is_strict_test(test_name) and not is_strict_v2_test(test_name)
 
 
 def is_strict_test(test_name):
-    return test_name.endswith(STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, STRICT_SUFFIX)
 
 
 def is_strict_v2_test(test_name):
-    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
+    return _ends_with_harness_suffix(test_name, STRICT_EXPORT_V2_SUFFIX)
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
-    return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, INLINE_AND_INSTALL_STRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
-    return test_name.endswith(RETRACEABILITY_STRICT_SUFFIX) or test_name.endswith(
-        RETRACEABILITY_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, RETRACEABILITY_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, RETRACEABILITY_NON_STRICT_SUFFIX)
 
 
 def is_serdes_test(test_name):
-    return test_name.endswith(SERDES_STRICT_SUFFIX) or test_name.endswith(
-        SERDES_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, SERDES_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, SERDES_NON_STRICT_SUFFIX)
 
 
 def need_serdes_test(test_name):
@@ -278,19 +285,19 @@ def need_serdes_test(test_name):
 
 
 def is_training_ir_test(test_name):
-    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX) or test_name.endswith(
-        TRAINING_IR_DECOMP_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, TRAINING_IR_DECOMP_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, TRAINING_IR_DECOMP_NON_STRICT_SUFFIX)
 
 
 def is_training_ir_strict_test(test_name):
-    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, TRAINING_IR_DECOMP_STRICT_SUFFIX)
 
 
 def is_cpp_runtime_test(test_name):
-    return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
-        CPP_RUNTIME_NONSTRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, CPP_RUNTIME_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, CPP_RUNTIME_NONSTRICT_SUFFIX)
 
 
 def get_hop_schema(ep: torch.export.ExportedProgram):
@@ -9471,75 +9478,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             runtime_output = ep.module()(torch.randn(6, 4, 24))
         self.assertEqual(runtime_output.shape, torch.Size([4, 32]))
 
-    @requires_gpu
-    def test_export_lstm_gpu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.rnn = torch.nn.LSTM(
-                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
-                )
-
-            def forward(self, x):
-                out, _ = self.rnn(x)
-                return out
-
-        m = M().to(GPU_TYPE)
-        x = torch.randn(2, 3, 4, device=GPU_TYPE)
-
-        ep = export(m, (x,))
-        self.assertTrue(callable(ep.module()))
-
-        eager_out = m(x)
-        export_out = ep.module()(x)
-        self.assertEqual(eager_out, export_out)
-
-    @requires_gpu
-    def test_export_gru_gpu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.rnn = torch.nn.GRU(
-                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
-                )
-
-            def forward(self, x):
-                out, _ = self.rnn(x)
-                return out
-
-        m = M().to(GPU_TYPE)
-        x = torch.randn(2, 3, 4, device=GPU_TYPE)
-
-        ep = export(m, (x,))
-        self.assertTrue(callable(ep.module()))
-
-        eager_out = m(x)
-        export_out = ep.module()(x)
-        self.assertEqual(eager_out, export_out)
-
-    @requires_gpu
-    def test_export_rnn_flatten_parameters_gpu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(
-                    input_size=3, hidden_size=4, num_layers=2, batch_first=True
-                )
-
-            def forward(self, x):
-                self.lstm.flatten_parameters()
-                out, (h, c) = self.lstm(x)
-                return out
-
-        m = M().to(GPU_TYPE)
-        x = torch.randn(1, 5, 3, device=GPU_TYPE)
-
-        ep = export(m, (x,), strict=False)
-
-        eager_out = m(x)
-        export_out = ep.module()(x)
-        self.assertEqual(eager_out, export_out)
-
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -9661,58 +9599,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y, _ = ep.module()(x)
         self.assertEqual(x.item(), 4)
         self.assertEqual(id(y), id(x))
-
-    @requires_gpu
-    @testing.expectedFailureCppRuntime
-    def test_device_to_gpu(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x.to("cpu")
-
-        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
-        ops = []
-        for node in ep.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        if is_training_ir_test(self._testMethodName):
-            # aten.to decomposes to _to_copy
-            self.assertEqual(
-                ops,
-                [
-                    torch.ops.aten._assert_tensor_metadata.default,
-                    torch.ops.aten._to_copy.default,
-                ],
-            )
-        else:
-            self.assertEqual(
-                ops,
-                [
-                    torch.ops.aten._assert_tensor_metadata.default,
-                    torch.ops.aten.to.dtype_layout,
-                ],
-            )
-
-        # Check device assertion
-        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-            ep.module()(torch.randn(64))
-
-        ep = ep.run_decompositions()
-        ops = []
-        for node in ep.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        self.assertEqual(len(ops), 2)
-        self.assertEqual(
-            ops,
-            [
-                torch.ops.aten._assert_tensor_metadata.default,
-                torch.ops.aten._to_copy.default,
-            ],
-        )
-
-        # Check device assertion again after decomp
-        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-            ep.module()(torch.randn(64))
 
     def test_tensor_constant_aten_to(self):
         class Module(torch.nn.Module):
@@ -18235,51 +18121,6 @@ def forward(self, x):
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
-    def test_exception(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-                self.register_buffer("buffer", torch.ones(4, 4))
-                self.register_buffer("param", torch.ones(4, 4))
-
-            def forward(self, x):
-                token_ids = torch.randint(0, 10, (4,), device=x.device)
-                embedded = self.embedding(token_ids).sum()
-                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
-
-        class BarModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if GPU_TYPE in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        class BarBar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = BarModel()
-
-            def forward(self, x):
-                with torch.amp.autocast(device_type=GPU_TYPE):
-                    y = self.mod(x)
-                return y
-
-        with torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
-                _ = torch.export.export(
-                    BarBar(),
-                    (),
-                    {"x": torch.randn(4, 4, 4, device=GPU_TYPE)},
-                    strict=False,
-                ).module()
-
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
             mod._buffers["test"] = torch.Tensor([1])
@@ -19870,6 +19711,232 @@ def forward(self, x, y):
         decomposed = ep.run_decompositions(decomposition_table)
         result = decomposed.module()(torch.randn(1, 16, 64))
         self.assertEqual(result.shape, (1, 256, 64))
+
+
+class TestExportAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @testing.expectedFailureCppRuntime
+    def test_device_to_accelerator(self, device):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Foo(), (torch.randn(64, device=device),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        if is_training_ir_test(self._testMethodName):
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten._to_copy.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                ],
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+        ep = ep.run_decompositions()
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 2)
+        self.assertEqual(
+            ops,
+            [
+                torch.ops.aten._assert_tensor_metadata.default,
+                torch.ops.aten._to_copy.default,
+            ],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+
+class TestExportRNN(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_export_lstm(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(device)
+        x = torch.randn(2, 3, 4, device=device)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    def test_export_gru(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.GRU(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(device)
+        x = torch.randn(2, 3, 4, device=device)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    def test_export_rnn_flatten_parameters(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=3, hidden_size=4, num_layers=2, batch_first=True
+                )
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                out, (h, c) = self.lstm(x)
+                return out
+
+        m = M().to(device)
+        x = torch.randn(1, 5, 3, device=device)
+
+        ep = export(m, (x,), strict=False)
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+
+
+class TestExportMoveToDeviceIndex(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_assert_tensor_metadata_device_index(self, device):
+        class N(torch.nn.Module):
+            def forward(self, x, y):
+                x = x.float()
+                y = y.float()
+                return x + y
+
+        device_type = torch.device(device).type
+        inp = (torch.randn(3, device=device), torch.randn(3, device=device))
+        ep = export(N(), inp)
+        ep = move_to_device_pass(ep, {f"{device_type}:0": device_type})
+        ep.module()(
+            torch.randn(3, device=f"{device_type}:0"),
+            torch.randn(3, device=f"{device_type}:0"),
+        )
+
+
+class TestExportAutocastException(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_exception(self, device):
+        device_type = torch.device(device).type
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+                self.register_buffer("buffer", torch.ones(4, 4))
+                self.register_buffer("param", torch.ones(4, 4))
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
+
+        class BarModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if x.device.type != "cpu":
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        class BarBar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = BarModel()
+
+            def forward(self, x):
+                with torch.amp.autocast(device_type=device_type):
+                    y = self.mod(x)
+                return y
+
+        with torch.no_grad():
+            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+                _ = torch.export.export(
+                    BarBar(),
+                    (),
+                    {"x": torch.randn(4, 4, 4, device=device)},
+                    strict=False,
+                ).module()
+
+
+# Split out of TestExport for device-agnostic coverage. Wrapper suites
+# (strict/serdes/retrace/...) only clone TestExport; they must also mock +
+# instantiate these via this list, or those cases silently drop.
+# instantiate_device_type_tests deletes test_* from the class it instantiates,
+# so keep pristine clones here for the wrappers and instantiate the originals.
+def _clone_export_device_test_class(cls):
+    return type(
+        cls.__name__,
+        cls.__bases__,
+        {k: v for k, v in cls.__dict__.items() if k not in ("__dict__", "__weakref__")},
+    )
+
+
+_DEVICE_EXPORT_TEST_SPECS = (
+    (TestExportAccelerator, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportRNN, {"only_for": ("cuda", "xpu"), "allow_xpu": True}),
+    (TestExportMoveToDeviceIndex, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportAutocastException, {"except_for": "cpu", "allow_xpu": True}),
+)
+
+DEVICE_EXPORT_TEST_CLASSES = tuple(
+    (_clone_export_device_test_class(cls), kwargs)
+    for cls, kwargs in _DEVICE_EXPORT_TEST_SPECS
+)
+
+for _cls, _kwargs in _DEVICE_EXPORT_TEST_SPECS:
+    instantiate_device_type_tests(_cls, globals(), **_kwargs)
+del _cls, _kwargs
+del _DEVICE_EXPORT_TEST_SPECS
+del _clone_export_device_test_class
+
 
 
 if __name__ == "__main__":
