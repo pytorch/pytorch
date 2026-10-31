@@ -798,7 +798,6 @@
   "test/test_testing.py",
   "test/test_throughput_benchmark.py",
   "test/test_torch.py",
-  "test/test_torchfuzz_repros.py",
   "test/test_transformers.py",
   "test/test_triton_utils.py",
   "test/test_tsan.py",
