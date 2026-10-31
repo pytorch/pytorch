@@ -969,7 +969,9 @@ class TestExport(TestCase):
         # a saved program does not keep aliasing, so export directly here.
         graph = torch.export.export(JvpInVmap(), inp).graph
         add_batch_dim = torch._functorch.predispatch._add_batch_dim
-        for node in graph.find_nodes(op="call_function", target=add_batch_dim):
+        batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+        self.assertTrue(batched)
+        for node in batched:
             self.assertEqual(
                 StorageWeakRef(node.meta["val"].untyped_storage()),
                 StorageWeakRef(node.args[0].meta["val"].untyped_storage()),
