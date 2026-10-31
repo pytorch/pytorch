@@ -6389,6 +6389,7 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
                 torch.optim.NAdam,
                 torch.optim.RAdam,
                 torch.optim.Adadelta,
+                torch.optim.Adagrad,
                 torch.optim.RMSprop,
                 torch.optim.Rprop,
             ),
@@ -12681,9 +12682,15 @@ class TestCudaOptims(TestCase):
             kwargs = optim_input.kwargs
             kwargs["fused"] = True
 
-            for actually_do_graphs in (
-                (True, False) if optim_info.has_capturable_arg else (True,)
-            ):
+            graph_modes = (
+                [(True, True), (True, False)]
+                if optim_info.has_capturable_arg
+                else [(None, True)]
+            )
+            if optim_cls is torch.optim.Adagrad and optim_info.has_capturable_arg:
+                # Preserve capture without opting in to the new capturable flag.
+                graph_modes += [(None, True), (False, True)]
+            for capturable, actually_do_graphs in graph_modes:
                 params = [torch.randn((i + 5, i + 5), device=device) for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
@@ -12718,9 +12725,10 @@ class TestCudaOptims(TestCase):
                     scaler_for_control.step(opt)
                     scaler_for_control.update()
 
-                # capturable=True
-                if optim_info.has_capturable_arg:
-                    kwargs["capturable"] = True
+                if capturable is not None:
+                    kwargs["capturable"] = capturable
+                else:
+                    kwargs.pop("capturable", None)
                 opt = optim_cls(params_graphed, **kwargs)
 
                 for i in range(steps_warmup):
