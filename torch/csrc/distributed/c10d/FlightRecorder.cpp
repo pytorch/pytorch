@@ -154,6 +154,36 @@ std::optional<FlightRecorderDumper> getDumper(const std::string& backend) {
   }
   return it->second;
 }
+
+std::unordered_map<std::string, std::function<FlightRecorderCommState()>>&
+commStates() {
+  static auto* commStates = new std::
+      unordered_map<std::string, std::function<FlightRecorderCommState()>>();
+  return *commStates;
+}
+
+// Called outside the lock: collecting communicator state may block. A
+// failing provider costs the comm state, not the trace.
+FlightRecorderCommState getCommState(const std::string& backend) {
+  std::function<FlightRecorderCommState()> commState;
+  {
+    std::lock_guard<std::mutex> lock(dumpersMutex());
+    auto it = commStates().find(backend);
+    if (it == commStates().end()) {
+      return {};
+    }
+    commState = it->second;
+  }
+  try {
+    return commState();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Flight Recorder comm state for " << backend
+                 << " failed: " << e.what();
+  } catch (...) {
+    LOG(WARNING) << "Flight Recorder comm state for " << backend << " failed";
+  }
+  return {};
+}
 } // namespace
 
 void registerFlightRecorderDumper(
@@ -175,6 +205,15 @@ void registerFlightRecorderDumper(
   dumpers()[backend] = std::move(dumper);
 }
 
+void registerFlightRecorderCommState(
+    const std::string& backend,
+    std::function<FlightRecorderCommState()> commState) {
+  TORCH_CHECK_VALUE(
+      commState, "FlightRecorderCommState provider for ", backend, " is empty");
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  commStates()[backend] = std::move(commState);
+}
+
 std::string dump_fr_trace(
     bool includeCollectives,
     bool includeStackTraces,
@@ -184,9 +223,7 @@ std::string dump_fr_trace(
     return dumper->dump(includeCollectives, includeStackTraces, onlyActive);
   }
   return getFlightRecorder(backend)->dump(
-      std::unordered_map<
-          std::string,
-          std::unordered_map<std::string, std::string>>{},
+      getCommState(backend),
       includeCollectives,
       includeStackTraces,
       onlyActive);
@@ -200,11 +237,7 @@ std::string dump_fr_trace_json(
     return dumper->dumpJson(includeCollectives, onlyActive);
   }
   return getFlightRecorder(backend)->dump_json(
-      std::unordered_map<
-          std::string,
-          std::unordered_map<std::string, std::string>>{},
-      includeCollectives,
-      onlyActive);
+      getCommState(backend), includeCollectives, onlyActive);
 }
 
 void dump_fr_trace_file(

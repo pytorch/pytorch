@@ -464,13 +464,13 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   // shrunk below. Port of the pre-reconfigure cleanup in torchcomms'
   // TorchCommNCCL::reconfigure.
   // The watchdog revokes without reconfigure_mutex_, so stop it first to
-  // avoid a concurrent second commRevoke on the same communicator. Done even
-  // if a previous initialization failed after starting the watchdog.
+  // avoid a concurrent second commRevoke on the same communicator.
   stopWatchdog();
   std::unique_lock revokeLock(revoke_mutex_);
   ncclComm_t oldComm = nullptr;
   if (init_state_ == InitializationState::INITIALIZED) {
     auto workStatus = workq_.garbageCollect();
+    unlistComm();
     if (nccl_comm_ && !revoked_.exchange(true) &&
         (workStatus == WorkNCCL::WorkStatus::NOT_STARTED ||
          workStatus == WorkNCCL::WorkStatus::INPROGRESS)) {

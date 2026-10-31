@@ -102,13 +102,15 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
         shrinkStatus,
         true,
         childOptions->timeout,
-        "NCCL commShrink failed");
+        "NCCL commShrink failed",
+        [this] { unlistComm(); });
   } catch (...) {
     comm_state_ = CommState::ERROR;
     // The failed call may have aborted the parent; drop its symmetric-memory
     // registration while nccl_comm_ still names it.
     retireComm();
     nccl_comm_ = nullptr;
+    dropMemoryRegistrations();
     throw;
   }
 

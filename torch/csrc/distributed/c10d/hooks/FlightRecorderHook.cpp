@@ -582,8 +582,10 @@ void FlightRecorderHook::onAbort() {
   // that runs ::abort() is the next synchronous collective on the main thread.
   // Letting that one run ahead would terminate the process with the trace half
   // written, which is exactly the post-mortem this exists to produce. The wait
-  // is bounded -- the dump only queries events, it never synchronizes on the
-  // device. Both statics live in libtorch_cpu, the single library that holds
+  // is bounded: each attempt below is abandoned after
+  // TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC, as the dump may block in a comm-state
+  // provider (e.g. ncclCommDump), though it never synchronizes on the device
+  // itself. Both statics live in libtorch_cpu, the single library that holds
   // the recorder, so there is one instance of them per process.
   static std::mutex dump_mutex;
   static bool dumped = false;
