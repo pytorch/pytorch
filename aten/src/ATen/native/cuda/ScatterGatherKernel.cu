@@ -674,9 +674,9 @@ void gather_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, c
     "gather_out_cuda", tensor_assign);
 }
 
+// Nondeterminism alerts for the scatter kernels are raised in scatter_impl,
+// which knows whether the indices are unique.
 void scatter_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // When indices are not unique, the behavior is non-deterministic
-  globalContext().alertNotDeterministic("scatter_cuda_");
   cuda_scatter_gather_base_kernel<>()(
     self, dim, index, src,
     "scatter_cuda_", tensor_assign);
@@ -696,9 +696,6 @@ void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& inde
 
 void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const ReductionType& reduce) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd/AtomicMul usage
-  globalContext().alertNotDeterministic("scatter_reduce_cuda_kernel");
   switch (reduce) {
   case ReductionType::SUM :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
@@ -721,7 +718,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
             "scatter_reduce_cuda_sum_", reduce_add);
     break;
   case ReductionType::PROD :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_prod_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_prod_", reduce_multiply);
     break;

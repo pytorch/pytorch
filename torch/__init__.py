@@ -1874,6 +1874,14 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
+    For :func:`torch.index_copy`, :func:`torch.index_add`, :func:`torch.index_reduce`,
+    :func:`torch.index_put`, :func:`torch.put`, :func:`torch.scatter`,
+    :func:`torch.scatter_add` and :func:`torch.scatter_reduce`, the slower CUDA
+    implementations and the errors listed above exist to handle duplicate
+    indices. Passing ``assume_unique=True`` to these operations guarantees that
+    the indices are unique; they then use their regular CUDA kernels and do not
+    raise, since those are deterministic in that case.
+
     In addition, several operations fill uninitialized memory when this setting
     is turned on and when
     :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.

@@ -886,9 +886,13 @@ aten::hspmm
 aten::hspmm.out
 aten::index.Tensor
 aten::index.Tensor_out
+aten::index_add.assume_unique_out
+aten::index_copy.assume_unique_out
 aten::index_put
+aten::index_put.assume_unique_out
 aten::index_put.out
 aten::index_reduce
+aten::index_reduce.assume_unique_out
 aten::index_reduce.out
 aten::indices
 aten::indices_copy
@@ -1060,6 +1064,7 @@ aten::polygamma
 aten::polygamma.out
 aten::polygamma_
 aten::put
+aten::put.assume_unique_out
 aten::put.out
 aten::put_
 aten::q_per_channel_axis
@@ -1170,6 +1175,7 @@ aten::rrelu_with_noise_
 aten::rrelu_with_noise_functional
 aten::scalar_tensor
 aten::scalar_tensor.out
+aten::scatter.assume_unique_out
 aten::scatter.reduce
 aten::scatter.reduce_out
 aten::scatter.src
@@ -1179,8 +1185,10 @@ aten::scatter.value_out
 aten::scatter.value_reduce
 aten::scatter.value_reduce_out
 aten::scatter_add
+aten::scatter_add.assume_unique_out
 aten::scatter_add.out
 aten::scatter_reduce.two
+aten::scatter_reduce.two_assume_unique_out
 aten::scatter_reduce.two_out
 aten::searchsorted.Scalar
 aten::searchsorted.Scalar_out

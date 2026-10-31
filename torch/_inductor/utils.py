@@ -5242,6 +5242,8 @@ def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool
     if target in (
         torch.ops.aten.index_put.default,
         torch.ops.aten.index_put_.default,
+        torch.ops.aten.index_put.assume_unique,
+        torch.ops.aten.index_put_.assume_unique,
         torch.ops.aten._unsafe_index_put.default,
     ):
         normalized = normalize_function(

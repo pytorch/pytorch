@@ -4,7 +4,7 @@ import math
 import operator
 import random
 import warnings
-from functools import reduce
+from functools import partial, reduce
 from itertools import product
 
 import numpy as np
@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
     skipXLA,
@@ -2098,6 +2099,125 @@ class TestIndexingDevice(TestCase):
                     input_list[i] = v
 
                 self.assertEqual(output, input_list)
+
+    # op name -> (torch function, args before src, args after src, kwargs)
+    _assume_unique_cases = {
+        "index_copy": ("index_copy", ("dim", "idx"), (), {}),
+        "index_add": ("index_add", ("dim", "idx"), (), {"alpha": 2}),
+        "index_reduce_prod": (
+            "index_reduce",
+            ("dim", "idx"),
+            ("prod",),
+            {"include_self": False},
+        ),
+        "index_reduce_mean": ("index_reduce", ("dim", "idx"), ("mean",), {}),
+        "index_reduce_amax": (
+            "index_reduce",
+            ("dim", "idx"),
+            ("amax",),
+            {"include_self": False},
+        ),
+        "index_put": ("index_put", ("idx_tuple",), (), {}),
+        "index_put_accumulate": ("index_put", ("idx_tuple",), (True,), {}),
+        "put": ("put", ("pidx",), (), {}),
+        "put_accumulate": ("put", ("pidx",), (True,), {}),
+        "scatter": ("scatter", ("dim", "sidx"), (), {}),
+        "scatter_add": ("scatter_add", ("dim", "sidx"), (), {}),
+        "scatter_reduce_sum": ("scatter_reduce", ("dim", "sidx"), ("sum",), {}),
+        "scatter_reduce_mean": (
+            "scatter_reduce",
+            ("dim", "sidx"),
+            ("mean",),
+            {"include_self": False},
+        ),
+        "scatter_reduce_amin": ("scatter_reduce", ("dim", "sidx"), ("amin",), {}),
+        "scatter_reduce_prod": (
+            "scatter_reduce",
+            ("dim", "sidx"),
+            ("prod",),
+            {"include_self": False},
+        ),
+    }
+
+    def _assume_unique_case(self, op, device, dtype):
+        name, pre, post, kwargs = self._assume_unique_cases[op]
+        x = make_tensor((6, 4), device=device, dtype=dtype)
+        idx = torch.randperm(6, device=device)[:4]
+        pidx = torch.randperm(x.numel(), device=device)[:5]
+        values = {
+            "dim": 0,
+            "idx": idx,
+            "idx_tuple": (idx,),
+            "pidx": pidx,
+            # unique along dim 0 within each column
+            "sidx": torch.stack(
+                [torch.randperm(6, device=device)[:4] for _ in range(4)], 1
+            ),
+        }
+        pre = [values[a] for a in pre]
+        src = make_tensor((5,) if name == "put" else (4, 4), device=device, dtype=dtype)
+
+        def fn(x, s, inplace=False, **kw):
+            f = (
+                getattr(x.clone(), name + "_")
+                if inplace
+                else partial(getattr(torch, name), x)
+            )
+            return f(*pre, s, *post, **kwargs, **kw)
+
+        return fn, x, src
+
+    @onlyNativeDeviceTypes
+    @expectedFailureMPS  # float64
+    @parametrize("op", list(_assume_unique_cases))
+    def test_assume_unique(self, device, op):
+        fn, x, s = self._assume_unique_case(op, device, torch.double)
+        x.requires_grad_()
+        s.requires_grad_()
+        expected = fn(x, s)
+        grad = torch.randn_like(expected)
+        expected_grads = torch.autograd.grad(expected, (x, s), grad)
+        with DeterministicGuard(True):
+            for inplace in (False, True):
+                actual = fn(x, s, inplace=inplace, assume_unique=True)
+                self.assertEqual(actual, expected)
+                self.assertEqual(
+                    torch.autograd.grad(actual, (x, s), grad), expected_grads
+                )
+        no_fwd_ad = op.startswith("index_reduce") or op == "scatter_reduce_prod"
+        f = partial(fn, assume_unique=True)
+        torch.autograd.gradcheck(f, (x, s), check_forward_ad=not no_fwd_ad)
+        torch.autograd.gradgradcheck(f, (x, s))
+        if op == "scatter":
+            with self.assertRaisesRegex(ValueError, "assume_unique"):
+                fn(x, s, reduce="add", assume_unique=True)
+
+    @onlyCUDA
+    @parametrize("op", list(_assume_unique_cases))
+    def test_assume_unique_skips_deterministic_fallback(self, device, op):
+        fn, x, s = self._assume_unique_case(op, device, torch.float)
+        x.requires_grad_()
+        s.requires_grad_()
+
+        def kernels(**kw):
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA]
+            ) as prof:
+                fn(x, s, **kw).sum().backward()
+                torch.cuda.synchronize()
+            return [e.name for e in prof.events() if e.device_type.name == "CUDA"]
+
+        with DeterministicGuard(True):
+            if op.startswith(("index_reduce", "put")) or op == "scatter_reduce_prod":
+                with self.assertRaisesRegex(RuntimeError, "deterministic"):
+                    fn(x, s)
+            else:
+                self.assertTrue(any("sort" in k.lower() for k in kernels()))
+            if op == "index_put_accumulate":
+                # CUDA index_put with accumulate=True always uses the sorting kernel
+                return
+            names = kernels(assume_unique=True)
+        self.assertFalse(any("sort" in k.lower() for k in names), names)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool))  # TODO: Add torch.cfloat here

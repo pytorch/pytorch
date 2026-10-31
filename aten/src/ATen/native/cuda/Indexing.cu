@@ -1141,7 +1141,7 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   return false;
 }
 
-void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+static void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result, bool assume_unique) {
   if (!result.is_same(self)) {
     result.copy_(self);
   }
@@ -1154,7 +1154,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
-  if (globalContext().deterministicAlgorithms()){
+  if (globalContext().deterministicAlgorithms() && !assume_unique) {
     torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for ([[maybe_unused]] const auto i : c10::irange(dim)) {
@@ -1208,7 +1208,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       index.dim() <= 1 && indContig) {
     std::vector<int64_t> idx_shape(source_.dim(), 1);
     idx_shape[0] = static_cast<int64_t>(numIndex);
-    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_);
+    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_, assume_unique);
     return;
   }
 #endif
@@ -1330,8 +1330,11 @@ void index_reduce_func_cuda_impl(
   bool include_self,
   const ReductionType& reduce,
   const func_t& reduce_func,
-  const Tensor& result) {
-  globalContext().alertNotDeterministic("index_reduce_cuda");
+  const Tensor& result,
+  bool assume_unique) {
+  if (!assume_unique) {
+    globalContext().alertNotDeterministic("index_reduce_cuda");
+  }
 
   if (!result.is_same(self)) result.copy_(self);
 
@@ -1522,26 +1525,72 @@ void index_reduce_func_cuda_impl(
 #undef LARGE_INDEX
 }
 
-TORCH_IMPL_FUNC(index_copy_cuda_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
+static void index_copy_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result, bool assume_unique) {
   // Like index_add, delegate row copies to scatter's fast-path dispatch.
   if (dim == 0 && index.is_contiguous() && index.numel() > 1 &&
       source.nbytes() / index.numel() >= kFastScatterMinSliceBytes &&
-      !globalContext().deterministicAlgorithms()) {
+      (!globalContext().deterministicAlgorithms() || assume_unique)) {
     if (!result.is_same(self)) {
       result.copy_(self);
     }
     std::vector<int64_t> index_shape(source.dim(), 1);
     index_shape[0] = index.numel();
-    result.scatter_(dim, index.view(index_shape).expand_as(source), source);
+    result.scatter_(dim, index.view(index_shape).expand_as(source), source, std::nullopt, assume_unique);
     return;
   }
-  index_copy_out_impl(self, dim, index, source, result);
+  index_copy_out_impl(self, dim, index, source, result, assume_unique);
+}
+
+TORCH_IMPL_FUNC(index_copy_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
+  index_copy_cuda_impl(self, dim, index, source, result, /*assume_unique=*/false);
+}
+
+TORCH_IMPL_FUNC(index_copy_assume_unique_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool assume_unique, const Tensor& result) {
+  index_copy_cuda_impl(self, dim, index, source, result, assume_unique);
 }
 
 TORCH_IMPL_FUNC(index_add_cuda_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  index_add_cuda_impl(self, dim, index, source, alpha, result);
+  index_add_cuda_impl(self, dim, index, source, alpha, result, /*assume_unique=*/false);
+}
+
+TORCH_IMPL_FUNC(index_add_assume_unique_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, bool assume_unique, const Tensor& result) {
+  index_add_cuda_impl(self, dim, index, source, alpha, result, assume_unique);
+}
+
+static void index_reduce_cuda_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const std::string_view reduce,
+    bool include_self,
+    const Tensor& result,
+    bool assume_unique) {
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+
+  if (reduce == "prod") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::PROD, reduce_multiply, result, assume_unique);
+  } else if (reduce == "mean") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MEAN, reduce_add, result, assume_unique);
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    counts.index_add_(dim, index, at::ones_like(source), 1, assume_unique);
+    counts.masked_fill_(counts == 0, 1);
+    if (result.is_floating_point() || result.is_complex()) {
+      result.div_(counts);
+    } else {
+      result.div_(counts, "floor");
+    }
+  } else if (reduce == "amax") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MAX, reduce_maximum, result, assume_unique);
+  } else if (reduce == "amin") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MIN, reduce_minimum, result, assume_unique);
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
+  }
 }
 
 TORCH_IMPL_FUNC(index_reduce_cuda_out)
@@ -1552,27 +1601,19 @@ TORCH_IMPL_FUNC(index_reduce_cuda_out)
  const std::string_view reduce,
  bool include_self,
  const Tensor& result) {
-  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+  index_reduce_cuda_impl(self, dim, index, source, reduce, include_self, result, /*assume_unique=*/false);
+}
 
-  if (reduce == "prod") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::PROD, reduce_multiply, result);
-  } else if (reduce == "mean") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MEAN, reduce_add, result);
-    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
-    counts.index_add_(dim, index, at::ones_like(source));
-    counts.masked_fill_(counts == 0, 1);
-    if (result.is_floating_point() || result.is_complex()) {
-      result.div_(counts);
-    } else {
-      result.div_(counts, "floor");
-    }
-  } else if (reduce == "amax") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MAX, reduce_maximum, result);
-  } else if (reduce == "amin") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MIN, reduce_minimum, result);
-  } else {
-    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
-  }
+TORCH_IMPL_FUNC(index_reduce_assume_unique_cuda_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ bool assume_unique,
+ const Tensor& result) {
+  index_reduce_cuda_impl(self, dim, index, source, reduce, include_self, result, assume_unique);
 }
 
 namespace {

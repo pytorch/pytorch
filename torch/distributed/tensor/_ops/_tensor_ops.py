@@ -977,7 +977,13 @@ def index_single_dim_strategy(
 
 
 @register_single_dim_strategy(
-    [aten.index_put.default, aten.index_put_.default, aten._index_put_impl_.default],
+    [
+        aten.index_put.default,
+        aten.index_put_.default,
+        aten.index_put.assume_unique,
+        aten.index_put_.assume_unique,
+        aten._index_put_impl_.default,
+    ],
     schema_info=RuntimeSchemaInfo(needs_pytree=True),
 )
 def index_put_single_dim_strategy(

@@ -3075,6 +3075,27 @@
   variants: function, method
   structured_delegate: index_copy.out
 
+# The assume_unique overloads below take `bool assume_unique` after the base
+# op's defaulted arguments, so existing positional C++ calls keep binding to the
+# base op; C++ callers of the new overloads must pass those arguments explicitly.
+- func: index_copy.assume_unique_out(Tensor self, int dim, Tensor index, Tensor source, *, bool assume_unique, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU, XPU: index_copy_assume_unique_out
+    CUDA: index_copy_assume_unique_cuda_out
+    MPS: index_copy_assume_unique_out_mps
+
+- func: index_copy_.assume_unique(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool assume_unique) -> Tensor(a!)
+  variants: method
+  structured_delegate: index_copy.assume_unique_out
+
+- func: index_copy.assume_unique(Tensor self, int dim, Tensor index, Tensor source, *, bool assume_unique) -> Tensor
+  variants: function, method
+  structured_delegate: index_copy.assume_unique_out
+
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   device_check: NoCheck   # delegate to _index_put_impl_, which leverages TensorIterator
   variants: function, method
@@ -3093,6 +3114,19 @@
   dispatch:
     CompositeExplicitAutograd: index_put
   tags: core
+
+- func: index_put.assume_unique(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False, *, bool assume_unique) -> Tensor
+  device_check: NoCheck   # delegate to index_put_.assume_unique after clone
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: index_put_assume_unique
+
+- func: index_put_.assume_unique(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, *, bool assume_unique) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  dispatch:
+    CPU, CUDA, MPS, XPU: index_put__assume_unique
+  autogen: index_put.assume_unique_out
 
 - func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
@@ -8233,6 +8267,17 @@
   dispatch:
     CompositeExplicitAutograd: put
 
+- func: put.assume_unique(Tensor self, Tensor index, Tensor source, bool accumulate=False, *, bool assume_unique) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: put_assume_unique
+
+- func: put_.assume_unique(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False, *, bool assume_unique) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA, MPS, XPU: put__assume_unique
+  autogen: put.assume_unique_out
+
 - func: index_add.out(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -8252,6 +8297,24 @@
   structured_delegate: index_add.out
   variants: function, method
 
+- func: index_add.assume_unique_out(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, bool assume_unique, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: index_add_assume_unique_cpu_out
+    CUDA: index_add_assume_unique_cuda_out
+    MPS: index_add_assume_unique_mps_out
+
+- func: index_add_.assume_unique(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, bool assume_unique) -> Tensor(a!)
+  structured_delegate: index_add.assume_unique_out
+  variants: method
+
+- func: index_add.assume_unique(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, bool assume_unique) -> Tensor
+  structured_delegate: index_add.assume_unique_out
+  variants: function, method
+
 - func: index_reduce.out(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -8269,6 +8332,24 @@
 
 - func: index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
   structured_delegate: index_reduce.out
+  variants: function, method
+
+- func: index_reduce.assume_unique_out(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, bool assume_unique, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: index_reduce_assume_unique_cpu_out
+    CUDA: index_reduce_assume_unique_cuda_out
+    MPS: index_reduce_assume_unique_mps_out
+
+- func: index_reduce_.assume_unique(Tensor(a!) self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, bool assume_unique) -> Tensor(a!)
+  structured_delegate: index_reduce.assume_unique_out
+  variants: method
+
+- func: index_reduce.assume_unique(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, bool assume_unique) -> Tensor
+  structured_delegate: index_reduce.assume_unique_out
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
@@ -8355,6 +8436,23 @@
   dispatch:
     CPU, CUDA, MPS, XPU: scatter_value_reduce_out
 
+# `reduce` is only part of the schema so that C++ calls like
+# `at::scatter(self, dim, index, src, "add")` cannot silently bind to a lone
+# trailing `bool assume_unique`; passing it is an error (use scatter_reduce).
+- func: scatter.assume_unique(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None, bool assume_unique) -> Tensor
+  structured_delegate: scatter.assume_unique_out
+  variants: function, method
+
+- func: scatter_.assume_unique(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str? reduce=None, bool assume_unique) -> Tensor(a!)
+  structured_delegate: scatter.assume_unique_out
+  variants: method
+
+- func: scatter.assume_unique_out(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None, bool assume_unique, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CPU, CUDA, MPS, XPU: scatter_assume_unique_out
+
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   structured_delegate: scatter_add.out
   variants: function, method
@@ -8370,6 +8468,20 @@
   dispatch:
     CPU, CUDA, MPS, XPU: scatter_add
 
+- func: scatter_add.assume_unique(Tensor self, int dim, Tensor index, Tensor src, *, bool assume_unique) -> Tensor
+  structured_delegate: scatter_add.assume_unique_out
+  variants: function, method
+
+- func: scatter_add_.assume_unique(Tensor(a!) self, int dim, Tensor index, Tensor src, *, bool assume_unique) -> Tensor(a!)
+  structured_delegate: scatter_add.assume_unique_out
+  variants: method
+
+- func: scatter_add.assume_unique_out(Tensor self, int dim, Tensor index, Tensor src, *, bool assume_unique, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CPU, CUDA, MPS, XPU: scatter_add_assume_unique_out
+
 - func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   structured_delegate: scatter_reduce.two_out
   variants: function, method
@@ -8384,6 +8496,20 @@
   variants: function
   dispatch:
     CPU, CUDA, MPS, XPU: scatter_reduce_two
+
+- func: scatter_reduce.two_assume_unique(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True, bool assume_unique) -> Tensor
+  structured_delegate: scatter_reduce.two_assume_unique_out
+  variants: function, method
+
+- func: scatter_reduce_.two_assume_unique(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True, bool assume_unique) -> Tensor(a!)
+  structured_delegate: scatter_reduce.two_assume_unique_out
+  variants: method
+
+- func: scatter_reduce.two_assume_unique_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True, bool assume_unique, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CPU, CUDA, MPS, XPU: scatter_reduce_two_assume_unique
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out

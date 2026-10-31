@@ -3427,7 +3427,7 @@ def max_unpool3d(
     return _max_unpoolnd(input, indices, output_size, 3)
 
 
-@register_decomposition(aten.index_add_)
+@register_decomposition(aten.index_add_.default)
 def index_add_(
     x: TensorLike,
     dim: int,
@@ -3439,7 +3439,7 @@ def index_add_(
     return _index_add(x, dim, index, tensor, inplace=True, alpha=alpha)
 
 
-@register_decomposition(aten.index_add)
+@register_decomposition([aten.index_add.default, aten.index_add.out])
 @out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
@@ -3539,12 +3539,12 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     return out
 
 
-@register_decomposition(aten.index_copy_)
+@register_decomposition(aten.index_copy_.default)
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=True)
 
 
-@register_decomposition(aten.index_copy)
+@register_decomposition([aten.index_copy.default, aten.index_copy.out])
 @out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
@@ -6402,6 +6402,41 @@ register_inplace(aten.scatter_, aten.scatter)
 register_inplace(aten.scatter_add_, aten.scatter_add)
 register_inplace(aten.scatter_reduce_, aten.scatter_reduce)
 register_inplace(aten.silu_, aten.silu)
+
+
+# assume_unique only affects how eager kernels handle deterministic mode.
+def _register_assume_unique_decomp(op, base):
+    @register_decomposition(op)
+    def decomp(*args, assume_unique: bool, **kwargs):
+        return base(*args, **kwargs)
+
+
+for _op, _base in (
+    (aten.index_copy.assume_unique, aten.index_copy.default),
+    (aten.index_put.assume_unique, aten.index_put.default),
+    (aten.put.assume_unique, aten.put.default),
+    (aten.index_add.assume_unique, aten.index_add.default),
+    (aten.index_reduce.assume_unique, aten.index_reduce.default),
+    (aten.scatter_add.assume_unique, aten.scatter_add.default),
+    (aten.scatter_reduce.two_assume_unique, aten.scatter_reduce.two),
+):
+    _register_assume_unique_decomp(_op, _base)
+
+
+@register_decomposition(aten.scatter.assume_unique)
+def scatter_assume_unique(self, dim, index, src, *, reduce=None, assume_unique):
+    torch._check_value(
+        reduce is None,
+        lambda: "scatter(): reduce is not supported together with assume_unique",
+    )
+    return aten.scatter.src(self, dim, index, src)
+
+
+# The other inplace assume_unique overloads are covered by the packet-level
+# register_inplace calls above.
+register_inplace(aten.index_copy_.assume_unique, aten.index_copy.assume_unique)
+register_inplace(aten.index_add_.assume_unique, aten.index_add.assume_unique)
+register_inplace(aten.put_.assume_unique, aten.put.assume_unique)
 
 
 @aten.one_hot.default.py_impl(DispatchKey.CompositeImplicitAutograd)

@@ -831,7 +831,8 @@ def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
     return self
 
 
-@register_complex(aten.index_add)
+@register_complex(aten.index_add.default)
+@register_complex(aten.index_add.assume_unique)
 def index_add_impl(
     self: ComplexTensor,
     dim: int,
@@ -845,14 +846,15 @@ def index_add_impl(
     self_re, self_im = split_complex_arg(self)
     source_re, source_im = split_complex_arg(source)
 
-    ret_re = self_re.index_add(dim, index, source_re)
-    ret_im = self_im.index_add(dim, index, source_im)
+    ret_re = self_re.index_add(dim, index, source_re, **kwargs)
+    ret_im = self_im.index_add(dim, index, source_im, **kwargs)
 
     return ComplexTensor(ret_re, ret_im)
 
 
 # TODO (hameerabbasi): Not being tested
-@register_complex(aten.index_add_)
+@register_complex(aten.index_add_.default)
+@register_complex(aten.index_add_.assume_unique)
 def index_add__impl(
     self: ComplexTensor,
     dim: int,
@@ -867,8 +869,8 @@ def index_add__impl(
     self_re, self_im = split_complex_arg(self)
     source_re, source_im = split_complex_arg(source)
 
-    ret_re = self_re.index_add_(dim, index, source_re)
-    ret_im = self_im.index_add_(dim, index, source_im)
+    ret_re = self_re.index_add_(dim, index, source_re, **kwargs)
+    ret_im = self_im.index_add_(dim, index, source_im, **kwargs)
 
     return ComplexTensor(ret_re, ret_im)
 
@@ -922,44 +924,56 @@ def var_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Tensor:
     return torch.var(self_re, *args, **kwargs) + torch.var(self_im, *args, **kwargs)
 
 
-@register_complex(aten.scatter_add)
+@register_complex(aten.scatter_add.default)
+@register_complex(aten.scatter_add.assume_unique)
 def scatter_add_impl(
-    self: ComplexTensor, dim: int, index: torch.Tensor, src: ComplexTensor
+    self: ComplexTensor,
+    dim: int,
+    index: torch.Tensor,
+    src: ComplexTensor,
+    **kwargs: Any,
 ) -> ComplexTensor:
     self_re, self_im = split_complex_arg(self)
     src_re, src_im = split_complex_arg(src)
 
-    ret_re = torch.scatter_add(self_re, dim, index, src_re)
-    ret_im = torch.scatter_add(self_im, dim, index, src_im)
+    ret_re = torch.scatter_add(self_re, dim, index, src_re, **kwargs)
+    ret_im = torch.scatter_add(self_im, dim, index, src_im, **kwargs)
 
     return ComplexTensor(ret_re, ret_im)
 
 
-@register_complex(aten.scatter_add_)
+@register_complex(aten.scatter_add_.default)
+@register_complex(aten.scatter_add_.assume_unique)
 def scatter_add__impl(
-    self: ComplexTensor, dim: int, index: torch.Tensor, src: ComplexTensor
+    self: ComplexTensor,
+    dim: int,
+    index: torch.Tensor,
+    src: ComplexTensor,
+    **kwargs: Any,
 ) -> ComplexTensor:
     self_re, self_im = split_complex_arg(self)
     src_re, src_im = split_complex_arg(src)
 
-    out_re = self_re.scatter_add_(dim, index, src_re)
-    out_im = self_im.scatter_add_(dim, index, src_im)
+    out_re = self_re.scatter_add_(dim, index, src_re, **kwargs)
+    out_im = self_im.scatter_add_(dim, index, src_im, **kwargs)
 
     return ComplexTensor(out_re, out_im)
 
 
-@register_complex(aten.index_put_)
+@register_complex(aten.index_put_.default)
+@register_complex(aten.index_put_.assume_unique)
 def index_put__impl(
     self: ComplexTensor,
     indices: tuple[torch.Tensor, ...],
     values: ComplexTensor,
     accumulate: bool = False,
+    **kwargs: Any,
 ) -> ComplexTensor:
     self_re, self_im = split_complex_arg(self)
     values_re, values_im = split_complex_arg(values)
 
-    out_re = self_re.index_put_(indices, values_re, accumulate=accumulate)
-    out_im = self_im.index_put_(indices, values_im, accumulate=accumulate)
+    out_re = self_re.index_put_(indices, values_re, accumulate=accumulate, **kwargs)
+    out_im = self_im.index_put_(indices, values_im, accumulate=accumulate, **kwargs)
 
     return ComplexTensor(out_re, out_im)
 

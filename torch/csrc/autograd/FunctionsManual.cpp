@@ -7623,10 +7623,17 @@ Tensor scatter_reduce_jvp(
     const Tensor& src_t,
     std::string_view reduce,
     bool include_self,
-    const Tensor& result) {
+    const Tensor& result,
+    bool assume_unique) {
+  auto scatter_reduce =
+      [&](const Tensor& t, const Tensor& s, std::string_view r) {
+        return assume_unique
+            ? t.scatter_reduce(dim, index, s, r, include_self, true)
+            : t.scatter_reduce(dim, index, s, r, include_self);
+      };
   if (reduce == "sum" || reduce == "mean") {
     // The function is linear
-    return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
+    return scatter_reduce(self_t, src_t, reduce);
     //  auto mask = x == restore_reduced_dims(result, dim, keepdim);
     //  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim,
     //  keepdim);
@@ -7635,12 +7642,9 @@ Tensor scatter_reduce_jvp(
     auto mask_self = self_p == result;
     auto mask_src = src_p == gather_result;
     auto masked_src_t = at::where(mask_src, src_t, 0.);
-    auto div =
-        mask_self.to(self_t.dtype())
-            .scatter_reduce(
-                dim, index, mask_src.to(self_t.dtype()), "sum", include_self);
-    return at::where(mask_self, self_t, 0.)
-        .scatter_reduce(dim, index, masked_src_t, "sum", include_self)
+    auto div = scatter_reduce(
+        mask_self.to(self_t.dtype()), mask_src.to(self_t.dtype()), "sum");
+    return scatter_reduce(at::where(mask_self, self_t, 0.), masked_src_t, "sum")
         .div(div);
   } else {
     // Not implemented
@@ -7656,8 +7660,18 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& src,
     std::string_view reduce,
     bool include_self,
-    const Tensor& result) {
+    const Tensor& result,
+    bool assume_unique) {
   Tensor grad_self, grad_src;
+  auto scatter_reduce = [&](const Tensor& t, const Tensor& s) {
+    return assume_unique
+        ? t.scatter_reduce(dim, index, s, reduce, include_self, true)
+        : t.scatter_reduce(dim, index, s, reduce, include_self);
+  };
+  auto scatter_add = [&](const Tensor& t, const Tensor& s) {
+    return assume_unique ? t.scatter_add(dim, index, s, true)
+                         : t.scatter_add(dim, index, s);
+  };
 
   // FIXME: complex gradients not handled correctly
   // For now this is ok as scatter_reduce isn't added to the whitelist
@@ -7673,28 +7687,26 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   } else if (reduce == "prod") {
     // Explicitly compute exclusive prod for elements in self/src that are 0
     Tensor masked_self = self.masked_fill(self == 0, 1);
-    Tensor masked_self_result =
-        masked_self.scatter_reduce(dim, index, src, reduce, include_self);
+    Tensor masked_self_result = scatter_reduce(masked_self, src);
     grad_self = grad * masked_self_result / masked_self;
     Tensor src_zero = src == 0;
     Tensor src_num_zeros =
-        zeros_like(self)
-            .scatter_add(dim, index, src_zero.to(self.dtype()))
+        scatter_add(zeros_like(self), src_zero.to(self.dtype()))
             .gather(dim, index);
     Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
     // For src positions with src_single_zero, grad * result.gather(dim,index) /
     // src.masked_fill(src_zero, 1) would incorrectly propagate zeros as the
     // gradient
     Tensor masked_src = src.masked_fill(src_single_zero, 1);
-    Tensor masked_src_result =
-        self.scatter_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor masked_src_result = scatter_reduce(self, masked_src);
     Tensor grad_src1 = where(
         src_single_zero,
         (grad * masked_src_result).gather(dim, index),
         (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled; this also avoids having the item() call in the usual case.
-    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
+    if (!assume_unique && GradMode::is_enabled() &&
+        (src_num_zeros > 1).any().item<bool>()) {
       auto node = c10::make_intrusive<DelayedError>(
           "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
           /* num inputs */ 1);
@@ -7705,7 +7717,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
-    N = N.scatter_add(dim, index, ones_like(src));
+    N = scatter_add(N, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
     Tensor N_src = N.gather(dim, index);
@@ -7715,8 +7727,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     Tensor value = result.gather(dim, index);
     Tensor self_is_result = (self == result).to(self.scalar_type());
     Tensor src_is_result = (src == value).to(self.scalar_type());
-    Tensor N_to_distribute =
-        self_is_result.scatter_add(dim, index, src_is_result);
+    Tensor N_to_distribute = scatter_add(self_is_result, src_is_result);
     Tensor grad_distributed = grad / N_to_distribute;
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
@@ -7756,8 +7767,18 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     const Tensor& source,
     std::string_view reduce,
     bool include_self,
-    const Tensor& result) {
+    const Tensor& result,
+    bool assume_unique) {
   Tensor grad_self, grad_src;
+  auto index_reduce = [&](const Tensor& t, const Tensor& s) {
+    return assume_unique
+        ? t.index_reduce(dim, index, s, reduce, include_self, true)
+        : t.index_reduce(dim, index, s, reduce, include_self);
+  };
+  auto index_add = [&](const Tensor& t, const Tensor& s) {
+    return assume_unique ? t.index_add(dim, index, s, 1, true)
+                         : t.index_add(dim, index, s);
+  };
 
   // FIXME: index_add's backward formula has a special case for source.dim == 0
   // but this case seems to throw the error "IndexError: dimension specified as
@@ -7770,20 +7791,18 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
 
   if (reduce == "prod") {
     Tensor masked_self = self.masked_fill(self == 0, 1);
-    Tensor masked_self_result =
-        masked_self.index_reduce(dim, index, source, reduce, include_self);
+    Tensor masked_self_result = index_reduce(masked_self, source);
     grad_self = grad * masked_self_result / masked_self;
     Tensor src_zero = source == 0;
-    Tensor src_num_zeros = zeros_like(self)
-                               .index_add(dim, index, src_zero.to(self.dtype()))
-                               .index_select(dim, index);
+    Tensor src_num_zeros =
+        index_add(zeros_like(self), src_zero.to(self.dtype()))
+            .index_select(dim, index);
     Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
     // For src positions with src_single_zero, (grad *
     // result).index_select(dim,index) / source.masked_fill(src_zero, 1) would
     // incorrectly propagate zeros as the gradient
     Tensor masked_src = source.masked_fill(src_single_zero, 1);
-    Tensor masked_src_result =
-        self.index_reduce(dim, index, masked_src, reduce, include_self);
+    Tensor masked_src_result = index_reduce(self, masked_src);
     Tensor grad_src1 = where(
         src_single_zero,
         (grad * masked_src_result).index_select(dim, index),
@@ -7791,7 +7810,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
             source.masked_fill(src_zero, 1));
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled this also avoids having the item() call in the usual case
-    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
+    if (!assume_unique && GradMode::is_enabled() &&
+        (src_num_zeros > 1).any().item<bool>()) {
       auto node = c10::make_intrusive<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);
@@ -7802,7 +7822,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     }
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
-    N = N.index_add(dim, index, ones_like(source));
+    N = index_add(N, ones_like(source));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
     Tensor N_src = N.index_select(dim, index);
@@ -7811,8 +7831,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     Tensor value = result.index_select(dim, index);
     Tensor self_is_result = (self == result).to(self.scalar_type());
     Tensor source_is_result = (source == value).to(self.scalar_type());
-    Tensor N_to_distribute =
-        self_is_result.index_add(dim, index, source_is_result);
+    Tensor N_to_distribute = index_add(self_is_result, source_is_result);
     Tensor grad_distributed = grad / N_to_distribute;
     grad_self = self_is_result * grad_distributed;
     grad_src = source_is_result * grad_distributed.index_select(dim, index);

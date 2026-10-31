@@ -154,6 +154,10 @@ def arguments(func: FunctionSchema, *, symint: bool) -> list[Binding]:
     args: list[Argument | TensorOptionsArguments | SelfArgument] = []
     args.extend(func.arguments.non_out)
     args.extend(func.arguments.out)
-    return [
-        r for arg in args for r in argument(arg, symint=symint, is_out=func.is_out_fn())
-    ]
+    return cpp.drop_non_trailing_defaults(
+        [
+            r
+            for arg in args
+            for r in argument(arg, symint=symint, is_out=func.is_out_fn())
+        ]
+    )
