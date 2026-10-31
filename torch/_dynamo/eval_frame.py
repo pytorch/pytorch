@@ -407,7 +407,38 @@ class _RefuseRecompileCallback(_FailOnRecompileCallback):
         )
 
 
+class _ConfigPatchedCallback:
+    """A context's compiling callback that compiles under a config patch (an
+    installed precompile artifact's serve-time compiles trace under its CUDA
+    graph config). ``_callback_from_stance`` applies the stance to the wrapped
+    callback and keeps the patch around whatever it returns.
+    """
+
+    def __init__(
+        self, callback: DynamoCallback, patch: Callable[[], Callable[[], None]]
+    ) -> None:
+        self._callback = callback
+        # A closure patcher: applies the patch and returns its revert.
+        self._patch = patch
+        # to prevent cache miss due to different backend
+        self._torchdynamo_orig_backend = callback
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        revert = self._patch()
+        try:
+            return self._callback(*args, **kwargs)  # type: ignore[misc, operator]
+        finally:
+            revert()
+
+
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
+    if isinstance(callback, _ConfigPatchedCallback):
+        inner = _callback_from_stance(callback._callback)
+        if inner is callback._callback:
+            return callback
+        if inner is False or inner is None:
+            return inner
+        return _ConfigPatchedCallback(inner, callback._patch)
     if isinstance(callback, _RefuseRecompileCallback):
         # Read the stance once: a concurrent set_stance must not slip a
         # compiling callback in between the check and the choice.

@@ -6520,6 +6520,7 @@ calls = model.calls.clone()
 with (
     contextlib.nullcontext() if training else torch.no_grad(),
     torch._inductor.config.patch(saved["config"]),
+    torch.compiler.set_stance(saved["stance"]),
 ):
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
@@ -6588,6 +6589,7 @@ class TestPrecompileCudagraphs(TestCase):
         skips=None,
         bumps=0,
         traces_off=None,
+        stance="default",
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
         # by the loading process while serving the artifact, under its env and
@@ -6600,6 +6602,7 @@ class TestPrecompileCudagraphs(TestCase):
             "expected_grad": expected_grad,
             "allow_serve_time_compiles": serve_time,
             "config": config or {},
+            "stance": stance,
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6671,6 +6674,19 @@ class TestPrecompileCudagraphs(TestCase):
         )
         self.assertGreater(served[0], 0)
 
+    @parametrize("stance", ["eager_then_compile", "aot_eager_then_compile"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_serve_time_compile_under_a_delayed_stance_keeps_the_config(self, stance):
+        # The stance replaces the compiling callback; the config patch stays.
+        fn = self.mod.calls_breaking_helper
+        self._capture_step(fn, mode="reduce-overhead")
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad():
+            expected = fn(self.model, miss)
+        self._serve_in_fresh_process(
+            expected, x=miss, serve_time=True, traces_off=0, stance=stance
+        )
+
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.step, grad=True, options=options)
@@ -6712,7 +6728,9 @@ class TestPrecompileCudagraphs(TestCase):
             self.model.zero_grad(set_to_none=True)
             fn(self.model, self.x).sum().backward()
             grad = self.model.lin.weight.grad.clone()
-            self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+            served = self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+            # The forward and backward graphs, as the flag decides them.
+            self.assertEqual(served[0], 2 if flag else 0)
         # An eager capture records no CUDA graph config for an override to contradict.
         self._capture_step(fn, grad=True, backend="eager")
 
@@ -6737,8 +6755,8 @@ class TestPrecompileCudagraphs(TestCase):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
         no_trees = {"triton.cudagraph_trees": False}
-        recorded, _ = self._serve_in_fresh_process(y, config=no_trees, bumps=3)
-        self.assertGreater(recorded, 0)
+        served = self._serve_in_fresh_process(y, config=no_trees, bumps=3, skips=0)
+        self.assertGreater(served[0], 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
         # Post-compile would take the partitioned wrapper in a loading process
