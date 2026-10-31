@@ -1118,12 +1118,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             node.target = inplaceable_op.inplace_op
 
     # Scatters are decided in a second sweep, once every other decision in this
-    # graph has been taken. should_reinplace_scatter has to know whether the
-    # scatter's result can escape as an alias of a graph input, and that
-    # depends on which of the other copy-removal mechanisms here fired -- the
-    # in-place rewrites, only_clone_these_tensors, tensors_to_clone. Deferring
-    # lets the alias walks read the answer off the rewritten graph instead of
-    # predicting it, which no prediction can do exactly.
+    # graph has been taken. The shared reinplace_registry_op guard needs to know
+    # whether a result can escape as an alias of a graph input, which depends on
+    # the copy-removal decisions already made in this pass. Deferring lets the
+    # alias walks inspect the rewritten graph instead of predicting those decisions.
     #
     # No decision below depends on a scatter's own decision: can_inplace and
     # the copy_ bookkeeping read storage, node_order, meta["val"] and the users
