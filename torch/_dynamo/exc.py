@@ -220,6 +220,14 @@ class RequiresGradRestartAnalysis(RestartAnalysis):
     """
 
 
+class CellAliasRestartAnalysis(RestartAnalysis):
+    """Raised when a cell shared with a class built during tracing may hold
+    a value that differs between calls.
+
+    On restart, the class statement graph breaks instead of being traced.
+    """
+
+
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 

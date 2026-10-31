@@ -52,6 +52,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    CellAliasRestartAnalysis,
     CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
@@ -2357,6 +2358,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             cells = []
 
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
+                # A class body can close over a name that is only bound after
+                # the class is created, e.g. a method referring to the class
+                # itself. Hand the real function an empty cell that stays
+                # linked to cell_var. Without an alias (a cell that existed
+                # before tracing, or after a restart, see track_cell_alias),
+                # the class statement graph breaks below: load_cell rejects a
+                # cell created during tracing, and the DeletedVariable of a
+                # pre-existing one fails to convert to a constant.
+                if allow_sourced_cells and cell_var._current_contents(tx) is None:
+                    alias_cell = tx.output.side_effects.track_cell_alias(cell_var)
+                    if alias_cell is not None:
+                        cells.append(alias_cell)
+                        continue
+
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
                 cell_contents = tx.output.side_effects.load_cell(cell_var)
@@ -2524,6 +2539,17 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.closure and any(
+            isinstance(c, variables.CellVariable) and c.linked_cell is not None
+            for c in self.closure.items  # type: ignore[attr-defined]
+        ):
+            # This function outlives the trace and could bind a class closure
+            # cell (see SideEffects.track_cell_alias) to anything later, so
+            # retrace and graph break at the class statement instead.
+            codegen.tx.speculation_log.graph_break_on_cell_alias = True
+            raise CellAliasRestartAnalysis(
+                restart_reason="escaping closure over a class closure cell"
+            )
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )

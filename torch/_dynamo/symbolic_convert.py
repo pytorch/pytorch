@@ -365,6 +365,10 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    # If True, don't hand classes built by __build_class__ alias cells for
+    # names bound later, so the class statement graph breaks. Set when such a
+    # name is bound to a mutable value or its cell escapes the trace.
+    graph_break_on_cell_alias: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -2419,6 +2423,27 @@ class InstructionTranslatorBase(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
         cell = self._cellvar(inst.argval)
+        # The empty cell a method of a class built during this trace closes
+        # over (see SideEffects.track_cell_alias), read before it is bound.
+        # The cell is created by this trace and bound later in it, so the read
+        # is unbound on every call, like CPython's fresh cell. Other empty
+        # cells keep falling through to load_cell.
+        if (
+            isinstance(cell, variables.CellVariable)
+            and cell.alias_cell is not None
+            and not self.output.side_effects.has_pending_mutation_of_attr(
+                cell, "cell_contents"
+            )
+        ):
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[
+                    f"cannot access free variable '{inst.argval}' where it is "
+                    "not associated with a value in enclosing scope"
+                ],
+                kwargs={"name": ConstantVariable.create(inst.argval)},
+            )
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 

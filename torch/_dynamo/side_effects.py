@@ -51,8 +51,20 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .codegen import PyCodegen
-from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
-from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
+from .exc import (
+    CellAliasRestartAnalysis,
+    collapse_resume_frames,
+    get_stack_above_dynamo,
+    unimplemented,
+)
+from .source import (
+    AttrSource,
+    ConstantSource,
+    GlobalSource,
+    LocalCellSource,
+    Source,
+    TempLocalSource,
+)
 from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
@@ -646,7 +658,45 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(value)} in store_cell"
             )
+        if cellvar.linked_cell is not None:
+            self._check_linked_cell_store(value)
         self.store_attr(cellvar, "cell_contents", value)
+        if cellvar.linked_cell is not None:
+            self.store_attr(cellvar.linked_cell, "cell_contents", value)
+
+    def _check_linked_cell_store(self, value: VariableTracker) -> None:
+        """A cell linked by `track_cell_alias` is shared by every call of the
+        compiled code, as is the class closing over it. Only accept values
+        that can never differ between calls: immutable constants, and classes
+        created during tracing (e.g. the class being built), which every call
+        reuses too. For anything else, retrace with aliasing off so the class
+        statement graph breaks and runs on every call.
+        """
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            raise AssertionError("output_graph weakref is dead in store_cell")
+        tx = output_graph.current_tx
+
+        def is_immutable_constant(v: VariableTracker) -> bool:
+            if isinstance(v, variables.ConstantVariable):
+                return True
+            if type(v) in (variables.TupleVariable, variables.FrozensetVariable):
+                return all(map(is_immutable_constant, v.unpack_var_sequence(tx)))
+            return False
+
+        if (
+            isinstance(value, variables.DeletedVariable)
+            or is_immutable_constant(value)
+            or (
+                isinstance(value, variables.UserDefinedClassVariable)
+                and value.source is None
+            )
+        ):
+            return
+        tx.speculation_log.graph_break_on_cell_alias = True
+        raise CellAliasRestartAnalysis(
+            restart_reason="store of a mutable value to a class closure cell"
+        )
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         if not isinstance(cellvar, variables.CellVariable):
@@ -999,6 +1049,62 @@ class SideEffects:
         self.id_to_variable[id(cell)] = variable
         self.keepalive.append(cell)
         return variable
+
+    def track_cell_alias(self, cellvar: VariableTracker) -> CellType | None:
+        """Return a real, empty cell to stand in for `cellvar`, which has not
+        been populated yet, creating it on first use.
+
+        Used when a function closing over `cellvar` must be materialized as a
+        real function, e.g. a method of a class built by `__build_class__`
+        before the name it refers to is bound. The real cell is tracked as a
+        pre-existing cell linked to `cellvar`: stores to either are mirrored
+        to the other, so inlined calls of the real function see the current
+        value, and the final value is written to the real cell after the graph
+        runs. Every function closing over `cellvar` gets the same real cell.
+
+        The real cell is a global of the compiled code, as is the class built
+        at trace time, so every call of the compiled code shares it. Stores
+        into it are limited to values that never change (see
+        `_check_linked_cell_store`), and no other function may hold either
+        cell past the trace (see `NestedUserFunctionVariable.reconstruct` and
+        `OutputGraph.codegen_cells`).
+
+        Returns None for a cell that existed before tracing (e.g. a free
+        variable of the compiled frame): it must not be replaced by a new
+        cell, since the enclosing function keeps writing to the original.
+        Also returns None once a frame has restarted with aliasing off.
+        """
+        if not isinstance(cellvar, variables.CellVariable):
+            raise AssertionError(
+                f"Expected CellVariable, got {type(cellvar)} in track_cell_alias"
+            )
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            raise AssertionError("output_graph weakref is dead in track_cell_alias")
+        if output_graph.current_tx.speculation_log.graph_break_on_cell_alias:
+            return None
+        # `cellvar` is itself an alias, e.g. the closure of a method of a
+        # class built earlier in the trace.
+        if cellvar.alias_cell is not None:
+            return cellvar.alias_cell
+        if cellvar.linked_cell is not None:
+            return cellvar.linked_cell.alias_cell
+        if not isinstance(cellvar.mutation_type, AttributeMutationNew):
+            return None
+        cell = CellType()
+        name = output_graph.install_global_by_id("___cell", cell)
+        output_graph.update_co_names(name)
+        alias = self.track_cell_existing(
+            ConstantSource(name), cell, variables.DeletedVariable()
+        )
+        if not isinstance(alias, variables.CellVariable):
+            raise AssertionError(
+                f"Expected CellVariable, got {type(alias)} in track_cell_alias"
+            )
+        alias.alias_cell = cell
+        cellvar.linked_cell = alias
+        alias.linked_cell = cellvar
+        return cell
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
         variable = variables.NewGlobalVariable.create(source)
