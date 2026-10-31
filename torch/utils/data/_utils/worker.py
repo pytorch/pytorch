@@ -330,6 +330,38 @@ def _worker_loop(
 
         watchdog = ManagerWatchdog()
 
+        # Slot pool async copy thread: when SHM_POOL=1, the copy into the
+        # SharedMemory slot is done in this background thread so the worker's
+        # main loop (data fetch) is not blocked — put is async, like the
+        # default Queue feeder.  The thread pulls (idx, data) from
+        # ``_shm_copy_queue``, copies tensors into a slot, and puts the
+        # lightweight SlotStub onto ``data_queue``.
+        _shm_copy_queue = None
+        _shm_copy_thread = None
+        try:
+            from .shm_pool import is_enabled as _shm_is_enabled
+            if _shm_is_enabled():
+                import threading as _threading
+                from .shm_pool import copy_batch_into_slot as _copy_into_slot
+
+                def _shm_copy_loop():
+                    while True:
+                        item = _shm_copy_queue.get()
+                        if item is None:
+                            break
+                        ci, cdata = item
+                        try:
+                            cdata = _copy_into_slot(cdata)
+                        except Exception:
+                            pass
+                        data_queue.put((ci, cdata))
+
+                _shm_copy_queue = queue.Queue()
+                _shm_copy_thread = _threading.Thread(target=_shm_copy_loop, daemon=True)
+                _shm_copy_thread.start()
+        except ImportError:
+            pass
+
         while watchdog.is_alive():
             try:
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
@@ -390,12 +422,33 @@ def _worker_loop(
                         data = ExceptionWrapper(
                             where=f"in DataLoader worker process {worker_id}"
                         )
+            # Slot pool: when SHM_POOL=1, write every CPU tensor into a
+            # persistent SharedMemory slot and send a lightweight SlotStub
+            # instead of the real tensors. This avoids per-batch
+            # /dev/shm fd creation (reduce_storage) on the worker side and
+            # per-batch munmap on the pin-thread side.  The copy is done in a
+            # background thread so the worker's main loop (data fetch) is not
+            # blocked — put is async, like the default Queue feeder.
+            if not isinstance(data, ExceptionWrapper):
+                try:
+                    from .shm_pool import is_enabled as _shm_is_enabled
+                    if _shm_is_enabled():
+                        _shm_copy_queue.put((idx, data))
+                        continue
+                except ImportError:
+                    pass
             data_queue.put((idx, data))
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
     finally:
+        # Signal the async copy thread to stop and wait for it to finish
+        # draining remaining batches onto data_queue.
+        if _shm_copy_queue is not None:
+            _shm_copy_queue.put(None)
+        if _shm_copy_thread is not None:
+            _shm_copy_thread.join()
         _worker_info = None
     if done_event.is_set():
         data_queue.cancel_join_thread()
