@@ -2517,6 +2517,20 @@ torch.{device_type}.synchronize()
 class TestPoolingNNCudaOnly(NNTestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @largeTensorTest("26GB", device="cuda")
+    def test_max_unpool2d_large_numel(self, device):
+        # numel > INT_MAX: the forward kernel's loop index must not be narrowed
+        # to int (it wrapped negative and faulted with an illegal memory access).
+        input = torch.ones(1, 1, 32769, 65536, device=device, dtype=torch.half)
+        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
+        indices = torch.zeros_like(input, dtype=torch.long)
+        out = F.max_unpool2d(input, indices, kernel_size=1)
+        del input, indices
+        # Every element maps to flat position 0 of the single plane. Use max
+        # rather than count_nonzero to avoid a full-size mask.
+        self.assertEqual(out[0, 0, 0, 0].item(), 1)
+        self.assertEqual(out.view(-1)[1:].max().item(), 0)
+
     @largeTensorTest("18GB", device="cuda")
     def test_avg_pool2d_backward_nonoverlapping_large(self, device):
         # Exercise the 64-bit index path (numel > INT_MAX) of the
