@@ -16,7 +16,6 @@ import secrets
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from enum import Enum
 from itertools import chain, count
 from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
@@ -58,6 +57,8 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.hints import KERNEL_CONFIGS_NAME
+from ..runtime.namedtuple_helpers import namedtuple_type
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -80,6 +81,7 @@ from ..utils import (
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
+    sanitize_constexpr_for_repr,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -311,20 +313,9 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
 
 
 def _sanitize_for_repr(obj: object) -> object:
-    """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, Enum):
-        return _sanitize_for_repr(obj.value)
-    repr_children = get_constexpr_repr_children(obj)
-    if repr_children is not None:
-        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
-        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
-        # invoke user code, so preserve the original when sanitization is a no-op.
-        if all(
-            child is original for child, original in zip(children, repr_children.values)
-        ):
-            return obj
-        return repr_children.rebuild(children)
-    return obj
+    # Infrastructure NamedTuples such as DeviceProperties must retain their
+    # runtime methods. Only user constexpr constants need structural aliases.
+    return sanitize_constexpr_for_repr(obj, canonicalize_namedtuples=False)
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -607,6 +598,76 @@ def user_defined_kernel_grid_fn_code(
                 writeline(statement, f"if {guards}: return {example_grid}")
 
     return fn_name, output.getvalue()
+
+
+def _collect_namedtuple_types(
+    value: Any, seen: OrderedSet[type] | None = None
+) -> list[type]:
+    """Return NamedTuple types referenced by ``value``, dependencies first.
+
+    Used so generated Triton modules can eval ``triton_meta={...!r}`` when a
+    user passes a NamedTuple as a ``tl.constexpr`` (see #192288).
+    """
+    if seen is None:
+        seen = OrderedSet()
+    result: list[type] = []
+    visited: OrderedSet[int] = OrderedSet()
+
+    def visit(obj: Any) -> None:
+        if id(obj) in visited:
+            return
+        visited.add(id(obj))
+        repr_children = get_constexpr_repr_children(obj)
+        if repr_children is not None:
+            for child in repr_children.values:
+                visit(child)
+        if pytree.is_namedtuple_instance(obj):
+            cls = type(obj)
+            if cls not in seen:
+                seen.add(cls)
+                result.append(cls)
+
+    visit(value)
+    return result
+
+
+def codegen_namedtuple_defs(constants: dict[str, Any]) -> str:
+    """Emit NamedTuple defs so ``repr`` of constexpr constants can eval.
+
+    Always reconstructs via ``namedtuple_helpers.namedtuple_type`` (never
+    ``from user_module import ...``): generated sources are cached and may be
+    reloaded on another machine, and classes defined in
+    ``compile_tasks.<hash>`` are not pickle-safe across compile workers.
+    """
+    types: list[type] = []
+    seen: OrderedSet[type] = OrderedSet()
+    for value in constants.values():
+        types.extend(_collect_namedtuple_types(value, seen))
+
+    if not types:
+        return ""
+
+    buf = IndentedBuffer()
+    lines: list[str] = []
+    emitted: OrderedSet[str] = OrderedSet()
+    for cls in types:
+        name = cls.__name__
+        fields = tuple(cls._fields)
+        alias = namedtuple_type(name, fields).__qualname__
+        if alias in emitted:
+            continue
+        emitted.add(alias)
+        lines.append(f"{alias} = namedtuple_type({name!r}, {fields!r})")
+
+    buf.writeline(
+        "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type"
+    )
+    # Type definitions do not reference each other. Keep source deterministic
+    # even when constexpr values contain sets.
+    for line in sorted(lines):
+        buf.writeline(line)
+    buf.newline()
+    return buf.getvalue()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -912,6 +973,94 @@ def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
         # So we need to add backslash here.
         src = src.replace('"""', '\\"\\"\\"')
     return src.replace("'''", "\\'\\'\\'")
+
+
+class _LineIfNamesUsed(DeferredLineBase):
+    """A line emitted only if the module uses one of ``names``: by default the names
+    the import or binding on it binds.
+
+    Which bindings a graph needs is not known when write_header runs, before anything
+    is lowered, and several are only ever emitted by interpolation
+    (``empty_strided_{device.type}``) or via ``repr()`` (``device(...)``, ``inf``), so
+    the question is asked of the finished module rather than at each use site.
+    """
+
+    def __init__(
+        self,
+        line: str,
+        names: tuple[str, ...],
+        wrapper: PythonWrapperCodegen,
+        binds: bool,
+    ) -> None:
+        super().__init__(line)
+        self.names = names
+        self.wrapper = wrapper
+        # Whether ``names`` are the ones the line binds, so only its right-hand side,
+        # not the whole line, is a use.
+        self.binds = binds
+
+    def __call__(self) -> str | None:
+        if self.wrapper.scanning_for_uses:
+            # Absent from the text being scanned, so that a line is not a use of its
+            # own names: `aten = torch.ops.aten` is not a use of aten.
+            return None
+        used = self.wrapper.used_names
+        return self.line if used is None or not used.isdisjoint(self.names) else None
+
+    def _new_line(self, line: str) -> _LineIfNamesUsed:
+        return _LineIfNamesUsed(line, self.names, self.wrapper, self.binds)
+
+
+class _OmittedFromScan(DeferredLineBase):
+    """A block of the module that is not looked at for uses of the preamble's names:
+    a module-level kernel, which brings its own imports, or a subgraph's code, which
+    reported its uses when it was generated."""
+
+    def __init__(self, line: str, wrapper: PythonWrapperCodegen) -> None:
+        super().__init__(line)
+        self.wrapper = wrapper
+
+    def __call__(self) -> str | None:
+        return None if self.wrapper.scanning_for_uses else self.line
+
+    def _new_line(self, line: str) -> _OmittedFromScan:
+        # IndentedBuffer re-indents or slices a line as a whole, which would apply to
+        # only the first line of the block.
+        if line != self.line:
+            raise AssertionError("a block omitted from the scan must stay at indent 0")
+        return _OmittedFromScan(line, self.wrapper)
+
+
+class _KernelConfigs(DeferredLineBase):
+    """``KERNEL_CONFIGS``: the config compile-time autotuning chose for each module-level
+    kernel, which the kernel launches with when the module is run on its own (see
+    cached_autotune).
+
+    It is written ahead of the kernels, which read it when they are defined, but is only
+    known once the autotune block has run, after every kernel, subgraphs' included, has
+    been emitted.
+    """
+
+    def __init__(self, wrapper: PythonWrapperCodegen) -> None:
+        super().__init__("")
+        self.wrapper = wrapper
+
+    def __call__(self) -> str | None:
+        configs = self.wrapper.kernel_configs
+        if self.wrapper.scanning_for_uses or not configs:
+            return None
+        pinned = {name: cfg for name, cfg in configs.items() if cfg is not None}
+        rows = "".join(f"    {name!r}: {cfg!r},\n" for name, cfg in pinned.items())
+        return (
+            "# The config each kernel below launches with when this file is run on its own,\n"
+            "# chosen by autotuning at compile time. A kernel missing here autotunes on its\n"
+            "# first launch, as does one whose config does not fit the GPU (after a retry\n"
+            "# with pipelining off).\n"
+            f"{KERNEL_CONFIGS_NAME} = {{\n{rows}}}"
+        )
+
+    def _new_line(self, line: str) -> _KernelConfigs:
+        return _KernelConfigs(self.wrapper)
 
 
 @dataclasses.dataclass
@@ -2190,6 +2339,22 @@ class PythonWrapperCodegen(CodeGen):
         # Cache keys of the kernel modules whose benchmark harness
         # emit_triton_kernel_definition cut from the module-level kernel.
         self.kernel_harness_modules: list[str] = []
+        # The names the finished module uses, which decide each _LineIfNamesUsed; None
+        # until _generate scans the module, and until then every such line is emitted.
+        self.used_names: OrderedSet[str] | None = None
+        self.scanning_for_uses = False
+        # The lines write_if_used wrote. The FX wrapper writes this header too but has
+        # its own _generate, which never scans, so it keeps every line.
+        self.conditional_lines: list[_LineIfNamesUsed] = []
+        # The names each subgraph uses, which the subgraph's own scan adds, since the
+        # root splices its code in unscanned.
+        self.names_used_unscanned: OrderedSet[str] = OrderedSet()
+        # Each module-level kernel that reads its launch config from KERNEL_CONFIGS, and
+        # that config, which generate_and_run_autotune_block fills in.
+        self.kernel_configs: dict[str, dict[str, Any] | None] = {}
+        # kernel_autotune_names across the root and its subgraphs: the kernels the
+        # autotune block launches.
+        self.kernel_autotune_names_all_graphs: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -2321,6 +2486,137 @@ class PythonWrapperCodegen(CodeGen):
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
+    def _preamble_imports(self) -> tuple[str, ...]:
+        return (
+            "from ctypes import c_void_p, c_long, c_int",
+            "import torch",
+            "import math",
+            "import random",
+            "import os",
+            "import tempfile",
+            "from math import inf, nan",
+            "from cmath import nanj",
+            "from torch._inductor.hooks import run_intermediate_hooks",
+            "from torch._inductor.utils import maybe_profile",
+            "from torch._inductor.codegen.memory_planning import _align as align",
+            "from torch import device, empty_strided",
+            "from torch._inductor.select_algorithm import extern_kernels",
+        )
+
+    def _preamble_bindings(self) -> tuple[str, ...]:
+        guards = "torch._C._dynamo.guards"
+        return (
+            "aten = torch.ops.aten",
+            "inductor_ops = torch.ops.inductor",
+            "_quantized = torch.ops._quantized",
+            f"assert_size_stride = {guards}.assert_size_stride",
+            f"assert_size_stride_grouped = {guards}.assert_size_stride_grouped",
+            f"assert_alignment = {guards}.assert_alignment",
+            f"empty_strided_cpu = {guards}._empty_strided_cpu",
+            f"empty_strided_cpu_pinned = {guards}._empty_strided_cpu_pinned",
+            f"empty_strided_cuda = {guards}._empty_strided_cuda",
+            f"empty_strided_xpu = {guards}._empty_strided_xpu",
+            f"empty_strided_mtia = {guards}._empty_strided_mtia",
+            f"reinterpret_tensor = {guards}._reinterpret_tensor",
+            "alloc_from_pool = torch.ops.inductor._alloc_from_pool",
+            "async_compile = AsyncCompile()",
+        )
+
+    def write_if_used(
+        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
+    ) -> None:
+        """Write a line that is kept only if the module uses a name in ``names``, by
+        default the names the import or binding on it binds. A kept line uses the names
+        it reads: a binding's right-hand side, or all of a line given ``names``."""
+        binds = names is None
+        if names is None:
+            names = self._names_bound_by(line)
+            if "torch" in names:
+                # The rest of the preamble is written in terms of it.
+                buf.writeline(line)
+                return
+        self.conditional_lines.append(_LineIfNamesUsed(line, names, self, binds))
+        buf.writeline(self.conditional_lines[-1])
+
+    @staticmethod
+    def _names_bound_by(line: str) -> tuple[str, ...]:
+        """The names bound by ``line``: ``x = ...``, ``import a.b[ as c], ...`` or
+        ``from m import a[ as b], ...`` on a single line."""
+        if m := re.fullmatch(r"(\w+) = .+", line):
+            return (m.group(1),)
+        if m := re.fullmatch(r"(import|from [\w.]+ import) ([\w., ]+)", line):
+            names = []
+            for item in m.group(2).split(","):
+                target, _, alias = item.strip().partition(" as ")
+                # `import a.b` binds `a`.
+                name = alias or target.split(".")[0]
+                if re.fullmatch(r"\w+", name):
+                    names.append(name)
+            if len(names) == m.group(2).count(",") + 1:
+                return tuple(names)
+        raise AssertionError(
+            f"cannot tell what {line!r} binds; write it with an explicit `names`"
+        )
+
+    def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
+        """Splice ``code`` into ``buf`` as one line, so that leaving it out of the scan
+        costs nothing per line of it."""
+        block = IndentedBuffer()
+        block.splice(code)
+        text = block.getvalue().rstrip("\n")
+        # Written as lines of their own: splice takes a line's leading whitespace,
+        # newlines included, as its indent.
+        code_start = len(text) - len(text.lstrip("\n"))
+        buf.writelines([""] * code_start)
+        if text:
+            buf.writeline(_OmittedFromScan(text[code_start:], self))
+
+    def needs_use_scan(self) -> bool:
+        """Whether _generate scans the finished module for uses of the preamble's names."""
+        return bool(self.conditional_lines)
+
+    def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
+        """The names ``module`` uses, leaving out what write_omitted_from_scan wrote."""
+        self.scanning_for_uses = True
+        try:
+            text = module.getvalue()
+        finally:
+            self.scanning_for_uses = False
+        # Each kernel's provenance comment names its source ops ("Original ATen:
+        # [aten.mul, ...]"), so whole-line comments are not uses. Trailing comments and
+        # strings still count, which can only keep a line.
+        return OrderedSet(
+            word
+            for line in text.splitlines()
+            if not line.lstrip().startswith("#")
+            for word in re.findall(r"\w+", line)
+        )
+
+    def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Record which names ``module``, the finished wrapper, uses."""
+        used = self.names_used_in(module) | self.names_used_unscanned
+        if self.kernel_sources:
+            # Run as a script, the module compiles its module-level kernels, which the
+            # scan leaves out, at async_compile.wait.
+            used.add("async_compile")
+        # A kept line uses the names it reads, which another line may bind:
+        # `async_compile = AsyncCompile()`.
+        reads = []
+        for line in self.conditional_lines:
+            text = line.line.partition(" = ")[2] if line.binds else line.line
+            reads.append((line.names, re.findall(r"(?<![.\w])\w+", text)))
+        while (
+            new := OrderedSet(
+                word
+                for names, words in reads
+                if not used.isdisjoint(names)
+                for word in words
+            )
+            - used
+        ):
+            used |= new
+        self.used_names = used
+
     def write_header(self) -> None:
         """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
@@ -2331,59 +2627,27 @@ class PythonWrapperCodegen(CodeGen):
         if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
             inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         elif torch._inductor.config.test_configs.track_memory_lifecycle:
-            inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
+            inductor_debug_utils = (
+                "from torch._inductor.runtime.debug_utils import tracked_empty_strided"
+            )
 
-        self.imports.splice(
-            f"""
-                {aot_config_comment}
-                from ctypes import c_void_p, c_long, c_int
-                import torch
-                import math
-                import random
-                import os
-                import tempfile
-                from math import inf, nan
-                from cmath import nanj
-                from torch._inductor.hooks import run_intermediate_hooks
-                from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
-                from torch import device, empty_strided
-                from {async_compile.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
-                {inductor_debug_utils}
-            """,
-            strip=True,
-        )
-        self.header.splice(
-            """
-                aten = torch.ops.aten
-                inductor_ops = torch.ops.inductor
-                _quantized = torch.ops._quantized
-                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
-                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
-                assert_alignment = torch._C._dynamo.guards.assert_alignment
-                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
-                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
-                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
-                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
-                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
-                reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
-                async_compile = AsyncCompile()
-            """,
-            strip=True,
-        )
+        if aot_config_comment:
+            self.imports.writeline(aot_config_comment)
+        for line in self._preamble_imports():
+            self.write_if_used(self.imports, line)
+        async_compile_import = f"from {async_compile.__name__} import AsyncCompile"
+        self.write_if_used(self.imports, async_compile_import)
+        if inductor_debug_utils:
+            self.imports.writeline(inductor_debug_utils)
+        for line in self._preamble_bindings():
+            self.write_if_used(self.header, line)
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
             from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
 
-            self.header.splice(
-                """
-                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
-                """,
-                strip=True,
-            )
+            p2p = "torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p"
+            self.write_if_used(self.header, f"empty_strided_p2p = {p2p}")
         except (AttributeError, ImportError):
             pass
         if config.annotate_training:
@@ -2469,18 +2733,17 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        import_str = f"""
-            import triton
-            import triton.language as tl
-            from {triton_heuristics.__name__} import start_graph, end_graph
-            """
+        graph_utils = f"from {triton_heuristics.__name__} import start_graph, end_graph"
+        triton_imports = ("import triton", "import triton.language as tl", graph_utils)
         if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.splice(import_str)
+            self.kernel_autotune_calls.writeline("")
+            self.kernel_autotune_calls.writelines(triton_imports)
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
         if not V.graph.cpp_wrapper:
-            self.imports.splice(import_str, strip=True)
+            for line in triton_imports:
+                self.write_if_used(self.imports, line)
             self.imports.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
@@ -2574,13 +2837,10 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
-        self.prefix.splice(
-            """
-
-            async_compile.wait(globals())
-            del async_compile
-            """
-        )
+        # None of these lines is a use of async_compile: a module that compiles nothing
+        # has no need of them.
+        for line in ("", "", "async_compile.wait(globals())", "del async_compile"):
+            self.write_if_used(self.prefix, line, ("async_compile",))
 
     def write_args(self, input_names: list[str]):
         lhs = ", ".join(input_names)
@@ -2845,21 +3105,22 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
-            # compile-on-one-rank: resolve at runtime so the autotune block matches the
-            # rank-agnostic call() body (see codegen_device_guard_enter).
-            autotune_idx = (
-                V.graph.device_ops.current_device_idx_expr()
-                if _coor_enabled()
-                else device_idx
-            )
-            self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({autotune_idx})"
-            )
+            self._write_autotune_get_raw_stream(name, device_idx)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
         self.writeline(f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})")
         return name
+
+    def _write_autotune_get_raw_stream(self, name: str, device_idx: int) -> None:
+        # compile-on-one-rank: resolve at runtime so the autotune block matches the
+        # rank-agnostic call() body (see codegen_device_guard_enter).
+        autotune_idx = (
+            V.graph.device_ops.current_device_idx_expr()
+            if _coor_enabled()
+            else device_idx
+        )
+        self.kernel_autotune_calls.writeline(f"{name} = get_raw_stream({autotune_idx})")
 
     def get_codegened_graph(self):
         return self.codegened_graph_stack[-1]
@@ -2954,8 +3215,8 @@ class PythonWrapperCodegen(CodeGen):
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
-            self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
+            self._write_autotune_get_raw_stream(
+                get_raw_stream_name(device_idx), device_idx
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -3197,7 +3458,9 @@ class PythonWrapperCodegen(CodeGen):
         call = f"{fn}({args})"
         return call
 
-    def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_stable(
+        self, desc, apply_size_hints=False, tensor_ref: str | None = None
+    ):
         block_shape = desc.block_shape
         if apply_size_hints:
             block_shape = V.graph.sizevars.optimization_hints(block_shape)
@@ -3209,7 +3472,8 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(import_line)
         prefix = f"{desc.descriptor_module}.{desc.descriptor_class}"
         fn = f"{prefix}.from_tensor"
-        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        if tensor_ref is None:
+            tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
         args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
@@ -3354,8 +3618,9 @@ class PythonWrapperCodegen(CodeGen):
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(kernel_defs)
-        else:
-            self.header.splice(kernel_defs)
+            if V.graph.cpp_wrapper:
+                return
+        self.header.splice(kernel_defs)
 
     def _generate(self, is_inference):
         if config.profile_bandwidth:
@@ -3442,6 +3707,8 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
+        if self.needs_use_scan():
+            self.scan_for_used_names(result)
 
         return (
             result.getvaluewithlinemap(),
@@ -3453,6 +3720,8 @@ class PythonWrapperCodegen(CodeGen):
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
         code and execute it to trigger Triton kernel compilation and auto-tuning
         """
+        from ..runtime.triton_heuristics import CachingAutotuner, config_to_dict
+
         self.kernel_autotune_defs.splice(
             """
             async_compile.wait(globals())
@@ -3496,6 +3765,23 @@ class PythonWrapperCodegen(CodeGen):
                 exec(tuning_code, scope)
             except Exception as e:
                 raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        # Only the kernels the block launched: async_compile precompiles every kernel,
+        # so one launcher alone does not show that it was tuned.
+        for name in self.kernel_configs.keys() & self.kernel_autotune_names_all_graphs:
+            kernel = scope.get(name)
+            if isinstance(kernel, CachingAutotuner) and len(kernel.launchers) == 1:
+                launched = kernel.launchers[0].config
+                row = config_to_dict(launched)
+                # A third-party backend's options, which config_from_dict restores.
+                if extra_options := getattr(launched, "extra_options", None):
+                    row["extra_options"] = extra_options
+                # A row the module could not read back, such as one holding an enum, is
+                # left out, so that its kernel tunes on first launch. So is a config with
+                # fields a row does not carry.
+                carried = launched.num_ctas == 1 and launched.pre_hook is None
+                with contextlib.suppress(ValueError, SyntaxError, TypeError):
+                    if carried and ast.literal_eval(repr(row)) == row:
+                        self.kernel_configs[name] = row
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -4294,7 +4580,10 @@ class PythonWrapperCodegen(CodeGen):
         body = self._format_kernel_definition(
             kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
-        self.header.splice(body)
+        if not standalone:
+            self.header.splice(body)
+            return
+        self.write_omitted_from_scan(self.header, body)
 
     def emit_triton_kernel_definition(
         self,
@@ -4303,11 +4592,15 @@ class PythonWrapperCodegen(CodeGen):
         src_code: str,
         device_type: str,
         metadata: str | None = None,
+        pin_config: bool = False,
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
         The python wrapper defines the kernel as code. Wrappers that consume a kernel's
         ``async_compile.triton(...)`` source themselves get that string form instead.
+        With ``pin_config``, set for an inductor-generated kernel, the module run on its
+        own launches the kernel with the config compile-time autotuning chose
+        (KERNEL_CONFIGS).
         """
         if not self.defines_triton_kernels_as_code():
             self.define_kernel(
@@ -4367,6 +4660,16 @@ class PythonWrapperCodegen(CodeGen):
         # defs and constants. In one shared namespace the later binding would win for
         # all of them, so _rename_kernel_module_globals makes each kernel-unique.
         src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
+        if pin_config and config.triton.autotune_at_compile_time:
+            # The autotune block below chooses this kernel's config, and the module
+            # launches it with that one rather than tuning again on first launch:
+            # cached_autotune looks the kernel up in its module's KERNEL_CONFIGS.
+            if not self.kernel_configs:
+                # Here rather than in write_header, which a subclass may replace. The
+                # root's header comes before every kernel, subgraphs' included.
+                root = self.get_root_graph()
+                root.header.writeline(_KernelConfigs(root))
+            self.kernel_configs[kernel_name] = None
         self.define_kernel(
             kernel_name,
             src_code,
@@ -4392,8 +4695,18 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.writeline(f"''', device_str='{device_type}')")
         return compile_wrapper.getvalue()
 
+    @cache_on_self
+    def get_root_graph(self) -> PythonWrapperCodegen:
+        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
+        while isinstance(root, SubgraphPythonWrapperCodegen):
+            root = root.parent_wrapper
+
+        if not isinstance(root, PythonWrapperCodegen):
+            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
+        return root
+
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
-        self.subgraph_definitions.splice(subgraph_code.value)
+        self.write_omitted_from_scan(self.subgraph_definitions, subgraph_code.value)
 
     @classmethod
     def _get_triton_info_kernel_cls(cls):
@@ -4463,6 +4776,9 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
+                    # Keep NamedTuple constexprs as-is; codegen_namedtuple_defs emits
+                    # their type into the generated module so triton_meta={...!r} evals
+                    # (see #192288). Do not substitute a non-tuple stand-in.
                     constants[arg.name] = kwargs[arg.name]
 
             else:
@@ -4667,6 +4983,11 @@ class PythonWrapperCodegen(CodeGen):
                 arg_names[i] for i in constexprs
             ]
 
+        # Prepare constants before both cache-key construction and type discovery.
+        sanitized_constants = sanitize_constexpr_for_repr(triton_meta["constants"])
+        triton_meta["constants"] = cast(dict[str, Any], sanitized_constants)
+        triton_meta = cast("TritonMeta", _sanitize_for_repr(triton_meta))
+
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
         if len(configs) > 0:
@@ -4706,6 +5027,10 @@ class PythonWrapperCodegen(CodeGen):
 
         compile_wrapper = IndentedBuffer()
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        # NamedTuple tl.constexpr values stringify with stable aliases; emit the
+        # type so triton_meta={triton_meta!r} can eval in this module (#192288).
+        if namedtuple_defs := codegen_namedtuple_defs(triton_meta.get("constants", {})):
+            compile_wrapper.splice(namedtuple_defs)
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
         ):
@@ -4716,14 +5041,12 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
-        # Sanitize triton_meta to convert Enum values for valid Python repr
-        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={sanitized_triton_meta!r},
+                triton_meta={triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
@@ -5315,6 +5638,8 @@ class PythonWrapperCodegen(CodeGen):
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
             stream_name = "raw_stream"
+            if config.triton.autotune_at_compile_time:
+                self._write_autotune_get_raw_stream(stream_name, device.index)
             self.writeline(
                 f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
             )
@@ -5432,6 +5757,21 @@ class PythonWrapperCodegen(CodeGen):
                         autotune_args[raw_key]
                     )
 
+                # The captured sample input of a TMA argument is the descriptor's
+                # underlying tensor, not the descriptor the kernel expects.
+                if triton_input and isinstance(raw_arg, ir.TMADescriptor):
+                    if isinstance(raw_arg, ir.TMADescriptorStable):
+                        desc_call = self._generate_tma_descriptor_call_stable(
+                            raw_arg, apply_size_hints=True, tensor_ref=triton_input
+                        )
+                        self.kernel_autotune_calls.writeline(f"{arg} = {desc_call}")
+                        triton_input = arg
+                    else:
+                        # Experimental descriptors take explicit dims, which are
+                        # size hints here and may not match the sample tensor, so
+                        # fall back to a synthetic tensor and descriptor.
+                        triton_input = None
+
                 if triton_input:
                     arg_str = triton_input
                     if not isinstance(arg_type, torch_dtype) and (
@@ -5546,6 +5886,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 )
             self.kernel_autotune_names.add(kernel_name)
+            self.kernel_autotune_names_all_graphs.add(kernel_name)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return
@@ -6444,6 +6785,14 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
+        self.multi_kernel_state = MultiKernelState(parent_wrapper.multi_kernel_state)
+        # Its code goes into the root unscanned, so it reports its own uses. The set is
+        # the root's, as kernel_sources is, so that a nested subgraph reports straight to
+        # the root rather than through each parent; a name reported for code the root
+        # does not splice in can only keep a preamble line, never drop one.
+        self.names_used_unscanned = root.names_used_unscanned
+        self.kernel_configs = root.kernel_configs
+        self.kernel_autotune_names_all_graphs = root.kernel_autotune_names_all_graphs
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
@@ -6456,6 +6805,20 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def add_benchmark_harness(self, output):
         pass
+
+    def needs_use_scan(self) -> bool:
+        # The root needs this subgraph's uses even if it writes no conditional line.
+        return True
+
+    def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Add the names ``module``, this subgraph's code, uses to the set shared with
+        the root, which splices that code in unscanned. Unlike the root's scan, it sets
+        no ``used_names``: it keeps or drops no line of its own."""
+        if self.conditional_lines:
+            # Only the root keeps or drops them; this scan never would.
+            name = self.subgraph_name
+            raise AssertionError(f"subgraph {name} wrote a line kept only if used")
+        self.names_used_unscanned |= self.names_used_in(module)
 
     def benchmark_compiled_module(self, output):
         pass
@@ -6562,16 +6925,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
-
-    @cache_on_self
-    def get_root_graph(self) -> PythonWrapperCodegen:
-        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
-        while isinstance(root, SubgraphPythonWrapperCodegen):
-            root = root.parent_wrapper
-
-        if not isinstance(root, PythonWrapperCodegen):
-            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
-        return root
 
     def generate_and_run_autotune_block(self):
         # Only execute auto-tuning block in the main graph
