@@ -605,9 +605,14 @@ def validate_bmm_capture_views(
         if source_meta.dtype != result_meta.dtype or not statically_known_shape_equal(
             shapes[0], shapes[1]
         ):
+            fix = (
+                "return GEMM-derived views directly from the epilogue"
+                if node in gemm_derived
+                else "reshape or reinterpret captures before the FlexGEMM call"
+            )
             raise NotImplementedError(
                 "FlexGEMM bmm epilogue views must preserve batch, row, and column axes "
-                "and dtype; reshape or reinterpret captures before the FlexGEMM call"
+                f"and dtype; {fix}"
             )
 
 

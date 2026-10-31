@@ -2653,7 +2653,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.bmm, (a, b), epilogue, kernel_options={"backend": "QUACK"}
             )
 
-        with self.assertRaisesRegex(InductorError, "preserve batch, row, and column"):
+        fix = (
+            "return GEMM-derived views directly"
+            if case == "flattened_acc"
+            else "reshape or reinterpret captures"
+        )
+        with self.assertRaisesRegex(
+            InductorError, f"preserve batch, row, and column.*{fix}"
+        ):
             torch.compile(fn, fullgraph=True)(a, b, torch.randn(shape))
 
     @skipIfNoCuteDSL
