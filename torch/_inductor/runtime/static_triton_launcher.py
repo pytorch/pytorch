@@ -53,6 +53,11 @@ def _triton_allocator_var():
     return _allocator
 
 
+# Encoded descriptors kept per descriptor position, so a dynamic size that
+# alternates between a few values does not re-encode on every launch.
+_HOST_TMA_CACHE_ENTRIES = 4
+
+
 def make_host_tma_expander():
     """Bind the TMA arg helpers once, so the launcher does not resolve them per call.
 
@@ -60,10 +65,13 @@ def make_host_tma_expander():
     ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
     descriptor position.
 
-    On a cache hit (same base address) it returns the previously-encoded
-    CUtensorMap, skipping both the TensorDescriptor construction/validation and
-    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
-    contents), so reuse is safe whenever the address/shape/strides match.
+    On a cache hit (same base address, shape and strides, among the last
+    _HOST_TMA_CACHE_ENTRIES seen at that position) it returns the
+    previously-encoded CUtensorMap, skipping both the TensorDescriptor
+    construction/validation and cuTensorMapEncodeTiled. The descriptor only
+    encodes addressing (not buffer contents), so reuse is safe whenever the
+    address/shape/strides match; shape and strides can change between launches
+    when they are dynamic sizes read at launch.
 
     `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
     and keeps the (possibly cloned) result alive across the launch, since the
@@ -75,15 +83,17 @@ def make_host_tma_expander():
     def expand_host_tma_descriptor(
         cache, pos, tensor, cacheable, shape, strides, block, meta
     ):
-        data_ptr = tensor.data_ptr()
+        key = (tensor.data_ptr(), tuple(shape), tuple(strides))
+        entries = cache.setdefault(pos, {}) if cacheable else {}
+        expanded = entries.pop(key, None)
+        if expanded is None:
+            desc = TensorDescriptor(tensor, shape, strides, block)
+            expanded = tuple(make_tensordesc_arg(desc, meta))
+            if len(entries) >= _HOST_TMA_CACHE_ENTRIES:
+                entries.pop(next(iter(entries)))
         if cacheable:
-            cached = cache.get(pos)
-            if cached is not None and cached[0] == data_ptr:
-                return cached[1]
-        desc = TensorDescriptor(tensor, shape, strides, block)
-        expanded = tuple(make_tensordesc_arg(desc, meta))
-        if cacheable:
-            cache[pos] = (data_ptr, expanded)
+            # Reinserted last: entries iterate least recently used first.
+            entries[key] = expanded
         return expanded
 
     return expand_host_tma_descriptor

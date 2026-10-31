@@ -3923,7 +3923,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return (
             has_triton_stable_tma_api()
             and config.triton.enable_host_side_tma
-            and not indexing.can_lift
             and indexing.constant_offset == 0
             and var not in self._host_tma_non_materializable
             and self._is_host_tma_materializable(indexing, dtype)
@@ -4721,7 +4720,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # descriptor can be built on the host. Register it and return early --
             # no in-kernel tl.make_tensor_descriptor is emitted for it.
             if self._can_materialize_host_tma(var, indexing, V.graph.get_dtype(name)):
-                if var not in self.host_tma_descriptor_args:
+                if var in self.host_tma_descriptor_args:
+                    # A second consumer of an arg the template already described
+                    # would silently reuse the template's block shape.
+                    self._reject_if_template_host_tma(var)
+                else:
                     self.host_tma_descriptor_args[var] = indexing
                 self._host_tma_descriptor_buffers.setdefault(var, OrderedSet()).add(
                     name
@@ -4732,7 +4735,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif (
                 has_triton_stable_tma_api()
                 and config.triton.enable_host_side_tma
-                and not indexing.can_lift
                 and indexing.constant_offset != 0
             ):
                 self._host_tma_non_materializable.add(var)
@@ -7936,6 +7938,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         return out
 
+    def body_fixed_blocks(self, sig_arg_names: OrderedSet[str]) -> dict[str, int]:
+        """Blocks defined in the kernel body rather than passed as a kernel arg."""
+        fixed_blocks: dict[str, int] = {}
+        if self.persistent_reduction:
+            for rt in self.range_trees:
+                if rt.is_reduction:
+                    block_name = f"{rt.prefix.upper()}BLOCK"
+                    if block_name not in sig_arg_names:
+                        try:
+                            val = self._get_persistent_reduction_block(rt.numel)
+                            if self.is_native_matmul:
+                                val = max(val, 16)
+                            fixed_blocks[block_name] = val
+                        except (TypeError, ValueError):
+                            pass
+        return fixed_blocks
+
     def resolved_host_tma_descriptor_args(
         self,
         descriptor_args: dict[str, TensorDescriptorOptions | dict[str, Any]]
@@ -7951,19 +7970,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         sig_arg_names = OrderedSet(
             arg.name for arg in signature if hasattr(arg, "name")
         )
-        fixed_blocks: dict[str, int] = {}
-        if self.persistent_reduction:
-            for rt in self.range_trees:
-                if rt.is_reduction:
-                    block_name = f"{rt.prefix.upper()}BLOCK"
-                    if block_name not in sig_arg_names:
-                        try:
-                            val = self._get_persistent_reduction_block(rt.numel)
-                            if self.is_native_matmul:
-                                val = max(val, 16)
-                            fixed_blocks[block_name] = val
-                        except (TypeError, ValueError):
-                            pass
+        fixed_blocks = self.body_fixed_blocks(sig_arg_names)
 
         def _resolve_block_dim(s):
             s_str = str(s)
