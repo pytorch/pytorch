@@ -5734,6 +5734,23 @@ class TestUtils(TestCase):
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
 
+    def test_skip_in_setup_exits_fresh_cache(self):
+        # A fresh_cache() leaked by a skip in setUp exits whenever the garbage
+        # collector finalizes it, which can deadlock on locks clear_caches() takes.
+        class SkipsInSetUp(TestCase):
+            def setUp(self):
+                super().setUp()
+                self.skipTest("skip after entering fresh_cache()")
+
+            def test_nothing(self):
+                pass
+
+        prior = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+        result = unittest.TestResult()
+        SkipsInSetUp("test_nothing").run(result)
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(os.environ.get("TORCHINDUCTOR_CACHE_DIR"), prior)
+
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
     @requires_gpu_and_triton

@@ -4902,11 +4902,6 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    // Early return
-    if (_size == 0) {
-      return true;
-    }
-
     // Invokes the base class's check_nopybind method. We permit a limited set
     // of leaf guards and accessors within the DictGuardManager framework.
     // Integrating certain guards or accessors directly within the
@@ -4958,11 +4953,6 @@ class DictGuardManager : public GuardManager {
     if (PyDict_Size(obj) != _size) {
       return GuardDebugInfo(
           false, "len(" + get_source() + ") != " + std::to_string(_size), 0);
-    }
-
-    // Early return
-    if (_size == 0) {
-      return GuardDebugInfo(true, 0);
     }
 
     // Invokes the base class's check_nopybind method. We permit a limited set

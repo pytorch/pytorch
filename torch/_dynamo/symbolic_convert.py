@@ -169,7 +169,12 @@ from .variables.base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    FrameStateSizeEntry,
+    SourcelessBuilder,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -204,12 +209,7 @@ from .variables.lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .variables.misc import (
-    CellVariable,
-    NullVariable,
-    PythonModuleVariable,
-    UnknownVariable,
-)
+from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
     generic_delitem,
@@ -259,10 +259,13 @@ tls = threading.local()
 # belong to no module (see get_globals_source_and_value).
 UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 compare_op_handlers: dict[str, Any] = {
-    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+    k: SourcelessBuilder.create_internal_builtin(v).call_function
+    for k, v in supported_comparison_ops.items()
 }
-handle_contains = BuiltinVariable(operator.contains).call_function
-handle_not = BuiltinVariable(operator.not_).call_function
+handle_contains = SourcelessBuilder.create_internal_builtin(
+    operator.contains
+).call_function
+handle_not = SourcelessBuilder.create_internal_builtin(operator.not_).call_function
 compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
     tx, [*reversed(args)], {}
 )
@@ -553,7 +556,7 @@ class YieldValueOp(Exception):
 
 def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     nargs = len(inspect.signature(fn).parameters)
-    fn_var = BuiltinVariable(fn)
+    fn_var = SourcelessBuilder.create_internal_builtin(fn)
 
     @functools.wraps(fn)
     def impl(self: InstructionTranslator, inst: Instruction) -> None:
@@ -1819,7 +1822,7 @@ class InstructionTranslatorBase(
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)
+            fn = LocalGeneratorFunctionVariable.create(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
@@ -2335,7 +2338,7 @@ class InstructionTranslatorBase(
         if val.source_location is None:
             inst = self.current_instruction
             if inst.positions is not None and inst.positions.lineno is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.positions.lineno,
@@ -2345,7 +2348,7 @@ class InstructionTranslatorBase(
                     )
                 )
             elif inst.starts_line is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.starts_line,
@@ -2594,26 +2597,36 @@ class InstructionTranslatorBase(
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
     # translator, as the decorator was, and written only past the alias check.
-    def import_source(self, module_name: str) -> GlobalSource:
+    def import_source(
+        self, module_name: str, module: types.ModuleType | None = None
+    ) -> GlobalSource:
         """Create an alias to a module for use in guards"""
-        if (memo := self._import_source_memo.get(module_name)) is not None:
+        f_globals = self.output.global_scope
+        if (memo := self._import_source_memo.get(module_name)) is not None and (
+            module is None or f_globals[memo.global_name] is module
+        ):
             return memo
 
         if "torch_package" in module_name:
-            value = torch.package.package_importer._package_imported_modules[
+            cached_value = torch.package.package_importer._package_imported_modules[
                 module_name
             ]
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = _import_module(module_name)
+            cached_value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+
+        value = cached_value if module is None else module
+        if module is not None and (
+            value is not cached_value or f_globals.get(alias, value) is not value
+        ):
+            alias = self.output.install_global_by_id(alias, value)
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        f_globals = self.output.global_scope
         if not (alias not in f_globals or f_globals[alias] is value):
             raise AssertionError(
                 "expected alias not in f_globals or f_globals[alias] is value to be true"
@@ -2621,7 +2634,8 @@ class InstructionTranslatorBase(
         f_globals[alias] = value
         self.output.update_co_names(alias)
         source = GlobalSource(alias)
-        self._import_source_memo[module_name] = source
+        if value is cached_value:
+            self._import_source_memo[module_name] = source
         return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
@@ -2716,16 +2730,16 @@ class InstructionTranslatorBase(
             # returned. Therefore, we set the source correctly here.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name)
+                source = self.import_source(top_level_module_name, value)
             else:
-                source = self.import_source(module_name)
+                source = self.import_source(module_name, value)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name, bad-argument-type]
-        self.push(PythonModuleVariable(value, source=source))
+        # pyrefly: ignore [unbound-name]
+        self.push(VariableTracker.build(self, value, source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -3025,7 +3039,9 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         if not pyexception_instance_check(val):
             raise AssertionError("expected _exception_instance_check(val) to be true")
-        typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
+        typ = SourcelessBuilder.create_internal_builtin(
+            val.exc_type  # type: ignore[attr-defined, union-attr]
+        )
         tb = val.tp_getattro_impl(
             # pyrefly: ignore[bad-argument-type]
             self,
@@ -3727,7 +3743,7 @@ class InstructionTranslatorBase(
 
         wrapper = _make_warnings_warn_wrapper(leaf_filename, leaf_lineno)
         wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
-        self.stack[callable_idx] = SkipFunctionVariable(
+        self.stack[callable_idx] = VariableBuilder.create_internal_skip_function(
             wrapper, source=GlobalSource(wrapper_name)
         )
 
@@ -4231,7 +4247,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(
+        fn = NestedUserFunctionVariable(  # noqa: RVT001
             fn_name,
             code,
             self.f_globals,
@@ -4382,7 +4398,8 @@ class InstructionTranslatorBase(
             self, "{:" + fmt_spec.as_python_constant() + "}"
         )
 
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+        format_fn = VariableTracker.build(self, str.format)
+        self.call_function(format_fn, [fmt_var, value], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -4808,7 +4825,7 @@ class InstructionTranslatorBase(
                 "expected isinstance( ctx, (ContextWrappingVariable, GenericContextWrappingVariable) ) to be true"
             )
 
-        self.push(WithExitFunctionVariable(ctx, inst.target))
+        self.push(WithExitFunctionVariable.create(ctx, inst.target))
         self.push(self.enter_ctx(ctx, inst))
 
     def append_prefix_inst(self, inst: Instruction) -> None:
@@ -4908,7 +4925,7 @@ class InstructionTranslatorBase(
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
-            tv = variables.TypingVariable(TypeVar(v))
+            tv = VariableTracker.build(self, TypeVar(v))
             self.push(tv)
         else:
             unimplemented(
@@ -5079,11 +5096,11 @@ class InstructionTranslatorBase(
                     "expected isinstance( ctx, (ContextWrappingVariable, GenericContextWrappingVariable) ) to be true"
                 )
             if attr == "__enter__":
-                self.push(WithEnterFunctionVariable(ctx))
+                self.push(WithEnterFunctionVariable(ctx))  # noqa: RVT001
                 self.PUSH_NULL(inst)
             else:
                 # WithExitFunctionVariable doesn't really do anything with target for 3.11+
-                self.push(WithExitFunctionVariable(ctx, None))
+                self.push(WithExitFunctionVariable.create(ctx, None))
                 self.PUSH_NULL(inst)
         else:
             # Implementation is similar to LOAD_METHOD for 3.13+
@@ -5497,7 +5514,7 @@ class InstructionTranslatorBase(
         # which would error out with an empty stack
         push_types = CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
         if f_code.co_flags & (push_types):
-            self.push(BuiltinVariable(None))
+            self.push(VariableTracker.build(self, None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False

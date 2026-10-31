@@ -1864,13 +1864,6 @@ class GuardBuilder(GuardBuilderBase):
         if source_name == "":
             return False
         value = self.get(source)
-        # DictGuardManager's empty fast path skips subclass attribute guards.
-        if (
-            issubclass(type(value), dict)
-            and type(value) is not dict
-            and not dict.__len__(value)
-        ):
-            return False
         return id(value) in self.key_order_guarded_dict_ids
 
     def get_guard_manager_type(
@@ -5265,14 +5258,18 @@ class GuardsStatePickler(FunctionPicklerBase):
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
             is_fake = is_fake_tensor(obj)
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
+            # For FakeTensors, record the real tensor's type. This is important
+            # for cross-compilation where we compile with fake tensors but run
+            # with real tensors. Only from_meta_and_device sets pytype; a fake
+            # Parameter without one carries the Parameter marker. Guards on a
+            # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                is_param = isinstance(obj, torch.nn.Parameter)
+                default = torch.nn.Parameter if is_param else torch.Tensor
+                pytype = obj.pytype or default
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
