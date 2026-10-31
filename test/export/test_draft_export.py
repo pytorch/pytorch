@@ -449,14 +449,18 @@ class TestDraftExport(TestCase):
 
     def test_vmap_over_empty_batch(self):
         # Real tensor propagation checks views against their real storage, and
-        # a vmap over an empty batch leaves none.
+        # a vmap over an empty batch leaves none, also when the batch size is
+        # only known at run time.
         class M(torch.nn.Module):
-            def forward(self, x):
-                return torch.vmap(lambda row: row * 2 + 1)(x)
+            def forward(self, x, empty):
+                selected = x[x[:, 0, 0] > 100]
+                return [
+                    torch.vmap(lambda row: row * 2 + 1)(t) for t in (empty, selected)
+                ]
 
-        x = torch.randn(0, 3, 4)
-        ep = draft_export(M(), (x,))
-        self.assertEqual(ep.module()(x), M()(x))
+        inputs = (torch.randn(5, 3, 4), torch.randn(0, 3, 4))
+        ep = draft_export(M(), inputs)
+        self.assertEqual(ep.module()(*inputs), M()(*inputs))
 
     def test_offsets(self):
         class M(torch.nn.Module):
