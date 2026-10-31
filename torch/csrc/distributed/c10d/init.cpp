@@ -5557,7 +5557,8 @@ be removed again via remove().)")
       module,
       "CompletedOpInfo",
       "An operation reported complete by CompletionCallbackHook.")
-      .def_readonly("name", &::c10d::CompletedOpInfo::name)
+      .def_readonly(
+          "name", &::c10d::CompletedOpInfo::name, "The op's HookOpName.")
       .def_readonly(
           "op_id",
           &::c10d::CompletedOpInfo::op_id,
@@ -5577,8 +5578,9 @@ only, not nccl-lazy).)");
       module,
       "CompletionCallbackHook",
       R"(
-Calls a Python function for every operation of a process group that completes
-successfully, using post and completion hooks.)")
+Calls a Python function as operations of a process group complete
+successfully, using post and completion hooks. See ``attach`` for the
+operations that are not reported.)")
       .def_static(
           "attach",
           [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
@@ -5594,16 +5596,20 @@ successfully, using post and completion hooks.)")
           R"(
 Attach ``callback(info: CompletedOpInfo)`` to a process group. It is called on
 a dedicated thread, one op at a time, in the order the backend reports
-completions, which is not necessarily issue order (nccl2 reports per CUDA
-stream); the backend never waits for it. Not reported: failed, timed-out and
+completions, which is not guaranteed to be issue order (nccl2 may report from
+more than one thread); the backend never waits for it. Not reported: failed, timed-out and
 aborted ops, ops issued before attach, ops on the group's non-default backends,
-and nccl2 p2p inside batch_isend_irecv. Exceptions are reported as unraisable
+nccl2 p2p inside batch_isend_irecv, and ops captured into a CUDA graph (their
+op_ids still advance last_op_id) or replayed from one. Exceptions are reported as unraisable
 and do not stop later callbacks. Raises if the default backend does not support
 completion hooks (nccl2 and nccl-lazy do). The process group owns the hook and
-the callback, so the returned handle only has to be kept to call remove() or
-read last_op_id; a callback that references its group keeps it alive until
-remove(). Must not be called from a callback. At interpreter exit, queued
-callbacks are dropped and exit waits for a running callback to return.)")
+the callback and releases the callback when destroyed, even if the returned
+handle is still referenced; the handle only has to be kept to call remove() or
+read last_op_id; a callback that references its
+group keeps it alive until remove(). Must not be called from a callback. At
+interpreter exit, queued callbacks are dropped and exit waits for a running
+callback to return; a forked child does not wait for the parent's callbacks. In
+a child forked from a callback, that thread ends when the callback returns.)")
       .def(
           "remove",
           &::c10d::CompletionCallbackHook::remove,
@@ -5612,7 +5618,8 @@ callbacks are dropped and exit waits for a running callback to return.)")
 Detach the hook and drop callbacks not yet delivered. Waits for a running
 callback to return unless called from a callback (of any hook); there, it does
 not wait and the hook stays registered with the group, inert, until a later
-``remove()`` from another thread or the group is destroyed.)")
+``remove()`` from another thread or the group is destroyed. Does nothing in a
+forked child, which has no dispatch thread.)")
       .def_property_readonly(
           "last_op_id",
           &::c10d::CompletionCallbackHook::lastOpId,

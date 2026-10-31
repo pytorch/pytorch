@@ -19,7 +19,9 @@
 // - ops on a group's non-default backends (e.g. CPU ops of a gloo+nccl2
 //   group): completion hooks are registered on the default backend only;
 // - nccl2 p2p inside a coalescing window (batch_isend_irecv), which completes
-//   only as part of the window, which the post-hook never sees.
+//   only as part of the window, which the post-hook never sees;
+// - ops captured into a CUDA graph (their op_ids still advance last_op_id),
+//   which the backend does not track, and graph replays, which issue no op.
 // Collectives inside a window are reported individually; *_coalesced ops
 // once, under their *_COALESCED name. There is no drain API: to wait for
 // specific ops, record their op_ids and wait for those.
@@ -30,8 +32,10 @@
 // never being called. Key uniqueness is the backend's contract and is not
 // checked.
 //
-// The process group owns the hook and the callback. A callback that references
-// its group forms a cycle that keeps both alive until remove().
+// The process group owns the hook and the callback, and releases the callback
+// when it is destroyed, even if the handle is still referenced. A callback
+// that references its group forms a cycle that keeps both alive until
+// remove().
 
 #pragma once
 
@@ -88,7 +92,8 @@ class TORCH_API CompletionCallbackHook
   // hook), which may run concurrently with such ops, it neither waits nor
   // touches the group's hook tables: the hooks stay registered but inert until
   // a later remove() from another thread or the group is destroyed. In a
-  // forked child, it does not wait for the parent's callbacks.
+  // forked child it does nothing: the child has no dispatch thread, and locks
+  // here or in the backend may have been held by a parent thread at fork.
   void remove();
 
   // For interpreter exit: drops queued callbacks of every hook, waits for

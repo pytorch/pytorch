@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import weakref
 from datetime import timedelta
 from unittest import mock
 
@@ -23,7 +24,10 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch._C._distributed_c10d import CompletionCallbackHook, HookOpName
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    MultiProcessTestCase,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -106,25 +110,49 @@ class _CompletionCallbackHookTestBase(MultiProcessTestCase):
 
 @requires_2_gpus
 @requires_nccl2
-class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
+class CompletionCallbackHookNccl2Test(MultiProcContinuousTest):
+    """Tests whose callbacks never block share one group."""
+
     hw_classification = HardwareClassification.CUDA
+    world_size = 2
+    timeout = timedelta(seconds=TIMEOUT)
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls):
+        return "cuda"
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Tests that expect untimed ops must not inherit timing from the env.
+        for var in ("TORCH_NCCL_ENABLE_TIMING", "NCCL_ENABLE_TIMING"):
+            os.environ.pop(var, None)
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
     @property
     def device(self):
         return torch.device("cuda", self.rank)
 
     def _init(self):
-        torch.cuda.set_device(self.rank)
-        return self._init_pg("nccl2")
+        return dist.group.WORLD
+
+    def _attach(self, pg, callback):
+        hook = CompletionCallbackHook.attach(pg, callback)
+        self.addCleanup(hook.remove)
+        return hook
 
     def _sync_all_reduce(self, group=None):
         dist.all_reduce(torch.ones(4, device=self.device), group=group)
         torch.cuda.synchronize()
 
-    def test_reports_ops_in_completion_order(self):
+    def test_reports_collectives(self):
         pg = self._init()
         collector = _Collector()
-        hook = CompletionCallbackHook.attach(pg, collector)
+        hook = self._attach(pg, collector)
         self.assertEqual(hook.last_op_id, -1)
 
         n = self.world_size
@@ -136,7 +164,8 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         dist.reduce_scatter_tensor(torch.empty_like(shard), flat)
         torch.cuda.synchronize()
 
-        infos = collector.wait_for(4)
+        # Report order is not guaranteed: nccl2 may report from two threads.
+        infos = sorted(collector.wait_for(4), key=lambda info: info[1])
         self.assertEqual(
             [name for name, _, _ in infos],
             [
@@ -151,18 +180,18 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         self.assertEqual(hook.last_op_id, op_ids[-1])
         # nccl2 does not time ops unless asked to.
         self.assertEqual([d for _, _, d in infos], [None] * 4)
-        hook.remove()
-        dist.destroy_process_group()
 
     def test_duration_from_backend_timing(self):
-        pg = self._init()
+        # Own group: timing cannot be turned off again.
+        pg = dist.new_group(backend="nccl2")
+        self.addCleanup(dist.destroy_process_group, pg)
         # Before the first op: works created earlier carry untimed events.
         pg._enable_collectives_timing()
         collector = _Collector()
-        hook = CompletionCallbackHook.attach(pg, collector)
+        self._attach(pg, collector)
         t = torch.ones(1024, device=self.device)
         for _ in range(3):
-            dist.all_reduce(t)
+            dist.all_reduce(t, group=pg)
         torch.cuda.synchronize()
 
         for name, _, duration in collector.wait_for(3):
@@ -170,15 +199,13 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
             self.assertIsInstance(duration, float)
             self.assertGreater(duration, 0.0)
             self.assertLess(duration, TIMEOUT * 1000.0)
-        hook.remove()
-        dist.destroy_process_group()
 
     def test_last_op_id_attributes_batches(self):
         # A caller marks the first op of a batch as last_op_id + 1 and
         # attributes every reported op_id at or above it to that batch.
         pg = self._init()
         collector = _Collector()
-        hook = CompletionCallbackHook.attach(pg, collector)
+        hook = self._attach(pg, collector)
         self._sync_all_reduce()
         collector.wait_for(1)
 
@@ -188,17 +215,15 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         torch.cuda.synchronize()
         batch = collector.wait_for(4)[1:]
         self.assertEqual(
-            [op_id for _, op_id, _ in batch],
+            sorted(op_id for _, op_id, _ in batch),
             list(range(batch_start, batch_start + 3)),
         )
         self.assertEqual(hook.last_op_id, batch_start + 2)
-        hook.remove()
-        dist.destroy_process_group()
 
     def test_reports_p2p(self):
         pg = self._init()
         collector = _Collector()
-        hook = CompletionCallbackHook.attach(pg, collector)
+        self._attach(pg, collector)
         t = torch.ones(4, device=self.device)
         if self.rank == 0:
             dist.send(t, dst=1)
@@ -207,13 +232,11 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         torch.cuda.synchronize()
         expected = HookOpName.SEND if self.rank == 0 else HookOpName.RECV
         self.assertEqual(collector.wait_for(1)[0][0], expected)
-        hook.remove()
-        dist.destroy_process_group()
 
     def test_coalescing(self):
         pg = self._init()
         collector = _Collector()
-        hook = CompletionCallbackHook.attach(pg, collector)
+        self._attach(pg, collector)
 
         # Each phase is waited for before the next: async and synchronous ops
         # run on different streams, so their completions may be reported in
@@ -248,8 +271,6 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
             [HookOpName.ALLREDUCE] * 3
             + [HookOpName.ALLREDUCE_COALESCED, HookOpName.ALLREDUCE],
         )
-        hook.remove()
-        dist.destroy_process_group()
 
     def test_completion_before_post_hook(self):
         # A fast op can complete before the post-hook maps its completion key.
@@ -261,7 +282,7 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         # key was registered.
         pg = self._init()
         collector = _Collector()
-        hook = CompletionCallbackHook.attach(pg, collector)
+        self._attach(pg, collector)
         self._sync_all_reduce()
         collector.wait_for(1)
         state = {"running": False}
@@ -290,8 +311,50 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         )
         # op_ids are assigned at issue, so the sentinel's is the later one.
         self.assertGreater(infos[1][1], infos[2][1])
-        hook.remove()
-        dist.destroy_process_group()
+
+    def test_non_default_backend_not_reported(self):
+        # Completion hooks are registered on the default backend only.
+        pg = dist.new_group(backend="cpu:gloo,cuda:nccl2")
+        self.addCleanup(dist.destroy_process_group, pg)
+        collector = _Collector()
+        hook = self._attach(pg, collector)
+        dist.all_reduce(torch.ones(4), group=pg)
+        self._sync_all_reduce(group=pg)
+        infos = collector.wait_for(1)
+        self.assertEqual(infos, [(HookOpName.ALLREDUCE, hook.last_op_id, None)])
+
+    def test_cuda_graph_not_reported(self):
+        # The backend does not track captured ops, and replays issue no op.
+        pg = dist.new_group(backend="nccl2")
+        self.addCleanup(dist.destroy_process_group, pg)
+        collector = _Collector()
+        hook = self._attach(pg, collector)
+        t = torch.ones(4, device=self.device)
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        # Warm up outside the capture.
+        with torch.cuda.stream(stream):
+            dist.all_reduce(t, group=pg)
+        torch.cuda.synchronize()
+        collector.wait_for(1)
+        graph = torch.cuda.CUDAGraph()
+        # Release NCCL graph resources before the group is destroyed.
+        self.addCleanup(graph.reset)
+        with torch.cuda.graph(graph, stream=stream):
+            dist.all_reduce(t, group=pg)
+        captured = hook.last_op_id
+        self.assertGreater(captured, collector.wait_for(1)[0][1])
+        graph.replay()
+        self._sync_all_reduce(group=pg)
+        # One more on the capture stream, so a late report of the captured op
+        # would arrive before this one.
+        with torch.cuda.stream(stream):
+            dist.all_reduce(t, group=pg)
+        torch.cuda.synchronize()
+        infos = collector.wait_for(3)
+        self.assertEqual(len(infos), 3)
+        self.assertNotIn(captured, [op_id for _, op_id, _ in infos])
+        self.assertEqual(max(op_id for _, op_id, _ in infos), hook.last_op_id)
 
     def test_callback_exception_is_unraisable(self):
         pg = self._init()
@@ -311,7 +374,7 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         old_hook = sys.unraisablehook
         sys.unraisablehook = record_unraisable
         try:
-            hook = CompletionCallbackHook.attach(pg, collector)
+            self._attach(pg, collector)
             self._sync_all_reduce()
             with unraisable_cv:
                 self.assertTrue(unraisable_cv.wait_for(lambda: unraisable, TIMEOUT))
@@ -320,17 +383,15 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
             self._sync_all_reduce()
             collector.wait_for(2)
             self.assertEqual(len(unraisable), 1)
-            hook.remove()
         finally:
             sys.unraisablehook = old_hook
-        dist.destroy_process_group()
 
     def test_remove_stops_delivery(self):
         pg = self._init()
         removed = _Collector()
-        hook = CompletionCallbackHook.attach(pg, removed)
+        hook = self._attach(pg, removed)
         sentinel = _Collector()
-        sentinel_hook = CompletionCallbackHook.attach(pg, sentinel)
+        self._attach(pg, sentinel)
         self._sync_all_reduce()
         removed.wait_for(1)
         sentinel.wait_for(1)
@@ -343,8 +404,60 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         # Post-hooks run at issue, so this is deterministic.
         self.assertEqual(hook.last_op_id, last)
         self.assertEqual(len(removed.names()), 1)
-        sentinel_hook.remove()
-        dist.destroy_process_group()
+
+    def test_remove_from_callback(self):
+        pg = self._init()
+        handle = []
+        removed_done = threading.Event()
+        attach_errors = []
+
+        def remove_self(info):
+            try:
+                CompletionCallbackHook.attach(pg, _Collector())
+            except RuntimeError as e:
+                attach_errors.append(str(e))
+            handle[0].remove()
+            removed_done.set()
+
+        removed = _Collector(on_info=remove_self)
+        handle.append(self._attach(pg, removed))
+        sentinel = _Collector()
+        self._attach(pg, sentinel)
+        self._sync_all_reduce()
+        self.assertTrue(removed_done.wait(TIMEOUT))
+        self.assertEqual(len(attach_errors), 1)
+        self.assertIn("from a completion callback", attach_errors[0])
+        # The removed hook stays registered but inert.
+        last = handle[0].last_op_id
+        self._sync_all_reduce()
+        sentinel.wait_for(2)
+        self.assertGreater(handle[0].last_op_id, last)
+        self.assertEqual(len(removed.names()), 1)
+        # A later remove() outside a callback unregisters it.
+        handle[0].remove()
+        last = handle[0].last_op_id
+        self._sync_all_reduce()
+        self.assertEqual(handle[0].last_op_id, last)
+
+
+@requires_2_gpus
+@requires_nccl2
+class CompletionCallbackHookNccl2BlockingTest(_CompletionCallbackHookTestBase):
+    """Tests with blocked callbacks, each in fresh processes."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @property
+    def device(self):
+        return torch.device("cuda", self.rank)
+
+    def _init(self):
+        torch.cuda.set_device(self.rank)
+        return self._init_pg("nccl2")
+
+    def _sync_all_reduce(self, group=None):
+        dist.all_reduce(torch.ones(4, device=self.device), group=group)
+        torch.cuda.synchronize()
 
     def test_remove_waits_for_running_callback(self):
         pg = self._init()
@@ -363,61 +476,26 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         hook = CompletionCallbackHook.attach(pg, blocked)
         sentinel = _Collector()
         sentinel_hook = CompletionCallbackHook.attach(pg, sentinel)
-        for _ in range(3):
-            dist.all_reduce(torch.ones(4, device=self.device))
-        torch.cuda.synchronize()
-        self.assertTrue(entered.wait(TIMEOUT))
-        sentinel.wait_for(3)
-
-        remover = threading.Thread(target=hook.remove)
-        remover.start()
+        remover = threading.Thread(target=hook.remove, daemon=True)
         try:
+            for _ in range(3):
+                dist.all_reduce(torch.ones(4, device=self.device))
+            torch.cuda.synchronize()
+            self.assertTrue(entered.wait(TIMEOUT))
+            sentinel.wait_for(3)
+            remover.start()
             # Bounded, and only fails if remove() returns early.
             remover.join(0.5)
             self.assertTrue(remover.is_alive())
         finally:
             release.set()
-            remover.join(TIMEOUT)
+        remover.join(TIMEOUT)
         self.assertFalse(remover.is_alive())
         self.assertTrue(finished.is_set())
         # Queued and later callbacks are dropped.
         self._sync_all_reduce()
         sentinel.wait_for(4)
         self.assertEqual(len(blocked.names()), 1)
-        sentinel_hook.remove()
-        dist.destroy_process_group()
-
-    def test_remove_from_callback(self):
-        pg = self._init()
-        handle = []
-        removed_done = threading.Event()
-        attach_errors = []
-
-        def remove_self(info):
-            try:
-                CompletionCallbackHook.attach(pg, _Collector())
-            except RuntimeError as e:
-                attach_errors.append(str(e))
-            handle[0].remove()
-            removed_done.set()
-
-        removed = _Collector(on_info=remove_self)
-        handle.append(CompletionCallbackHook.attach(pg, removed))
-        sentinel = _Collector()
-        sentinel_hook = CompletionCallbackHook.attach(pg, sentinel)
-        self._sync_all_reduce()
-        self.assertTrue(removed_done.wait(TIMEOUT))
-        self.assertEqual(len(attach_errors), 1)
-        self.assertIn("from a completion callback", attach_errors[0])
-        # The removed hook stays registered but inert.
-        self._sync_all_reduce()
-        sentinel.wait_for(2)
-        self.assertEqual(len(removed.names()), 1)
-        # A later remove() outside a callback unregisters it.
-        handle[0].remove()
-        last = handle[0].last_op_id
-        self._sync_all_reduce()
-        self.assertEqual(handle[0].last_op_id, last)
         sentinel_hook.remove()
         dist.destroy_process_group()
 
@@ -440,7 +518,9 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
 
             # Neither the backend nor abort waits on a running callback.
             aborter = threading.Thread(
-                target=dist.distributed_c10d._abort_process_group, args=(sub,)
+                target=dist.distributed_c10d._abort_process_group,
+                args=(sub,),
+                daemon=True,
             )
             aborter.start()
             aborter.join(TIMEOUT)
@@ -452,34 +532,48 @@ class CompletionCallbackHookNccl2Test(_CompletionCallbackHookTestBase):
         self.assertEqual(blocked.names(), [HookOpName.ALLREDUCE])
         dist.destroy_process_group()
 
-    def test_destroy_delivers_queued_callbacks(self):
+    def test_destroy_releases_hook(self):
         # The group owns the hook. Destroying and dropping the group while a
-        # callback is blocked neither waits on it nor drops queued callbacks.
+        # callback is blocked waits on neither it nor remove(): queued
+        # callbacks are still delivered, then the callback is released, even
+        # though it references the handle (a cycle the GC cannot see).
         self._init()
         sub = dist.new_group(backend="nccl2", use_local_synchronization=True)
         entered = threading.Event()
         release = threading.Event()
+        freed = threading.Event()
 
         def block(info):
             entered.set()
             release.wait()
 
         blocked = _Collector(on_info=block)
-        CompletionCallbackHook.attach(sub, blocked)
+        handles = []
+        callback = lambda info, handles=handles: blocked(info)  # noqa: E731
+        weakref.finalize(callback, freed.set)
+        handles.append(CompletionCallbackHook.attach(sub, callback))
+        del callback, handles
         try:
             for _ in range(3):
                 dist.all_reduce(torch.ones(4, device=self.device), group=sub)
             torch.cuda.synchronize()
             self.assertTrue(entered.wait(TIMEOUT))
-            # Reports every finished op before returning.
-            dist.destroy_process_group(sub)
-            del sub
+            destroyer = threading.Thread(
+                target=dist.destroy_process_group, args=(sub,), daemon=True
+            )
+            destroyer.start()
+            destroyer.join(TIMEOUT)
+            self.assertFalse(destroyer.is_alive(), "destroy waited on the callback")
+            del sub, destroyer
             gc.collect()
+            # Still running.
+            self.assertFalse(freed.is_set())
         finally:
             release.set()
         self.assertEqual(
             [name for name, _, _ in blocked.wait_for(3)], [HookOpName.ALLREDUCE] * 3
         )
+        self.assertTrue(freed.wait(TIMEOUT), "callback not released")
         self._sync_all_reduce()
         dist.destroy_process_group()
 
@@ -520,49 +614,47 @@ class CompletionCallbackHookNcclLazyTest(_CompletionCallbackHookTestBase):
         dist.destroy_process_group()
 
 
-class CompletionCallbackHookUnsupportedTest(_CompletionCallbackHookTestBase):
+class CompletionCallbackHookUnsupportedTest(TestCase):
     """Backends without completion hooks raise, so callers can fall back."""
 
     hw_classification = HardwareClassification.GENERIC
 
+    def _init_pg(self, backend, store):
+        dist.init_process_group(backend, world_size=1, rank=0, store=store)
+        self.addCleanup(dist.destroy_process_group)
+        return dist.group.WORLD
+
     def test_gloo_raises(self):
-        pg = self._init_pg("gloo")
+        pg = self._init_pg("gloo", dist.HashStore())
         self.assertFalse(pg.supports_completion_hooks)
         with self.assertRaisesRegex(RuntimeError, "does not support completion hooks"):
             CompletionCallbackHook.attach(pg, lambda info: None)
-        dist.destroy_process_group()
 
     def test_rejects_non_callable(self):
-        pg = self._init_pg("gloo")
+        pg = self._init_pg("gloo", dist.HashStore())
         with self.assertRaisesRegex(TypeError, "callable"):
             CompletionCallbackHook.attach(pg, 1)
-        dist.destroy_process_group()
 
     def test_fake_raises(self):
-        dist.init_process_group(
-            "fake", world_size=self.world_size, rank=self.rank, store=FakeStore()
-        )
+        pg = self._init_pg("fake", FakeStore())
         with self.assertRaisesRegex(RuntimeError, "does not support completion hooks"):
-            CompletionCallbackHook.attach(dist.group.WORLD, lambda info: None)
-        dist.destroy_process_group()
+            CompletionCallbackHook.attach(pg, lambda info: None)
 
 
-@requires_2_gpus
+@unittest.skipIf(not TEST_CUDA, "requires a GPU")
 @unittest.skipIf(not dist.is_nccl_available(), "nccl is not available")
-class CompletionCallbackHookLegacyNcclTest(_CompletionCallbackHookTestBase):
+class CompletionCallbackHookLegacyNcclTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_legacy_nccl_raises(self):
-        # Read where the backend is registered, so it must be set before init.
-        os.environ["TORCH_DIST_USE_NCCL2"] = "0"
-        torch.cuda.set_device(self.rank)
-        pg = self._init_pg("nccl")
-        self.assertEqual(
-            pg._get_backend(torch.device("cuda", self.rank)).name(), "nccl"
+        dist.init_process_group(
+            "nccl-legacy", world_size=1, rank=0, store=dist.HashStore()
         )
+        self.addCleanup(dist.destroy_process_group)
+        pg = dist.group.WORLD
+        self.assertFalse(pg.supports_completion_hooks)
         with self.assertRaisesRegex(RuntimeError, "does not support completion hooks"):
             CompletionCallbackHook.attach(pg, lambda info: None)
-        dist.destroy_process_group()
 
 
 _SHUTDOWN_SCRIPT = """
@@ -607,7 +699,8 @@ class Callback:
 
 hook = CompletionCallbackHook.attach(dist.group.WORLD, Callback())
 t = torch.ones(1024, device="cuda")
-for _ in range(100):
+# fork: one op, so none is still being reported when the child is forked.
+for _ in range(1 if mode == "fork" else 100):
     dist.all_reduce(t)
 if mode == "blocked":
     # Exit with a callback running and more queued behind it. Registered after

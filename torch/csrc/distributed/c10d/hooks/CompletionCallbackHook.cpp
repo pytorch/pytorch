@@ -68,7 +68,7 @@ struct CompletionCallbackHook::Dispatcher {
   explicit Dispatcher(CompletionCallback cb) : callback(std::move(cb)) {}
 
   void run() {
-    c10::setThreadName("pt_completion_cb");
+    c10::setThreadName("pt_c10d_compcb");
     on_dispatch_thread = true;
     std::unique_lock<std::mutex> lock(mutex);
     thread_id = std::this_thread::get_id();
@@ -99,13 +99,20 @@ struct CompletionCallbackHook::Dispatcher {
       } catch (...) {
         LOG(ERROR) << "CompletionCallbackHook: callback threw";
       }
+#ifndef _WIN32
+      // A child forked from the callback: mutex may have been held by a
+      // parent thread at fork time, and the queue is the parent's.
+      if (getpid() != owner_pid) {
+        return;
+      }
+#endif
       lock.lock();
       delivering = false;
       cv.notify_all();
     }
     // Release the callback (and whatever it captures) on this thread, not on
     // whichever thread happens to drop the last reference to the dispatcher.
-    auto cb = std::move(callback);
+    auto cb = std::exchange(callback, nullptr);
     lock.unlock();
     cb = nullptr;
     lock.lock();
@@ -127,6 +134,13 @@ struct CompletionCallbackHook::Dispatcher {
   // discard: drop queued callbacks instead of delivering them.
   // wait: wait for a running callback to return.
   void stop(bool discard, bool wait) {
+#ifndef _WIN32
+    // A forked child has no dispatch thread, and mutex may have been held by
+    // a parent thread at fork time.
+    if (getpid() != owner_pid) {
+      return;
+    }
+#endif
     std::unique_lock<std::mutex> lock(mutex);
     stopped = true;
     if (discard) {
@@ -136,11 +150,6 @@ struct CompletionCallbackHook::Dispatcher {
     if (!wait || thread_id == std::this_thread::get_id()) {
       return;
     }
-#ifndef _WIN32
-    if (getpid() != owner_pid) {
-      return;
-    }
-#endif
     cv.wait(lock, [this] { return !delivering; });
   }
 
@@ -194,10 +203,23 @@ std::shared_ptr<CompletionCallbackHook> CompletionCallbackHook::attach(
     }).detach();
   } catch (...) {
     // Already published: a concurrent stopAll() must not wait for it.
-    std::lock_guard<std::mutex> lock(hook->dispatcher_->mutex);
-    hook->dispatcher_->exited = true;
+    {
+      std::lock_guard<std::mutex> lock(hook->dispatcher_->mutex);
+      hook->dispatcher_->exited = true;
+    }
+    hook->dispatcher_->cv.notify_all();
     throw;
   }
+  // Stops delivery and releases the callback once the group drops its
+  // post-hook, even if the handle is still referenced (e.g. by the callback, a
+  // cycle Python's GC cannot see) or the backend outlives the group.
+  struct StopOnRelease {
+    std::shared_ptr<Dispatcher> dispatcher;
+    ~StopOnRelease() {
+      dispatcher->stop(/*discard=*/false, /*wait=*/false);
+    }
+  };
+  auto stopper = std::make_shared<StopOnRelease>(hook->dispatcher_);
   // The lambdas own the hook, so it lives as long as the group's hook maps:
   // the caller does not have to keep the returned handle alive. Completion
   // first, so no op whose key the post-hook registers can complete unseen.
@@ -205,7 +227,8 @@ std::shared_ptr<CompletionCallbackHook> CompletionCallbackHook::attach(
       hook->hook_id_,
       [hook](const CompletionHookArgs& args) { hook->onCompletion(args); });
   pg->registerPostHook(
-      hook->hook_id_, [hook](const PostHookArgs& args) { hook->onPost(args); });
+      hook->hook_id_,
+      [hook, stopper](const PostHookArgs& args) { hook->onPost(args); });
   return hook;
 }
 
@@ -227,6 +250,13 @@ void CompletionCallbackHook::remove() {
   // Unregistering drops the group's references, which are normally the only
   // ones keeping this hook alive.
   auto keepalive = weak_from_this().lock();
+#ifndef _WIN32
+  // A forked child has no dispatch thread, and any lock here or in the backend
+  // may have been held by a parent thread at fork time.
+  if (getpid() != dispatcher_->owner_pid) {
+    return;
+  }
+#endif
   c10::intrusive_ptr<ProcessGroup> pg;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -248,13 +278,14 @@ void CompletionCallbackHook::remove() {
     dispatcher_->stop(/*discard=*/true, /*wait=*/false);
     return;
   }
+  // Wait first: the running callback may be issuing ops on the group.
+  dispatcher_->stop(/*discard=*/true, /*wait=*/true);
   // Not under mutex_: a completion hook may be blocked on mutex_ right now
   // while the backend holds the lock guarding its hook table.
   if (pg) {
     pg->unregisterPostHook(hook_id_);
     pg->unregisterCompletionHook(hook_id_);
   }
-  dispatcher_->stop(/*discard=*/true, /*wait=*/true);
 }
 
 void CompletionCallbackHook::stopAll() {
