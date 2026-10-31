@@ -1646,6 +1646,23 @@ class TestSparseCSRDevice(TestCase):
         values = torch.tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7], dtype=dtype, device=device)
         self.assertEqual(csr.values(), values)
 
+        # Non-contiguous COO indices (e.g. sliced columns or transposed (N, 2) coordinate matrix)
+        row_noncontig = torch.tensor([[0, 99], [1, 88], [2, 77]], device=device, dtype=torch.int64)[:, 0]
+        self.assertFalse(row_noncontig.is_contiguous())
+        for out_int32 in (False, True):
+            crow_actual = torch._convert_indices_from_coo_to_csr(row_noncontig, size=4, out_int32=out_int32)
+            crow_expected = torch._convert_indices_from_coo_to_csr(
+                row_noncontig.contiguous(), size=4, out_int32=out_int32
+            )
+            self.assertEqual(crow_actual, crow_expected)
+
+        coords_t = torch.tensor([[0, 2], [1, 0], [1, 3], [2, 1]], device=device, dtype=torch.int64).t()
+        self.assertFalse(coords_t.is_contiguous())
+        vals = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=dtype, device=device)
+        coo_noncontig = torch.sparse_coo_tensor(coords_t, vals, (3, 4), device=device, dtype=dtype).coalesce()
+        self.assertFalse(coo_noncontig.indices().is_contiguous())
+        self.assertEqual(coo_noncontig.to_sparse_csr().to_dense(), coo_noncontig.to_dense())
+
     @parametrize("blocksize", [2, 4])
     @dtypes((torch.double, torch.int32), (torch.double, torch.int64))
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
