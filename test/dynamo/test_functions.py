@@ -5,6 +5,7 @@ import collections
 import collections.abc
 import contextlib
 import contextvars
+import datetime
 import enum
 import functools
 import inspect
@@ -30,8 +31,9 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
+from torch._dynamo import decorators, trace_rules
 from torch._dynamo.comptime import comptime
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import Unsupported, UserError
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -4461,6 +4463,48 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + 123 + 12)
 
+    @parametrize("disallowed", [False, True])
+    def test_getattr_metaclass_respects_disallow_in_graph(self, disallowed):
+        class Meta(type):
+            def __getattr__(cls, name):
+                if name == "dynamic_attr":
+                    return len(name)
+                raise AttributeError(name)
+
+        class C(metaclass=Meta):
+            pass
+
+        callback = Meta.__getattr__
+        if disallowed:
+            self.addCleanup(
+                lambda: trace_rules._allowed_callable_ids.remove(id(callback))
+            )
+            self.addCleanup(
+                lambda: trace_rules._disallowed_callable_ids.remove(id(callback))
+            )
+            torch.compiler.allow_in_graph(callback)
+            torch._dynamo.disallow_in_graph(callback)
+
+        def fn(x):
+            y = x.sin()
+            # A tensor default avoids getattr's all-constant eager fallback.
+            return y + getattr(C, "dynamic_attr", x)
+
+        x = torch.ones(2)
+        strict_counter = torch._dynamo.testing.CompileCounter()
+        strict_fn = torch.compile(fn, backend=strict_counter, fullgraph=True)
+        if disallowed:
+            with self.assertRaisesRegex(Unsupported, "marked as skipped"):
+                strict_fn(x)
+            self.assertEqual(strict_counter.frame_count, 0)
+        else:
+            self.assertEqual(strict_fn(x), fn(x))
+            self.assertEqual(strict_counter.frame_count, 1)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter)(x), fn(x))
+        self.assertEqual(counter.frame_count, 2 if disallowed else 1)
+
     def test_two_point_iter(self):
         def fn(x, y):
             it = map(lambda n: n + 1, range(6))
@@ -6358,6 +6402,63 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
+    def test_torch_op_overload_attr_recompiles(self):
+        def fn(x, y):
+            return torch.ops.aten.add.Tensor(x, y)
+
+        compile_count = 0
+
+        def backend(gm, _example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return torch.fx.Interpreter(gm).run
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(2)
+        y = torch.tensor(3)
+        original = torch.ops.aten.add.Tensor
+        try:
+            self.assertEqual(fn(x, y), torch.tensor(5))
+            self.assertEqual(compiled(x, y), torch.tensor(5))
+            self.assertEqual(compile_count, 1)
+            torch.ops.aten.add.Tensor = torch.ops.aten.mul.Tensor
+            self.assertEqual(fn(x, y), torch.tensor(6))
+            self.assertEqual(compiled(x, y), torch.tensor(6))
+            self.assertEqual(compile_count, 2)
+        finally:
+            torch.ops.aten.add.Tensor = original
+
+    def test_torch_op_overload_property_effects(self):
+        calls = []
+
+        class Packet(torch._ops.OpOverloadPacket):
+            @property
+            def member(self):
+                calls.append("member")
+                return torch.ops.aten.add.Tensor
+
+        op = torch.ops.aten.add
+        packet = Packet(op._qualified_op_name, op.__name__, op._op, op._overload_names)
+
+        def fn(x):
+            return packet.member(x, x)
+
+        compile_count = 0
+
+        def backend(gm, _example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return torch.fx.Interpreter(gm).run
+
+        x = torch.tensor(3)
+        self.assertEqual(fn(x), torch.tensor(6))
+        self.assertEqual(calls, ["member"])
+        calls.clear()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x), torch.tensor(6))
+        self.assertEqual(calls, ["member"])
+        self.assertEqual(compile_count, 1)
+
     def test_property_descriptor_on_instance(self):
         class Foo:
             def __init__(self, x):
@@ -6923,6 +7024,67 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), expected)
 
+    @parametrize("name", ["__len__", "count"])
+    @parametrize("sourced", [False, True])
+    @parametrize("graph_break", [False, True])
+    def test_unbound_descriptor_reconstruction(self, name, sourced, graph_break):
+        def fn(x):
+            owner = list if sourced else type([x])
+            descriptor = getattr(owner, name)
+            result = x + 1
+            if graph_break:
+                torch._dynamo.graph_break()
+            return result + 2, descriptor
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=not graph_break)
+        x = torch.ones(1)
+        result, descriptor = compiled(x)
+        self.assertEqual(result, fn(x)[0])
+        self.assertIs(descriptor, getattr(list, name))
+        self.assertEqual(counter.frame_count, 2 if graph_break else 1)
+
+    @parametrize("name", ["__len__", "count"])
+    @parametrize("sourced", [False, True])
+    def test_unbound_descriptor_export_output(self, name, sourced):
+        def fn(x):
+            owner = list if sourced else type([x])
+            return x + 1, getattr(owner, name)
+
+        # Export reconstructs even sourced values before checking output types.
+        with self.assertRaisesRegex(UserError, "not supported or pytree-flattenable"):
+            torch._dynamo.export(fn)(torch.ones(1))
+
+    @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
+    def test_module_shared_class_getattribute_guard(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.offset = 3
+
+            def forward(self, x):
+                return x + self.offset
+
+        def fn(x, first, second):
+            return first(x) + second(x)
+
+        x = torch.ones(1)
+        first, second = Module(), Module()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for _ in range(2):
+            self.assertEqual(compiled(x, first, second), fn(x, first, second))
+        self.assertEqual(counter.frame_count, 1)
+
+        def getattribute(self, name):
+            if name == "offset":
+                return 40
+            return object.__getattribute__(self, name)
+
+        Module.__getattribute__ = getattribute
+        self.assertEqual(compiled(x, first, second), fn(x, first, second))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("names", [("__add__", "__mul__"), ("append", "pop")])
     def test_unbound_descriptor_comparison(self, names):
         def fn(x):
@@ -7402,6 +7564,43 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(obj), fn(obj)
         )
+
+    @parametrize("disallowed", [False, True])
+    def test_polyfilled_user_method_respects_disallow_in_graph(self, disallowed):
+        def isoformat(self, /):
+            return f"{self.year:0>4}-{self.month:0>2}-{self.day:0>2}"
+
+        original = datetime.date.isoformat
+        torch.compiler.substitute_in_graph(original)(isoformat)
+        self.addCleanup(decorators._unregister_substitute_in_graph, original)
+        if disallowed:
+            self.addCleanup(
+                lambda: trace_rules._allowed_callable_ids.remove(id(isoformat))
+            )
+            self.addCleanup(
+                lambda: trace_rules._disallowed_callable_ids.remove(id(isoformat))
+            )
+            torch.compiler.allow_in_graph(isoformat)
+            torch._dynamo.disallow_in_graph(isoformat)
+
+        def fn(x, day):
+            y = x.sin()
+            return y + len(day.isoformat())
+
+        args = (torch.ones(2), datetime.date(2026, 10, 26))
+        strict_counter = torch._dynamo.testing.CompileCounter()
+        strict_fn = torch.compile(fn, backend=strict_counter, fullgraph=True)
+        if disallowed:
+            with self.assertRaisesRegex(Unsupported, "marked as skipped"):
+                strict_fn(*args)
+            self.assertEqual(strict_counter.frame_count, 0)
+        else:
+            self.assertEqual(strict_fn(*args), fn(*args))
+            self.assertEqual(strict_counter.frame_count, 1)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter)(*args), fn(*args))
+        self.assertEqual(counter.frame_count, 2 if disallowed else 1)
 
     @unittest.skipIf(sys.version_info < (3, 13), "__replace__ added in 3.13")
     @parametrize("bound", [False, True])

@@ -17,7 +17,7 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.guards import _ordered_dict_order
+from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
 from torch._dynamo.testing import CompileCounter
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
@@ -91,27 +91,34 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("order", [(), (0,), (0, 1, 2), (2, 0, 1)])
     def test_ordered_dict_order_guard(self, order):
-        root = RootGuardManager()
-        root.add_ordered_dict_order_guard(
-            lambda inputs: inputs["mapping"], order, ["mapping order"], None
-        )
-        clone = root.clone_manager(lambda manager: True)
         mapping = OrderedDict.fromkeys(range(len(order)), 1)
         for key in order:
             mapping.move_to_end(key)
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping",
+            "mapping",
+            mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        manager.add_ordered_dict_order_guard(order, ["mapping order"], None)
+        clone = root.clone_manager(lambda manager: True)
         inputs = {"mapping": mapping}
         self.assertTrue(root.check(inputs))
         self.assertTrue(root.check_verbose(inputs).result)
         self.assertTrue(clone.check(inputs))
         self.assertFalse(root.check({}))
+        self.assertFalse(root.check_verbose({}).result)
         self.assertFalse(root.check({"mapping": {}}))
         self.assertFalse(root.check({"mapping": None}))
         self.assertFalse(
             root.check({"mapping": OrderedDict.fromkeys(range(len(order) + 1))})
         )
+        self.assertFalse(root.get_epilogue_lambda_guards())
         self.assertIsInstance(
-            root.get_epilogue_lambda_guards()[0], guards.ORDERED_DICT_ORDER_MATCH
+            manager.get_leaf_guards()[0], guards.ORDERED_DICT_ORDER_MATCH
         )
+        self.assertTrue(guards.ORDERED_DICT_ORDER_MATCH(root, order, [], None)(mapping))
         if len(order) > 1:
             mapping.move_to_end(order[0])
             self.assertFalse(root.check(inputs))
@@ -140,13 +147,9 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
 
         class Mapping(OrderedDict):
             def __iter__(self):
-                raise AssertionError("guard called __iter__")
+                raise AssertionError("guard called a Python mapping callback")
 
-            def keys(self):
-                raise AssertionError("guard called keys")
-
-            def __len__(self):
-                raise AssertionError("guard called __len__")
+            keys = __len__ = __iter__
 
         first, second = Key(1), Key(2)
         mapping = Mapping([(first, 1), (second, 2)])
@@ -156,7 +159,7 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
         order = _ordered_dict_order(mapping)
         self.assertEqual(order, (1, 0) if reordered else (0, 1))
         root = RootGuardManager()
-        root.add_ordered_dict_order_guard(lambda value: value, order, [], None)
+        root.add_ordered_dict_order_guard(order, [], None)
         self.assertTrue(root.check(mapping))
         Key.fail = False
         mapping.move_to_end(second if reordered else first)
@@ -165,7 +168,7 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
 
     def test_ordered_dict_order_guard_does_not_specialize_keys(self):
         root = RootGuardManager()
-        root.add_ordered_dict_order_guard(lambda value: value, (1, 0), [], None)
+        root.add_ordered_dict_order_guard((1, 0), [], None)
         for keys in ((1, 2), (11, 12)):
             mapping = OrderedDict.fromkeys((None, *keys))
             del mapping[None]
@@ -177,70 +180,87 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
     def test_ordered_dict_order_guard_rejects_invalid_positions(self, order):
         root = RootGuardManager()
         with self.assertRaisesRegex(ValueError, "permutation"):
-            root.add_ordered_dict_order_guard(lambda value: value, order, [], None)
+            root.add_ordered_dict_order_guard(order, [], None)
 
-    def test_ordered_dict_order_guard_runs_after_source_guards(self):
-        def get_mapping(inputs):
-            self.fail("source guards should reject the missing mapping first")
-
-        root = RootGuardManager()
-        root.add_lambda_guard(lambda inputs: "mapping" in inputs, [], None)
-        root.add_ordered_dict_order_guard(get_mapping, (0, 1), [], None)
-        self.assertFalse(root.check({}))
-        self.assertFalse(root.check_verbose({}).result)
-
+    @parametrize(
+        "mutation, linked_count",
+        [(mode, count) for mode in ("before", "after") for count in (0, 1, 2)]
+        + [("delete", 1), ("replace", 1)],
+    )
+    @parametrize("key_type", [str, int])
     @parametrize("copy", [False, True])
-    def test_ordered_dict_unlinked_key_invalidates_guard(self, copy):
+    def test_ordered_dict_invalid_storage(self, mutation, linked_count, key_type, copy):
+        mapping = OrderedDict()
+        if mutation == "before":
+            dict.__setitem__(mapping, key_type(0), 0)
+        mapping.update((key_type(i), i) for i in range(1, linked_count + 1))
+        if mutation in ("delete", "replace"):
+            dict.__delitem__(mapping, key_type(1))
+        if mutation in ("after", "replace"):
+            dict.__setitem__(mapping, key_type(0), 0)
+        valid = OrderedDict(dict.items(mapping))
+        spec = GuardBuilder.ORDERED_DICT_ORDER_MATCH.guard_check_spec
+        order = spec.get_metadata_fn(None, valid)
+        self.assertTrue(spec.eval_fn(valid, order))
+        self.assertIsNone(_ordered_dict_order(mapping))
+        self.assertFalse(spec.eval_fn(mapping, order))
+        self.assertFalse(spec.eval_fn(mapping, None))
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(order, [], None)
+        self.assertFalse(root.check(mapping))
+
         def fn(x, mapping):
             result = mapping.copy() if copy else mapping
-            return x + 1, tuple(result.items())
+            return x + 1, tuple(result.values()), tuple(result.items())
 
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
         x = torch.ones(1)
-        mapping = OrderedDict(a=1)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x, mapping), fn(x, mapping))
-        unlinked = OrderedDict()
-        dict.__setitem__(unlinked, "a", 1)
+        if mutation in ("delete", "replace"):
+            with self.assertRaises(KeyError):
+                compiled(x, mapping)
+        else:
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(compiled(x, valid), fn(x, valid))
+        self.assertEqual(counter.frame_count, 1)
+        fullgraph = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fullgraph(x, valid), fn(x, valid))
         with self.assertRaisesRegex(
             Unsupported, "OrderedDict storage differs from linked keys"
         ):
-            compiled(x, unlinked)
+            fullgraph(x, mapping)
+        if mutation in ("before", "after"):
+            mapping[key_type(0)] = 0  # link the raw storage key and compile normally
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
 
-    @parametrize("position", ["before", "after"])
-    @parametrize("key_type", [str, int])
-    @parametrize("linked_count", [0, 1, 2])
-    def test_ordered_dict_unlinked_input_keys(self, position, key_type, linked_count):
-        mapping = OrderedDict()
-        if position == "before":
-            dict.__setitem__(mapping, key_type(0), 0)
-        for key in range(1, linked_count + 1):
-            mapping[key_type(key)] = key
-        if position == "after":
-            dict.__setitem__(mapping, key_type(0), 0)
+    def test_ordered_dict_snapshot_preserves_instance_state(self):
+        class State(dict):
+            pass
 
-        def fn(x, mapping):
-            return x + 1, tuple(mapping.values())
+        mapping = OrderedDict.fromkeys([1, 2])
+        before = tuple(map(id, gc.get_referents(mapping)))
+        self.assertEqual(guards.ordered_dict_keys(mapping), [1, 2])
+        self.assertEqual(tuple(map(id, gc.get_referents(mapping))), before)
+        mapping.__dict__ = State(extra=1)
+        mapping.move_to_end(1)
+        self.assertEqual(_ordered_dict_order(mapping), (1, 0))
 
-        x = torch.ones(1)
-        compiled = torch.compile(fn, backend="eager")
-        self.assertEqual(compiled(x, mapping), fn(x, mapping))
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            Unsupported, "OrderedDict storage differs from linked keys"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
-        # Linking an existing storage key must not reuse the incomplete snapshot.
-        mapping[key_type(0)] = 0
-        self.assertEqual(compiled(x, mapping), fn(x, mapping))
-
-    @parametrize("nested", [False, True])
-    def test_ordered_dict_order_guard_after_version_shortcut(self, nested):
+    @parametrize("container", ["mapping", "dict", "module"])
+    def test_ordered_dict_order_guard_after_version_shortcut(self, container):
         def fn(x, inputs):
-            mapping = inputs["mapping"] if nested else inputs
+            if container == "module":
+                mapping = inputs.mapping
+            else:
+                mapping = inputs["mapping"] if container == "dict" else inputs
             return x + next(iter(mapping.values()))
 
         mapping = OrderedDict(a=1, b=2)
-        inputs = {"mapping": mapping} if nested else mapping
+        if container == "module":
+            inputs = torch.nn.Module()
+            inputs.mapping = mapping
+        else:
+            inputs = {"mapping": mapping} if container == "dict" else mapping
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
@@ -254,6 +274,20 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_empty_dict_identity_guard(self):
+        mapping = {}
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping",
+            "mapping",
+            mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        manager.add_id_match_guard(id(mapping), ["mapping identity"], None)
+        self.assertTrue(root.check({"mapping": mapping}))
+        self.assertFalse(root.check({"mapping": {}}))
+        self.assertFalse(root.check_verbose({"mapping": {}}).result)
 
     def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
         from torch._inductor.codecache import CppCodeCache
