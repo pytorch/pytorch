@@ -195,22 +195,22 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
             return ConstantVariable.create(None)
 
-        TorchInGraphFunctionVariable(
+        SourcelessBuilder.create_internal_torch_function(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
         return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslatorBase", *args: Any) -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
-        TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
-            tx, [], {}
-        )
+        SourcelessBuilder.create_internal_torch_function(
+            torch._C._pop_torch_function_stack
+        ).call_function(tx, [], {})
         return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
@@ -380,6 +380,8 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
     @classmethod
     def register_device_context_insertion(cls, tx: "InstructionTranslatorBase") -> None:
+        from .builder import VariableBuilder
+
         stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             return
@@ -387,8 +389,8 @@ class TorchFunctionModeStackVariable(VariableTracker):
             cls.offset += 1
             stack.insert(
                 0,
-                TorchFunctionModeVariable(
-                    None, source=TorchFunctionModeStackSource(-cls.offset)
+                VariableBuilder.create_internal_torch_function_mode_stack_entry(
+                    TorchFunctionModeStackSource(-cls.offset)
                 ),
             )
 
