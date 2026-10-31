@@ -5613,7 +5613,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
             overwrites any earlier dump there, including the watchdog's.
 
             Arguments:
-                rank(int): Rank used to name the per-rank output file.
+                rank(int): Rank used to name the per-rank output file, only if no earlier dump in this process created the file.
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.

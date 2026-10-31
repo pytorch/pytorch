@@ -1033,8 +1033,28 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
   init();
-  // Names the file fr_dump_file?backend=nccl writes, as dumpDebuggingInfo does.
-  FlightRecorderCUDA::get()->setRank(globalRank());
+  // The rank fr_dump_file?backend=nccl dumps under. Not globalRank(): that is
+  // the rank in the first ProcessGroupNCCL, which may be a subgroup. An empty
+  // global_ranks_in_group is only the world mapping for the default group;
+  // shrink() and stateless groups also leave it empty, so it only fills an
+  // unset rank rather than overwriting a real one with a group-local rank.
+  auto* recorder = FlightRecorderCUDA::get();
+  const auto& ranks = groupRanks();
+  if (static_cast<size_t>(rank_) >= ranks.size()) {
+    LOG(WARNING) << logPrefix() << "rank " << rank_
+                 << " is outside global_ranks_in_group; Flight Recorder rank "
+                    "left unchanged.";
+  } else if (
+      !options_->global_ranks_in_group.empty() || recorder->getRank() < 0) {
+    auto global_rank = static_cast<int>(ranks[rank_]);
+    auto previous = recorder->getRank();
+    if (previous >= 0 && previous != global_rank) {
+      LOG(WARNING) << logPrefix() << "Flight Recorder rank changed from "
+                   << previous << " to " << global_rank
+                   << "; dump files from this process will disagree.";
+    }
+    recorder->setRank(global_rank);
+  }
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
