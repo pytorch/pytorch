@@ -727,10 +727,11 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
         from torch.fx.experimental.symbolic_shapes import statically_known_true
 
         with disable_proxy_modes_tracing(), fake_mode, torch._C._DisableFuncTorch():
-            # A view fits in the wrapped storage only when the batch is not
-            # empty, and real tensor propagation checks the view against the
-            # real storage. When the batch may be empty, record a new tensor
-            # with the wrapper's sizes and strides instead.
+            # An empty wrapped tensor, such as a vmap over an empty batch, has
+            # no storage for the view to point into, and real tensor propagation
+            # checks the view against the real storage. So a view is recorded
+            # only when the wrapped tensor is known not to be empty, and a new
+            # tensor with the wrapper's sizes and strides otherwise.
             if statically_known_true(inner.numel() != 0):
                 return inner.detach().as_strided(
                     val.shape, val.stride(), val.storage_offset()

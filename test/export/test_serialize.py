@@ -3033,9 +3033,10 @@ class TestPredispatchSerialization(TestCase):
             with self.assertRaisesRegex(SerializeError, reason, msg=new):
                 load(artifact.exported_program.replace(old, new))
 
-        # Finding a flat_apply name never runs a module's code: not for a
-        # module that is not imported yet, not for a lazily loaded one, which
-        # runs on its first attribute read, and not for a module __getattr__.
+        # Finding a flat_apply name never runs the code of a module outside
+        # _FLAT_APPLY_MODULES: not for a module that is not imported yet, not
+        # for a lazily loaded one, which runs on its first attribute read, and
+        # not for a module __getattr__.
         with tempfile.TemporaryDirectory() as tmp:
             ran = os.path.join(tmp, "ran")
             path = os.path.join(tmp, "flat_apply_side_effect.py")

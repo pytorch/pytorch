@@ -713,12 +713,13 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-# The torch modules whose flat_apply functions a program can use without its
-# user importing anything: the helper that calls custom autograd functions, and
-# ModIndex, which TransformGetItemToIndex uses. `import torch` does not import
-# all of them, so load imports these itself. Other modules, such as
-# torch.distributed.tensor for DTensor, have to be imported first, like any
-# other. The module comes from this table, never from the loaded file.
+# The torch modules that define what export puts into flat_apply calls for
+# programs whose users import nothing: the helper that calls custom autograd
+# functions, and ModIndex, the autograd function that TransformGetItemToIndex
+# uses. `import torch` does not import all of them, so load imports these
+# itself. Other modules, such as torch.distributed.tensor for DTensor, have to
+# be imported first, like any other. The module comes from this table, never
+# from the loaded file.
 _FLAT_APPLY_MODULES = frozenset(
     {"torch.export.custom_ops", "torch._dynamo._trace_wrapped_higher_order_op"}
 )
