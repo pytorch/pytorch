@@ -44,6 +44,7 @@ class TestFlatnonzero(TestCase):
         assert_equal(np.flatnonzero(x), [0, 1, 3, 4])
 
 
+@instantiate_parametrized_tests
 class TestAny(TestCase):
     def test_basic(self):
         y1 = [0, 0, 1, 0]
@@ -71,7 +72,16 @@ class TestAny(TestCase):
         y = np.array([[0, 1, 0, 3], [1, 0, 2, 0]])
         assert_equal(np.any(y), y.any())
 
+    @parametrize("dtype", ["uint8", "int8", "int64", "float32", "bool"])
+    def test_result_dtype_is_bool(self, dtype):
+        y = np.array([[0, 1, 0], [0, 0, 0]], dtype=dtype)
+        assert_equal(np.any(y).dtype, np.bool_)
+        assert_equal(np.any(y, axis=1).dtype, np.bool_)
+        assert_equal(y.any(axis=0, keepdims=True).dtype, np.bool_)
+        assert_equal(np.any(y, axis=1), [True, False])
 
+
+@instantiate_parametrized_tests
 class TestAll(TestCase):
     def test_basic(self):
         y1 = [0, 1, 1, 0]
@@ -97,6 +107,61 @@ class TestAll(TestCase):
     def test_method_vs_function(self):
         y = np.array([[0, 1, 0, 3], [1, 0, 2, 0]])
         assert_equal(np.all(y), y.all())
+
+    @parametrize("dtype", ["uint8", "int8", "int64", "float32", "bool"])
+    def test_result_dtype_is_bool(self, dtype):
+        y = np.array([[1, 1, 1], [0, 1, 1]], dtype=dtype)
+        assert_equal(np.all(y).dtype, np.bool_)
+        assert_equal(np.all(y, axis=1).dtype, np.bool_)
+        assert_equal(y.all(axis=0, keepdims=True).dtype, np.bool_)
+        assert_equal(np.all(y, axis=1), [True, False])
+
+
+class TestQuantileScalarShape(TestCase):
+    # A scalar q with axis=None must give a 0-D result, not shape (1,)
+    def test_median(self):
+        x = np.array([1.5, -1.5, 2.5, -0.5, 8.0], dtype="float32")
+        assert_equal(np.median(x).shape, ())
+        assert_equal(np.median(x.reshape(5, 1)).shape, ())
+        assert_equal(np.median(x, keepdims=True).shape, (1,))
+        assert_equal(np.median(x.reshape(5, 1), axis=0).shape, (1,))
+
+    def test_percentile_quantile(self):
+        x = np.arange(12, dtype="float64").reshape(3, 4)
+        assert_equal(np.percentile(x, 50).shape, ())
+        assert_equal(np.quantile(x, 0.5).shape, ())
+        assert_equal(np.percentile(x, 50, keepdims=True).shape, (1, 1))
+        assert_equal(np.percentile(x, [25, 50]).shape, (2,))
+        assert_allclose(np.median(x), 5.5)
+        assert_allclose(np.quantile(x, 0.25), 2.75)
+
+    def test_out(self):
+        x = np.arange(12, dtype="float64").reshape(3, 4)
+        for func, q in [(np.percentile, 50), (np.quantile, 0.5)]:
+            out = np.empty(())
+            assert_equal(func(x, q, out=out), 5.5)
+            assert_equal(out, 5.5)
+            # NumPy broadcasts a scalar result into out
+            for shape in [(1,), (1, 1), (3,)]:
+                out = np.empty(shape)
+                func(x, q, out=out)
+                assert_equal(out, np.full(shape, 5.5))
+            out = np.empty((1, 4))
+            func(x, q, axis=0, keepdims=True, out=out)
+            assert_equal(out, [[4.0, 5.0, 6.0, 7.0]])
+            with assert_raises(ValueError):
+                func(x, q, axis=0, out=np.empty(3))
+
+    def test_median_out(self):
+        x = np.arange(12, dtype="float64").reshape(3, 4)
+        out = np.empty(())
+        assert_equal(np.median(x, out=out), 5.5)
+        assert_equal(out, 5.5)
+        # Unlike quantile/percentile, NumPy's median requires an exactly shaped out
+        with assert_raises(ValueError):
+            np.median(x, out=np.empty(1))
+        with assert_raises(ValueError):
+            np.median(x, axis=0, out=np.empty(3))
 
 
 class TestMean(TestCase):
