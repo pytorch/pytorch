@@ -885,6 +885,20 @@ def forward(self, primals_1):
                 f, inp, test_mutation=True, keep_inp_mutations=True
             )
 
+    def test_set__intermediate_with_grad_fn_onto_input(self):
+        def f(a, w):
+            out = w * 2
+            with torch.no_grad():
+                out.set_(a)
+            return out
+
+        for requires_grad in (False, True):
+            inp = [
+                torch.randn(4, requires_grad=requires_grad),
+                torch.randn(4, requires_grad=True),
+            ]
+            self.verify_aot_autograd(f, inp)
+
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
     )

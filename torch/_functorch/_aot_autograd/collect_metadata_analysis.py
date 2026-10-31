@@ -577,6 +577,7 @@ alias each other from a multi-output view call"
             elif (
                 inner_storage in inp_inner_storage_refs
                 and inner_storage not in set_inp_inner_storages
+                and not o.requires_grad
             ):
                 # See "Why Do We Care If Storage Changed?" above
                 base_idx = inp_inner_storage_refs[inner_storage]
