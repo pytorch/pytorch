@@ -4,8 +4,9 @@
 independently managed workers. It does not require a process group, global rank
 assignment, or matching receives.
 
-An endpoint connects to one peer. Exchange `bind()` bytes and remote memory
-descriptors through a trusted application control plane. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
+An endpoint may connect to multiple peers; remote descriptors identify their
+peer. Exchange `bind()` bytes and remote memory descriptors through a trusted
+application control plane. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
 copies from the remote base to a writable local view. Offsets and lengths are bytes;
 shape and dtype agreement is the application's responsibility.
 
@@ -16,7 +17,12 @@ can use `read_async`, `write_async`, or `wait_all`. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 Ordinary reads and writes are not ordered on CUDA streams. The API does not
-provide tracing, batching, or remote slicing. Descriptor classes define explicit
+provide tracing or batching. Views and remote buffers support `slice(offset, length)`
+and step-1 `[a:b]` byte ranges. Like Python sequences, `[a:b]` counts negative
+bounds from the end and clamps out-of-range ones, while `slice` raises; a
+transfer of a clamped view copies fewer bytes. Non-slice keys raise `TypeError`
+and steps other than 1 raise `ValueError`. A remote slice does not
+restrict the peer's access to the rest of the registration. Descriptor classes define explicit
 `serialize()`/`deserialize()` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
@@ -33,6 +39,7 @@ types are rejected. Tensor contents and native handles are never serialized.
    :members:
 .. autoclass:: torch.distributed._transport.MutableMemoryView
 .. autoclass:: torch.distributed._transport.RemoteBuffer
+   :members:
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
@@ -79,10 +86,26 @@ The initial backend is NIXL, installed separately with `pip install nixl`.
 Its default UCX plugin supports CPU and CUDA memory, subject to the installed
 NIXL/UCX build and hardware.
 
+Peers are identified by NIXL agent name. Connecting again with the same
+`bind()` bytes is a no-op. While NIXL holds a peer, connecting a restarted peer
+under the same agent name raises the backend error. A descriptor whose
+well-formed metadata names a different connected peer is rejected without
+unloading that peer. Malformed metadata naming a connected peer, even in a
+descriptor carrying the sender's own `agent_name`, drops that peer's
+descriptors: its pending transfers never complete, `connected()` stays True,
+and `close` times out with memory still registered. An endpoint serving
+several peers must therefore trust every peer's descriptor metadata; checking
+`agent_name` does not prevent this. Peer state grows with each connected peer
+and is released only by `close`, which waits for pending transfers to all
+peers. The transport does not tie a descriptor to the peer that sent it, so
+such an endpoint must also authorize each request, for example by assigning
+each client an `agent_name` and checking that the request's
+`remote_buffer.agent_name` matches.
+
 `unregister_memory(memory)` deregisters a local allocation without closing the
 transport. Wait for local transfers first and coordinate with peers to stop remote
 access; the backend cannot detect incoming DMA. All handles sharing a registration,
-including previously created views and exported descriptors, become invalid.
+including previously created views, exported descriptors, and their slices, become invalid.
 Register again and exchange fresh descriptors before resuming transfers.
 
 NIXL transfers return Work objects that retain their request handles until
