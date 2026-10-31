@@ -36,13 +36,18 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.utils._triton import has_datacenter_blackwell_tma_device
+from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_datacenter_blackwell_tma_device, has_triton
 
 
 def has_tlx() -> bool:
@@ -99,8 +104,9 @@ def tearDownModule():
         _PRIOR_FP32_MATMUL_PRECISION = None
 
 
-@instantiate_parametrized_tests
 class TestMaxAutotuneBlackwell(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -113,6 +119,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_regular_mm_persistent_tma(
         self,
+        device,
         a_transposed: bool,
         b_transposed: bool,
         dynamic: bool,
@@ -137,12 +144,12 @@ class TestMaxAutotuneBlackwell(TestCase):
         a = (
             torch.randn(*((K, M) if a_transposed else (M, K)))
             .to(torch.float16)
-            .to(GPU_TYPE)
+            .to(device)
         )
         b = (
             torch.randn(*((N, K) if b_transposed else (K, N)))
             .to(torch.float16)
-            .to(GPU_TYPE)
+            .to(device)
         )
 
         epilogue_subtile_regex = f"EPILOGUE_SUBTILE={epilogue_subtile}"
@@ -332,6 +339,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_scaled_mm_per_tensor_persistent_tma(
         self,
+        device,
         dynamic: bool,
         tma_store: bool,
         host_side_tma: bool,
@@ -349,8 +357,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         # TMA requires 16-byte alignment: here we repeat the dims
         # by the factor of 8, as float16 is 2-byte.
         M, N, K = 32, 16, 48
-        a = (torch.randn((M, K)).to(torch.float16).to(GPU_TYPE)).repeat(8, 8)
-        b = (torch.randn((N, K)).to(torch.float16).to(GPU_TYPE)).repeat(8, 8)
+        a = (torch.randn((M, K)).to(torch.float16).to(device)).repeat(8, 8)
+        b = (torch.randn((N, K)).to(torch.float16).to(device)).repeat(8, 8)
 
         scale_a = get_scale_per_tensor(a)
         scale_b = get_scale_per_tensor(b)
@@ -396,6 +404,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_scaled_mm_per_row_persistent_tma(
         self,
+        device,
         dynamic: bool,
         tma_store: bool,
         host_side_tma: bool,
@@ -421,8 +430,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         # TMA requires 16-byte alignment: here we repeat the dims
         # by the factor of 8, as float16 is 2-byte.
         M, N, K = 32, 16, 48
-        a = (torch.randn((M, K)).to(torch.bfloat16).to(GPU_TYPE)).repeat(8, 8)
-        b = (torch.randn((N, K)).to(torch.bfloat16).to(GPU_TYPE)).repeat(8, 8)
+        a = (torch.randn((M, K)).to(torch.bfloat16).to(device)).repeat(8, 8)
+        b = (torch.randn((N, K)).to(torch.bfloat16).to(device)).repeat(8, 8)
 
         scale_a = get_scale_per_row(a)
         scale_b = get_scale_per_row(b)
@@ -471,6 +480,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_addmm_persistent_tma(
         self,
+        device,
         a_transposed: bool,
         b_transposed: bool,
         dynamic: bool,
@@ -497,14 +507,14 @@ class TestMaxAutotuneBlackwell(TestCase):
         a = (
             torch.randn(*((K, M) if a_transposed else (M, K)))
             .to(torch.float16)
-            .to(GPU_TYPE)
+            .to(device)
         )
         b = (
             torch.randn(*((N, K) if b_transposed else (K, N)))
             .to(torch.float16)
-            .to(GPU_TYPE)
+            .to(device)
         )
-        x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
+        x = torch.randn(N).to(torch.float16).to(device)
 
         epilogue_subtile_regex = f"EPILOGUE_SUBTILE={epilogue_subtile}"
         with config.patch(
@@ -652,13 +662,10 @@ class TestMaxAutotuneBlackwell(TestCase):
         FileCheck().check_not("tensordesc<").run(code[0])
 
 
-@instantiate_parametrized_tests
-@unittest.skipIf(
-    config.triton.enable_host_side_tma,
-    "epilogue fusion registers a descriptor the host path cannot resolve",
-)
 class TestBlackwellTMAStoreFusion(TestCase):
     """Tests for TMA store with fused pointwise epilogues on Blackwell."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _make_tma_store_test_config(epilogue_subtile: int) -> BlackwellGPUGemmConfig:
@@ -685,6 +692,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
     @parametrize("epilogue_subtile", (1, 2))
     def test_blackwell_mm_sigmoid_epilogue_fusion_tma_store(
         self,
+        device,
         shape: tuple[int, int, int],
         epilogue_subtile: int,
     ):
@@ -695,8 +703,8 @@ class TestBlackwellTMAStoreFusion(TestCase):
             return x * (2.0 * torch.sigmoid(mm))
 
         M, N, K = shape
-        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=device)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=device)
 
         test_config = self._make_tma_store_test_config(epilogue_subtile)
         # Ensure the heuristic cache is populated, then patch mm_configs.
@@ -741,6 +749,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
     @parametrize("epilogue_subtile", (1, 2))
     def test_blackwell_addmm_relu_epilogue_fusion_tma_store(
         self,
+        device,
         shape: tuple[int, int, int],
         epilogue_subtile: int,
     ):
@@ -751,9 +760,9 @@ class TestBlackwellTMAStoreFusion(TestCase):
             return torch.relu(mm + bias)
 
         M, N, K = shape
-        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        bias = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=device)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=device)
+        bias = torch.randn(N, dtype=torch.bfloat16, device=device)
 
         test_config = self._make_tma_store_test_config(epilogue_subtile)
         # Ensure the heuristic cache is populated, then patch mm_configs.
@@ -791,13 +800,10 @@ class TestBlackwellTMAStoreFusion(TestCase):
         ).run(code[0])
 
 
-@instantiate_parametrized_tests
-@unittest.skipIf(
-    config.triton.enable_host_side_tma,
-    "epilogue fusion registers a descriptor the host path cannot resolve",
-)
 class TestBlackwellTMALoadFusion(TestCase):
     """Tests for TMA load with fused pointwise epilogues on Blackwell."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _make_tma_load_test_config(epilogue_subtile: int) -> BlackwellGPUGemmConfig:
@@ -820,6 +826,7 @@ class TestBlackwellTMALoadFusion(TestCase):
     @parametrize("epilogue_subtile", (1, 2))
     def test_blackwell_mm_sigmoid_epilogue_tma_load(
         self,
+        device,
         shape: tuple[int, int, int],
         epilogue_subtile: int,
     ):
@@ -830,8 +837,8 @@ class TestBlackwellTMALoadFusion(TestCase):
             return x * (2.0 * torch.sigmoid(mm))
 
         M, N, K = shape
-        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=device)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=device)
 
         test_config = self._make_tma_load_test_config(epilogue_subtile=epilogue_subtile)
         from torch._inductor.heuristics.template.registry import get_template_heuristic
@@ -875,6 +882,7 @@ class TestBlackwellTMALoadFusion(TestCase):
     @parametrize("epilogue_subtile", (1, 2))
     def test_blackwell_mm_scale_bias_epilogue_tma_load(
         self,
+        device,
         shape: tuple[int, int, int],
         epilogue_subtile: int,
     ):
@@ -884,10 +892,10 @@ class TestBlackwellTMALoadFusion(TestCase):
             return torch.mm(x, W.T) * scale + bias
 
         M, N, K = shape
-        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        scale = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE)
-        bias = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=device)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=device)
+        scale = torch.randn(M, N, dtype=torch.bfloat16, device=device)
+        bias = torch.randn(M, N, dtype=torch.bfloat16, device=device)
 
         test_config = self._make_tma_load_test_config(epilogue_subtile=epilogue_subtile)
         from torch._inductor.heuristics.template.registry import get_template_heuristic
@@ -931,6 +939,7 @@ class TestBlackwellTMALoadFusion(TestCase):
     @parametrize("epilogue_subtile", (1, 2))
     def test_blackwell_addmm_1d_bias_epilogue_tma_load(
         self,
+        device,
         shape: tuple[int, int, int],
         epilogue_subtile: int,
     ):
@@ -940,9 +949,9 @@ class TestBlackwellTMALoadFusion(TestCase):
             return torch.addmm(bias, x, W.T)
 
         M, N, K = shape
-        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
-        bias = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=device)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=device)
+        bias = torch.randn(N, dtype=torch.bfloat16, device=device)
 
         test_config = self._make_tma_load_test_config(epilogue_subtile=epilogue_subtile)
         from torch._inductor.heuristics.template.registry import get_template_heuristic
@@ -982,6 +991,8 @@ class TestBlackwellTMALoadFusion(TestCase):
 @instantiate_parametrized_tests
 class TestBlackwellExhaustiveConfigs(TestCase):
     """Tests for exhaustive config generation for Blackwell templates."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     # Expected valid values for each parameter based on _generate_exhaustive_configs
     VALID_BLOCK_SIZES = {32, 64, 128, 256}
@@ -1058,6 +1069,8 @@ class TestBlackwellExhaustiveConfigs(TestCase):
 
 
 class TestBlackwellAutoWSConstraints(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_two_ctas_allows_all_pipeline_depths(self):
         kwargs = {
             "BLOCK_M": 128,
@@ -1172,6 +1185,7 @@ class TestBlackwellAutoWSConstraints(TestCase):
 @unittest.skipIf(torch.version.hip is not None, "CUDA-specific template heuristics")
 @instantiate_parametrized_tests
 class TestBlackwellAutoWSConfigs(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """autoWS config selection for the Blackwell persistent-TMA template."""
 
     @parametrize(
@@ -1276,6 +1290,8 @@ class TestBlackwellAutoWSConfigs(TestCase):
 
 @instantiate_parametrized_tests
 class TestBlackwellBMMTemplate(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _compile_blackwell_bmm(
         self,
         fn,
@@ -1903,9 +1919,13 @@ class TestBlackwellBMMTemplate(TestCase):
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
 
+instantiate_device_type_tests(TestMaxAutotuneBlackwell, globals(), only_for="cuda")
+instantiate_device_type_tests(TestBlackwellTMAStoreFusion, globals(), only_for="cuda")
+instantiate_device_type_tests(TestBlackwellTMALoadFusion, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
-    # Set env to make it work in CI.
-    if HAS_GPU and HAS_CPU and is_big_gpu():
+    if has_triton() and HAS_CPU and is_big_gpu():
         run_tests()
