@@ -9,49 +9,77 @@ from torch._inductor import config
 from torch._inductor.codegen import common
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-DEVICES = ("cpu", GPU_TYPE) if HAS_GPU else ("cpu",)
+def _register_add_one_ops(lib):
+    """Register a simple add_one op with functional + .out overloads."""
+    lib.define("add_one(Tensor x) -> Tensor")
+    lib.define(
+        "add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+        tags=(torch.Tag.out,),
+    )
+
+    def _add_one_impl(x: torch.Tensor) -> torch.Tensor:
+        return x + 1
+
+    def _add_one_out_impl(x: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
+        out.copy_(x + 1)
+        return out
+
+    lib.impl("add_one", _add_one_impl, "CompositeExplicitAutograd")
+    lib.impl("add_one.out", _add_one_out_impl, "CompositeExplicitAutograd")
+
+    @torch.library.register_fake("mylib::add_one", lib=lib)
+    def _add_one_fake(x):
+        return x.new_empty(x.shape)
+
+    return torch.ops.mylib.add_one, torch.ops.mylib.add_one.out
 
 
-@instantiate_parametrized_tests
+def _register_split_add_ops(lib):
+    """Register a split_add op returning two tensors with functional + .out overloads."""
+    lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
+    lib.define(
+        "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
+        tags=(torch.Tag.out,),
+    )
+
+    def _split_add_impl(x, a, b):
+        return (x + a, x + b)
+
+    def _split_add_out_impl(x, a, b, *, out0, out1):
+        out0.copy_(x + a)
+        out1.copy_(x + b)
+        return (out0, out1)
+
+    lib.impl("split_add", _split_add_impl, "CompositeExplicitAutograd")
+    lib.impl("split_add.out", _split_add_out_impl, "CompositeExplicitAutograd")
+
+    @torch.library.register_fake("mylib::split_add", lib=lib)
+    def _split_add_fake(x, a, b):
+        return (x.new_empty(x.shape), x.new_empty(x.shape))
+
+    return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
+
+
 class TestCustomOpOutLowering(InductorTestCase):
     """Tests for lowering functional custom ops to out-variant ExternKernelOut."""
 
-    def _register_add_one_ops(self, lib):
-        """Register a simple add_one op with functional + .out overloads."""
-        lib.define("add_one(Tensor x) -> Tensor")
-        lib.define(
-            "add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
-            tags=(torch.Tag.out,),
-        )
+    hw_classification = HardwareClassification.ACCELERATOR
 
-        def _add_one_impl(x: torch.Tensor) -> torch.Tensor:
-            return x + 1
+    def setUp(self):
+        super().setUp()
+        # CPU inductor does not use triton, so only skip accelerator instances.
+        if self.device_type != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton")
 
-        def _add_one_out_impl(x: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
-            out.copy_(x + 1)
-            return out
-
-        lib.impl("add_one", _add_one_impl, "CompositeExplicitAutograd")
-        lib.impl("add_one.out", _add_one_out_impl, "CompositeExplicitAutograd")
-
-        @torch.library.register_fake("mylib::add_one", lib=lib)
-        def _add_one_fake(x):
-            return x.new_empty(x.shape)
-
-        return torch.ops.mylib.add_one, torch.ops.mylib.add_one.out
-
-    @parametrize("device", DEVICES)
     def test_add_one_lowered_to_out(self, device):
         """Test that a simple functional op gets lowered to its out-variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            self._register_add_one_ops(lib)
+            _register_add_one_ops(lib)
 
             def f(x):
                 return torch.ops.mylib.add_one(x)
@@ -66,11 +94,10 @@ class TestCustomOpOutLowering(InductorTestCase):
 
             FileCheck().check(".out(").check_not(".default(").run(code)
 
-    @parametrize("device", DEVICES)
     def test_add_one_lowered_to_out_dynamic_shape(self, device):
         """Out-variant lowering with symbolic output shape (see #185503)."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            self._register_add_one_ops(lib)
+            _register_add_one_ops(lib)
 
             def f(x):
                 return torch.ops.mylib.add_one(x)
@@ -86,36 +113,10 @@ class TestCustomOpOutLowering(InductorTestCase):
             self.assertEqual(compiled_out, eager_out)
             FileCheck().check(".out(").check_not(".default(").run(code)
 
-    def _register_split_add_ops(self, lib):
-        """Register a split_add op returning two tensors with functional + .out overloads."""
-        lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
-        lib.define(
-            "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
-            tags=(torch.Tag.out,),
-        )
-
-        def _split_add_impl(x, a, b):
-            return (x + a, x + b)
-
-        def _split_add_out_impl(x, a, b, *, out0, out1):
-            out0.copy_(x + a)
-            out1.copy_(x + b)
-            return (out0, out1)
-
-        lib.impl("split_add", _split_add_impl, "CompositeExplicitAutograd")
-        lib.impl("split_add.out", _split_add_out_impl, "CompositeExplicitAutograd")
-
-        @torch.library.register_fake("mylib::split_add", lib=lib)
-        def _split_add_fake(x, a, b):
-            return (x.new_empty(x.shape), x.new_empty(x.shape))
-
-        return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
-
-    @parametrize("device", DEVICES)
     def test_multi_output_lowered_to_out(self, device):
         """Test a two-output functional op gets lowered to its .out variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            func_op, out_op = self._register_split_add_ops(lib)
+            _register_split_add_ops(lib)
 
             def f(x):
                 a, b = torch.ops.mylib.split_add(x, 1.0, 2.0)
@@ -130,7 +131,6 @@ class TestCustomOpOutLowering(InductorTestCase):
             self.assertEqual(compiled_out, eager_out)
             FileCheck().check(".out(").check("out0=").check("out1=").run(code)
 
-    @parametrize("device", DEVICES)
     def test_op_without_out_variant_falls_through(self, device):
         """Test that ops without an out-variant fall through to FallbackKernel."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -154,7 +154,18 @@ class TestCustomOpOutLowering(InductorTestCase):
             compiled_out, (code,) = run_and_get_code(
                 torch.compile(f, backend="inductor", fullgraph=True), x
             )
-            self.assertEqual(compiled_out, eager_out)
+            self.assertEqual(
+                compiled_out,
+                eager_out,
+                msg="output mismatch for op_without_out_variant_falls_through",
+            )
+            self.assertNotIn(".out(", code)
+
+
+class TestCustomOpOutLoweringCppWrapper(InductorTestCase):
+    """Tests for cpp_wrapper runtime dispatch."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cpp_wrapper_runtime_dispatch_single_output_fallback(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -189,8 +200,6 @@ class TestCustomOpOutLowering(InductorTestCase):
                 "cpu", cpp_wrapper=True
             )
             if wrapper_codegen.__name__ == "CppWrapperCpuArrayRef":
-                # ArrayRef wrapper tensors are not AtenTensorHandle, so that wrapper
-                # path intentionally does not emit assert_size_stride.
                 self.assertNotRegex(source_code, output_assert)
             else:
                 FileCheck().check_regex(output_assert).run(source_code)
@@ -286,6 +295,9 @@ class TestCustomOpOutLowering(InductorTestCase):
         self.assertEqual(len(packed), 1)
         for output in packed[0].outputs:
             self.assertIsInstance(output, IRNode)
+
+
+instantiate_device_type_tests(TestCustomOpOutLowering, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
