@@ -3276,7 +3276,7 @@ def forward(self, arg0_1, arg1_1):
         )
 
         for backend, dtype in cases:
-            with self.subTest(backend=backend, dtype=dtype):
+            with self.subTest(backend=backend.name, dtype=dtype):
                 torch._dynamo.reset()
                 q = torch.randn(
                     2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
