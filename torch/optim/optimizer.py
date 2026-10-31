@@ -244,6 +244,43 @@ def _get_fused_step_dtypes(
     return step_dtypes
 
 
+def _process_fused_optimizer_value(
+    param: torch.Tensor,
+    value: torch.Tensor,
+    param_id: int,
+    param_groups: list[dict[str, Any]],
+    key: str | None = None,
+) -> torch.Tensor:
+    if (
+        key == "step"
+        and param.device.type in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
+        and value.dtype in (torch.float32, torch.float64)
+        and any(
+            pg.get("fused", False) and param_id in pg["params"] for pg in param_groups
+        )
+    ):
+        return value.to(device=param.device)
+    return Optimizer._process_value_according_to_param_policy(
+        param, value, param_id, param_groups, key
+    )
+
+
+def _normalize_fused_step_dtypes(
+    state: dict[torch.Tensor, Any], group: dict[str, Any]
+) -> None:
+    if not group.get("fused", False):
+        return
+    step_states = [
+        state[p]
+        for p in group["params"]
+        if p.device.type in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
+        and torch.is_tensor(state.get(p, {}).get("step"))
+    ]
+    if any(s["step"].dtype == torch.float64 for s in step_states):
+        for s in step_states:
+            s["step"] = s["step"].to(dtype=torch.float64)
+
+
 def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     r"""Return the device type list that supports capturable optimizer."""
     capturable_supported_devices = ["cuda", "xpu", "hpu"]
@@ -848,14 +885,7 @@ class Optimizer:
                 break
         if key == "step":
             if capturable or fused:
-                dtype = (
-                    value.dtype
-                    if fused
-                    and param.device.type in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
-                    and value.dtype in (torch.float32, torch.float64)
-                    else torch.float32
-                )
-                return value.to(dtype=dtype, device=param.device)
+                return value.to(dtype=torch.float32, device=param.device)
             else:
                 return value
         else:
@@ -1034,7 +1064,7 @@ class Optimizer:
             if isinstance(value, torch.Tensor):
                 return cast(
                     _T,
-                    Optimizer._process_value_according_to_param_policy(
+                    self._process_value_according_to_param_policy(
                         param, value, param_id, param_groups, key
                     ),
                 )
@@ -1083,19 +1113,6 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)
         ]
         self.__setstate__({"state": state, "param_groups": param_groups})
-
-        for group in self.param_groups:
-            if not group.get("fused", False):
-                continue
-            step_states = [
-                self.state[p]
-                for p in group["params"]
-                if p.device.type in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
-                and "step" in self.state.get(p, {})
-            ]
-            if any(s["step"].dtype == torch.float64 for s in step_states):
-                for s in step_states:
-                    s["step"] = s["step"].to(dtype=torch.float64)
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
             post_hook(self)

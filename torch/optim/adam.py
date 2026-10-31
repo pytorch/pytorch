@@ -18,7 +18,9 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _normalize_fused_step_dtypes,
     _params_doc,
+    _process_fused_optimizer_value,
     _stack_if_compiling,
     _to_scalar,
     _use_grad_for_differentiable,
@@ -114,6 +116,12 @@ class Adam(Optimizer):
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
+    @staticmethod
+    def _process_value_according_to_param_policy(
+        param, value, param_id, param_groups, key=None
+    ):
+        return _process_fused_optimizer_value(param, value, param_id, param_groups, key)
+
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
@@ -137,6 +145,7 @@ class Adam(Optimizer):
                         if group["capturable"] or group["fused"]
                         else torch.tensor(step_val, dtype=_get_scalar_dtype())
                     )
+            _normalize_fused_step_dtypes(self.state, group)
 
     def _init_group(
         self,

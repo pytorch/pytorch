@@ -14,7 +14,9 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _normalize_fused_step_dtypes,
     _params_doc,
+    _process_fused_optimizer_value,
     _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -101,6 +103,12 @@ class Adagrad(Optimizer):
                     p, init_value, memory_format=torch.preserve_format
                 )
 
+    @staticmethod
+    def _process_value_according_to_param_policy(
+        param, value, param_id, param_groups, key=None
+    ):
+        return _process_fused_optimizer_value(param, value, param_id, param_groups, key)
+
     def __setstate__(self, state):
         super().__setstate__(state)
         #  define "fused" for
@@ -125,6 +133,7 @@ class Adagrad(Optimizer):
                         if group["fused"]
                         else torch.tensor(step_val, dtype=_get_scalar_dtype())
                     )
+            _normalize_fused_step_dtypes(self.state, group)
 
     def share_memory(self) -> None:
         """Calls tensor.share_memory_() on the state sum tensors."""

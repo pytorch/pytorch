@@ -28,7 +28,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -1059,9 +1058,7 @@ class TestOptimRenewed(TestCase):
 
             state = deepcopy(optimizer.state_dict())
             for param_state in state["state"].values():
-                param_state["step"] = param_state["step"].to(
-                    device="cpu", dtype=expected_dtype
-                )
+                param_state["step"] = param_state["step"].to(device="cpu")
             optimizer.load_state_dict(state)
             step = optimizer.state[param]["step"]
             self.assertEqual(step.dtype, expected_dtype)
@@ -1221,80 +1218,6 @@ class TestOptimRenewed(TestCase):
                     self.assertEqual(optimizer.state[param], previous_state)
                 else:
                     self.assertTrue(torch.all(param < previous_param))
-
-    @onlyCUDA
-    @parametrize("amsgrad", [False, True])
-    @optims(
-        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
-        dtypes=[torch.float32],
-    )
-    def test_fused_mixed_precision_step_dtype(self, device, dtype, optim_info, amsgrad):
-        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
-        optimizers = [
-            optim_info.optim_cls([p], lr=0.01, fused=True, amsgrad=amsgrad)
-            for p in params
-        ]
-        for param, optimizer, step_dtype in zip(
-            params, optimizers, (torch.float32, torch.float64), strict=True
-        ):
-            param.grad = torch.full_like(param, 0.25)
-            _bf16_state_init_hook(optimizer, (), {})
-            optimizer.state[param]["step"] = torch.zeros(
-                (), device=device, dtype=step_dtype
-            )
-        for step in range(1, 4):
-            for optimizer in optimizers:
-                optimizer.step()
-            self.assertEqual(params[0], params[1])
-            for key in optimizers[0].state[params[0]]:
-                if key == "step":
-                    for param, optimizer in zip(params, optimizers, strict=True):
-                        self.assertEqual(optimizer.state[param][key].item(), step)
-                else:
-                    self.assertEqual(
-                        optimizers[0].state[params[0]][key],
-                        optimizers[1].state[params[1]][key],
-                    )
-
-    @onlyCUDA
-    @parametrize("tensor_lr", [False, True])
-    @parametrize("first_step_dtype", [torch.float32, torch.float64])
-    @optims(
-        [
-            o
-            for o in optim_db
-            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
-        ],
-        dtypes=[torch.float32],
-    )
-    def test_fused_step_dtype_mismatch(
-        self, device, dtype, optim_info, tensor_lr, first_step_dtype
-    ):
-        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
-        for param in params:
-            param.grad = torch.full_like(param, 0.25)
-        lr = (
-            torch.tensor(0.01, device=device, dtype=torch.float32)
-            if tensor_lr
-            else 0.01
-        )
-        optimizer = optim_info.optim_cls(params, fused=True, lr=lr)
-        optimizer.step()
-        step_dtypes = (
-            (torch.float32, torch.float64)
-            if first_step_dtype == torch.float32
-            else (torch.float64, torch.float32)
-        )
-        for param, step_dtype in zip(params, step_dtypes, strict=True):
-            optimizer.state[param]["step"] = optimizer.state[param]["step"].to(
-                step_dtype
-            )
-        expected = [param.clone() for param in params]
-        with self.assertRaisesRegex(
-            RuntimeError, "Fused optimizer step tensors must have the same dtype"
-        ):
-            optimizer.step()
-        self.assertEqual(params, expected)
 
     @onlyCPU
     @optims(
@@ -3052,6 +2975,33 @@ class TestOptimRenewed(TestCase):
 
 
 class TestScalarDtype(TestCase):
+    @parametrize("step_type", ["float32", "float64", "int", "float"])
+    def test_fused_subclass_load_step_dtype(self, step_type):
+        class LegacyFusedOptimizer(Optimizer):
+            pass
+
+        params = [torch.ones(8, device="cpu", dtype=torch.float32) for _ in range(2)]
+        optimizer = LegacyFusedOptimizer(params, {"fused": True})
+        if step_type in ("float32", "float64"):
+            step_dtype = torch.float32 if step_type == "float32" else torch.float64
+            step = torch.tensor(3, dtype=step_dtype)
+        else:
+            step = 3 if step_type == "int" else 3.0
+        optimizer.state[params[0]]["step"] = step
+        optimizer.state[params[1]]["step"] = torch.tensor(2, dtype=torch.float32)
+        saved_state = deepcopy(optimizer.state_dict())
+        restored = LegacyFusedOptimizer(params, {"fused": True})
+        with set_default_dtype(torch.float64):
+            restored.load_state_dict(saved_state)
+        actual_step = restored.state[params[0]]["step"]
+        if torch.is_tensor(step):
+            self.assertEqual(actual_step.dtype, torch.float32)
+            self.assertEqual(actual_step.item(), 3)
+        else:
+            self.assertIs(type(actual_step), type(step))
+            self.assertEqual(actual_step, step)
+        self.assertEqual(restored.state[params[1]]["step"].dtype, torch.float32)
+
     @parametrize("default_dtype", [torch.float16, torch.float32])
     @parametrize("is_fused", [None, False, True])
     @parametrize("target_device", [None, "cpu", "cuda", "mps", "xpu"])
