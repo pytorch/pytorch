@@ -2061,11 +2061,13 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(out_add_nc, ref_add, atol=0, rtol=0, exact_dtype=True)
             self.assertEqual(out_sub_nc, ref_sub, atol=0, rtol=0, exact_dtype=True)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @dtypes(torch.float16)
     def test_add_alpha_overflow_reduced_precision(self, device, dtype):
-        # Passing an alpha exceeding the reduced-precision range (e.g. 1e5 for float16)
-        # used to raise an overflow error during Scalar conversion. Now alpha is converted
-        # to opmath_t (float), computing in float and returning inf, matching CUDA behavior.
+        # Passing an alpha exceeding float16's finite range (e.g. 1e5, where float16 max is 65504)
+        # previously raised a checked_convert RuntimeError during Scalar conversion on CPU:
+        # "value cannot be converted to type at::Half without overflow".
+        # Now alpha is converted to opmath_t (float), so it succeeds without raising on CPU,
+        # computes in float32, and overflows to inf in float16, matching CUDA.
         a = torch.tensor([1.0], device=device, dtype=dtype)
         b = torch.tensor([1.0], device=device, dtype=dtype)
         res = torch.add(a, b, alpha=1e5)
