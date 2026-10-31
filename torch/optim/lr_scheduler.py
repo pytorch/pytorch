@@ -9,7 +9,7 @@ import types
 import warnings
 from bisect import bisect_right
 from collections import Counter
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from typing import Any, cast, Literal, SupportsFloat, TYPE_CHECKING, TypedDict
 from typing_extensions import deprecated, override, Self
 from weakref import ref
@@ -94,11 +94,27 @@ def _update_param_group_val(
         param_group[key] = val
 
 
+# Transitional backward compatibility for scheduler overrides without **kwargs.
+# Once support for those legacy signatures is removed, remove these checks and
+# the cache and forward scheduling inputs unconditionally.
+_cached_signature = lru_cache(maxsize=128)(inspect.signature)
+
+
 def _accepts_kwargs(method: Callable[..., Any]) -> bool:
-    """Whether a bound method collects arbitrary keyword arguments."""
+    """Whether a method collects arbitrary keyword arguments."""
+    # Cache functions rather than bound methods to avoid retaining schedulers
+    # and to share results across instances without hiding method replacements.
+    if isinstance(method, types.MethodType):
+        method = method.__func__
+    # Callable objects can have instance-specific, mutable signatures.
+    signature = (
+        _cached_signature(method)
+        if isinstance(method, types.FunctionType)
+        else inspect.signature(method)
+    )
     return any(
         parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in inspect.signature(method).parameters.values()
+        for parameter in signature.parameters.values()
     )
 
 
@@ -1200,7 +1216,6 @@ class SequentialLR(LRScheduler):
                 f"number of milestones to be equal to {len(milestones)}"
             )
         self._schedulers = schedulers
-        self._schedulers_accept_kwargs = [_accepts_kwargs(s.step) for s in schedulers]
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
@@ -1257,7 +1272,7 @@ class SequentialLR(LRScheduler):
             else:
                 scheduler._update_lr(0)  # For backwards compatibility
         else:
-            if self._schedulers_accept_kwargs[idx]:
+            if kwargs and _accepts_kwargs(scheduler.step):
                 scheduler.step(**kwargs)
             else:
                 scheduler.step()  # For backwards compatibility
@@ -1269,14 +1284,14 @@ class SequentialLR(LRScheduler):
         """Return the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in ``self.__dict__`` except
-        the optimizer and derived scheduler metadata.
+        the optimizer and wrapped schedulers.
 
         The wrapped scheduler states will also be saved.
         """
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers", "_schedulers_accept_kwargs")
+            if key not in ("optimizer", "_schedulers")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -1615,7 +1630,6 @@ class ChainedScheduler(LRScheduler):
                     f"which is different from {optimizer.__class__.__name__}."
                 )
         self._schedulers = schedulers
-        self._schedulers_accept_kwargs = [_accepts_kwargs(s.step) for s in schedulers]
         self.optimizer = optimizer
         # Unlike the other schedulers, this does not end with
         # `self._initial_step()`: every scheduler in `schedulers` already took
@@ -1644,10 +1658,8 @@ class ChainedScheduler(LRScheduler):
                 "argument: its meaning is ambiguous for a composite scheduler. "
                 "Omit 'epoch' when calling step()."
             )
-        for scheduler, accepts_kwargs in zip(
-            self._schedulers, self._schedulers_accept_kwargs, strict=True
-        ):
-            if accepts_kwargs:
+        for scheduler in self._schedulers:
+            if kwargs and _accepts_kwargs(scheduler.step):
                 scheduler.step(**kwargs)
             else:
                 scheduler.step()  # For backwards compatibility
@@ -1658,14 +1670,14 @@ class ChainedScheduler(LRScheduler):
         """Return the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in ``self.__dict__`` except
-        the optimizer and derived scheduler metadata.
+        the optimizer and wrapped schedulers.
 
         The wrapped scheduler states will also be saved.
         """
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers", "_schedulers_accept_kwargs")
+            if key not in ("optimizer", "_schedulers")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 

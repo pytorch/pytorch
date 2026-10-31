@@ -648,6 +648,69 @@ class TestLRScheduler(TestCase):
         self.assertEqual(scheduler.update_kwargs, [{}, expected])
         self.assertEqual(scheduler.get_lr_kwargs, [{}, expected])
 
+    @parametrize("composite_cls", [None, SequentialLR, ChainedScheduler])
+    def test_scheduler_reuses_signature_checks(self, composite_cls):
+        def make_scheduler():
+            children = [self.RecordingScheduler(self.opt) for _ in range(2)]
+            if composite_cls is SequentialLR:
+                return SequentialLR(self.opt, children, milestones=[2])
+            if composite_cls is ChainedScheduler:
+                return ChainedScheduler(children)
+            return children[0]
+
+        scheduler = make_scheduler()
+        for _ in range(4):
+            self.opt.step()
+            scheduler.step(metrics=1.0)
+
+        # New instances share the checks, including at a sequential milestone.
+        cache_info = torch.optim.lr_scheduler._cached_signature.cache_info
+        misses = cache_info().misses
+        scheduler = make_scheduler()
+        for _ in range(4):
+            self.opt.step()
+            scheduler.step(metrics=1.0)
+        self.assertEqual(cache_info().misses, misses)
+
+    @parametrize("composite_cls", [SequentialLR, ChainedScheduler])
+    def test_composite_checks_replaced_step(self, composite_cls):
+        child = self.RecordingScheduler(self.opt)
+        if composite_cls is SequentialLR:
+            scheduler = SequentialLR(self.opt, [child], milestones=[])
+        else:
+            scheduler = ChainedScheduler([child])
+        self.opt.step()
+        scheduler.step(metrics=1.0)
+        original_step = child.step
+
+        def legacy_step(self, epoch=None):
+            original_step(epoch)
+
+        child.step = types.MethodType(legacy_step, child)
+        scheduler.step(metrics=2.0)
+        self.assertEqual(child.step_kwargs[-1], {})
+
+        child.step = original_step
+        scheduler.step(metrics=3.0)
+        self.assertEqual(child.step_kwargs[-1], {"metrics": 3.0})
+
+    def test_scheduler_checks_replaced_get_lr(self):
+        scheduler = self.RecordingScheduler(self.opt)
+        self.opt.step()
+        scheduler.step(metrics=1.0)
+        original_get_lr = scheduler.get_lr
+
+        def legacy_get_lr(self):
+            return original_get_lr()
+
+        scheduler.get_lr = types.MethodType(legacy_get_lr, scheduler)
+        scheduler.step(metrics=2.0)
+        self.assertEqual(scheduler.get_lr_kwargs[-1], {})
+
+        scheduler.get_lr = original_get_lr
+        scheduler.step(metrics=3.0)
+        self.assertEqual(scheduler.get_lr_kwargs[-1], {"metrics": 3.0})
+
     def test_scheduler_step_supports_legacy_get_lr(self):
         scheduler = self.LegacyGetLRScheduler(self.opt)
         initial_lrs = [float(group["lr"]) for group in self.opt.param_groups]
@@ -1384,8 +1447,7 @@ class TestLRScheduler(TestCase):
             schedulers=[ConstantLR(self.opt), PlateauLR(self.opt)],
             milestones=[2],
         )
-        # Which schedulers accept scheduling inputs is rederived on
-        # construction, so it must stay out of the checkpoint.
+        # Signature checks are cached outside the scheduler state.
         self.assertNotIn("_schedulers_accept_kwargs", scheduler.state_dict())
 
     def test_sequential_lr_starts_with_plateau_lr(self):
@@ -1595,8 +1657,7 @@ class TestLRScheduler(TestCase):
         scheduler = ChainedScheduler(
             [ConstantLR(self.opt), PlateauLR(self.opt)], optimizer=self.opt
         )
-        # Which schedulers accept scheduling inputs is rederived on
-        # construction, so it must stay out of the checkpoint.
+        # Signature checks are cached outside the scheduler state.
         self.assertNotIn("_schedulers_accept_kwargs", scheduler.state_dict())
 
     def test_chained_scheduler_composes_with_plateau_lr(self):
