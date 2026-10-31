@@ -82,8 +82,8 @@ namespace {
   }
 
   Tensor adaptive_avg_pool2d_symint(at::Tensor const& input, SymIntArrayRef output_size) {
-    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+    TORCH_CHECK_VALUE(
         (output_size[0] >= 0 && output_size[1] >= 0),
         "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], "}");

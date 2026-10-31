@@ -8033,11 +8033,11 @@ class TestMPS(TestCaseMPS):
     def test_adaptive_avg_pool_backward_errors(self):
         x = torch.randn(2, 3, 4, 5, 6, device='mps')
         grad = torch.randn(2, 3, 2, 2, 2, device='mps')
-        with self.assertRaisesRegex(RuntimeError, "Expected dtype"):
+        with self.assertRaisesRegex(ValueError, "Expected dtype"):
             torch.ops.aten.adaptive_avg_pool3d_backward(grad, x, grad_input=torch.empty(0, device='mps', dtype=torch.bfloat16))
-        with self.assertRaisesRegex(RuntimeError, "Expected 4D or 5D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 4D or 5D tensor"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad.view(6, 8), x.view(6, 120))
-        with self.assertRaisesRegex(RuntimeError, "Expected 3D or 4D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 3D or 4D tensor"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad.view(6, 8), x.view(6, 120))
 
     # Test max avg pool2d - when the input size is a multiple of output size
