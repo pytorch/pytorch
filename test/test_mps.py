@@ -14675,6 +14675,7 @@ class TestConsistency(TestCaseMPS):
 
     BF16_LOW_PRECISION_LIST = {
         'nn.functional.linear',
+        'nn.functional.linear_cross_entropy',
         'nn.functional.gaussian_nll_loss',
     }
     FP16_LOW_PRECISION_LIST = {
