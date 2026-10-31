@@ -6629,7 +6629,8 @@ with (
     torch._inductor.config.patch(saved["config"]),
 ):
     for _ in range(3):
-        torch.compiler.cudagraph_mark_step_begin()
+        if saved["mark_step"]:
+            torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
         y = f(model, saved["x"])
         torch.testing.assert_close(y, saved["expected"])
@@ -6700,6 +6701,7 @@ class TestPrecompileCudagraphs(TestCase):
         load_config=None,
         policy=None,
         trees=None,
+        mark_step=True,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all,
         # including a tree manager's own memory-pool graph)
@@ -6716,6 +6718,7 @@ class TestPrecompileCudagraphs(TestCase):
             "config": config or {},
             "load_config": load_config or {},
             "policy": policy,
+            "mark_step": mark_step,
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6786,6 +6789,18 @@ class TestPrecompileCudagraphs(TestCase):
             expected, x=miss, serve_time=True, skips=0
         )
         self.assertGreater(served[0], 0)
+
+    @parametrize("serving", ["standalone", "installed"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_artifact_served_without_mark_step_records_its_cudagraphs(self, serving):
+        # Each call starts a new CUDA graph tree generation, as under
+        # torch.compile, so warmup ends without cudagraph_mark_step_begin().
+        mod = self.mod
+        fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
+        y, meta = self._capture_step(fn, options={"triton.cudagraphs": True})
+        self.assertEqual(meta["SERVING_MODE"], serving)
+        recorded, _ = self._serve_in_fresh_process(y, mark_step=False, skips=0)
+        self.assertGreater(recorded, 0)
 
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
         options = {"triton.cudagraphs": True}

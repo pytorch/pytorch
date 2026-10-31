@@ -1990,6 +1990,9 @@ class PrecompileSession(Generic[_P, _R]):
         # and whether its options decide that rather than the ambient flag.
         self._requests_cudagraphs = False
         self._options_set_cudagraphs = False
+        # Whether cpp_wrapper under graph_partition turns the record's CUDA graphs
+        # off, whatever triton.cudagraphs says.
+        self._cpp_wrapper_drops_cudagraphs = False
         if self._backend_name == "inductor":
             inputs = self._cudagraph_inputs = _cudagraph_inputs()
             config = self._cudagraph_config = {
@@ -2004,9 +2007,9 @@ class PrecompileSession(Generic[_P, _R]):
             from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
             # Record what compile_fx compiles (get_cpp_wrapper_config).
-            if cpp_wrapper and not cpp_wrapper_supports_cudagraphs(
-                config["graph_partition"]
-            ):
+            supported = cpp_wrapper_supports_cudagraphs(config["graph_partition"])
+            self._cpp_wrapper_drops_cudagraphs = cpp_wrapper and not supported
+            if self._cpp_wrapper_drops_cudagraphs:
                 config["triton.cudagraphs"] = False
             # A capture without CUDA graphs records only that, and its calls
             # compile the rest as configured.
@@ -2432,7 +2435,7 @@ class PrecompileSession(Generic[_P, _R]):
             forward = flag if fwd is None else fwd
             if forward != flag or (forward and backward and bwd is False):
                 remedy = "Set triton.cudagraphs to match, or remove the override."
-                if self._requests_cudagraphs and not flag:
+                if self._cpp_wrapper_drops_cudagraphs:
                     remedy = (
                         "cpp_wrapper with graph_partition compiles without CUDA "
                         "graphs: turn one of them off, or remove the override."

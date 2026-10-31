@@ -562,6 +562,7 @@ def _build_multigraph_forward():
 
     import torch
     from torch._dynamo.aot_compile import bind_locals
+    from torch._dynamo.mutation_guard import GenerationTracker
     from torch._dynamo.output_graph import get_builtins_dict
     from torch._dynamo.package import (
         load_guard_manager,
@@ -873,7 +874,18 @@ def _build_multigraph_forward():
         if scope is not None:
             for _name in _frame["resume_names"]:
                 _seed(scope, _name, dispatcher)
-    return entry
+
+    if entry is None:
+        raise AssertionError("an artifact's entry frame is checked before seeding")
+
+    def forward(*args, **kwargs):
+        # A call starts a new CUDA graph tree generation, as entering
+        # torch.compile's wrapper does (OptimizeContext.on_enter): without it, a
+        # loop that never calls cudagraph_mark_step_begin never ends warmup.
+        GenerationTracker.generation += 1
+        return entry(*args, **kwargs)
+
+    return forward
 
 
 def _build_installed_forward():
