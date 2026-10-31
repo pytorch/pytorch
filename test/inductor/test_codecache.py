@@ -5220,6 +5220,36 @@ class TestCudaCompileCommand(TestCase):
                 raise AssertionError(cmd_parts)
 
 
+class TestTritonBundler(TestCase):
+    def test_collect_dedupes_repeated_puts(self):
+        # Thread compile workers register the artifacts they compiled, and the
+        # parent process registers them again when finalizing the same
+        # CachingAutotuner (precompile with warm_cache_only=False). The bundle
+        # should carry one copy per (kernel_hash, device).
+        with tempfile.TemporaryDirectory() as directory:
+            for kernel_hash in ("kernel_a", "kernel_b"):
+                artifact_dir = os.path.join(directory, kernel_hash)
+                os.mkdir(artifact_dir)
+                with open(os.path.join(artifact_dir, "kernel.cubin"), "wb") as f:
+                    f.write(b"binary stand-in")
+            with mock.patch.dict(
+                os.environ, {"TRITON_CACHE_DIR": directory}
+            ), config.patch(bundle_triton_into_fx_graph_cache=True):
+                TritonBundler.begin_compile()
+                try:
+                    TritonBundler.put("kernel_a", 0)
+                    TritonBundler.put("kernel_a", 0)
+                    TritonBundler.put("kernel_b", 0)
+                    TritonBundler.put("kernel_a", 1)
+                    bundle, _ = TritonBundler.collect()
+                finally:
+                    TritonBundler.end_compile()
+        hashes = [(a.kernel_hash, a.device) for a in bundle.kernel_artifacts]
+        self.assertEqual(
+            sorted(hashes), [("kernel_a", 0), ("kernel_a", 1), ("kernel_b", 0)]
+        )
+
+
 @instantiate_parametrized_tests
 class TestAutotuneCache(TestCase):
     device_type = GPU_TYPE
