@@ -1192,10 +1192,12 @@ class TestOptimRenewed(TestCase):
     # Test vectorization path splits for fused kernels. Ensure the scalar path
     # and vectorized path compute the same thing.
     # See https://github.com/pytorch/pytorch/issues/191763.
-    # fp64 is left out so this runs on MPS; it shares the same code w/ fp32
+    # fp64 is included so the RVV path (rvv_traits<double>, a separate
+    # specialization from float) is exercised; it is skipped only on MPS, which
+    # does not support torch.float64.
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
-        dtypes=(torch.float32, torch.float16, torch.bfloat16),
+        dtypes=(torch.float32, torch.float64, torch.float16, torch.bfloat16),
     )
     # Vectorized::size() is at most 32 elements (AVX512, bf16/fp16), so 64 tests
     # two full blocks with no remainder, and 65 adds a scalar remainder.
@@ -1207,6 +1209,8 @@ class TestOptimRenewed(TestCase):
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
+        if _get_device_type(device) == "mps" and dtype == torch.float64:
+            self.skipTest("MPS does not support torch.float64")
         optim_cls = optim_info.optim_cls
         for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
             kwargs = deepcopy(optim_input.kwargs)
@@ -1233,6 +1237,62 @@ class TestOptimRenewed(TestCase):
                     # the shape guard skips step and SGD's None momentum_buffer
                     if torch.is_tensor(v) and v.shape == param_numel.shape:
                         self.assertEqual(v, ref_state[k].expand(numel))
+
+    # amsgrad's NaN-propagating maximum must agree with the scalar forloop
+    # reference, which uses torch.maximum (adam.py) and propagates NaN. Only
+    # Adam/AdamW accept amsgrad; SGD and Adagrad do not. The max_exp_avg_sq
+    # equality is checked on CPU only: the CPU fused kernel (vector bodies and
+    # scalar tails) uses a NaN-propagating max, but the CUDA and MPS fused
+    # kernels use std::max(max_exp_avg_sq, exp_avg_sq) (e.g.
+    # aten/src/ATen/native/cuda/fused_adam_utils.cuh), which drops a NaN
+    # exp_avg_sq, so their max_exp_avg_sq diverges from the forloop path under
+    # a NaN gradient.
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=(torch.float32, torch.float64, torch.float16, torch.bfloat16),
+    )
+    def test_fused_matches_forloop_nan_amsgrad(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
+        if _get_device_type(device) == "mps" and dtype == torch.float64:
+            self.skipTest("MPS does not support torch.float64")
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
+            kwargs = deepcopy(optim_input.kwargs)
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
+                continue
+            kwargs["amsgrad"] = True
+            # 65 spans several VLEN tiles plus a remainder, so the pipelined
+            # main loop (not just the masked tail) is exercised.
+            param_fused = torch.nn.Parameter(
+                torch.rand(65, device=device, dtype=dtype)
+            )
+            param_forloop = param_fused.detach().clone().requires_grad_()
+            opt_fused = optim_cls([param_fused], fused=True, **kwargs)
+            opt_forloop = optim_cls([param_forloop], fused=False, **kwargs)
+            for step in range(2):
+                grad = torch.rand_like(param_fused)
+                if step == 1:
+                    # NaN gradient in a middle tile (index 33): the fused
+                    # amsgrad update must propagate it into max_exp_avg_sq
+                    # exactly like the forloop path. Index 33 lands in a full
+                    # vector block; index 64 is always in the scalar remainder
+                    # for a 65-element param, so it exercises the scalar-tail
+                    # max (and, on RVV, the masked tail).
+                    grad[33] = float("nan")
+                    grad[64] = float("nan")
+                param_fused.grad = grad.clone()
+                param_forloop.grad = grad.clone()
+                opt_fused.step()
+                opt_forloop.step()
+                self.assertEqual(param_fused, param_forloop)
+                if _get_device_type(device) == "cpu":
+                    self.assertEqual(
+                        opt_fused.state[param_fused]["max_exp_avg_sq"],
+                        opt_forloop.state[param_forloop]["max_exp_avg_sq"],
+                    )
 
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
