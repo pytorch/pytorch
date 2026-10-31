@@ -102,7 +102,6 @@
   "test/distributed/elastic/test_control_plane.py",
   "test/distributed/flight_recorder/test_fr_analysis.py",
   "test/distributed/flight_recorder/test_loader.py",
-  "test/distributed/fsdp/test_checkpoint_wrapper.py",
   "test/distributed/fsdp/test_fsdp_apply.py",
   "test/distributed/fsdp/test_fsdp_backward_prefetch.py",
   "test/distributed/fsdp/test_fsdp_checkpoint.py",
