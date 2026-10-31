@@ -69,7 +69,6 @@ L2:
 L3:
   npu:
     Ascend/pytorch: [huangjingwei, kerer-ai, zyw-hw]
-
-L4:
   # Canonical test repos for CRCR.
-  - pytorch/crcr-test: [atalman, can-gaa-hou, fffrog, jewelkm89, KarhouTam, subinz1]
+  crcr-test:
+    pytorch/crcr-test: [atalman, can-gaa-hou, fffrog, jewelkm89, KarhouTam, subinz1]
