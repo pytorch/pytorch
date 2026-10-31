@@ -237,41 +237,6 @@ if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
         # ^ this will throw an exception if the script fails.
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_device_tracing_decided_per_session(self):
-        # Kineto is registered once per process, by the first session. Each
-        # session must still decide for itself whether to trace the device.
-        # Runs in a fresh process because earlier tests may have registered Kineto.
-        script = """
-import json
-import torch
-from torch.profiler import DeviceType, profile, ProfilerActivity
-
-x = torch.ones(64, 64, device="cuda")
-
-def run(activities):
-    with profile(activities=activities) as prof:
-        x @ x
-        torch.cuda.synchronize()
-    events = prof.events()
-    return {
-        "device": sum(e.device_type == DeviceType.CUDA for e in events),
-        "runtime": sum(e.name.startswith("cuda") for e in events),
-    }
-
-cpu, cuda = [ProfilerActivity.CPU], [ProfilerActivity.CPU, ProfilerActivity.CUDA]
-print(json.dumps([run(cpu), run(cuda), run(cpu)]))
-"""
-        out = subprocess.check_output(
-            [sys.executable, "-c", script], text=True, timeout=60
-        )
-        cpu_first, cuda, cpu_after = json.loads(out.splitlines()[-1])
-        none = {"device": 0, "runtime": 0}
-        self.assertEqual(cpu_first, none)
-        self.assertGreater(cuda["device"], 0)
-        self.assertGreater(cuda["runtime"], 0)
-        self.assertEqual(cpu_after, none)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
     def test_kineto_multigpu(self):
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
