@@ -2627,8 +2627,14 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def cpp_wrapper_supports_cudagraphs(graph_partition: bool) -> bool:
+    """Whether a cpp_wrapper graph compiles with CUDA graphs (outside AOT)."""
+    return not graph_partition
+
+
 def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
-    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
+    supported = cpp_wrapper_supports_cudagraphs(config.graph_partition)
+    if log_cudagraph_skip and config.triton.cudagraphs and not supported:
         log_cudagraph_skip_and_bump_counter(
             format_default_skip_message(
                 "cpp-wrapper does not support graph partition yet"
@@ -2648,9 +2654,7 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
         "triton.cudagraphs": (
-            config.triton.cudagraphs
-            and not V.aot_compilation
-            and not config.graph_partition
+            config.triton.cudagraphs and not V.aot_compilation and supported
         ),
         "triton.store_cubin": True,
     }

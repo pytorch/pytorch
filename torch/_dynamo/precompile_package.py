@@ -158,6 +158,35 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
+def _cudagraph_inputs() -> dict[str, Any]:
+    # The ambient settings a capture's CUDA graph record is derived from.
+    import torch._inductor.config as c
+
+    return {
+        "triton.cudagraphs": c.triton.cudagraphs,
+        "triton.cudagraph_trees": c.triton.cudagraph_trees,
+        "graph_partition": c.graph_partition,
+        "cpp_wrapper": c.cpp_wrapper,
+    }
+
+
+def _check_cudagraph_policy(cudagraph_config: Mapping[str, bool]) -> None:
+    # Checked on every call: it decides how the capture wraps each graph (and can
+    # turn off the box a forward shares with its backward), while a loaded artifact
+    # wraps them by CUDAGRAPH_CONFIG.
+    import torch._inductor.config as inductor_config
+
+    policy = inductor_config.cudagraph_policy
+    if cudagraph_config.get("triton.cudagraphs") and policy is not None:
+        raise PackageError(
+            "a DynamoTracer capture cannot record "
+            "torch._inductor.config.cudagraph_policy: it decides how the capture "
+            "wraps each graph, while a loaded artifact wraps them by "
+            "CUDAGRAPH_CONFIG. Unset it while capturing and set it in the loading "
+            "process."
+        )
+
+
 @contextlib.contextmanager
 def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
@@ -1712,6 +1741,9 @@ class _CapturePackage(CompilePackage):
         self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
+        # The (fwd, bwd) of the torch._dynamo.override_cudagraphs each backend graph
+        # compiled under, by backend id.
+        self.cudagraph_overrides: dict[str, tuple[bool | None, bool | None]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1728,6 +1760,9 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
+        # The annotation compile_fx reads.
+        if (a := gm.meta.get("cudagraph_annotation")) is not None:
+            self.cudagraph_overrides[backend_id] = (a.fwd, a.bwd)
 
     def add_graph_break_op(
         self,
@@ -1942,6 +1977,47 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if not isinstance(backend, str):
             _check_capture_options(backend.config)
+        # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
+        # graphs is decided again when it is post-compiled at load. The artifact
+        # records the capture's choice, and the capture's calls compile under it.
+        # graph_partition is in it because post-compile picks the wrapper for a
+        # partitioned graph by it, while the graph was partitioned at compile.
+        self._cudagraph_config: dict[str, bool] = {}
+        # The ambient settings the record was derived from, which _call checks
+        # each call against.
+        self._cudagraph_inputs: dict[str, Any] = {}
+        # Whether the capture asked for CUDA graphs, before a cpp_wrapper downgrade,
+        # and whether its options decide that rather than the ambient flag.
+        self._requests_cudagraphs = False
+        self._options_set_cudagraphs = False
+        # Whether cpp_wrapper under graph_partition turns the record's CUDA graphs
+        # off, whatever triton.cudagraphs says.
+        self._cpp_wrapper_drops_cudagraphs = False
+        if self._backend_name == "inductor":
+            inputs = self._cudagraph_inputs = _cudagraph_inputs()
+            config = self._cudagraph_config = {
+                k: v for k, v in inputs.items() if k != "cpp_wrapper"
+            }
+            cpp_wrapper = inputs["cpp_wrapper"]
+            if not isinstance(backend, str):
+                config.update((k, v) for k, v in backend.config.items() if k in config)
+                cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
+                self._options_set_cudagraphs = "triton.cudagraphs" in backend.config
+            self._requests_cudagraphs = config["triton.cudagraphs"]
+            from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
+
+            # Record what compile_fx compiles (get_cpp_wrapper_config).
+            supported = cpp_wrapper_supports_cudagraphs(config["graph_partition"])
+            self._cpp_wrapper_drops_cudagraphs = (
+                self._requests_cudagraphs and cpp_wrapper and not supported
+            )
+            if self._cpp_wrapper_drops_cudagraphs:
+                config["triton.cudagraphs"] = False
+            # A capture without CUDA graphs records only that, and its calls
+            # compile the rest as configured.
+            if not self._requests_cudagraphs:
+                config = self._cudagraph_config = {"triton.cudagraphs": False}
+            _check_cudagraph_policy(config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2059,10 +2135,31 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
+        if self._cudagraph_inputs:
+            ambient = _cudagraph_inputs()
+            changed: list[str]
+            if self._requests_cudagraphs:
+                snapshot = self._cudagraph_inputs
+                changed = [k for k, v in snapshot.items() if ambient[k] != v]
+            else:
+                # The calls compile with CUDA graphs off, as recorded: refuse an
+                # ambient request for them, which would be silently ignored,
+                # unless the capture's options decide it, as under torch.compile.
+                on = ambient["triton.cudagraphs"] and not self._options_set_cudagraphs
+                changed = ["triton.cudagraphs"] if on else []
+            if changed:
+                raise PackageError(
+                    f"{', '.join(changed)} changed since capture() began: the artifact "
+                    "records one CUDA graph config, read when capture() is called, "
+                    "for every captured call. Restore it for the captured calls; to "
+                    "capture under another value, set it before capture()."
+                )
+            _check_cudagraph_policy(self._cudagraph_config)
         try:
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
+                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 return self._compiled(*args, **kwargs)
         except Exception as e:
@@ -2322,6 +2419,35 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         package = self._package
+        # The artifact records the capture's CUDA graph config, not each graph's, so
+        # an override that decides a graph otherwise cannot be served. As compile_fx
+        # applies one: fwd decides the forward, and bwd=False alone keeps a CUDA
+        # graphed forward's backward out, if there is one.
+        overrides = package.cudagraph_overrides
+        inductor = self._backend_name == "inductor"
+        flag = self._cudagraph_config.get("triton.cudagraphs", False)
+        for backend_id, artifact in backends.items():
+            if not (inductor and backend_id in overrides):
+                continue
+            # A graph pruned to a no-op never reaches Inductor: no CUDA graph.
+            if not isinstance(artifact, BundledAOTAutogradCacheArtifact):
+                continue
+            fwd, bwd = overrides[backend_id]
+            backward = artifact.content.compiled_bw is not None
+            forward = flag if fwd is None else fwd
+            if forward != flag or (forward and backward and bwd is False):
+                remedy = "Set triton.cudagraphs to match, or remove the override."
+                if self._cpp_wrapper_drops_cudagraphs:
+                    remedy = (
+                        "cpp_wrapper with graph_partition compiles without CUDA "
+                        "graphs: turn one of them off, or remove the override."
+                    )
+                raise PackageError(
+                    f"a DynamoTracer capture cannot serve torch._dynamo."
+                    f"override_cudagraphs(fwd={fwd}, bwd={bwd}) under "
+                    f"triton.cudagraphs={flag}: the artifact records the capture's "
+                    f"CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. {remedy}"
+                )
         # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
         # on those of any compiled frame, and a graph's ops on the graph's devices.
         op_devices: dict[tuple[str, str], set[str]] = {
@@ -2375,6 +2501,7 @@ class PrecompileSession(Generic[_P, _R]):
             summary,
             self._backend_name,
             self._fn,
+            self._cudagraph_config,
             inductor_options=options,
             **sections,
         )
