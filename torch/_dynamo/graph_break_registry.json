@@ -3594,6 +3594,16 @@
       ]
     }
   ],
+  "GB8144": [
+    {
+      "Gb_type": "Protocol isinstance() after an in-frame attribute change",
+      "Context": "isinstance({self}, {proto})",
+      "Explanation": "A runtime_checkable Protocol check is answered by the real object, which does not have the attributes this frame changed.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0201": [
     {
       "Gb_type": "namedtuple construction",

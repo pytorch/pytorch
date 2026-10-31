@@ -32,7 +32,7 @@ import operator
 import sys
 import types
 import typing
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
@@ -634,6 +634,28 @@ _VALUE_INDEPENDENT_INSTANCECHECKS = frozenset(
     )
     if hook is not None
 )
+_PROTOCOL_INSTANCECHECK = getattr(
+    getattr(typing, "_ProtocolMeta", None), "__instancecheck__", None
+)
+
+
+def _runtime_protocol_members(
+    classinfo: Any, instancecheck: Any
+) -> Collection[str] | None:
+    """The members typing's instance check reads for a Protocol. None for anything
+    else, including a metaclass that overrides the hook and a Python that does not
+    expose them (they are private to typing)."""
+    if instancecheck is not _PROTOCOL_INSTANCECHECK or not getattr(
+        classinfo, "_is_protocol", False
+    ):
+        return None
+    members = getattr(classinfo, "__protocol_attrs__", None)  # 3.12+
+    if members is None:
+        get_members = getattr(typing, "_get_protocol_attrs", None)
+        if get_members is None:
+            return None
+        members = get_members(classinfo)
+    return members
 
 
 def _uses_custom_classinfo_check(
@@ -2955,10 +2977,19 @@ class BuiltinVariable(BaseBuiltinVariable):
                 else arg.get_real_python_backed_value()
             )
             if value is not NO_SUCH_SUBOBJ:
+                protocol_members = (
+                    _runtime_protocol_members(member, instancecheck)
+                    if isinstance(arg, variables.UserDefinedObjectVariable)
+                    else None
+                )
+                if protocol_members is not None:
+                    arg.require_live_protocol_members(tx, member, protocol_members)
                 try:
                     val = isinstance(value, member)
                 except TypeError as e:
                     raise_observed_exception(TypeError, tx, args=list(e.args))
+                if protocol_members is not None:
+                    arg.guard_protocol_members(member, protocol_members)
             else:
                 try:
                     # NB: `isinstance()` does not call `__subclasscheck__` but use `__instancecheck__`.

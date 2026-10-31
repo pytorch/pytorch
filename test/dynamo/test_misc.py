@@ -247,6 +247,45 @@ def _load_pybind11_enum_mod(*, load_inline):
     return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
 
 
+@typing.runtime_checkable
+class _HasPorts(typing.Protocol):
+    ports: tuple[int, ...]
+
+
+@typing.runtime_checkable
+class _HasFoo(typing.Protocol):
+    def foo(self) -> int: ...
+
+
+class _Bag:
+    pass
+
+
+@dataclasses.dataclass
+class _PortsDefault:
+    ports: tuple[int, ...] = (1,)
+
+
+@dataclasses.dataclass
+class _ImplementsPorts(_HasPorts):
+    ports: tuple[int, ...]
+
+
+def _having(obj, **attrs):
+    for name, value in attrs.items():
+        setattr(obj, name, value)
+    return obj
+
+
+def _protocol_check(x, o, proto):
+    return x + 1 if isinstance(o, proto) else x - 1
+
+
+@torch._dynamo.disable
+def _eager_isinstance(o, proto):
+    return isinstance(o, proto)
+
+
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_storage_offset_scalar_output(self):
         def fn(x):
@@ -9748,6 +9787,838 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         mod = torch.nn.Linear(3, 3)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, mod), fn(x, mod))
+
+    @parametrize(
+        "case",
+        [
+            "data_member",
+            "data_member_none",
+            "method_member",
+            "method_member_none",
+            "method_over_class_none",
+            "static_method_member",
+            "class_method_member",
+            "plain_method_member",
+            "data_descriptor_over_none_entry",
+            "nn_module",
+            "list_subclass",
+            "dict_subclass",
+            "simple_namespace",
+            "inherited_metaclass_hook",
+            "inherited_protocol_members",
+            "getattribute",
+            "getattr_hook",
+            "property_reads_state",
+            "slot",
+            "thread_local",
+            "thread_local_real_dict",
+        ],
+    )
+    def test_isinstance_protocol_guards_what_it_read(self, case):
+        # https://github.com/pytorch/pytorch/issues/196127
+        # Two objects of one class through one compiled function: where typing
+        # answers them differently the second needs its own graph, and where it
+        # does not (3.12 stopped reading some of these) they share one.
+        before_312 = sys.version_info < (3, 12)
+        # Before 3.12 typing runs user code for these, which a guard cannot repeat
+        # on every call, so they keep the unguarded answer.
+        if before_312 and case in (
+            "getattribute",
+            "getattr_hook",
+            "property_reads_state",
+        ):
+            self.skipTest("typing runs user code for this member")
+
+        class Meta(type(typing.Protocol)):
+            pass
+
+        @typing.runtime_checkable
+        class HasPortsMeta(typing.Protocol, metaclass=Meta):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class Base(typing.Protocol):
+            pass
+
+        # 3.12.2+ inherits the empty set of data members from Base, so typing
+        # treats this data member as a method member, which None opts out of.
+        class Inherits(Base, typing.Protocol):
+            ports: tuple[int, ...]
+
+        # With a data member typing has to walk, rather than accept the class.
+        @typing.runtime_checkable
+        class HasPortsFoo(typing.Protocol):
+            ports: tuple[int, ...]
+
+            def foo(self) -> int: ...
+
+        class NoneFoo:
+            foo = None
+
+        class StaticFoo:
+            foo = staticmethod(len)
+
+        class ClassFoo:
+            @classmethod
+            def foo(cls):
+                return 1
+
+        class PlainFoo:
+            def foo(self):
+                return 1
+
+        class PropertyFoo:
+            @property
+            def foo(self):
+                return len
+
+        def property_foo_none_entry():
+            o = PropertyFoo()
+            o.__dict__["foo"] = None
+            return o
+
+        class ListSub(list):
+            pass
+
+        class DictSub(dict):
+            pass
+
+        class WithGetattribute:
+            def __getattribute__(self, name):
+                return object.__getattribute__(self, name)
+
+        class WithGetattr:
+            def __init__(self, has_ports):
+                self.has_ports = has_ports
+
+            def __getattr__(self, name):
+                if name == "ports" and self.has_ports:
+                    return (1,)
+                raise AttributeError(name)
+
+        class WithProperty:
+            def __init__(self, ports):
+                self._ports = ports
+
+            @property
+            def ports(self):
+                if self._ports is None:
+                    raise AttributeError("ports")
+                return self._ports
+
+        class Slotted:
+            __slots__ = ("ports",)
+
+        class Local(threading.local):
+            pass
+
+        def ported(make):
+            return lambda: _having(make(), ports=(1,))
+
+        def with_foo(foo):
+            return lambda: _having(_Bag(), foo=foo)
+
+        def linear():
+            return torch.nn.Linear(3, 3)
+
+        # Not empty: nothing can guard an empty dict subclass, since
+        # DictGuardManager answers for a size of zero without running its accessors.
+        def dict_sub():
+            return DictSub(a=1)
+
+        def real_dict_entry():
+            local = Local()
+            object.__getattribute__(local, "__dict__")["ports"] = (1,)
+            return local
+
+        differ = (True, False)
+        by_read = differ if before_312 else (True, True)
+        by_hook = differ if before_312 else (False, False)
+        by_dict = (False, False) if before_312 else differ
+        by_none = differ if sys.version_info >= (3, 12, 2) else (True, True)
+        ns = types.SimpleNamespace
+        proto, first, second, answers = {
+            "data_member": (_HasPorts, ported(_Bag), _Bag, differ),
+            "data_member_none": (
+                _HasPorts,
+                lambda: _having(_Bag(), ports=None),
+                _Bag,
+                differ,
+            ),
+            "method_member": (_HasFoo, with_foo(len), _Bag, differ),
+            "method_member_none": (_HasFoo, with_foo(len), with_foo(None), differ),
+            "method_over_class_none": (
+                _HasFoo,
+                lambda: _having(NoneFoo(), foo=len),
+                NoneFoo,
+                differ,
+            ),
+            "static_method_member": (
+                HasPortsFoo,
+                ported(StaticFoo),
+                lambda: _having(StaticFoo(), ports=(1,), foo=None),
+                differ,
+            ),
+            "class_method_member": (
+                HasPortsFoo,
+                ported(ClassFoo),
+                lambda: _having(ClassFoo(), ports=(1,), foo=None),
+                differ,
+            ),
+            "plain_method_member": (
+                HasPortsFoo,
+                ported(PlainFoo),
+                lambda: _having(PlainFoo(), ports=(1,), foo=None),
+                differ,
+            ),
+            "data_descriptor_over_none_entry": (
+                HasPortsFoo,
+                ported(property_foo_none_entry),
+                property_foo_none_entry,
+                differ,
+            ),
+            "nn_module": (_HasPorts, ported(linear), linear, differ),
+            "list_subclass": (_HasPorts, ported(ListSub), ListSub, differ),
+            "dict_subclass": (_HasPorts, ported(dict_sub), dict_sub, differ),
+            "simple_namespace": (_HasPorts, ported(ns), ns, differ),
+            "inherited_metaclass_hook": (HasPortsMeta, ported(_Bag), _Bag, differ),
+            "inherited_protocol_members": (
+                Inherits,
+                lambda: _having(_Bag(), ports=(1,)),
+                lambda: _having(_Bag(), ports=None),
+                by_none,
+            ),
+            "getattribute": (
+                _HasPorts,
+                ported(WithGetattribute),
+                WithGetattribute,
+                differ,
+            ),
+            "getattr_hook": (
+                _HasPorts,
+                lambda: WithGetattr(True),
+                lambda: WithGetattr(False),
+                by_hook,
+            ),
+            "property_reads_state": (
+                _HasPorts,
+                lambda: WithProperty((1,)),
+                lambda: WithProperty(None),
+                by_read,
+            ),
+            "slot": (_HasPorts, ported(Slotted), Slotted, by_read),
+            "thread_local": (_HasPorts, ported(Local), Local, by_hook),
+            "thread_local_real_dict": (_HasPorts, real_dict_entry, Local, by_dict),
+        }[case]
+
+        x = torch.ones(3)
+        frames = 2 if answers[0] != answers[1] else 1
+        pairs = ((first, answers[0]), (second, answers[1]))
+        for order, pair in enumerate((pairs, pairs[::-1])):
+            msg = f"{case} order {order}"
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(_protocol_check, backend=cnt, fullgraph=True)
+            for make, answer in pair:
+                self.assertEqual(_eager_isinstance(make(), proto), answer, msg=msg)
+                expected = x + 1 if answer else x - 1
+                self.assertEqual(opt_fn(x, make(), proto), expected, msg=msg)
+            self.assertEqual(cnt.frame_count, frames, msg=msg)
+
+    def test_isinstance_protocol_shares_graph_when_reads_agree(self):
+        class CustomHook(type(typing.Protocol)):
+            def __instancecheck__(cls, instance):
+                return True
+
+        @typing.runtime_checkable
+        class Hooked(typing.Protocol, metaclass=CustomHook):
+            ports: tuple[int, ...]
+
+        class Concrete(_HasPorts):
+            pass
+
+        class ClassPorts:
+            ports = (0,)
+
+        class NoneDefault:
+            ports = None
+
+        # Sorted first, so absent on both objects it settles the answer alone.
+        @typing.runtime_checkable
+        class TwoMembers(typing.Protocol):
+            a: int
+            b: int
+
+        def bag(**attrs):
+            return _having(_Bag(), **attrs)
+
+        x = torch.ones(3)
+        for name, proto, objs in (
+            ("first member absent", TwoMembers, [bag(b=1), bag()]),
+            ("method values", _HasFoo, [bag(foo=len), bag(foo=0), bag(foo=False)]),
+            (
+                "data values",
+                _HasPorts,
+                [bag(ports=(1,)), bag(ports=[1]), bag(ports=None)],
+            ),
+            (
+                "unrelated present",
+                _HasPorts,
+                [bag(ports=(1,), a=1), bag(ports=(1,), b=2)],
+            ),
+            ("unrelated absent", _HasPorts, [bag(a=1), bag(b=2)]),
+            ("custom hook", Hooked, [bag(ports=(1,)), bag()]),
+            ("concrete subclass", Concrete, [bag(ports=(1,)), bag()]),
+            (
+                "class data member",
+                _HasPorts,
+                [ClassPorts(), _having(ClassPorts(), ports=(1,))],
+            ),
+            (
+                "class default None",
+                _HasPorts,
+                [NoneDefault(), _having(NoneDefault(), ports=(1,))],
+            ),
+        ):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(_protocol_check, backend=cnt, fullgraph=True)
+            for o in objs:
+                expected = x + 1 if _eager_isinstance(o, proto) else x - 1
+                self.assertEqual(opt_fn(x, o, proto), expected, msg=name)
+            self.assertEqual(cnt.frame_count, 1, msg=name)
+
+        # From 3.12 the ABC check answers first and no member is read. Before that
+        # typing reads the member, and so does the guard.
+        class Nominal(_HasPorts):
+            pass
+
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(_protocol_check, backend=cnt, fullgraph=True)
+        for o in (Nominal(), _having(Nominal(), ports=(1,))):
+            self.assertEqual(opt_fn(x, o, _HasPorts), x + 1)
+        self.assertEqual(cnt.frame_count, 2 if sys.version_info < (3, 12) else 1)
+
+    @parametrize(
+        "change",
+        [
+            "set",
+            "delete",
+            "method_to_none",
+            "method_from_none",
+            "replace_dict",
+            "computed",
+            "built",
+        ],
+    )
+    def test_isinstance_protocol_after_in_frame_change(self, change):
+        # The real object does not have what the frame stored, so these graph
+        # break and the check runs on the materialized object.
+        def set_member(x, o):
+            o.ports = (1,)
+            return _protocol_check(x, o, _HasPorts)
+
+        def delete_member(x, o):
+            del o.ports
+            return _protocol_check(x, o, _HasPorts)
+
+        def method_to_none(x, o):
+            o.foo = None
+            return _protocol_check(x, o, _HasFoo)
+
+        def method_from_none(x, o):
+            o.foo = len
+            return _protocol_check(x, o, _HasFoo)
+
+        def replace_dict(x, o):
+            o.__dict__ = {"ports": (1,)}
+            return _protocol_check(x, o, _HasPorts)
+
+        def computed(x, o, n=3):
+            o.foo = n + 1
+            return _protocol_check(x, o, _HasFoo)
+
+        def built(x, o):
+            bag = _Bag()
+            bag.ports = (1,)
+            return _protocol_check(x, bag, _HasPorts)
+
+        fn, make, answer = {
+            "set": (set_member, _Bag, True),
+            "delete": (delete_member, lambda: _having(_Bag(), ports=(1,)), False),
+            "method_to_none": (method_to_none, lambda: _having(_Bag(), foo=len), False),
+            "method_from_none": (
+                method_from_none,
+                lambda: _having(_Bag(), foo=None),
+                True,
+            ),
+            "replace_dict": (replace_dict, _Bag, True),
+            "computed": (computed, _Bag, True),
+            "built": (built, _Bag, True),
+        }[change]
+
+        x = torch.ones(3)
+        expected = x + 1 if answer else x - 1
+        self.assertEqual(torch.compile(fn, backend="eager")(x, make()), expected)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            Unsupported, "Protocol isinstance.. after an in-frame attribute change"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, make())
+
+    def test_isinstance_protocol_frame_stores_that_change_nothing(self):
+        # These stores are recognized as leaving typing's answer unchanged, so
+        # they must not cost a graph break.
+        class ClassPorts:
+            ports = (0,)
+
+            def __init__(self):
+                self.ports = (1,)
+
+        class ClassPortsError(Exception):
+            ports = (0,)
+
+            def __init__(self):
+                super().__init__("message")
+                self.ports = (1,)
+
+        class MethodOverStoredError(Exception):
+            def foo(self):
+                return 0
+
+            def __init__(self):
+                super().__init__("message")
+                self.foo = len
+
+        # An explicit subclass: typing accepts it whatever the frame stores.
+        class ImplementsFoo(_HasFoo):
+            def __init__(self):
+                self.foo = None
+
+        class WithFoo:
+            def __init__(self):
+                self.a = 1
+
+            def foo(self):
+                return self.a
+
+        class Counting(torch.nn.Module):
+            ports = (1,)
+
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def forward(self, x):
+                self.calls += 1
+                return _protocol_check(x, self, _HasPorts)
+
+        class StoresOwnMember(_HasPorts, torch.nn.Module):
+            def __init__(self):
+                torch.nn.Module.__init__(self)
+
+            def forward(self, x):
+                self.ports = tuple(x.shape)
+                return _protocol_check(x, self, _HasPorts)
+
+        class CountingProperty(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            @property
+            def ports(self):
+                return (1,)
+
+            def forward(self, x):
+                self.calls += 1
+                return _protocol_check(x, self, _HasPorts)
+
+        def method_over_class_method(x, o):
+            o.foo = len
+            return _protocol_check(x, o, _HasFoo)
+
+        def built_method_over_stored(x):
+            return _protocol_check(x, MethodOverStoredError(), _HasFoo)
+
+        def built_implements(x):
+            return _protocol_check(x, _ImplementsPorts((1,)), _HasPorts)
+
+        def built_implements_foo(x):
+            return _protocol_check(x, ImplementsFoo(), _HasFoo)
+
+        def in_cond(x):
+            def true_fn(y):
+                return _protocol_check(y, _ImplementsPorts((1,)), _HasPorts)
+
+            return torch.cond(x.sum() > 0, true_fn, lambda y: y * 2, (x,))
+
+        def unrelated(x, o):
+            o.other = 1
+            return _protocol_check(x, o, _HasPorts)
+
+        def overwrite(x, o):
+            o.ports = (2,)
+            return _protocol_check(x, o, _HasPorts)
+
+        def delete_then_set(x, o):
+            del o.ports
+            o.ports = (2,)
+            return _protocol_check(x, o, _HasPorts)
+
+        def built_store_over_default(x):
+            return _protocol_check(x, ClassPorts(), _HasPorts)
+
+        def built_exception(x):
+            return _protocol_check(x, ClassPortsError(), _HasPorts)
+
+        def built_dataclass(x):
+            return _protocol_check(x, _PortsDefault(), _HasPorts)
+
+        def built_method(x):
+            return _protocol_check(x, WithFoo(), _HasFoo)
+
+        def built_without_member(x):
+            return _protocol_check(x, _Bag(), _HasPorts)
+
+        x = torch.ones(3)
+
+        def ported():
+            return _having(_Bag(), ports=(1,))
+
+        for fn, args, expected in (
+            (unrelated, (x, ported()), x + 1),
+            (overwrite, (x, ported()), x + 1),
+            (delete_then_set, (x, ported()), x + 1),
+            (built_store_over_default, (x,), x + 1),
+            (built_exception, (x,), x + 1),
+            (built_dataclass, (x,), x + 1),
+            (built_method, (x,), x + 1),
+            (built_without_member, (x,), x - 1),
+            (method_over_class_method, (x, WithFoo()), x + 1),
+            (built_method_over_stored, (x,), x + 1),
+            (built_implements, (x,), x + 1),
+            (built_implements_foo, (x,), x + 1),
+            (in_cond, (x,), x + 1),
+            (Counting(), (x,), x + 1),
+            (StoresOwnMember(), (x,), x + 1),
+            (CountingProperty(), (x,), x + 1),
+        ):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(*args), expected, msg=str(fn))
+
+    def test_isinstance_protocol_store_to_unset_slot(self):
+        # Before 3.12 hasattr() sees that the slot is unset on the real object, so
+        # the store changes the answer. From 3.12 the slot on the class answers.
+        class Slotted:
+            __slots__ = ("ports",)
+
+        def store(x, o):
+            o.ports = (1,)
+            return _protocol_check(x, o, _HasPorts)
+
+        x = torch.ones(3)
+        self.assertEqual(torch.compile(store, backend="eager")(x, Slotted()), x + 1)
+
+    def test_isinstance_protocol_store_on_thread_local(self):
+        # From 3.12 typing cannot see the per-thread attribute, so the store cannot
+        # change its answer. Before that a graph break does not replay such a store
+        # where hasattr() finds it, on main too.
+        if sys.version_info < (3, 12):
+            self.skipTest("store to a threading.local across a graph break")
+
+        class Local(threading.local):
+            pass
+
+        def store(x, o):
+            o.ports = (1,)
+            return _protocol_check(x, o, _HasPorts)
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(store, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, Local()), x - 1)
+
+    def test_isinstance_protocol_member_holds_iterated_dict(self):
+        # Iterating the member gives it a DictGuardManager, which takes no leaf
+        # guard for the None check.
+        def iterates(x, o):
+            if isinstance(o, _HasFoo):
+                for value in o.foo.values():
+                    x = x + value
+            return x
+
+        @torch._dynamo.disable
+        def eager(x, o):
+            return iterates(x, o)
+
+        x = torch.ones(3)
+        o = _having(_Bag(), foo={"a": 1})
+        opt_fn = torch.compile(iterates, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), eager(x, o))
+        self.assertEqual(opt_fn(x, _having(_Bag(), foo={"a": 2})), x + 2)
+
+    def test_isinstance_protocol_other_argument_kinds(self):
+        # Only a user defined object goes through the member guards.
+        def with_member():
+            pass
+
+        with_member.ports = (1,)
+
+        class WithMember:
+            ports = (1,)
+
+        x = torch.ones(3)
+        for o in (with_member, WithMember, types.ModuleType("empty")):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+            expected = x + 1 if _eager_isinstance(o, _HasPorts) else x - 1
+            self.assertEqual(opt_fn(x, o, _HasPorts), expected, msg=str(o))
+
+    def test_isinstance_protocol_unusual_instance_dict(self):
+        # inspect.getattr_static skips a shadowed __dict__ and reads a real one
+        # without its overrides, so each pair goes through one compiled function
+        # and must answer as typing does, without crashing the compiler or a guard.
+        class ShadowedByProperty:
+            @property
+            def __dict__(self):
+                return {"foo": len}
+
+        class ShadowedByAttribute:
+            __dict__ = {"foo": 1}
+
+        class DictIsMethod:
+            def __dict__(self):
+                return {}
+
+        class DictIsNone:
+            __dict__ = None
+
+        class DictIsMappingProxy:
+            __dict__ = types.MappingProxyType({})
+
+        class DictRaises:
+            @property
+            def __dict__(self):
+                raise TypeError("no dict")
+
+        class Lying(dict):
+            def __contains__(self, key):
+                return True
+
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+        class NoDict:
+            __slots__ = ("other",)
+
+        class ForeignGetset:
+            __slots__ = ()
+            __dict__ = _Bag.__dict__["__dict__"]
+
+        class SlotsAndGetattr:
+            __slots__ = ()
+
+            def __getattr__(self, name):
+                return 42
+
+        class FabricatingMeta(type):
+            @property
+            def __dict__(cls):
+                return {"ports": None}
+
+        class Fabricated(metaclass=FabricatingMeta):
+            pass
+
+        # __dict__ is a dict on the first object and not on the second.
+        class Proxy:
+            def __init__(self, wrapped):
+                object.__setattr__(self, "__wrapped__", wrapped)
+
+            @property
+            def __dict__(self):
+                return self.__wrapped__.__dict__
+
+        def lying():
+            bag = _Bag()
+            bag.__dict__ = Lying()
+            return bag
+
+        def pair(make):
+            return make, make
+
+        x = torch.ones(3)
+        for proto, first, second in (
+            (_HasFoo, *pair(ShadowedByProperty)),
+            (_HasFoo, *pair(ShadowedByAttribute)),
+            (_HasFoo, *pair(DictIsMethod)),
+            (_HasPorts, *pair(DictIsNone)),
+            (_HasPorts, *pair(DictIsMappingProxy)),
+            (_HasPorts, *pair(DictRaises)),
+            (_HasFoo, *pair(lying)),
+            (_HasPorts, *pair(NoDict)),
+            (_HasPorts, *pair(ForeignGetset)),
+            (_HasFoo, *pair(SlotsAndGetattr)),
+            (_HasPorts, *pair(Fabricated)),
+            (_HasPorts, lambda: Proxy(_Bag()), lambda: Proxy(_Bag)),
+            (_HasPorts, lambda: Proxy(_Bag), lambda: Proxy(_Bag())),
+        ):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+            for make in (first, second):
+                expected = x + 1 if _eager_isinstance(make(), proto) else x - 1
+                self.assertEqual(opt_fn(x, make(), proto), expected, msg=str(first))
+
+        # typing never runs a shadowing __dict__ property, so neither may a guard.
+        class CountsDictReads:
+            reads = 0
+
+            @property
+            def __dict__(self):
+                type(self).reads += 1
+                return {"foo": len}
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+        opt_fn(x, CountsDictReads(), _HasFoo)
+        opt_fn(x, CountsDictReads(), _HasFoo)
+        self.assertEqual(CountsDictReads.reads, 0)
+
+        # No entry may serve an object whose __dict__ has a different type.
+        class PlainDictSub(dict):
+            pass
+
+        def with_dict(instance_dict):
+            bag = _Bag()
+            bag.__dict__ = instance_dict
+            return bag
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+        for instance_dict, expected in (
+            ({}, x - 1),
+            (PlainDictSub(ports=(1,)), x + 1),
+            ({}, x - 1),
+        ):
+            self.assertEqual(opt_fn(x, with_dict(instance_dict), _HasPorts), expected)
+
+    def test_isinstance_protocol_leaves_getters_to_typing(self):
+        class Raises:
+            @property
+            def ports(self):
+                raise TypeError("ports")
+
+        class StructuralRaises:
+            @property
+            def foo(self):
+                raise TypeError("foo")
+
+        class Counted:
+            reads = 0
+
+            @property
+            def ports(self):
+                type(self).reads += 1
+                return (1,)
+
+        class ReadOnce:
+            reads = 0
+
+            @property
+            def ports(self):
+                type(self).reads += 1
+                if type(self).reads > 1:
+                    raise ValueError("read twice")
+                return (1,)
+
+        class NewTypePerRead:
+            reads = 0
+
+            @property
+            def foo(self):
+                type(self).reads += 1
+                return type("Fresh", (), {"__call__": len})()
+
+        def check(x, o, proto):
+            try:
+                return _protocol_check(x, o, proto)
+            except TypeError:
+                return x * 10
+
+        # What a getter raises reaches user code where typing runs it.
+        x = torch.ones(3)
+        for make, proto, expected in (
+            (Raises, _HasPorts, x * 10 if sys.version_info < (3, 12) else x + 1),
+            (StructuralRaises, _HasFoo, x + 1),
+            (NewTypePerRead, _HasFoo, x + 1),
+        ):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(check, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, make(), proto), expected, msg=str(make))
+
+        # A guard must not repeat a getter: it could do anything on the next read.
+        torch._dynamo.reset()
+        opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, ReadOnce(), _HasPorts), x + 1)
+
+        class CountedGetattr:
+            reads = 0
+
+            def __getattr__(self, name):
+                type(self).reads += 1
+                raise AttributeError(name)
+
+        class CountedSlotGetattr(CountedGetattr):
+            __slots__ = ("ports",)
+
+        class CountedGetattribute:
+            reads = 0
+
+            def __getattribute__(self, name):
+                if name == "ports":
+                    type(self).reads += 1
+                return object.__getattribute__(self, name)
+
+        for cls in (Counted, CountedGetattr, CountedSlotGetattr, CountedGetattribute):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+            expected = opt_fn(x, cls(), _HasPorts)
+            cls.reads = 0
+            self.assertEqual(opt_fn(x, cls(), _HasPorts), expected, msg=cls.__name__)
+            self.assertEqual(cls.reads, 0, msg=cls.__name__)
+
+    def test_isinstance_protocol_member_is_not_an_identifier(self):
+        # A guard source spells the member as an attribute access.
+        x = torch.ones(3)
+        for name in ("class", "a.b"):
+            proto = typing.runtime_checkable(
+                type(typing.Protocol)(
+                    "Named", (typing.Protocol,), {"__annotations__": {name: int}}
+                )
+            )
+            torch._dynamo.reset()
+            opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+            o = _having(_Bag(), **{name: 1})
+            self.assertEqual(opt_fn(x, o, proto), x + 1, msg=name)
+
+    def test_isinstance_protocol_leaves_abc_cache_alone(self):
+        # Tracing must not record the class in the Protocol's ABC negative cache
+        # when typing would not have, or a later issubclass() stops raising.
+        class WithProperty:
+            @property
+            def ports(self):
+                return (1,)
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(_protocol_check, backend="eager", fullgraph=True)
+        opt_fn(x, WithProperty(), HasPorts)
+        with self.assertRaisesRegex(TypeError, "non-method members"):
+            issubclass(WithProperty, HasPorts)
 
     def test_isinstance_does_not_specialize_value_independent_constant(self):
         # Neither hook can see anything about a str that its type does not
