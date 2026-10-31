@@ -162,12 +162,19 @@ class Adagrad(Optimizer):
                     if group["fused"]:
                         _device_dtype_check_for_fused(p)
 
+                    step_dtype = _get_scalar_dtype(
+                        is_fused=group["fused"], device=p.device
+                    )
+                    if group["fused"] and p.device.type in ("cpu", "cuda"):
+                        for other in group["params"]:
+                            other_state = self.state.get(other, {})
+                            if other.device == p.device and "step" in other_state:
+                                step_dtype = other_state["step"].dtype
+                                break
                     state["step"] = (
                         torch.zeros(
                             (),
-                            dtype=_get_scalar_dtype(
-                                is_fused=group["fused"], device=p.device
-                            ),
+                            dtype=step_dtype,
                             device=p.device,
                         )
                         if group["fused"]

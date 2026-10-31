@@ -1060,7 +1060,7 @@ class TestOptimRenewed(TestCase):
             state = deepcopy(optimizer.state_dict())
             for param_state in state["state"].values():
                 param_state["step"] = param_state["step"].to(
-                    device="cpu", dtype=torch.float64
+                    device="cpu", dtype=expected_dtype
                 )
             optimizer.load_state_dict(state)
             step = optimizer.state[param]["step"]
@@ -1079,6 +1079,46 @@ class TestOptimRenewed(TestCase):
                     reference_optimizer.step()
                     self.assertEqual(step.item(), expected_step)
                     self.assertEqual(param, reference)
+
+    @parametrize("step_dtype", [torch.float32, torch.float64])
+    @parametrize("resume", [False, True])
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_step_dtype_default_change(
+        self, device, dtype, optim_info, step_dtype, resume
+    ):
+        if torch.device(device).type not in ("cpu", "cuda"):
+            self.skipTest("Float64 fused steps are supported on CPU and CUDA")
+        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
+        with set_default_dtype(step_dtype):
+            optimizer = optim_info.optim_cls(params, fused=True, lr=0.01)
+            params[0].grad = torch.full_like(params[0], 0.25)
+            optimizer.step()
+        initial_step = 2**24 + 1 if step_dtype == torch.float64 else 1
+        optimizer.state[params[0]]["step"].fill_(initial_step)
+        new_default = torch.float64 if step_dtype == torch.float32 else torch.float32
+        with set_default_dtype(new_default):
+            if resume:
+                saved_state = deepcopy(optimizer.state_dict())
+                optimizer = optim_info.optim_cls(params, fused=True, lr=0.01)
+                optimizer.load_state_dict(saved_state)
+                self.assertEqual(
+                    optimizer.state[params[0]]["step"].item(), initial_step
+                )
+            params[1].grad = torch.full_like(params[1], 0.25)
+            optimizer.step()
+            for param in params:
+                self.assertEqual(optimizer.state[param]["step"].dtype, step_dtype)
+            self.assertEqual(
+                optimizer.state[params[0]]["step"].item(), initial_step + 1
+            )
+            self.assertEqual(optimizer.state[params[1]]["step"].item(), 1)
 
     @onlyCUDA
     @parametrize("amsgrad", [False, True])

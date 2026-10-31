@@ -833,8 +833,10 @@ class Optimizer:
         if key == "step":
             if capturable or fused:
                 dtype = (
-                    _get_scalar_dtype(is_fused=True, device=param.device)
+                    value.dtype
                     if fused
+                    and param.device.type in ("cpu", "cuda")
+                    and value.dtype in (torch.float32, torch.float64)
                     else torch.float32
                 )
                 return value.to(dtype=dtype, device=param.device)

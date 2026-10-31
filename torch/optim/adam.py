@@ -163,15 +163,22 @@ class Adam(Optimizer):
                 if len(state) == 0:
                     if group["fused"]:
                         _device_dtype_check_for_fused(p)
+                    step_dtype = _get_scalar_dtype(
+                        is_fused=group["fused"], device=p.device
+                    )
+                    if group["fused"] and p.device.type in ("cpu", "cuda"):
+                        for other in group["params"]:
+                            other_state = self.state.get(other, {})
+                            if other.device == p.device and "step" in other_state:
+                                step_dtype = other_state["step"].dtype
+                                break
                     # note(crcrpar): [special device hosting for step]
                     # Deliberately host `step` on CPU if both capturable and fused are off.
                     # This is because kernel launches are costly on CUDA and XLA.
                     state["step"] = (
                         torch.zeros(
                             (),
-                            dtype=_get_scalar_dtype(
-                                is_fused=group["fused"], device=p.device
-                            ),
+                            dtype=step_dtype,
                             device=p.device,
                         )
                         if group["capturable"] or group["fused"]
