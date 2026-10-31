@@ -5007,6 +5007,58 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
 
+    def test_set_stale_base_not_aliased(self):
+        # https://github.com/pytorch/pytorch/issues/199229
+        def fn(dest, src, storage):
+            dest.set_(src)
+            storage[0] = 10.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0), storage
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+
+    def test_stale_base_at_entry_not_aliased(self):
+        # The input is already stale when the compiled function is called:
+        # dest.set_(src) runs before compile, so dest._base still points at the
+        # old storage while dest now owns src's. describe_tensor and
+        # _view_base_sharing_storage must see dest as standalone, not alias storage.
+        def fn(dest, storage):
+            dest[0] = 10.0
+            return storage[0].clone()
+
+        storage = torch.arange(5, dtype=torch.float32)
+        dest = storage[:3]
+        dest.set_(torch.full((3,), 7.0))  # rebase: dest._base is now stale
+
+        expected_storage = storage.clone()
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            s = expected_storage.clone()
+            torch.compile(fn, backend=backend)(dest, s)
+            self.assertEqual(s, expected_storage)
+
+    def test_set_new_base_stays_aliased(self):
+        # After dest.set_(src), dest must alias src, not its old base.
+        def fn(dest, src):
+            dest.set_(src)
+            src[0] = 42.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0)
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
