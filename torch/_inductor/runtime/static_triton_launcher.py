@@ -17,6 +17,12 @@ from .triton_compat import (
 from .triton_helpers import get_constexprs
 
 
+def _max_tmem_columns(arch: int | str | None) -> int:
+    # Mirrors CompiledKernel._init_handles; Triton 3.8 added sm_107's 576 columns:
+    # https://github.com/triton-lang/triton/commit/ab592f012f37f2c2ffc9ceda6c5b49b3c37c9036
+    return 576 if arch == 107 and get_triton_version() >= (3, 8) else 512
+
+
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
@@ -116,6 +122,10 @@ class StaticallyLaunchedTritonKernel:
 
     supports_global_scratch = False
 
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return False
+
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
@@ -170,14 +180,6 @@ class StaticallyLaunchedTritonKernel:
         # Newer triton versions pass extra scratch parameters to the compiled kernel.
         # pyrefly: ignore [missing-attribute]
         metadata = kernel.metadata
-        tmem_size = getattr(metadata, "tmem_size", None)
-        if tmem_size is not None:
-            arch = getattr(getattr(metadata, "target", None), "arch", None)
-            max_tmem_size = (
-                576 if arch == 107 and get_triton_version() >= (3, 8) else 512
-            )
-            if tmem_size > max_tmem_size:
-                raise OutOfResources(tmem_size, max_tmem_size, "tensor memory")
         self.global_scratch_size = getattr(metadata, "global_scratch_size", None)
         self.global_scratch_align = getattr(metadata, "global_scratch_align", 1) or 1
         if (
@@ -192,6 +194,10 @@ class StaticallyLaunchedTritonKernel:
         if self.profile_scratch_size and self.profile_scratch_size > 0:
             raise NotImplementedError("Profile scratch not yet supported")
         self.has_profile_scratch = self.profile_scratch_size is not None
+
+        self.launch_pdl = getattr(metadata, "launch_pdl", False)
+        if self.launch_pdl and not self.supports_launch_pdl(metadata.target):
+            raise NotImplementedError("PDL launch not supported")
 
         self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
@@ -513,6 +519,8 @@ class StaticallyLaunchedTritonKernel:
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
 
+        # Only launchers with supports_launch_pdl take the trailing launch_pdl flag.
+        launch_pdl = (True,) if self.launch_pdl else ()
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
         self.C_impl._launch_kernel(
@@ -525,11 +533,16 @@ class StaticallyLaunchedTritonKernel:
             arg_tys,
             args,
             stream,
+            *launch_pdl,
         )
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     supports_global_scratch = not is_rocm()
+
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return not is_rocm() and target.arch >= 90
 
     @cached_property
     def C_impl(self):
@@ -538,6 +551,8 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         return _StaticCudaLauncher
 
     def __init__(self, kernel: CompiledKernel) -> None:
+        self.tmem_size: int | None = None
+        self.max_tmem_size = 0
         # pyrefly: ignore [missing-attribute]
         if "hsaco" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
@@ -547,11 +562,22 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         elif "cubin" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["cubin"]
+            # pyrefly: ignore [missing-attribute]
+            metadata = kernel.metadata
+            self.tmem_size = getattr(metadata, "tmem_size", None)
+            arch = getattr(getattr(metadata, "target", None), "arch", None)
+            self.max_tmem_size = _max_tmem_columns(arch)
         else:
             raise RuntimeError(
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
             )
         super().__init__(kernel)
+
+    def load_kernel(self, device: int) -> None:
+        # Match Triton's load-time check so _make_launchers can retry num_stages=1.
+        if self.tmem_size is not None and self.tmem_size > self.max_tmem_size:
+            raise OutOfResources(self.tmem_size, self.max_tmem_size, "tensor memory")
+        super().load_kernel(device)
 
     def _current_device(self) -> int:
         import torch

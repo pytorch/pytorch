@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import weakref
+from contextlib import nullcontext
 from functools import partial
 from types import SimpleNamespace
 from unittest import mock
@@ -18,6 +19,7 @@ from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.static_triton_launcher import (
+    _max_tmem_columns,
     _STATIC_LAUNCHER_REGISTRY,
     register_statically_launched_kernel,
     statically_launched_kernel_by_device,
@@ -27,6 +29,7 @@ from torch._inductor.runtime.static_triton_launcher import (
 )
 from torch._inductor.runtime.triton_compat import (
     CompiledKernel,
+    HAS_TRITON,
     JITFunction,
     OutOfResources,
     tl,
@@ -38,8 +41,14 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_WINDOWS,
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._triton import has_triton_cuda_tma_device
@@ -59,10 +68,11 @@ def _patched_getitem(self, grid):
     return launcher_with_native_code
 
 
+@instantiate_parametrized_tests
 class TestStaticTritonLauncherUnit(TestCase):
     @staticmethod
     def _global_scratch_kernel(
-        kernel_cls=StaticallyLaunchedCudaKernel, **metadata_overrides
+        kernel_cls=StaticallyLaunchedCudaKernel, *, asm=None, **metadata_overrides
     ):
         fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
         src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
@@ -84,38 +94,121 @@ class TestStaticTritonLauncherUnit(TestCase):
             metadata=metadata,
             _cubin_path="/tmp/scratch_kernel.cubin",
             hash="hash",
-            asm={"cubin": b"cubin"},
+            asm={"cubin": b"cubin"} if asm is None else asm,
         )
         kernel = kernel_cls(compiled_kernel)
         kernel.function = 1
         return kernel
 
-    def test_tensor_memory_limit(self):
+    @parametrize(
+        "arch,version,limit",
+        [
+            (100, (3, 8), 512),
+            (107, (3, 5), 512),
+            (107, (3, 8), 576),
+            (107, (3, 9), 576),
+            (110, (3, 8), 512),
+            (None, (3, 8), 512),
+        ],
+    )
+    def test_tensor_memory_limit(self, arch, version, limit):
         make_kernel = partial(self._global_scratch_kernel, global_scratch_size=0)
-        for version in [(3, 5), (3, 8), (3, 9)]:
-            with mock.patch(
-                "torch._inductor.runtime.static_triton_launcher.get_triton_version",
-                return_value=version,
-            ):
-                for arch in [75, 80, 86, 89, 90, 100, 101, 103, 107, 110, 120, 121]:
-                    limit = 576 if arch == 107 and version >= (3, 8) else 512
-                    target = SimpleNamespace(arch=arch)
-                    with self.subTest(arch=arch, version=version):
-                        make_kernel(tmem_size=limit, target=target)
-                        with self.assertRaises(OutOfResources) as error:
-                            make_kernel(tmem_size=limit + 1, target=target)
-                        self.assertEqual(
-                            error.exception.args, (limit + 1, limit, "tensor memory")
-                        )
+        with mock.patch(
+            "torch._inductor.runtime.static_triton_launcher.get_triton_version",
+            return_value=version,
+        ):
+            self.assertEqual(_max_tmem_columns(arch), limit)
+            for size in [limit, limit + 1]:
+                kernel = make_kernel(tmem_size=size, target=SimpleNamespace(arch=arch))
+                kernel.function = None
+                kernel.C_impl = mock.Mock()
+                kernel.C_impl._load_kernel.return_value = (1, 2, 3, 4)
+                if size == limit:
+                    kernel.load_kernel(0)
+                    kernel.C_impl._load_kernel.assert_called_once()
+                else:
+                    with self.assertRaises(OutOfResources) as error:
+                        kernel.load_kernel(0)
+                    self.assertEqual(
+                        error.exception.args, (size, limit, "tensor memory")
+                    )
+                    kernel.C_impl._load_kernel.assert_not_called()
+
+    def test_tensor_memory_missing_metadata(self):
+        make_kernel = partial(self._global_scratch_kernel, global_scratch_size=0)
         for metadata in [{}, {"target": None}, {"target": SimpleNamespace()}]:
             with self.subTest(metadata=metadata):
-                make_kernel(tmem_size=512, **metadata)
+                make_kernel(tmem_size=512, **metadata).load_kernel(0)
+                kernel = make_kernel(tmem_size=513, **metadata)
                 with self.assertRaises(OutOfResources) as error:
-                    make_kernel(tmem_size=513, **metadata)
+                    kernel.load_kernel(0)
                 self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
         for size in [None, 0]:
-            make_kernel(tmem_size=size)
-        make_kernel()
+            make_kernel(tmem_size=size).load_kernel(0)
+        make_kernel().load_kernel(0)
+
+    def test_tensor_memory_is_cuda_only(self):
+        for kernel_cls in [StaticallyLaunchedTritonKernel, StaticallyLaunchedXpuKernel]:
+            self._global_scratch_kernel(
+                kernel_cls, global_scratch_size=0, tmem_size=1024
+            ).load_kernel(0)
+        self._global_scratch_kernel(
+            asm={"hsaco": b"hsaco"}, global_scratch_size=0, tmem_size=1024
+        ).load_kernel(0)
+
+    @parametrize("retry_succeeds", [False, True])
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @skipIfRocm
+    def test_tensor_memory_autotuner_retries_without_pipelining(self, retry_succeeds):
+        config = triton.Config({"NUM_STAGES": 3}, num_stages=3)
+        compile_meta = {
+            "device": 0,
+            "device_type": "cuda",
+            "signature": {0: "*fp32"},
+            "constants": {},
+        }
+        inductor_meta = {"grid_type": "FixedGrid", "fixed_grid": [1, 1, 1]}
+        impl = mock.Mock()
+        impl._load_kernel.return_value = (1, 2, 3, 4)
+
+        def compile_config(cfg):
+            tmem_size = 512 if retry_succeeds and cfg.num_stages == 1 else 513
+            kernel, _ = self._can_statically_launch(
+                "tmem_kernel", ["tmem_kernel.cubin"], tmem_size=tmem_size
+            )
+            self.assertIsInstance(kernel, StaticallyLaunchedCudaKernel)
+            kernel.C_impl = impl
+            return StaticTritonCompileResult(kernel, cfg, compile_meta, inductor_meta)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.configs = [config]
+        autotuner.compile_results = []
+        autotuner.launchers = []
+        autotuner.inductor_meta = inductor_meta
+        autotuner.device_props = SimpleNamespace(type="cuda", index=0)
+        autotuner._precompile_config = mock.Mock(side_effect=compile_config)
+        autotuner._ensure_kernel_loaded = mock.Mock()
+        autotuner.get_device_interface = mock.Mock()
+        autotuner._precompile_worker()
+        self.assertIsInstance(autotuner.compile_results[0], StaticTritonCompileResult)
+        impl._load_kernel.assert_not_called()
+        with mock.patch(
+            "torch._dynamo.device_interface.DeviceGuard", return_value=nullcontext()
+        ):
+            if retry_succeeds:
+                autotuner._make_launchers()
+                self.assertEqual(len(autotuner.launchers), 1)
+                impl._load_kernel.assert_called_once()
+            else:
+                with self.assertRaises(OutOfResources) as error:
+                    autotuner._make_launchers()
+                self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
+                self.assertEqual(autotuner.launchers, [])
+                impl._load_kernel.assert_not_called()
+        self.assertEqual(autotuner._precompile_config.call_count, 2)
+        retried_config = autotuner._precompile_config.call_args.args[0]
+        self.assertEqual(retried_config.num_stages, 1)
+        self.assertEqual(retried_config.kwargs["NUM_STAGES"], 1)
 
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
@@ -164,7 +257,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         import types
 
         class FakeFastLauncher:
-            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+            def __init__(self, func, num_warps, shared, arg_tys, n_scratch, launch_pdl):
                 self.func = func
 
         kernel = object.__new__(StaticallyLaunchedCudaKernel)
@@ -174,6 +267,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel.arg_tys = "O"
         kernel.has_global_scratch = False
         kernel.has_profile_scratch = False
+        kernel.launch_pdl = False
 
         launcher_globals = {"runner": kernel.run}
 
@@ -340,7 +434,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
 
-    def _can_statically_launch(self, kernel_name, filenames):
+    def _can_statically_launch(self, kernel_name, filenames, **metadata_overrides):
         from torch._inductor.runtime.hints import HeuristicType
 
         directory = tempfile.mkdtemp()
@@ -364,6 +458,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             hash="ab" * 32,
             asm={"cubin": b"binary"},
         )
+        compiled_kernel.metadata.__dict__.update(metadata_overrides)
         with torch._inductor.config.patch(use_static_triton_launcher=True):
             static_kernel = StaticTritonCompileResult.can_statically_launch(
                 compiled_kernel,
@@ -1026,6 +1121,18 @@ class TestStaticTritonCompileResult(TestCase):
     """
 
     def test_basic_compile(self):
+        @torch.compile
+        def foo(x, y):
+            return x + y
+
+        x = torch.randn(10, device=GPU_TYPE)
+        y = torch.randn(10, device=GPU_TYPE)
+        self.assertEqual(foo(x, y), x + y)
+
+    @skipIfRocm
+    @unittest.skipIf(not SM90OrLater, "PDL requires sm90+")
+    @torch._inductor.config.patch("triton.enable_pdl", True)
+    def test_basic_compile_pdl(self):
         @torch.compile
         def foo(x, y):
             return x + y
