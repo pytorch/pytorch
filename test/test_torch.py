@@ -10622,6 +10622,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             dev = torch.device(device)
             self.assertEqual(repr(dev), get_expected_device_repr(dev))
 
+    @parametrize("index", [1, 2, 127])
+    def test_device_invalid_cpu_index(self, index):
+        msg = f"CPU device index must be -1 or zero, got {index}"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.device(f"cpu:{index}")
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.device("cpu", index)
+
     # Tests that the use_deterministic_flag can be set as expected
     @wrapDeterministicFlagAPITest
     def test_deterministic_flag(self):
