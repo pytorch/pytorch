@@ -38,7 +38,11 @@ def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
 
 @dataclass(frozen=True)
 class NIXLRemoteBuffer(_WireDescriptor):
-    """A serializable descriptor for memory registered by a NIXL peer."""
+    """A serializable descriptor for memory registered by a NIXL peer.
+
+    ``address`` and ``length`` are the accessible range; ``region_address`` and
+    ``region_length`` are the containing registration.
+    """
 
     _backend = "nixl"
     _fields = {
@@ -48,6 +52,8 @@ class NIXLRemoteBuffer(_WireDescriptor):
         "device_id": int,
         "memory_type": str,
         "metadata": bytes,
+        "region_address": int,
+        "region_length": int,
     }
 
     agent_name: str
@@ -56,6 +62,8 @@ class NIXLRemoteBuffer(_WireDescriptor):
     device_id: int
     memory_type: str
     metadata: bytes
+    region_address: int
+    region_length: int
 
     def slice(self, offset: int | None = None, length: int | None = None) -> Self:
         offset, length = _subrange(self.length, offset, length, "remote buffer")
@@ -63,6 +71,15 @@ class NIXLRemoteBuffer(_WireDescriptor):
 
     def __getitem__(self, key: builtins.slice) -> Self:
         return self.slice(*_slice_range(self.length, key))
+
+    @classmethod
+    def _validate(cls, fields: dict[str, Any]) -> None:
+        super()._validate(fields)
+        if fields["address"] < fields["region_address"] or (
+            fields["address"] + fields["length"]
+            > fields["region_address"] + fields["region_length"]
+        ):
+            raise ValueError("descriptor range is outside its registration")
 
 
 @dataclass

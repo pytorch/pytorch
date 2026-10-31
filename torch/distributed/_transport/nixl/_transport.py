@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import time
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
+from operator import itemgetter
 from threading import RLock
 from typing import Any, cast, TYPE_CHECKING
 
@@ -24,6 +27,8 @@ from ._work import _live_transports, _NIXLWork
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .._api import Memory
 
 
@@ -36,6 +41,38 @@ def _load_backend() -> Any:
 
 def _agent_name(name: str | bytes) -> str:
     return name.decode() if isinstance(name, bytes) else name
+
+
+# Bounds loaded descriptors per peer; past this, a peer is reset when it is idle.
+_MAX_LOADED = 4096
+
+_LoadedKey = tuple[str, int, int, int]
+
+
+def _overlaps(first: _LoadedKey, second: _LoadedKey) -> bool:
+    return (
+        first[:2] == second[:2]
+        and first[2] < second[2] + second[3]
+        and second[2] < first[2] + first[3]
+    )
+
+
+# Polls rather than waits: errors belong to the callers that submitted these
+# Works, and another event loop may own their progress tasks.
+def _wait_idle(works: list[_NIXLWork], deadline: float) -> bool:
+    while not all(w.is_completed() for w in works):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.001)
+    return True
+
+
+async def _wait_idle_async(works: list[_NIXLWork], deadline: float) -> bool:
+    while not all(w.is_completed() for w in works):
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.001)
+    return True
 
 
 class NIXLTransport(Transport):
@@ -80,6 +117,7 @@ class NIXLTransport(Transport):
         ):
             raise TypeError("backend_options must map strings to strings")
         backend = _load_backend()
+        self._backend = backend
         self._plugin = plugin.upper()
         config = backend.nixl_agent_config(
             backends=[] if backend_options else [self._plugin],
@@ -98,9 +136,16 @@ class NIXLTransport(Transport):
         self._default_timeout = timeout
         self._peers: set[str] = set()
         self._remote_agents: set[str] = set()
+        # Peer registrations loaded into NIXL as non-overlapping ((memory type,
+        # device, registration address, registration length), metadata) entries,
+        # sorted by key.
+        self._loaded: dict[str, list[tuple[_LoadedKey, bytes]]] = {}
+        # Peers to reset once idle; transfers to them wait until then.
+        self._resetting: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
+        self._pending_peers: Counter[str] = Counter()
         self._operation_lock = RLock()
         # Lifecycle: open -> closing -> closed. Closing rejects new operations and
         # is terminal; a failed or timed-out close retains unreleased resources
@@ -115,7 +160,15 @@ class NIXLTransport(Transport):
         try:
             backend = _load_backend()
             return all(
-                hasattr(backend, name) for name in ("nixl_agent", "nixl_agent_config")
+                hasattr(backend, name)
+                for name in (
+                    "nixl_agent",
+                    "nixl_agent_config",
+                    "nixlRegDList",
+                    "DRAM_SEG",
+                    "nixlNotAllowedError",
+                    "nixlNotFoundError",
+                )
             )
         except Exception:
             return False
@@ -155,13 +208,26 @@ class NIXLTransport(Transport):
             return operation()
 
     def bind(self, *, timeout: float | None = None) -> bytes:
-        return self._call(lambda: self._ensure_open().get_agent_metadata(), timeout)
+        return self._call(self._bind, timeout)
+
+    def _bind(self) -> bytes:
+        # Connection info only: descriptors are loaded per remote buffer.
+        return self._ensure_open().get_partial_agent_metadata(
+            self._backend.nixlRegDList(self._backend.DRAM_SEG),
+            inc_conn_info=True,
+            backends=[self._plugin],
+        )
 
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
         return self._call(lambda: self._connect(peer_url), timeout)
 
     def _connect(self, peer_url: bytes) -> int:
-        name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
+        agent = self._ensure_open()
+        try:
+            name = _agent_name(agent.add_remote_agent(peer_url))
+        except Exception:
+            self._close_if_dropped(agent, self._remote_agents)
+            raise
         self._peers.add(name)
         self._remote_agents.add(name)
         return 0
@@ -250,6 +316,8 @@ class NIXLTransport(Transport):
             registration.device_id,
             registration.memory_type,
             metadata,
+            registration.address,
+            registration.length,
         )
 
     def _check_transfer(
@@ -262,6 +330,9 @@ class NIXLTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, NIXLRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a NIXL transport")
+        remote_buffer._validate(
+            {name: getattr(remote_buffer, name) for name in remote_buffer._fields}
+        )
         if remote_buffer.agent_name not in self._peers:
             raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
@@ -284,7 +355,8 @@ class NIXLTransport(Transport):
         *,
         mutable: bool,
         timeout: float,
-    ) -> _NIXLWork:
+    ) -> _NIXLWork | list[_NIXLWork]:
+        """Submit a transfer, or return Works that must finish first."""
         agent = self._ensure_open()
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
         local_buffer = cast(NIXLMemoryView, local_buffer)
@@ -294,20 +366,8 @@ class NIXLTransport(Transport):
         if local_buffer.size() == 0:
             work._done = True
             return work
-        loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
-        if loaded_name != remote_buffer.agent_name:
-            # Keep agents loaded by other peers; they may have transfers in flight.
-            if loaded_name not in self._remote_agents:
-                self._remote_agents.add(loaded_name)
-                try:
-                    agent.remove_remote_agent(loaded_name)
-                except Exception:
-                    # Preserve the agent for retryable close, including failed cleanup.
-                    self._closing = True
-                    _live_transports.add(self)
-                    raise
-                self._remote_agents.remove(loaded_name)
-            raise ValueError("remote buffer metadata names a different agent")
+        if busy := self._load_remote(agent, remote_buffer):
+            return busy
         local_descs = agent.get_xfer_descs(
             [
                 (
@@ -334,6 +394,7 @@ class NIXLTransport(Transport):
         work._descriptors = (local_descs, remote_descs)
         self._transfers[id(work)] = work._handle
         self._pending[id(work)] = work
+        self._pending_peers[remote_buffer.agent_name] += 1
         _live_transports.add(self)
         try:
             work._state = agent.transfer(work._handle)
@@ -342,6 +403,89 @@ class NIXLTransport(Transport):
             # retain buffers until a native terminal state establishes safety.
             work._error = error
         return work
+
+    def _close_if_dropped(self, agent: Any, names: Iterable[str]) -> None:
+        # A load failing after it starts on a peer's descriptors drops them but
+        # keeps the peer's UCX connection, which then refuses reloads and
+        # in-flight status queries. The metadata may name any connected peer.
+        if not all(map(agent.check_remote_metadata, names)):
+            self._closing = True
+
+    def _remove_remote_agent(self, agent: Any, name: str) -> None:
+        agent.remove_remote_agent(name)
+        self._remote_agents.remove(name)
+        self._loaded.pop(name, None)
+
+    def _load_remote(
+        self, agent: Any, remote_buffer: NIXLRemoteBuffer
+    ) -> list[_NIXLWork]:
+        """Load peer metadata, resetting the peer if stale descriptors may alias it.
+
+        NIXL resolves a remote address to any loaded descriptor containing it
+        and cannot unload single descriptors, so one the peer has since
+        deregistered can break transfers to an overlapping registration.
+        Resetting disconnects the peer, so it waits for transfers to that peer;
+        alternating between overlapping registrations resets on every switch.
+        """
+        name = remote_buffer.agent_name
+        key = (
+            remote_buffer.memory_type,
+            remote_buffer.device_id,
+            remote_buffer.region_address,
+            remote_buffer.region_length,
+        )
+        loaded = self._loaded.get(name, [])
+        i = bisect.bisect_left(loaded, key, key=itemgetter(0))
+        if name not in self._resetting and loaded[i : i + 1] == [
+            (key, remote_buffer.metadata)
+        ]:
+            return []
+        # Loaded keys never overlap each other, so only key's neighbors can.
+        stale = name in self._resetting or any(
+            _overlaps(key, other) for other, _ in loaded[max(i - 1, 0) : i + 1]
+        )
+        # Past the cap, reset only when idle so large batches do not drain.
+        if stale or (len(loaded) >= _MAX_LOADED and not self._pending_peers[name]):
+            busy = [
+                work
+                for work in self._pending.values()
+                if work._buffers[1].agent_name == name
+            ]
+            if busy:
+                self._resetting.add(name)
+                return busy
+            if name in self._remote_agents:
+                self._remove_remote_agent(agent, name)
+            self._resetting.discard(name)
+            loaded, i = [], 0
+        try:
+            loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
+        except Exception as error:
+            # Includes a peer just reset; NIXL cannot tell if it is wedged.
+            self._close_if_dropped(agent, self._remote_agents | {name})
+            refused = isinstance(error, self._backend.nixlNotAllowedError)
+            if refused and not self._closing:
+                # Changed connection info: the peer restarted and must be reset.
+                self._resetting.add(name)
+            raise
+        if loaded_name != name:
+            if loaded_name in self._remote_agents:
+                # Another peer may have transfers in flight; reset it when idle.
+                self._resetting.add(loaded_name)
+            else:
+                self._remote_agents.add(loaded_name)
+                try:
+                    self._remove_remote_agent(agent, loaded_name)
+                except Exception:
+                    # Preserve the agent for retryable close, including failed cleanup.
+                    self._closing = True
+                    _live_transports.add(self)
+                    raise
+            raise ValueError("remote buffer metadata names a different agent")
+        self._remote_agents.add(loaded_name)
+        loaded.insert(i, (key, remote_buffer.metadata))
+        self._loaded[name] = loaded
+        return []
 
     def _start(
         self,
@@ -356,14 +500,23 @@ class NIXLTransport(Transport):
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
-        with self._locked(timeout):
-            work = self._submit(
-                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
-            )
-        if async_op:
-            return work
+        while True:
+            with self._locked(max(0.0, deadline - time.monotonic())):
+                work = self._submit(
+                    operation,
+                    local_buffer,
+                    remote_buffer,
+                    mutable=mutable,
+                    timeout=timeout,
+                )
+            if not isinstance(work, list):
+                break
+            if not _wait_idle(work, deadline):
+                raise TimeoutError("peer transfers remain pending")
         # Native submission itself is synchronous and cannot be preempted.
         work._timeout = max(0.0, deadline - time.monotonic())
+        if async_op:
+            return work
         work.wait()
         return 0
 
@@ -413,10 +566,19 @@ class NIXLTransport(Transport):
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
-        async with self._locked_async(deadline):
-            work = self._submit(
-                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
-            )
+        while True:
+            async with self._locked_async(deadline):
+                work = self._submit(
+                    operation,
+                    local_buffer,
+                    remote_buffer,
+                    mutable=mutable,
+                    timeout=timeout,
+                )
+            if not isinstance(work, list):
+                break
+            if not await _wait_idle_async(work, deadline):
+                raise TimeoutError("peer transfers remain pending")
         await wait_all([work], timeout=max(0.0, deadline - time.monotonic()))
 
     async def write_async(
@@ -511,6 +673,8 @@ class NIXLTransport(Transport):
         for name in list(self._remote_agents):
             agent.remove_remote_agent(name)
             self._remote_agents.remove(name)
+        self._loaded.clear()
+        self._resetting.clear()
         self._peers.clear()
         self._agent = None
         self._closed = True
