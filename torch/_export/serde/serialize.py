@@ -4,6 +4,7 @@ import copy
 import copyreg
 import dataclasses
 import heapq
+import importlib
 import inspect
 import io
 import json
@@ -712,14 +713,24 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
+# The torch modules that define what export puts into flat_apply calls: the
+# helper that calls custom autograd functions, and ModIndex, which
+# TransformGetItemToIndex uses. `import torch` does not import all of them, so
+# load imports these itself. The module comes from this table, never from the
+# loaded file.
+_FLAT_APPLY_MODULES = frozenset(
+    {"torch.export.custom_ops", "torch._dynamo._trace_wrapped_higher_order_op"}
+)
+
+
 def _find_imported(name: str) -> Any:
     """
     Find the class or function that a saved flat_apply node names, without
-    importing anything or running a module's code. Importing a module runs
-    its code, so a saved program must not decide what gets imported. Only
-    top-level classes and functions of modules that are already imported are
-    found, so the module that defines one has to be imported before loading.
-    The object must report the same qualified name, so aliases such as
+    running code from a module that the file chooses. Importing a module runs
+    its code, so apart from the torch modules in ``_FLAT_APPLY_MODULES``,
+    nothing is imported: the module that defines a name has to be imported
+    before loading. Only top-level classes and functions are found, and the
+    object must report the same qualified name, so aliases such as
     ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
     ``__main__`` modules are refused too, because they differ between
     processes.
@@ -727,6 +738,8 @@ def _find_imported(name: str) -> Any:
     module_name, _, attr = name.rpartition(".")
     if "__main__" in module_name.split("."):
         raise SerializeError(f"{name} is in a __main__ module")
+    if module_name in _FLAT_APPLY_MODULES:
+        importlib.import_module(module_name)
     module = sys.modules.get(module_name)
     if module is None:
         raise SerializeError(
@@ -757,7 +770,7 @@ def _find_flat_apply_func(
     wrapper tensor subclasses and the helper that calls custom autograd
     functions are accepted. The helper gets its class by name, as its first
     argument, so that name must find a torch.autograd.Function. Both names
-    are found with ``_find_imported``, which imports nothing.
+    are found with ``_find_imported``.
     """
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):

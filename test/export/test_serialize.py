@@ -2800,7 +2800,11 @@ class TestPredispatchSerialization(TestCase):
 
     def test_predispatch_flat_apply_serialize_roundtrip(self):
         """Test that flat_apply calls can be saved and then loaded in a new process."""
-        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+        from torch._dynamo._trace_wrapped_higher_order_op import (
+            ModIndex,
+            TransformGetItemToIndex,
+        )
+        from torch._export.serde.serialize import _FLAT_APPLY_MODULES
         from torch.testing._internal.two_tensor import TwoTensor
 
         class M(torch.nn.Module):
@@ -2844,8 +2848,10 @@ class TestPredispatchSerialization(TestCase):
             self.assertEqual(expected, loaded_ep.module()(*inp))
             torch.export.save(loaded_ep, io.BytesIO())
 
-            # Load and run in a new process. Load does not import modules, so
+            # Load and run in a new process. Load imports the module of
+            # ModIndex, which the indexing calls use, but no other module, so
             # the process imports the module that defines TwoTensor first.
+            self.assertIn(ModIndex.__module__, _FLAT_APPLY_MODULES)
             # Packaged fbcode test binaries cannot start a plain Python with torch.
             if not IS_FBCODE:
                 script = (
