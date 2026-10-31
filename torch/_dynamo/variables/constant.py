@@ -404,6 +404,13 @@ class ConstantVariable(VariableTracker):
                         tx,
                         args=list(exc.args),
                     )
+            if name == "to_bytes" and istype(self.value, int):
+                try:
+                    return ConstantVariable.create(
+                        self.value.to_bytes(*const_args, **const_kwargs)
+                    )
+                except Exception as e:
+                    raise_observed_exception(type(e), tx, args=list(e.args))
             if (
                 hasattr(operator, name)
                 and name not in _RICHCOMPARE_OPS
