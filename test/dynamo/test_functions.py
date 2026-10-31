@@ -5744,6 +5744,118 @@ class GraphModule(torch.nn.Module):
         g = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(e, g)
 
+    def test_round_uses_type_method(self):
+        class NoRound:
+            pass
+
+        class ClassRound:
+            def __round__(self):
+                return 31
+
+        def missing_method():
+            obj = NoRound()
+            obj.__round__ = lambda: 23
+            try:
+                return round(obj)
+            except TypeError:
+                return 7
+
+        def type_method():
+            obj = ClassRound()
+            obj.__round__ = lambda: 23
+            return round(obj)
+
+        self.assertEqual(missing_method(), 7)
+        self.assertEqual(
+            torch.compile(missing_method, backend="eager", fullgraph=True)(), 7
+        )
+        self.assertEqual(type_method(), 31)
+        self.assertEqual(
+            torch.compile(type_method, backend="eager", fullgraph=True)(), 31
+        )
+
+    def test_round_object_from_input(self):
+        class NoRound:
+            pass
+
+        class ClassRound:
+            def __round__(self, ndigits=None):
+                return ("class", ndigits)
+
+        def instance_round(*args):
+            return ("instance", args)
+
+        instance_only = NoRound()
+        instance_only.__round__ = instance_round
+        both = ClassRound()
+        both.__round__ = instance_round
+
+        def fn(t, obj):
+            try:
+                return t.sin(), round(obj), round(obj, 2)
+            except TypeError as e:
+                return t.sin(), str(e)
+
+        t = torch.ones(1)
+        for obj in (ClassRound(), both, instance_only):
+            with self.subTest(obj=obj):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(t, obj), fn(t, obj))
+
+    def test_round_forwards_ndigits_like_cpython(self):
+        class NoArgRound:
+            def __round__(self):
+                return "no-arg"
+
+        class OtherName:
+            def __round__(self, n=None):
+                return ("n", n)
+
+        class Base:
+            def __round__(self, nd=None):
+                return ("base", nd)
+
+        class Child(Base):
+            pass
+
+        def type_error(f):
+            try:
+                f()
+            except TypeError:
+                return "TypeError"
+            return "no error"
+
+        class NoRound:
+            pass
+
+        def keyword_error(f):
+            # Newer CPython appends a "Did you mean" suggestion; compare the
+            # message up to the offending keyword.
+            try:
+                f()
+            except TypeError as e:
+                return str(e).split("'digits'")[0]
+            return "no error"
+
+        cases = [
+            lambda: round(NoArgRound(), None),
+            lambda: round(NoArgRound(), ndigits=None),
+            lambda: round(OtherName(), ndigits=2),
+            lambda: round(OtherName(), 2),
+            lambda: round(Child(), 3),
+            lambda: type_error(lambda: round(OtherName(), 2, 3)),
+            lambda: type_error(lambda: round(OtherName(), 2, ndigits=3)),
+            lambda: type_error(lambda: round(OtherName(), digits=2)),
+            # Arguments are checked before __round__ is looked up.
+            lambda: keyword_error(lambda: round(NoRound(), digits=2)),
+        ]
+        for case in cases:
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(case, backend="eager", fullgraph=True)(), case()
+            )
+
     @unittest.skipIf(sys.platform == "darwin", "No mkldnn on MacOS")
     def test_quantize_per_tensor(self):
         def fn(t, scale, zero_point):
