@@ -7048,6 +7048,133 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 all_elements_within_threshold, "Some elements have error >= 0.06"
             )
 
+    @onlyCPU
+    @parametrize("q_group", [32, 64])
+    @parametrize("bias_type", ["bf16", "strided_fp32"])
+    def test__dyn_quant_matmul_4bit_bias_regression(
+        self, device, q_group, bias_type
+    ):
+        torch.manual_seed(1)
+
+        m, k, n = 4, 64, 4096
+
+        a = torch.rand((m, k), dtype=torch.float32, device=device)
+        b = torch.rand((k, n), dtype=torch.float32, device=device)
+
+        if bias_type == "bf16":
+            bias = torch.rand(n, dtype=torch.bfloat16, device=device)
+        else:
+            bias = torch.rand(n * 2, dtype=torch.float32, device=device)[::2]
+            self.assertFalse(bias.is_contiguous())
+
+        b_uint8, scales = _group_quantize_tensor_symmetric(
+            b, n_bit=4, groupsize=q_group
+        )
+
+        scales = scales.to(
+            torch.float32 if q_group == k else torch.bfloat16
+        )
+
+        def pack(bias_value):
+            return torch._dyn_quant_pack_4bit_weight(
+                b_uint8, scales, bias_value, q_group, k, n
+            )
+
+        def matmul(packed):
+            return torch._dyn_quant_matmul_4bit(
+                a, packed, q_group, k, n
+            )
+
+        # Repeated packing must produce identical packed weights.
+        packed_reference = pack(bias)
+
+        for _ in range(10):
+            packed = pack(bias)
+
+            torch.testing.assert_close(
+                packed,
+                packed_reference,
+                rtol=0,
+                atol=0,
+            )
+
+        output = matmul(packed_reference)
+
+        # Check quantized matmul against the FP32 reference with bias.
+        reference = torch.mm(a, b) + bias.float()
+        mean_err = (
+            (output - reference).abs()
+            / reference.abs().clamp(min=1e-6)
+        ).mean()
+        self.assertLess(mean_err.item(), 0.05)
+
+        # Verify packing handles non-contiguous scales in both paths.
+        scales_storage = torch.empty(
+            (*scales.shape, 2),
+            dtype=scales.dtype,
+            device=scales.device,
+        )
+        scales_storage[..., 0] = scales
+        scales_noncontiguous = scales_storage[..., 0]
+
+        self.assertFalse(scales_noncontiguous.is_contiguous())
+
+        packed_noncontiguous_scales = torch._dyn_quant_pack_4bit_weight(
+            b_uint8,
+            scales_noncontiguous,
+            bias,
+            q_group,
+            k,
+            n,
+        )
+
+        torch.testing.assert_close(
+            matmul(packed_noncontiguous_scales),
+            matmul(packed_reference),
+            rtol=0,
+            atol=0,
+        )
+
+        # Verify packing handles non-contiguous INT4 weights.
+        weight_storage = torch.empty(
+            (*b_uint8.shape, 2),
+            dtype=b_uint8.dtype,
+            device=b_uint8.device,
+        )
+        weight_storage[..., 0] = b_uint8
+        weight_noncontiguous = weight_storage[..., 0]
+
+        self.assertFalse(weight_noncontiguous.is_contiguous())
+
+        packed_noncontiguous_weight = torch._dyn_quant_pack_4bit_weight(
+            weight_noncontiguous,
+            scales,
+            bias,
+            q_group,
+            k,
+            n,
+        )
+
+        torch.testing.assert_close(
+            matmul(packed_noncontiguous_weight),
+            matmul(packed_reference),
+            rtol=0,
+            atol=0,
+        )
+
+        packed_without_bias = pack(None)
+        output_without_bias = matmul(packed_without_bias)
+
+        # Verify the bias contribution independently of INT4 error.
+        expected_bias = bias.float().unsqueeze(0).expand_as(output)
+
+        torch.testing.assert_close(
+            output - output_without_bias,
+            expected_bias,
+            rtol=0.01,
+            atol=0.01,
+        )
+
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
