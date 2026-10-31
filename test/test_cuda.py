@@ -5121,8 +5121,10 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         results_filename = torch.cuda.tunable.get_filename()
         max_duration = torch.cuda.tunable.get_max_tuning_duration()
         max_iterations = torch.cuda.tunable.get_max_tuning_iterations()
-        try:
-            with tempfile.TemporaryDirectory() as results_dir:
+        with tempfile.TemporaryDirectory() as results_dir:
+            # Restore TunableOp state before results_dir is removed, so the
+            # results file is closed (Windows cannot delete an open file).
+            try:
                 torch.cuda.tunable.set_filename(
                     os.path.join(results_dir, "tunableop_results.csv")
                 )
@@ -5148,12 +5150,12 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
                 graph.replay()
                 stream.synchronize()
                 self.assertEqual(captured, expected)
-        finally:
-            torch.cuda.tunable.set_max_tuning_iterations(max_iterations)
-            torch.cuda.tunable.set_max_tuning_duration(max_duration)
-            torch.cuda.tunable.tuning_enable(was_tuning)
-            torch.cuda.tunable.enable(was_enabled)
-            torch.cuda.tunable.set_filename(results_filename)
+            finally:
+                torch.cuda.tunable.set_max_tuning_iterations(max_iterations)
+                torch.cuda.tunable.set_max_tuning_duration(max_duration)
+                torch.cuda.tunable.tuning_enable(was_tuning)
+                torch.cuda.tunable.enable(was_enabled)
+                torch.cuda.tunable.set_filename(results_filename)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

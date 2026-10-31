@@ -645,6 +645,7 @@ void TuningContext::EnableTuning(bool value) {
   }
   else {
     TUNABLE_LOG1("Disable Tuning for TunableOp");
+    manager_.CloseRealtimeAppend();
   }
 }
 
@@ -907,6 +908,7 @@ TuningStatus TuningContext::LoadTuningResults(const TuningResults& tr) {
 }
 
 void TuningContext::SetFilename(const std::string& filename, bool insert_device_ordinal) {
+  manager_.CloseRealtimeAppend();
   filename_ = filename;
 
   if (filename_.empty()) {
