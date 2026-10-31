@@ -305,11 +305,25 @@ def run_functionalized_fw_and_collect_metadata(
         # set_() only updates the inner FunctionalTensorWrapper's storage, not the
         # outer FunctionalTensor's, so outputs that were set_() onto an input can
         # only be matched to it through the inner storage.
+        # Inputs that were themselves set_() are excluded: their inner storage is
+        # the new storage, not the one they were passed in with, so matching on it
+        # would create the false alias described in "Why Do We Care If Storage
+        # Changed?" below.
         inp_inner_storage_refs = {
             StorageWeakRef(inpt.elem.untyped_storage()): idx
             for idx, inpt in enumerate(flat_f_args)
             if isinstance(inpt, FunctionalTensor)
             and not torch._functionalize_was_storage_changed(inpt.elem)  # type: ignore[attr-defined]
+        }
+        # Storages that an input was set_() onto. An output on one of these may be
+        # derived from the set_() input rather than from the input that owns the
+        # storage (x.set_(y); return x.view(-1) has y's data but x's autograd
+        # history), so we can't pick a single base for it.
+        set_inp_inner_storages = {
+            StorageWeakRef(inpt.elem.untyped_storage())
+            for inpt in flat_f_args
+            if isinstance(inpt, FunctionalTensor)
+            and torch._functionalize_was_storage_changed(inpt.elem)  # type: ignore[attr-defined]
         }
 
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
@@ -560,7 +574,11 @@ alias each other from a multi-output view call"
                     raise AssertionError("curr_storage must not be None")
                 base_idx = inp_storage_refs[curr_storage]
                 output_type = OutputType.is_input
-            elif inner_storage in inp_inner_storage_refs:
+            elif (
+                inner_storage in inp_inner_storage_refs
+                and inner_storage not in set_inp_inner_storages
+            ):
+                # See "Why Do We Care If Storage Changed?" above
                 base_idx = inp_inner_storage_refs[inner_storage]
                 output_type = OutputType.alias_of_input
 
