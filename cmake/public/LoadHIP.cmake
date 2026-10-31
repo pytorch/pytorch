@@ -88,19 +88,25 @@ macro(find_package_and_print_version PACKAGE_NAME)
 endmacro()
 
 # Use CMake's native HIP language support instead of FindHIP.cmake.
-# Set up the HIP compiler before calling enable_language(HIP).
-if(DEFINED ENV{HIP_CLANG_PATH})
-  file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
-else()
-  set(_hip_clang_dir "${ROCM_PATH}/lib/llvm/bin")
-endif()
-if(WIN32)
-  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
-else()
-  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++")
-endif()
-if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
-  message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
+# Set up the HIP compiler before calling enable_language(HIP). Keep a compiler
+# that is already set, by -D or an earlier enable_language(HIP): replacing it,
+# even with another spelling of the same path, makes CMake delete the whole
+# cache and reconfigure. Not "DEFINED": a failed check_language(HIP) caches
+# NOTFOUND, and that still needs the lookup below.
+if(NOT CMAKE_HIP_COMPILER)
+  if(DEFINED ENV{HIP_CLANG_PATH})
+    file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
+  else()
+    set(_hip_clang_dir "${ROCM_PATH}/lib/llvm/bin")
+  endif()
+  if(WIN32)
+    set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
+  else()
+    set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++")
+  endif()
+  if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
+    message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
+  endif()
 endif()
 
 set(CMAKE_HIP_PLATFORM "amd" CACHE STRING "HIP platform" FORCE)
