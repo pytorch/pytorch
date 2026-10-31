@@ -1,14 +1,17 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Reduce.h>
+#include <ATen/native/cpu/SumKernel.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/functional.h>
 #include <algorithm>
 #include <array>
+#include <functional>
 
 namespace at::native {
 namespace {
@@ -178,53 +181,82 @@ struct OuterSumCastLoadPolicy<scalar_t, scalar_t, void>:
     LoadPolicy<scalar_t> {
 };
 
-/* To implement nansum, augment the load operation to mask out nans before
- * entering the normal sum loop.
+/* nansum and the vector norms sum a function of each element: nansum masks out
+ * nans, the norms take |x|, x * x or (x != 0). Map is applied to each loaded
+ * element, in the accumulation type, before it enters the normal sum loop.
  */
 
-template <typename scalar_t>
-struct NanSumLoadPolicy {
+struct NanToZeroMap {
+  template <typename T>
+  static T apply(T x) {
+    return at::_isnan(x) ? T(0) : x;
+  }
+  template <typename T>
+  static Vectorized<T> apply(Vectorized<T> x) {
+    return Vectorized<T>::blendv(x, Vectorized<T>(0), x.isnan());
+  }
+};
+
+struct AbsMap {
+  template <typename T>
+  static T apply(T x) {
+    return std::abs(x);
+  }
+  template <typename T>
+  static Vectorized<T> apply(Vectorized<T> x) {
+    return x.abs();
+  }
+};
+
+struct SquareMap {
+  template <typename T>
+  static T apply(T x) {
+    return x * x;
+  }
+  template <typename T>
+  static Vectorized<T> apply(Vectorized<T> x) {
+    return x * x;
+  }
+};
+
+struct NonZeroMap {
+  template <typename T>
+  static T apply(T x) {
+    return x != T(0) ? T(1) : T(0);
+  }
+  template <typename T>
+  static Vectorized<T> apply(Vectorized<T> x) {
+    return x.ne(Vectorized<T>(0));
+  }
+};
+
+template <typename scalar_t, typename Map>
+struct MapLoadPolicy {
   static constexpr int64_t memsize() {
-    return sizeof(scalar_t);
+    return LoadPolicy<scalar_t>::memsize();
   }
 
   static scalar_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto val = LoadPolicy<scalar_t>::load(data, stride, index);
-    return at::_isnan(val) ? scalar_t(0) : val;
+    return Map::apply(LoadPolicy<scalar_t>::load(data, stride, index));
   }
 };
 
-template <typename scalar_t>
-struct NanSumLoadPolicy<Vectorized<scalar_t>> {
-  using vec_t = Vectorized<scalar_t>;
-
-  static constexpr int64_t memsize() {
-    return LoadPolicy<vec_t>::memsize();
-  }
-
-  static vec_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto val = LoadPolicy<vec_t>::load(data, stride, index);
-    return vec_t::blendv(val, vec_t(0), val.isnan());
-  }
-};
-
-template <typename scalar_t, typename acc_t>
-struct NanSumCastLoadPolicy {
+template <typename scalar_t, typename acc_t, typename Map>
+struct MapCastLoadPolicy {
   static constexpr int64_t memsize() {
     return sizeof(scalar_t);
   }
 
   static acc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto val = CastLoadPolicy<scalar_t, acc_t>::load(data, stride, index);
-    return at::_isnan(val) ? acc_t(0) : val;
+    return Map::apply(CastLoadPolicy<scalar_t, acc_t>::load(data, stride, index));
   }
 };
 
-template <typename vec_t, typename vacc_t, typename = void>
-struct InnerNanSumCastLoadPolicy;
+template <typename vec_t, typename vacc_t, typename Map, typename = void>
+struct InnerMapCastLoadPolicy;
 
-template <typename vec_t, typename vacc_t>
-struct InnerNanSumCastLoadPolicy <vec_t, vacc_t,
+template <typename vec_t, typename vacc_t, typename Map>
+struct InnerMapCastLoadPolicy <vec_t, vacc_t, Map,
   std::enable_if_t<(!is_reduced_floating_point_v<vechold_type<vec_t>>) &&
                     !std::is_same_v<vec_t, vacc_t>>> {
   using scalar_t = vechold_type<vec_t>;
@@ -237,18 +269,18 @@ struct InnerNanSumCastLoadPolicy <vec_t, vacc_t,
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
     auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
     return load_reduce_vec<acc_t>(ptr, [](acc_t a, scalar_t b) {
-      return at::_isnan(b) ? a : a + b;
+      return a + Map::apply(acc_t(b));
     }, acc_t(0));
   }
 };
 
-template <typename scalar_t>
-struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t, void>:
-    NanSumLoadPolicy<scalar_t> {
+template <typename scalar_t, typename Map>
+struct InnerMapCastLoadPolicy<scalar_t, scalar_t, Map, void>:
+    MapLoadPolicy<scalar_t, Map> {
 };
 
-template <typename vec_t, typename vacc_t>
-struct InnerNanSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_floating_point_v<vechold_type<vec_t>>>> {
+template <typename vec_t, typename vacc_t, typename Map>
+struct InnerMapCastLoadPolicy <vec_t, vacc_t, Map, std::enable_if_t<is_reduced_floating_point_v<vechold_type<vec_t>>>> {
   using scalar_t = vechold_type<vec_t>;
 
   static constexpr int64_t memsize() {
@@ -259,21 +291,18 @@ struct InnerNanSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_flo
     auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
     vacc_t first, second;
     vec::load_to_float<scalar_t>(ptr, first, second);
-    const vacc_t zero(0);
-    return (vacc_t::blendv(first, zero, first.isnan()) +
-            vacc_t::blendv(second, zero, second.isnan()));
+    return Map::apply(first) + Map::apply(second);
   }
 };
 
-template <typename vec_t, typename vacc_t>
-struct OuterNanSumCastLoadPolicy {
+template <typename vec_t, typename vacc_t, typename Map>
+struct OuterMapCastLoadPolicy {
   static constexpr int64_t memsize() {
     return OuterSumCastLoadPolicy<vec_t, vacc_t>::memsize();
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto val = OuterSumCastLoadPolicy<vec_t, vacc_t>::load(data, stride, index);
-    return vacc_t::blendv(val, vacc_t(0), val.isnan());
+    return Map::apply(OuterSumCastLoadPolicy<vec_t, vacc_t>::load(data, stride, index));
   }
 };
 
@@ -565,11 +594,15 @@ void scalar_outer_sum(
   }
 }
 
+// Plain sum: elements enter the sum loop unchanged.
+struct IdentityMap {};
+
 // Custom floating point sum for better accuracy
-template <bool ignore_nan, typename scalar_t>
-void cascade_sum(TensorIterator &iter) {
-  iter.output_base().fill_(scalar_t(0));
-  iter.parallel_reduce(
+template <typename Map, typename scalar_t, typename out_t = scalar_t>
+void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
+  constexpr bool is_identity = std::is_same_v<Map, IdentityMap>;
+  static_assert(!is_identity || std::is_same_v<scalar_t, out_t>);
+  auto loop =
     [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       int64_t in_strides[] = { strides[1], strides[3] };
@@ -592,15 +625,14 @@ void cascade_sum(TensorIterator &iter) {
           char* ptrs[3] = { data[0], data[0], data[1] };
           // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
-          if constexpr (ignore_nan) {
-              basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) {
-                auto a_notnan = at::_isnan(a) ? scalar_t(0) : a;
-                auto b_notnan = at::_isnan(b) ? scalar_t(0) : b;
-                return a_notnan + b_notnan;
-              });
-          } else {
+          if constexpr (is_identity) {
               basic_loop(ptrs, inner_strides, 0, size0,
                          [](scalar_t a, scalar_t b) { return a + b; });
+          } else {
+              using acc_t = at::acc_type<scalar_t, true>;
+              basic_loop(ptrs, inner_strides, 0, size0, [](out_t a, scalar_t b) {
+                return out_t(acc_t(a) + Map::apply(acc_t(b)));
+              });
           }
         });
         return;
@@ -613,25 +645,25 @@ void cascade_sum(TensorIterator &iter) {
       using acc_t = at::acc_type<scalar_t, true>;
       using vacc_t = Vectorized<acc_t>;
       using ScalarLoadPolicy = std::conditional_t<
-          ignore_nan,
-          NanSumCastLoadPolicy<scalar_t, acc_t>,
-          CastLoadPolicy<scalar_t, acc_t>>;
-      using StorePolicy = CastStoreAccumulate<scalar_t, acc_t>;
+          is_identity,
+          CastLoadPolicy<scalar_t, acc_t>,
+          MapCastLoadPolicy<scalar_t, acc_t, Map>>;
+      using StorePolicy = CastStoreAccumulate<out_t, acc_t>;
 
       if (in_strides[0] == sizeof(scalar_t) && size0 >= vec_t::size()) {
         // Contiguous inner reduction
         using VecLoadPolicy = std::conditional_t<
-            ignore_nan,
-            InnerNanSumCastLoadPolicy<vec_t, vacc_t>,
-            InnerSumCastLoadPolicy<vec_t, vacc_t>>;
+            is_identity,
+            InnerSumCastLoadPolicy<vec_t, vacc_t>,
+            InnerMapCastLoadPolicy<vec_t, vacc_t, Map>>;
         vectorized_inner_sum<acc_t, VecLoadPolicy, ScalarLoadPolicy, StorePolicy>(
             data, in_strides[1], out_stride, size0, size1);
       } else if (in_strides[1] == sizeof(scalar_t) && size1 >= vec_t::size()) {
         // Contiguous outer reduction
         using VecLoadPolicy = std::conditional_t<
-            ignore_nan,
-            OuterNanSumCastLoadPolicy<vec_t, vacc_t>,
-            OuterSumCastLoadPolicy<vec_t, vacc_t>>;
+            is_identity,
+            OuterSumCastLoadPolicy<vec_t, vacc_t>,
+            OuterMapCastLoadPolicy<vec_t, vacc_t, Map>>;
         vectorized_outer_sum<acc_t, VecLoadPolicy, ScalarLoadPolicy, StorePolicy>(
             data, in_strides[0], out_stride, size0, size1);
       } else if (in_strides[0] < in_strides[1]) {
@@ -641,7 +673,44 @@ void cascade_sum(TensorIterator &iter) {
         scalar_outer_sum<acc_t, ScalarLoadPolicy, StorePolicy>(
             data, in_strides, out_stride, size0, size1);
       }
-    });
+    };
+
+  if constexpr (!is_identity) {
+    // TensorIterator::parallel_reduce would add up the per-thread results of a
+    // reduction to one element with this same loop, applying Map to them again
+    // (and reading them as scalar_t). The output is written once here, so it
+    // can also be a reduced precision scalar_t.
+    if (iter.output_base(0).numel() == 1) {
+      using acc_t = at::acc_type<scalar_t, true>;
+      const acc_t total = at::parallel_reduce(
+          0, iter.numel(), at::internal::GRAIN_SIZE, acc_t(0),
+          [&](int64_t begin, int64_t end, acc_t /*ident*/) {
+            out_t partial(0);
+            iter.serial_for_each(
+                [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+                  char* ptrs[] = {reinterpret_cast<char*>(&partial), data[1]};
+                  loop(ptrs, strides, size0, size1);
+                },
+                {begin, end});
+            return acc_t(partial);
+          },
+          std::plus<acc_t>());
+      const acc_t result = sqrt_result ? std::sqrt(total) : total;
+      if (iter.dtype(0) == c10::CppTypeToScalarType<out_t>::value) {
+        *static_cast<out_t*>(iter.data_ptr(0)) = out_t(result);
+      } else {
+        *static_cast<scalar_t*>(iter.data_ptr(0)) = scalar_t(result);
+      }
+      return;
+    }
+  }
+  iter.output_base().fill_(out_t(0));
+  iter.parallel_reduce(loop);
+  if (sqrt_result) {
+    const TensorBase& out = iter.output_base();
+    auto sqrt_iter = TensorIteratorConfig().add_output(out).add_const_input(out).build();
+    cpu_kernel(sqrt_iter, [](out_t a) -> out_t { return std::sqrt(a); });
+  }
 }
 
 void sum_kernel_impl(TensorIterator &iter) {
@@ -657,18 +726,45 @@ void sum_kernel_impl(TensorIterator &iter) {
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "sum_cpu", [&] {
-    cascade_sum</*ignore_nan=*/false, scalar_t>(iter);
+    cascade_sum<IdentityMap, scalar_t>(iter);
   });
 }
 
 void nansum_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
-    cascade_sum</*ignore_nan=*/true, scalar_t>(iter);
+    cascade_sum<NanToZeroMap, scalar_t>(iter);
   });
 }
 
+template <typename scalar_t, typename out_t>
+void cascade_powsum(TensorIterator &iter, double p, bool is_norm) {
+  if (p == 0) {
+    cascade_sum<NonZeroMap, scalar_t, out_t>(iter);
+  } else if (p == 1) {
+    cascade_sum<AbsMap, scalar_t, out_t>(iter);
+  } else {
+    TORCH_INTERNAL_ASSERT(p == 2, "cascade_powsum: unsupported p ", p);
+    cascade_sum<SquareMap, scalar_t, out_t>(iter, /*sqrt_result=*/is_norm);
+  }
+}
+
 }  // namespace (anonymous)
+
+inline namespace CPU_CAPABILITY {
+
+void cascade_powsum_kernel(TensorIterator &iter, double p, bool is_norm) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half, iter.input_dtype(), "cascade_powsum_cpu", [&] {
+    using out_t = std::conditional_t<is_reduced_floating_point_v<scalar_t>, float, scalar_t>;
+    TORCH_INTERNAL_ASSERT(iter.dtype(0) == c10::CppTypeToScalarType<out_t>::value ||
+                          (iter.dtype(0) == iter.input_dtype() && iter.output_base(0).numel() == 1),
+                          "cascade_powsum: unexpected output dtype ", iter.dtype(0));
+    cascade_powsum<scalar_t, out_t>(iter, p, is_norm);
+  });
+}
+
+}  // namespace CPU_CAPABILITY
 
 // nansum on Float16 has poor accuracy with AVX2, and more so with AVX512.
 // So until it's fixed, it won't be dispatched with AVX512. GH issue 59415.
