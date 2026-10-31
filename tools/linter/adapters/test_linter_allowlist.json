@@ -208,7 +208,6 @@
   "test/distributed/test_c10d_process_group.py",
   "test/distributed/test_c10d_pybackend.py",
   "test/distributed/test_c10d_pypg.py",
-  "test/distributed/test_c10d_spawn_gloo.py",
   "test/distributed/test_c10d_spawn_ucc.py",
   "test/distributed/test_c10d_suspend_resume.py",
   "test/distributed/test_c10d_torchcomms.py",
