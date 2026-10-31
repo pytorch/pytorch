@@ -37,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1213,6 +1214,46 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 class DecompOneOffTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyNativeDeviceTypes
+    @parametrize("rows", [4, 0])
+    @parametrize(
+        "input_dtype,weight_dtype,bias_dtype",
+        [
+            (torch.float32, torch.float32, torch.float32),
+            (torch.float32, torch.float16, torch.float16),
+            (torch.bfloat16, torch.float32, torch.float32),
+            (torch.float16, torch.float32, torch.float32),
+            (torch.float64, torch.float32, torch.float32),
+            (torch.bfloat16, None, torch.float32),
+            (torch.bfloat16, torch.float32, torch.bfloat16),
+        ],
+    )
+    def test_layer_norm_param_dtype_matches_eager(
+        self, device, rows, input_dtype, weight_dtype, bias_dtype
+    ):
+        # Which weight/bias dtypes eager accepts differs by backend (CPU takes a
+        # bf16/fp16 input with fp32 params even with no rows, CUDA rejects any
+        # mismatch once there is a row), so compare the ref against eager rather
+        # than against a fixed outcome.
+        def param(dtype):
+            return None if dtype is None else torch.randn(8, dtype=dtype, device=device)
+
+        input = torch.randn(rows, 8, dtype=input_dtype, device=device)
+        args = (input, (8,), param(weight_dtype), param(bias_dtype), 1e-5)
+        dtype_error = r"mixed dtype \(CPU\)|expected scalar type"
+        try:
+            expected = torch.native_layer_norm(*args)
+        except RuntimeError as e:
+            if not re.search(dtype_error, str(e)):
+                self.skipTest(f"eager fails for a reason other than the dtypes: {e}")
+            with self.assertRaisesRegex(RuntimeError, dtype_error):
+                torch._refs.native_layer_norm(*args)
+            return
+        # Two implementations rounding to bf16/fp16 can differ by an ulp, so the
+        # values are compared loosely; dtypes and shapes must still match exactly.
+        actual = torch._refs.native_layer_norm(*args)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
