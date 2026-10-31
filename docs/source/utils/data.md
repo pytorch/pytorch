@@ -431,6 +431,30 @@ for batch_ndx, sample in enumerate(loader):
     print(sample.tgt.is_pinned())
 ```
 
+For custom types other than {class}`~torch.Tensor` subclasses, DataLoader also
+supports a {meth}`pin_memory_with_device` method. DataLoader calls this method
+with the selected accelerator's type as a string, such as `"cuda"` or `"xpu"`,
+without a device index. If both hooks are defined on a non-Tensor custom type,
+{meth}`pin_memory_with_device` takes precedence over {meth}`pin_memory`.
+Tensor subclasses continue to use {meth}`~torch.Tensor.pin_memory`.
+As with {meth}`pin_memory`, the method must return the pinned batch. Pin member
+tensors with the no-argument {meth}`~torch.Tensor.pin_memory` method; its
+`device` argument is deprecated.
+
+For example, a subclass of `SimpleCustomBatch` can record the accelerator type
+while using its existing method to pin the tensors:
+
+```python
+class DeviceAwareCustomBatch(SimpleCustomBatch):
+    def __init__(self, data):
+        super().__init__(data)
+        self.pin_memory_device = None
+
+    def pin_memory_with_device(self, device):
+        self.pin_memory_device = device
+        return self.pin_memory()
+```
+
 ```{eval-rst}
 .. autoclass:: DataLoader
 ```

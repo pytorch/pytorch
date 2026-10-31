@@ -56,6 +56,9 @@ def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):
         return data.pin_memory()
 
+    if hasattr(data, "pin_memory_with_device"):
+        return data.pin_memory_with_device(device)
+
     if hasattr(data, "pin_memory"):
         return data.pin_memory()
 
