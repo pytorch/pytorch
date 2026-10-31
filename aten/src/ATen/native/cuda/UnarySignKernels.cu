@@ -74,17 +74,9 @@ void sign_kernel_cuda(TensorIteratorBase& iter){
 }
 
 void signbit_kernel_cuda(TensorIteratorBase& iter){
-  // NOTE: signbit does not always support integral arguments.
-  if (at::isIntegralType(iter.input_dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(), "signbit_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return is_negative(a); });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
-      using opmath_t = at::opmath_type<scalar_t>;
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return signbit(opmath_t{a}); });
-    });
-  }
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.input_dtype(), "signbit_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return c10::signbit(a); });
+  });
 }
 
 template<typename T>

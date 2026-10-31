@@ -2,7 +2,10 @@
 
 #include <c10/util/generic_math.h>
 #include <torch/headeronly/util/BFloat16-math.h>
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
 #include <torch/headeronly/util/NumericUtils.h>
+#include <torch/headeronly/util/TypeSafeSignMath.h>
 #include <cmath>
 #include <limits>
 namespace torch {
@@ -61,6 +64,39 @@ TEST(TestMath, TestIsInf) {
   EXPECT_FALSE(_isinf(torch::headeronly::Float8_e4m3fn(1.0f)));
   EXPECT_FALSE(_isinf(torch::headeronly::Float8_e5m2fnuz(1.0f)));
   EXPECT_FALSE(_isinf(torch::headeronly::Float8_e4m3fnuz(1.0f)));
+}
+
+TEST(TestMath, TestSignbit) {
+  using torch::headeronly::BFloat16;
+  using torch::headeronly::Float8_e4m3fn;
+  using torch::headeronly::Float8_e5m2;
+  using torch::headeronly::Half;
+  using torch::headeronly::signbit;
+  const float fnan = std::numeric_limits<float>::quiet_NaN();
+  const double dnan = std::numeric_limits<double>::quiet_NaN();
+
+  EXPECT_TRUE(signbit(-1));
+  EXPECT_FALSE(signbit(0));
+  EXPECT_FALSE(signbit(1u));
+
+  EXPECT_TRUE(signbit(-1.0f));
+  EXPECT_TRUE(signbit(-0.0f));
+  EXPECT_FALSE(signbit(0.0f));
+  EXPECT_TRUE(signbit(-fnan));
+  EXPECT_FALSE(signbit(fnan));
+  EXPECT_TRUE(signbit(-0.0));
+  EXPECT_TRUE(signbit(-dnan));
+
+  EXPECT_TRUE(signbit(Half(-0.0f)));
+  EXPECT_FALSE(signbit(Half(0.0f)));
+  EXPECT_TRUE(signbit(Half(0xFE00, Half::from_bits())));
+  EXPECT_TRUE(signbit(BFloat16(-0.0f)));
+  EXPECT_FALSE(signbit(BFloat16(0.0f)));
+  EXPECT_TRUE(signbit(BFloat16(0xFFC0, BFloat16::from_bits())));
+  EXPECT_TRUE(signbit(Float8_e4m3fn(-0.0f)));
+  EXPECT_FALSE(signbit(Float8_e4m3fn(0.0f)));
+  EXPECT_TRUE(signbit(Float8_e5m2(-0.0f)));
+  EXPECT_FALSE(signbit(Float8_e5m2(0.0f)));
 }
 
 TEST(TestMath, TestIsReducedFloatingPoint) {
