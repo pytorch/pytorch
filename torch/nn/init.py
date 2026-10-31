@@ -494,7 +494,7 @@ def xavier_uniform_(
     Also known as Glorot initialization.
 
     Args:
-        tensor: an n-dimensional `torch.Tensor`
+        tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         gain: an optional scaling factor
         generator: the torch Generator to sample from (default: None)
 
@@ -526,7 +526,7 @@ def xavier_normal_(
     Also known as Glorot initialization.
 
     Args:
-        tensor: an n-dimensional `torch.Tensor`
+        tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         gain: an optional scaling factor
         generator: the torch Generator to sample from (default: None)
 
@@ -571,7 +571,7 @@ def kaiming_uniform_(
     Also known as He initialization.
 
     Args:
-        tensor: an n-dimensional `torch.Tensor`
+        tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         a: the negative slope of the rectifier used after this layer (only
             used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
@@ -636,7 +636,7 @@ def kaiming_normal_(
     Also known as He initialization.
 
     Args:
-        tensor: an n-dimensional `torch.Tensor`
+        tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         a: the negative slope of the rectifier used after this layer (only
             used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
