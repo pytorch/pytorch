@@ -1588,7 +1588,8 @@ class TestLRScheduler(TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FutureWarning)
             with self.assertRaisesRegex(
-                ValueError, "does not support `ReduceLROnPlateau`"
+                ValueError,
+                r"ReduceLROnPlateau.*does not accept.*Use `PlateauLR`",
             ):
                 SequentialLR(
                     self.opt,
@@ -1600,7 +1601,8 @@ class TestLRScheduler(TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FutureWarning)
             with self.assertRaisesRegex(
-                ValueError, "does not support `ReduceLROnPlateau`"
+                ValueError,
+                r"ReduceLROnPlateau.*does not accept.*Use `PlateauLR`",
             ):
                 ChainedScheduler(
                     [ConstantLR(self.opt), ReduceLROnPlateau(self.opt)],

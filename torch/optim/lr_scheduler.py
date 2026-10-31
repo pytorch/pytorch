@@ -1175,9 +1175,9 @@ class SequentialLR(LRScheduler):
                 )
             if isinstance(scheduler, ReduceLROnPlateau):
                 raise ValueError(
-                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
-                    "requires additional kwargs to be specified when calling `step`, "
-                    f"but got one at index {scheduler_idx} in the given schedulers sequence."
+                    f"{self.__class__.__name__} received a `ReduceLROnPlateau` scheduler, "
+                    "which it does not accept. Use `PlateauLR` instead and pass "
+                    "the metric with `step(metrics=...)`."
                 )
             if optimizer != scheduler.optimizer:
                 raise ValueError(
@@ -1597,9 +1597,9 @@ class ChainedScheduler(LRScheduler):
                 )
             if isinstance(scheduler, ReduceLROnPlateau):
                 raise ValueError(
-                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
-                    "requires additional kwargs to be specified when calling `step`, "
-                    f"but got one at index {scheduler_idx} in the given schedulers sequence."
+                    f"{self.__class__.__name__} received a `ReduceLROnPlateau` scheduler, "
+                    "which it does not accept. Use `PlateauLR` instead and pass "
+                    "the metric with `step(metrics=...)`."
                 )
             if optimizer != scheduler.optimizer:
                 raise ValueError(
