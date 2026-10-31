@@ -5149,7 +5149,7 @@ class InstructionTranslatorBase(
 
     @functools.cached_property
     def frame_variable(self) -> FrameVariable:
-        return FrameVariable(self)
+        return FrameVariable(self)  # noqa: RVT001
 
     def lasti_instruction(self) -> Instruction:
         # Mirrors CPython's _PyInterpreterFrame_LASTI: the current instruction,
