@@ -49,7 +49,6 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
@@ -930,6 +929,7 @@ class TestFP8Lowering(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm_min_sms": 0,
             "triton.enable_persistent_tma_matmul": True,
             "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
             "test_configs.max_mm_configs": 1,
@@ -987,6 +987,7 @@ class TestFP8Lowering(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm_min_sms": 0,
             "triton.enable_persistent_tma_matmul": True,
         }
     )
@@ -1020,6 +1021,7 @@ class TestFP8Lowering(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm_min_sms": 0,
             "triton.enable_persistent_tma_matmul": True,
             "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
             "test_configs.max_mm_configs": 1,
@@ -1489,8 +1491,7 @@ class TestFP8Lowering(TestCase):
     @skipIfXpu(msg="torch-xpu-ops/issues/4852")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device() or not is_big_gpu(),
-        "Need device-side TMA support in Triton and max-autotune",
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
@@ -1546,6 +1547,7 @@ class TestFP8Lowering(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_min_sms": 0,
                 "max_autotune": True,
             }
         ):
@@ -1650,8 +1652,7 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device() or not is_big_gpu(),
-        "Need device-side TMA support in Triton and max-autotune",
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
     @onlyOn(["cuda", "xpu"])
     @skipIfXpu(msg="torch-xpu-ops/issues/4852")
@@ -1708,6 +1709,7 @@ class TestFP8Lowering(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_min_sms": 0,
                 "max_autotune": True,
             }
         ):
@@ -1848,6 +1850,7 @@ class TestFP8Lowering(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_min_sms": 0,
                 "max_autotune": True,
             }
         ):
@@ -1959,6 +1962,7 @@ class TestFP8Lowering(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_min_sms": 0,
                 "max_autotune": True,
             }
         ):
