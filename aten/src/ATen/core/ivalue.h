@@ -627,6 +627,10 @@ struct TORCH_API IValue final {
   IValue(const c10::SymBool& i) {
     if (auto mi = i.maybe_as_bool()) {
       tag = Tag::Bool;
+      static_assert(
+          std::endian::native == std::endian::little ||
+              std::endian::native == std::endian::big,
+          "mixed-endian platforms are not supported");
       if constexpr (std::endian::native == std::endian::little) {
         payload.u.as_int = *mi;
       } else {

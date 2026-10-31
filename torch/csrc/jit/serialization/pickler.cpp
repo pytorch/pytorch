@@ -1,5 +1,3 @@
-#include <algorithm>
-#include <array>
 #include <bit>
 #include <string>
 #include <type_traits>
@@ -546,20 +544,10 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static double swapDouble(double value) {
-  auto bits = std::bit_cast<std::array<char, sizeof(double)>>(value);
-  std::ranges::reverse(bits);
-  return std::bit_cast<double>(bits);
-}
-
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
   // Pickle stores doubles big-endian, unlike the integer fields above.
-  if constexpr (std::endian::native == std::endian::little) {
-    push<double>(swapDouble(value));
-  } else {
-    push<double>(value);
-  }
+  push<uint64_t>(to_be64(std::bit_cast<uint64_t>(value)));
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();
