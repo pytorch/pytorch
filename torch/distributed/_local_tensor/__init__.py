@@ -93,6 +93,40 @@ def _is_in_fake_tensor_mode() -> bool:
     return torch._C._get_dispatch_mode(mode_key) is not None
 
 
+def _hide_from_torch_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Runs ``fn`` with ``__torch_function__`` handling disabled.
+
+    Applied to LocalTensor's simulator work: fanning an op or collective out
+    to every rank, inspecting, comparing or copying the per-rank tensors,
+    saving, restoring and copying the RNG state around each rank's work, and
+    computing every rank's DeviceMesh coordinates (a real rank reads its own
+    from an attribute). None of this per-rank work exists on a real rank, so
+    user TorchFunctionModes (e.g. a type checker that rejects tensors it has
+    not seen) must not observe it. This matters even inside
+    ``__torch_dispatch__``: a user mode is only inactive there when dispatch
+    was entered through a torch function call, not when C++ calls an op
+    directly (e.g. the DTensor constructor reading ``storage_offset``).
+
+    User code that is run once per rank (``maybe_run_for_local_tensor``,
+    ``rank_map`` callbacks) is not wrapped, since it would also run, and be
+    visible, on a real rank.
+
+    TODO: the DTensor RNG helpers (``_LocalOffsetBasedRNGTracker``,
+    ``_LocalPhiloxState``, ``_LocalDeviceHandle``) and
+    ``get_generator_seed_for_device_type`` still expose their per-rank
+    RNG-state ops; their real-rank counterparts expose similar ops on their
+    own RNG state.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with torch._C.DisableTorchFunction():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def _reduce_multidim_lists(
     lists_to_reduce: list[Any], reduce_func: Callable[[list[Any]], Any]
 ) -> Any:
@@ -258,6 +292,7 @@ def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
                 torch.get_device_module().set_rng_state(device_rng_state)
 
 
+@_hide_from_torch_function
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """
     Gets CPU and accelerator (e.g., CUDA, XPU device) rng states from all devices.
@@ -265,6 +300,7 @@ def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     return (torch.get_rng_state(), _collect_accelerator_rng_states())
 
 
+@_hide_from_torch_function
 def _set_rng_state(
     cpu_state: torch.Tensor, accelerator_states: dict[int, torch.Tensor]
 ) -> None:
@@ -463,6 +499,9 @@ class LocalIntNode:
         return False
 
     def is_constant(self) -> bool:
+        return False
+
+    def has_hint(self) -> bool:
         return False
 
     def sym_max(
@@ -937,6 +976,7 @@ class LocalTensor(torch.Tensor):
 
     @staticmethod
     @torch._disable_dynamo
+    @_hide_from_torch_function
     def __new__(
         cls,
         local_tensors: dict[int, torch.Tensor],
@@ -990,6 +1030,7 @@ class LocalTensor(torch.Tensor):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__()
 
+    @_hide_from_torch_function
     def __deepcopy__(self, memo: dict[Any, Any] | None) -> "LocalTensor":
         local_tensors_copy = {
             r: copy.deepcopy(t, memo) for r, t in self._local_tensors.items()
@@ -997,6 +1038,7 @@ class LocalTensor(torch.Tensor):
         # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(local_tensors_copy, self.requires_grad)
 
+    @_hide_from_torch_function
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
@@ -1039,6 +1081,7 @@ class LocalTensor(torch.Tensor):
 
     @classmethod
     @torch._disable_dynamo
+    @_hide_from_torch_function
     def __torch_dispatch__(  # type: ignore[override]
         cls,
         func: Any,
@@ -1074,6 +1117,7 @@ class LocalTensor(torch.Tensor):
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
 
+    @_hide_from_torch_function
     def numpy(self, *, force: bool = False) -> Any:
         if HAS_NUMPY:
             return self.reconcile().numpy(force=force)
@@ -1086,6 +1130,7 @@ class LocalTensor(torch.Tensor):
     ) -> torch.Tensor:
         return _LocalContiguous.apply(self, memory_format)
 
+    @_hide_from_torch_function
     def is_contiguous(
         self,
         memory_format: torch.memory_format = torch.contiguous_format,
@@ -1095,6 +1140,7 @@ class LocalTensor(torch.Tensor):
             for t in self._local_tensors.values()
         )
 
+    @_hide_from_torch_function
     def tolist(self) -> list[Any]:
         """
         Try to reconcile, if successful convert to list, otherwise if dtype is integer,
@@ -1116,6 +1162,7 @@ class LocalTensor(torch.Tensor):
 
         raise RuntimeError("Cannot convert local tensor to list")
 
+    @_hide_from_torch_function
     def reconcile(self) -> torch.Tensor:
         """
         Reconciles the LocalTensor into a single torch.Tensor by ensuring all local
@@ -1144,6 +1191,7 @@ class LocalTensor(torch.Tensor):
             return t1.shape
         return None
 
+    @_hide_from_torch_function
     def _sync_meta(self) -> None:
         with no_dispatch():
             (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
@@ -1156,6 +1204,7 @@ class _LocalContiguous(torch.autograd.Function):
     """Autograd function for LocalTensor.contiguous() that preserves gradient flow."""
 
     @staticmethod
+    @_hide_from_torch_function
     def forward(  # type: ignore[override]
         ctx: torch.autograd.function.FunctionCtx,
         input: LocalTensor,
@@ -1275,12 +1324,7 @@ class LocalTensorMode(TorchDispatchMode):
         # _distribute_region will compute correct per-shard offsets
         # but we want all ranks to start with the same state
         if not _is_in_fake_tensor_mode():
-            cpu_state, cuda_states = _get_rng_state()
-            for rank in self.ranks:
-                self._per_rank_rng_states[rank] = (
-                    cpu_state.clone(),
-                    {idx: state.clone() for idx, state in cuda_states.items()},
-                )
+            self._copy_rng_state_to_all_ranks()
 
         return super().__enter__()
 
@@ -1300,6 +1344,7 @@ class LocalTensorMode(TorchDispatchMode):
                 local_tensor_mode_list[-1].enable_()
         super().__exit__(exc_type, exc_val, exc_tb)
 
+    @_hide_from_torch_function
     def __torch_dispatch__(
         self,
         func: Any,
@@ -1520,6 +1565,16 @@ class LocalTensorMode(TorchDispatchMode):
     def _any_local_rng_state(self) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         return self._per_rank_rng_states[next(iter(self.ranks))]
 
+    @_hide_from_torch_function
+    def _copy_rng_state_to_all_ranks(self) -> None:
+        """Sets every rank's RNG state to a copy of the current global RNG state."""
+        cpu_state, cuda_states = _get_rng_state()
+        for rank in self.ranks:
+            self._per_rank_rng_states[rank] = (
+                cpu_state.clone(),
+                {idx: state.clone() for idx, state in cuda_states.items()},
+            )
+
     def _patch_device_mesh(self) -> None:
         if self._old_device_mesh_methods is not None:
             raise AssertionError
@@ -1610,12 +1665,7 @@ class _LocalRandom:
         result = _manual_seed_impl(seed)
 
         if lm is not None and len(lm._per_rank_rng_states) > 0:
-            cpu_state, cuda_states = _get_rng_state()
-            for rank in lm.ranks:
-                lm._per_rank_rng_states[rank] = (
-                    cpu_state.clone(),
-                    {idx: state.clone() for idx, state in cuda_states.items()},
-                )
+            lm._copy_rng_state_to_all_ranks()
 
         return result
 
@@ -1647,6 +1697,7 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
+    @_hide_from_torch_function
     def get_coordinate(self: DeviceMesh) -> list[SymInt] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
