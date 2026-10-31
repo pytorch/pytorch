@@ -4000,34 +4000,6 @@ def forward(self, add_tensor):
         ):
             log_prob_ep.module()(invalid_log_prob_input)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_non_strict_export_distribution_validation_cuda(self):
-        script = """\
-import torch
-
-
-class NormalMean(torch.nn.Module):
-    def forward(self, scale):
-        return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
-
-
-scale = torch.ones(2, 3, device="cuda")
-ep = torch.export.export(NormalMean(), (scale,), strict=False)
-try:
-    ep.module()(-scale)
-except RuntimeError as exc:
-    if "Expected parameter to satisfy its distribution constraint" not in str(exc):
-        raise
-else:
-    raise AssertionError("invalid scale did not raise")
-torch.ones(1, device="cuda")
-torch.cuda.synchronize()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-
     def test_draft_export_checks_mutation_with_nan(self):
         @torch.library.custom_op("export::foo", mutates_args={})
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -19455,6 +19427,36 @@ class TestExportDevice(TorchTestCase):
     # import time, and the Dynamo TestCase enters a config.patch there that is
     # never exited, which would leak into every other test in this file.
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_non_strict_export_distribution_validation(self, device):
+        # Runs in a subprocess so a device-side assert triggered by the
+        # distribution constraint check cannot poison this process.
+        script = f"""\
+import torch
+
+
+class NormalMean(torch.nn.Module):
+    def forward(self, scale):
+        return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+
+
+scale = torch.ones(2, 3, device="{device}")
+ep = torch.export.export(NormalMean(), (scale,), strict=False)
+try:
+    ep.module()(-scale)
+except RuntimeError as exc:
+    if "Expected parameter to satisfy its distribution constraint" not in str(exc):
+        raise
+else:
+    raise AssertionError("invalid scale did not raise")
+torch.ones(1, device="{device}")
+torch.accelerator.synchronize()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     @onlyAccelerator
     def test_assert_tensor_metadata_device_index(self, device):
