@@ -2930,7 +2930,7 @@ class TestPredispatchSerialization(TestCase):
 
         # A class defined inside a function cannot be found by name.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
+        reason = "main script" if __name__ == "__main__" else "not a top-level"
         with self.assertRaisesRegex(SerializeError, reason):
             torch.export.save(ep, io.BytesIO())
 
@@ -2946,7 +2946,7 @@ class TestPredispatchSerialization(TestCase):
             x = torch.randn(4)
             ep = export(Bar(), (x,), strict=False)
             self.assertEqual(ep.module()(x), x * 2 + 1)
-            with self.assertRaisesRegex(SerializeError, "__main__ module"):
+            with self.assertRaisesRegex(SerializeError, "main script"):
                 torch.export.save(ep, io.BytesIO())
 
         # An autograd function from an imported module saves, loads and runs.
@@ -3011,7 +3011,8 @@ class TestPredispatchSerialization(TestCase):
             (func_name, b'"torch.os.system"', "not a top-level"),
             (func_name, b'"torch.builtins.exec"', "not a top-level"),
             (func_name, b'"torch.does_not_exist.f"', "not a top-level"),
-            (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
+            (func_name, b'"torch.utils.model_dump.__main__.main"', "main script"),
+            (func_name, b'"__mp_main__.f"', "main script"),
             (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
             (cls_name, b'"torch.autograd.Function"', "not a class or function defined"),
             (cls_name, b'"torch.os.system"', "not a top-level"),

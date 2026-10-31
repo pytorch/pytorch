@@ -732,12 +732,13 @@ def _find_imported(name: str) -> Any:
     before loading. Only top-level classes and functions are found, and the
     object must report the same qualified name, so aliases such as
     ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
-    ``__main__`` modules are refused too, because they differ between
-    processes.
+    Names in the main script are refused too, because it differs between
+    processes. A multiprocessing child imports the main script as
+    ``__mp_main__``.
     """
     module_name, _, attr = name.rpartition(".")
-    if "__main__" in module_name.split("."):
-        raise SerializeError(f"{name} is in a __main__ module")
+    if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
+        raise SerializeError(f"{name} is in the main script's module")
     if module_name in _FLAT_APPLY_MODULES:
         importlib.import_module(module_name)
     module = sys.modules.get(module_name)
