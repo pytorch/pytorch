@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import operator
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, Literal, TYPE_CHECKING, TypeVar
@@ -13,12 +14,13 @@ from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .utils import is_using_cudagraph_partition
+from .utils import get_first_incompatible_cudagraph_node, is_using_cudagraph_partition
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence, Set as AbstractSet
+    from collections.abc import Iterator, Sequence, Set as AbstractSet
 
+    from torch._inductor.graph import GraphLowering
     from torch._inductor.output_code import OutputCode
 
 _OC = TypeVar("_OC", bound="OutputCode")
@@ -201,14 +203,26 @@ class WrappedFunction:
 def get_mutating_use_stack_trace_from_node(
     placeholder_node: torch.fx.Node,
 ) -> str | None:
+    def stack_trace_of(use: torch.fx.Node) -> str | None:
+        if stack_trace := use.meta.get("stack_trace", None):
+            return stack_trace
+        # Functionalization's write-back copy_ has no stack trace, but the op
+        # whose result it copies does.
+        if use.target is torch.ops.aten.copy_.default:
+            src = use.args[1]
+            if isinstance(src, torch.fx.Node):
+                return src.meta.get("stack_trace", None)
+        return None
+
     # reinplaced uses might have a single, non-copy_ use
     if len(placeholder_node.users) == 1:
-        return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
+        return stack_trace_of(next(iter(placeholder_node.users)))
 
     for use in placeholder_node.users:
-        if use.target is torch.ops.aten.copy_.default:
-            if stack_trace := use.meta.get("stack_trace", None):
-                return stack_trace
+        if use.target is torch.ops.aten.copy_.default and (
+            stack_trace := stack_trace_of(use)
+        ):
+            return stack_trace
 
     return None
 
@@ -399,6 +413,142 @@ def check_lowering_disable_cudagraph(
         check_caching_allocator_for_cudagraphs()
         or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
     )
+
+
+def _with_subgraphs(graph: GraphLowering) -> Iterator[GraphLowering]:
+    yield graph
+    for subgraph in graph.seen_subgraphs.values():
+        if subgraph.graph is not None:
+            yield from _with_subgraphs(subgraph.graph)
+
+
+def _with_fx_subgraphs(module: torch.nn.Module) -> Iterator[torch.fx.GraphModule]:
+    # Also covers higher-order ops whose bodies aren't lowered as subgraphs,
+    # e.g. the control_deps wrapping stream ops.
+    if not isinstance(module, torch.fx.GraphModule):
+        return
+    yield module
+    for node in module.graph.find_nodes(op="get_attr"):
+        yield from _with_fx_subgraphs(operator.attrgetter(node.target)(module))
+
+
+# Host syncs, which JIT cudagraphs don't reject yet; AOT also rejects
+# FORBIDDEN_CUDAGRAPH_OPS.
+AOT_FORBIDDEN_CUDAGRAPH_OPS = frozenset(
+    [
+        "streams.synchronize_event.default",
+        "streams.synchronize_stream.default",
+        "streams.synchronize_device.default",
+    ]
+)
+
+
+def _draws_random_numbers(node: torch.fx.Node) -> bool:
+    if torch.Tag.nondeterministic_seeded not in getattr(node.target, "tags", ()):
+        return False
+    # Attention ops are tagged for their optional dropout.
+    schema = node.target._schema  # type: ignore[union-attr]
+    names = [arg.name for arg in schema.arguments]
+    if "dropout_p" not in names:
+        return True
+    i = names.index("dropout_p")
+    default = schema.arguments[i].default_value
+    p = node.kwargs.get("dropout_p", node.args[i] if i < len(node.args) else default)
+    return not (isinstance(p, (int, float)) and p == 0)
+
+
+def check_aot_cudagraphs(graph: GraphLowering) -> None:
+    """Fails an AOTInductor compile with aot_inductor.cudagraphs=True unless
+    the graph and the subgraphs of its higher-order ops can be captured into a
+    CUDA graph. AOT mode lowers with graph_partition off, so CPU nodes and
+    partition-gated lowering reasons (e.g. for while_loop) count."""
+
+    def with_stack_trace(msg: str, stack_trace: str | None) -> str:
+        return f"{msg}. Found from:\n{stack_trace}" if stack_trace else msg
+
+    def reason_at(msg: str, node: torch.fx.Node) -> str:
+        stack_trace = node.meta.get("stack_trace") or _get_use_stack_trace(node)
+        return with_stack_trace(msg, stack_trace)
+
+    def first(
+        gm: torch.fx.GraphModule, pred: Callable[[torch.fx.Node], bool]
+    ) -> torch.fx.Node | None:
+        return next((n for n in gm.graph.nodes if pred(n)), None)
+
+    def incompatible_op(gm: torch.fx.GraphModule) -> str | None:
+        host_sync = first(gm, lambda n: str(n.target) in AOT_FORBIDDEN_CUDAGRAPH_OPS)
+        if node := host_sync or get_first_incompatible_cudagraph_node(gm):
+            return reason_at(f"incompatible op {node.target}", node)
+        return None
+
+    def side_effect(gm: torch.fx.GraphModule) -> str | None:
+        # A replay wouldn't repeat the side effect.
+        if node := first(gm, lambda n: n.target is torch.ops.higher_order.with_effects):
+            return reason_at(f"op {node.args[1]} has side effects", node)
+        return None
+
+    def side_stream(gm: torch.fx.GraphModule) -> str | None:
+        # The generated code can't use side streams during a capture.
+        def uses_stream(n: torch.fx.Node) -> bool:
+            if n.meta.get("custom", {}).get("stream") is not None:
+                return True
+            target = n.target
+            return (
+                isinstance(target, torch._ops.OpOverload)
+                and target.namespace == "streams"
+            )
+
+        if node := first(gm, uses_stream):
+            return reason_at("it uses a side stream", node)
+        return None
+
+    def random_numbers(gm: torch.fx.GraphModule) -> str | None:
+        # Random numbers aren't supported yet: concurrent replays race on the
+        # generator's offset.
+        if node := first(gm, _draws_random_numbers):
+            return reason_at(f"it uses random numbers ({node.target})", node)
+        return None
+
+    def find_reason() -> str | None:
+        if "cuda" not in graph.device_types:
+            return "it doesn't run on CUDA"
+        if torch.version.hip:
+            return "ROCm isn't supported yet, see https://github.com/ROCm/rocm-systems/issues/12677"
+        graphs = list(_with_subgraphs(graph))
+        for g in graphs:
+            if g.disable_cudagraphs_reason:
+                return g.disable_cudagraphs_reason
+        gms = list(_with_fx_subgraphs(graph.module))
+        for check in (incompatible_op, side_effect, side_stream, random_numbers):
+            for gm in gms:
+                if reason := check(gm):
+                    return reason
+        device_node_mapping: dict[torch.device, torch.fx.Node] = {}
+        for g in graphs:
+            for device, node in g.device_node_mapping.items():
+                device_node_mapping.setdefault(device, node)
+        if reason := check_multiple_devices_or_any_cpu_nodes(device_node_mapping):
+            return reason.removeprefix(format_default_skip_message(""))
+        # The runtime checks every input's device, so unused inputs count too.
+        (device,) = device_node_mapping
+        for i, node in enumerate(graph.graph.find_nodes(op="placeholder")):
+            val = node.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.device != device:
+                return f"input {i} is on {val.device}"
+        placeholders = get_placeholder_info(graph.graph)
+        mutated = [
+            i for i, p in enumerate(placeholders) if p.name in graph.mutated_buffers
+        ]
+        if mutated:
+            msg = get_mutation_stack_trace(placeholders, mutated)
+            return msg.removeprefix(format_default_skip_message(""))
+        return None
+
+    if reason := find_reason():
+        raise RuntimeError(
+            "aot_inductor.cudagraphs=True, but the model can't be captured "
+            f"into a CUDA graph: {reason}"
+        )
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
