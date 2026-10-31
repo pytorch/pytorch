@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import json
 import os
@@ -241,6 +242,90 @@ def find_torch_cuda_toolkit_metadata_version() -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def get_matrix_python_versions() -> set[str] | None:
+    """Python versions in FULL_PYTHON_VERSIONS of generate_binary_build_matrix.py.
+
+    The free-threaded "t" suffix is dropped since "3.14t" shares the "3.14" classifier.
+    Returns None if the script is not available (e.g. wheel tested outside a checkout).
+    """
+    matrix_script = (
+        PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    )
+    if not matrix_script.exists():
+        return None
+    for node in ast.parse(matrix_script.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "FULL_PYTHON_VERSIONS"
+            for t in node.targets
+        ):
+            return {v.removesuffix("t") for v in ast.literal_eval(node.value)}
+    raise RuntimeError(f"FULL_PYTHON_VERSIONS not found in {matrix_script}")
+
+
+def check_python_metadata() -> None:
+    """Validate Requires-Python and Python version Classifiers in torch wheel METADATA.
+
+    They must agree with each other, include the running interpreter and, when
+    generate_binary_build_matrix.py is available, match its FULL_PYTHON_VERSIONS 1:1.
+    """
+    from importlib import metadata
+
+    try:
+        torch_metadata = metadata.metadata("torch")
+    except metadata.PackageNotFoundError:
+        print("torch distribution metadata not found, skipping Python metadata check")
+        return
+
+    requires_python = torch_metadata.get("Requires-Python", "")
+    match = re.fullmatch(r">=\s*3\.(\d+)", requires_python.strip())
+    if match is None:
+        raise RuntimeError(
+            f"Unexpected Requires-Python in torch wheel metadata: {requires_python!r}, "
+            "expected '>=3.X'"
+        )
+    min_version = f"3.{match.group(1)}"
+
+    classifier_versions = {
+        c.rsplit("::", 1)[1].strip()
+        for c in torch_metadata.get_all("Classifier", [])
+        if re.fullmatch(r"Programming Language :: Python :: 3\.\d+", c)
+    }
+    if not classifier_versions:
+        raise RuntimeError("No Python version Classifier in torch wheel metadata")
+
+    def sort_key(version: str) -> int:
+        return int(version.split(".")[1])
+
+    errors = []
+    if min(classifier_versions, key=sort_key) != min_version:
+        errors.append(
+            f"Requires-Python is {requires_python!r} but the lowest Python Classifier "
+            f"is {min(classifier_versions, key=sort_key)}"
+        )
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if current not in classifier_versions:
+        errors.append(f"Running Python {current} has no matching Classifier")
+    matrix_versions = get_matrix_python_versions()
+    if matrix_versions is None:
+        print("generate_binary_build_matrix.py not found, skipping build matrix check")
+    elif classifier_versions != matrix_versions:
+        not_in_metadata = sorted(matrix_versions - classifier_versions, key=sort_key)
+        not_in_matrix = sorted(classifier_versions - matrix_versions, key=sort_key)
+        errors.append(
+            "Python Classifiers do not match FULL_PYTHON_VERSIONS in "
+            f"generate_binary_build_matrix.py: missing from metadata {not_in_metadata}, "
+            f"missing from matrix {not_in_matrix}"
+        )
+    if errors:
+        raise RuntimeError(
+            "torch wheel Python metadata check failed:\n  " + "\n  ".join(errors)
+        )
+    print(
+        f"Python metadata check passed: Requires-Python {requires_python}, "
+        f"Classifiers {sorted(classifier_versions, key=sort_key)}"
+    )
 
 
 def get_expected_cuda_toolkit_version_windows(cuda_version: str) -> str | None:
@@ -803,6 +888,7 @@ def main() -> None:
 
     check_wheel_platform_tag()
     check_mac_wheel_minos()
+    check_python_metadata()
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@
 #include <ctime>
 #include <mutex>
 #include <new>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -429,6 +430,19 @@ int RocprofLogger::toolInit(
         api_callback,
         nullptr));
 
+    // Learn every kernel dispatch at enqueue (including each kernel of a graph
+    // launch and runtime-internal blits), so stopLogging() knows which
+    // dispatch records are still owed.
+    auto dispatch_ops = std::vector<rocprofiler_tracing_operation_t>{
+        ROCPROFILER_KERNEL_DISPATCH_ENQUEUE};
+    ROCPROF_CALL_THROW(rocprofiler_configure_callback_tracing_service(
+        globalContext.context,
+        ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+        dispatch_ops.data(),
+        dispatch_ops.size(),
+        dispatch_callback,
+        nullptr));
+
     // Collect async ops via buffers
     constexpr auto buffer_size_bytes = 0x40000;
     constexpr auto buffer_watermark_bytes = buffer_size_bytes / 2;
@@ -520,25 +534,41 @@ RocprofLogger& RocprofLogger::singleton() {
 RocprofLogger::RocprofLogger() {}
 
 namespace {
-thread_local std::deque<uint64_t>
-    t_externalIds[RocLogger::CorrelationDomain::size];
-}
+// A thread's thread_locals are destroyed when it exits; for the main thread
+// that happens inside exit(), before static destructors that can still make
+// traced HIP calls (rocBLAS/hipBLASLt unloading code objects while a session
+// is open). ~ThreadState sets t_threadExiting before its members are
+// destroyed, and the trivially destructible flag stays readable afterwards.
+thread_local bool t_threadExiting = false;
+struct ThreadState {
+  std::deque<uint64_t> externalIds[RocLogger::CorrelationDomain::size];
+  // This owner keeps the returned pointer alive while clearLogs() invalidates
+  // and releases the registry's copy from another thread.
+  std::shared_ptr<ThreadTraceBuffer> buffer;
+  ~ThreadState() {
+    t_threadExiting = true;
+  }
+};
+thread_local ThreadState t_state;
+} // namespace
 
 void RocprofLogger::pushCorrelationID(uint64_t id, CorrelationDomain type) {
-  if (!singleton().externalCorrelationEnabled_.load(
+  if (t_threadExiting ||
+      !singleton().externalCorrelationEnabled_.load(
           std::memory_order_relaxed)) {
     return;
   }
-  t_externalIds[type].push_back(id);
+  t_state.externalIds[type].push_back(id);
 }
 
 void RocprofLogger::popCorrelationID(CorrelationDomain type) {
-  if (!singleton().externalCorrelationEnabled_.load(
+  if (t_threadExiting ||
+      !singleton().externalCorrelationEnabled_.load(
           std::memory_order_relaxed)) {
     return;
   }
-  if (!t_externalIds[type].empty()) {
-    t_externalIds[type].pop_back();
+  if (!t_state.externalIds[type].empty()) {
+    t_state.externalIds[type].pop_back();
   } else {
     LOG(ERROR)
         << "Attempt to popCorrelationID from an empty external Ids stack";
@@ -574,9 +604,7 @@ void RocprofLogger::clearLogs() {
 
 ThreadTraceBuffer* RocprofLogger::getThreadBuffer() {
   static RocprofLogger* dis = &singleton();
-  // This owner keeps the returned pointer alive while clearLogs() invalidates
-  // and releases the registry's copy from another thread.
-  thread_local std::shared_ptr<ThreadTraceBuffer> buffer;
+  auto& buffer = t_state.buffer;
 
   if (buffer == nullptr ||
       buffer->generation != dis->generation_.load(std::memory_order_acquire)) {
@@ -620,8 +648,10 @@ void RocprofLogger::mergeThreadBuffers() {
 void RocprofLogger::insert_row_to_buffer(rocprofBase* row) {
   RocprofLogger* dis = &singleton();
 
-  // perThreadBuffers disabled
-  if (!dis->perThreadBuffers_.load(std::memory_order_relaxed)) {
+  // perThreadBuffers disabled, or this thread's buffer is already destroyed
+  // (buffer_callback still delivers records from the final flush in exit())
+  if (!dis->perThreadBuffers_.load(std::memory_order_relaxed) ||
+      t_threadExiting) {
     std::lock_guard<std::mutex> lock(dis->rowsMutex_);
     if (dis->rows_.size() >= dis->maxBufferSize_) {
       LOG_FIRST_N(WARNING, 10)
@@ -687,17 +717,21 @@ void RocprofLogger::code_object_callback(
 
 void RocprofLogger::api_callback(
     rocprofiler_callback_tracing_record_t record,
-    [[maybe_unused]] rocprofiler_user_data_t* user_data,
+    rocprofiler_user_data_t* user_data,
     [[maybe_unused]] void* callback_data) {
-  thread_local std::unordered_map<uint64_t, uint64_t> timestamps;
-
+  // Calls made after this thread's thread_locals are gone (see
+  // ThreadState) happen during thread or process teardown; drop them.
+  if (t_threadExiting) {
+    return;
+  }
+  // The SDK keeps user_data from the ENTER to the EXIT phase of one call, so
+  // the start time needs no per-thread map.
   if (record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API) {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) {
-      timestamps[record.correlation_id.internal] = getApproximateTime();
+      user_data->value = getApproximateTime();
     } // ROCPROFILER_CALLBACK_PHASE_ENTER
     else { // ROCPROFILER_CALLBACK_PHASE_EXIT
-      uint64_t startTime = timestamps[record.correlation_id.internal];
-      timestamps.erase(record.correlation_id.internal);
+      uint64_t startTime = user_data->value;
       uint64_t endTime = getApproximateTime();
 
       // Kernel Launch Records
@@ -805,9 +839,10 @@ void RocprofLogger::api_callback(
           for (int it = RocLogger::CorrelationDomain::begin;
                it < RocLogger::CorrelationDomain::end;
                ++it) {
-            if (t_externalIds[it].size() > 0) {
+            if (t_state.externalIds[it].size() > 0) {
               buffer->externalCorrelations[it].emplace_back(
-                  record.correlation_id.internal, t_externalIds[it].back());
+                  record.correlation_id.internal,
+                  t_state.externalIds[it].back());
             }
           }
           break;
@@ -817,15 +852,34 @@ void RocprofLogger::api_callback(
         for (int it = RocLogger::CorrelationDomain::begin;
              it < RocLogger::CorrelationDomain::end;
              ++it) {
-          if (t_externalIds[it].size() > 0) {
+          if (t_state.externalIds[it].size() > 0) {
             std::lock_guard<std::mutex> lock(dis->externalCorrelationsMutex_);
             dis->externalCorrelations_[it].emplace_back(
-                record.correlation_id.internal, t_externalIds[it].back());
+                record.correlation_id.internal, t_state.externalIds[it].back());
           }
         }
       }
     } // ROCPROFILER_CALLBACK_PHASE_EXIT
   } // ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API
+}
+
+void RocprofLogger::dispatch_callback(
+    rocprofiler_callback_tracing_record_t record,
+    [[maybe_unused]] rocprofiler_user_data_t* user_data,
+    [[maybe_unused]] void* callback_data) {
+  // Registered before the packet is submitted, so it always precedes the
+  // dispatch's buffer record.
+  if (record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH ||
+      record.operation != ROCPROFILER_KERNEL_DISPATCH_ENQUEUE ||
+      record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER) {
+    return;
+  }
+  auto* data =
+      static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(
+          record.payload);
+  auto& dis = singleton();
+  std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
+  dis.pendingDispatches_.insert(data->dispatch_info.dispatch_id);
 }
 
 void RocprofLogger::buffer_callback(
@@ -844,6 +898,12 @@ void RocprofLogger::buffer_callback(
             *(static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
                 header->payload));
         auto& dispatch = record.dispatch_info;
+
+        {
+          auto& dis = singleton();
+          std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
+          dis.pendingDispatches_.erase(dispatch.dispatch_id);
+        }
 
         // Safe access to agents map with default value
         auto& globalContext = getGlobalContext();
@@ -937,6 +997,10 @@ void RocprofLogger::setPerThreadBuffers(bool enabled) {
   perThreadBuffers_.store(enabled, std::memory_order_relaxed);
 }
 
+void RocprofLogger::setDispatchRecordWait(std::chrono::milliseconds wait) {
+  dispatchRecordWait_ = wait;
+}
+
 void RocprofLogger::ensureRegistered() {
   int status = 0;
   rocprofiler_is_initialized(&status);
@@ -961,6 +1025,11 @@ void RocprofLogger::startLogging() {
   }
 
   externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
+  {
+    // Dispatches given up on by an earlier stop must not stall this session.
+    std::lock_guard<std::mutex> lock(pendingDispatchesMutex_);
+    pendingDispatches_.clear();
+  }
   // start_context is idempotent (it returns SUCCESS for an already-active
   // context), so there is no need to query context state first.
   ROCPROF_CALL(rocprofiler_start_context(globalContext.context));
@@ -991,6 +1060,34 @@ void RocprofLogger::stopLogging() {
   // to the contexts active at enqueue, and its record is still written to
   // this buffer when the kernel completes after the stop.
   ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
+
+  // The SDK writes a dispatch record from its own completion handler, which
+  // can run after the application has already seen the kernel finish (e.g.
+  // hipDeviceSynchronize returned). Such a record would miss the flush above
+  // and be dropped as out of range in the next session, so re-flush until
+  // every dispatch of this session has its record. The wait is bounded because
+  // some dispatches never produce a usable one: a dispatch the SDK could not
+  // time has no record, and a kernel still running at stop ends outside this
+  // session's window, so its record is dropped even if the wait sees it.
+  auto pendingCount = [this] {
+    std::lock_guard<std::mutex> lock(pendingDispatchesMutex_);
+    return pendingDispatches_.size();
+  };
+  const auto deadline = std::chrono::steady_clock::now() + dispatchRecordWait_;
+  size_t pending = pendingCount();
+  while (pending > 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+    ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
+    pending = pendingCount();
+  }
+  if (pending > 0 && dispatchRecordWait_.count() > 0) {
+    LOG_FIRST_N(WARNING, 10)
+        << "Stopped waiting for " << pending
+        << " kernel dispatch record(s) after " << dispatchRecordWait_.count()
+        << " ms; their GPU events are missing from this trace. Kernels still "
+        << "running when profiling stopped cannot be recorded; for kernels "
+        << "that had finished, raise ROCPROF_DISPATCH_RECORD_WAIT_MSECS.";
+  }
 }
 
 //
