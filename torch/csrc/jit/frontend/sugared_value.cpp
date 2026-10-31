@@ -208,7 +208,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
-    if (iface->getMethod(field)) {
+    if (iface->hasMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
   } else if (auto enum_type = value_->type()->cast<EnumType>()) {
