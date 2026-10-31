@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import torch
 from torch._inductor import config
 from torch._inductor.autows_utils import meta_ws_enabled
-from torch._inductor.ir import Buffer, ExternKernel, FixedLayout, FlexibleLayout
+from torch._inductor.ir import ExternKernel, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     DecomposeKSubgraphTemplate,
@@ -19,26 +19,10 @@ from torch._inductor.lowering import lowerings, register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.utils._triton import has_datacenter_blackwell_tma_device
-
-
-def decomposeK(a, b, kPartitions):
-    m = a.shape[0]
-    n = b.shape[1]
-    k = a.shape[1]
-
-    B = k // kPartitions
-    a_reshaped = torch.permute(a.reshape(m, B, kPartitions), (1, 0, 2))
-    b_reshaped = b.reshape(B, kPartitions, n)
-    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
-    result_fp32 = result.to(torch.float32)
-    reduced_buf = torch.sum(result_fp32, 0)
-    return reduced_buf.to(a.dtype)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
+from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_datacenter_blackwell_tma_device, has_triton
 
 
 BLACKWELL_K_SPLIT = 8
@@ -78,27 +62,20 @@ def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_empty((BLACKWELL_K_SPLIT * m_pad, b.shape[1]), dtype=torch.float32)
 
 
-def _exact_inputs(*shape: int, dtype: torch.dtype) -> torch.Tensor:
+def _exact_inputs(*shape: int, device: str, dtype: torch.dtype) -> torch.Tensor:
     # Small integers keep every partial sum exact, so results are bitwise.
-    return torch.randint(-2, 3, shape, device=GPU_TYPE).to(dtype)
+    return torch.randint(-2, 3, shape, device=device).to(dtype)
 
 
-@instantiate_parametrized_tests
 class TestSubgraphChoice(TestCase):
-    def setUp(self):
-        super().setUp()
-
-    def _create_buffer(self, name, shape, dtype):
-        return Buffer(
-            name=name,
-            layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
-        )
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("backend", ("aten", "triton"))
     @parametrize("meta_ws", (False, True))
     @parametrize("config_index", (0, 1))
     @parametrize("dtype", (torch.bfloat16, torch.float32))
-    def test_subgraph_decompose_k(self, backend, meta_ws, config_index, dtype):
+    @unittest.skipIf(not has_triton(), "requires triton")
+    def test_subgraph_decompose_k(self, device, backend, meta_ws, config_index, dtype):
         if backend == "aten" and (meta_ws or config_index):
             self.skipTest("MetaWS and partial configs only apply to the Triton backend")
         if backend == "triton":
@@ -132,12 +109,12 @@ class TestSubgraphChoice(TestCase):
         # an odd M-tile count (padded to a full pair under 2CTA), and for Triton
         # its last K partition is short for both partial configs.
         a1, b1 = (
-            _exact_inputs(300, 8200, dtype=dtype),
-            _exact_inputs(8200, 136, dtype=dtype),
+            _exact_inputs(300, 8200, device=device, dtype=dtype),
+            _exact_inputs(8200, 136, device=device, dtype=dtype),
         )
         a2, b2 = (
-            _exact_inputs(256, 8200, dtype=dtype),
-            _exact_inputs(8200, 128, dtype=dtype),
+            _exact_inputs(256, 8200, device=device, dtype=dtype),
+            _exact_inputs(8200, 128, device=device, dtype=dtype),
         )
 
         def fn(a1, b1, a2, b2):
@@ -173,7 +150,7 @@ class TestSubgraphChoice(TestCase):
         has_datacenter_blackwell_tma_device(),
         "the Triton partial BMM needs datacenter Blackwell",
     )
-    def test_decompose_k_partial_freezes_producer_layout(self):
+    def test_decompose_k_partial_freezes_producer_layout(self, device):
         # The partial bakes operand strides into constexprs; a producer's
         # flexible layout must be frozen first or the strides go stale.
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
@@ -188,8 +165,8 @@ class TestSubgraphChoice(TestCase):
             )
 
         # Column-major A keeps its leading stride TMA-aligned with K = 8193.
-        a = _exact_inputs(8193, 256, dtype=torch.bfloat16).T
-        y = _exact_inputs(128, 8193, dtype=torch.bfloat16)
+        a = _exact_inputs(8193, 256, device=device, dtype=torch.bfloat16).T
+        y = _exact_inputs(128, 8193, device=device, dtype=torch.bfloat16)
 
         def fn(x, y):
             partial = torch.ops.inductor_test.blackwell_decompose_k_partial(
@@ -225,9 +202,9 @@ class TestSubgraphChoice(TestCase):
             ("TRITON", "aten, TRITON", True, True),  # both plans enumerated
         ),
     )
-    def test_decompose_k_bmm_backends(self, outer, nested, expect_aten, expect_triton):
-        a = _exact_inputs(131072, 256, dtype=torch.bfloat16).T
-        b = _exact_inputs(131072, 128, dtype=torch.bfloat16)
+    def test_decompose_k_bmm_backends(self, device, outer, nested, expect_aten, expect_triton):
+        a = _exact_inputs(131072, 256, device=device, dtype=torch.bfloat16).T
+        b = _exact_inputs(131072, 128, device=device, dtype=torch.bfloat16)
         patch = {
             "max_autotune_gemm": True,
             "max_autotune_gemm_backends": outer,
@@ -248,17 +225,14 @@ class TestSubgraphChoice(TestCase):
         self.assertEqual("_split_aten" in source, expect_aten)
         self.assertEqual("_split_triton_" in source, expect_triton)
 
-    def test_subgraph_freeze_layout(self):
+    @unittest.skipIf(not has_triton(), "requires triton")
+    def test_subgraph_freeze_layout(self, device):
         from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm_common import mm_args
 
         M, N, K = (4, 128, 14240)
-        a_in = torch.randn(
-            (M, K), dtype=torch.bfloat16, device=torch.device(f"{GPU_TYPE}:0")
-        )
-        b_in = torch.randn(
-            (K, N), dtype=torch.bfloat16, device=torch.device(f"{GPU_TYPE}:0")
-        )
+        a_in = torch.randn((M, K), dtype=torch.bfloat16, device=device)
+        b_in = torch.randn((K, N), dtype=torch.bfloat16, device=device)
 
         @torch.library.custom_op("mylib::matmul_decompose_padding", mutates_args={})
         def matmul_decompose(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -323,7 +297,12 @@ class TestSubgraphChoice(TestCase):
             compiled_func(a_in, b_in)
 
 
+instantiate_device_type_tests(
+    TestSubgraphChoice, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
     # Set env to make it work in CI.
-    if HAS_GPU and HAS_CPU:
+    if HAS_CPU:
         run_tests()
