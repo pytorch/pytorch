@@ -12,6 +12,7 @@
 
 #include <c10/util/irange.h>
 
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -846,6 +847,21 @@ TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
                               bool compute_v) {
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
+
+  // On CPU, LAPACK's syevd takes 32-bit workspace sizes. For large n the required
+  // workspace (2*n^2 + 6*n + 1 real, n^2 + 2*n complex, when computing eigenvectors)
+  // overflows int, so fail early with a clear message. Do it before allocating outputs.
+  if (A.device().type() == at::kCPU) {
+    const auto n = static_cast<long double>(A.size(-1));
+    const auto min_lwork = compute_v
+        ? (A.is_complex() ? n * n + 2 * n : 2 * n * n + 6 * n + 1)
+        : 2 * n + 1;
+    TORCH_CHECK(
+        min_lwork <= static_cast<long double>(std::numeric_limits<int>::max()),
+        "linalg.eigh: the input matrix of size ", A.size(-1), "x", A.size(-1), " is too large. ",
+        "The CPU LAPACK 32-bit integer interface used by PyTorch cannot represent the ",
+        "required workspace (at least ", static_cast<int64_t>(min_lwork), " elements).");
+  }
 
   auto shape = A.sizes().vec();
   if (compute_v) {

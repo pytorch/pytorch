@@ -1229,6 +1229,17 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigh(a, out=(out_w, out_v))
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    def test_eigh_large_matrix_error_message(self, device):
+        # LAPACK's 32-bit interface cannot hold the workspace for huge matrices.
+        # An expanded (stride 0) input avoids allocating the dense matrix; the
+        # check runs before any output is allocated.
+        for dtype in (torch.float32, torch.complex64):
+            a = torch.empty((), dtype=dtype, device=device).expand(53000, 53000)
+            with self.assertRaisesRegex(RuntimeError, "is too large"):
+                torch.linalg.eigh(a)
+
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     def test_eigh_svd_illcondition_matrix_input_should_not_crash(self, device, dtype):

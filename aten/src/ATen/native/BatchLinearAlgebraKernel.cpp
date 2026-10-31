@@ -203,6 +203,12 @@ template <typename T>
 inline
 std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
     const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
+    // The LAPACK interface used here takes workspace sizes as 32-bit ints, so a larger
+    // workspace cannot be requested. Casting it would be undefined behavior.
+    TORCH_CHECK(
+        next_after < static_cast<T>(std::numeric_limits<int>::max()),
+        "LAPACK requires a workspace of ", val, " elements, which exceeds the maximum ",
+        "supported by the 32-bit integer LAPACK interface. The input matrix is too large.");
     return std::max<int>(1, std::ceil(next_after));
 }
 template <typename T>
