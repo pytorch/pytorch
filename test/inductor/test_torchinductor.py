@@ -9213,6 +9213,14 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(1, 0, 64), torch.randn(128, 64)))
 
+    def test_cat_clamped_gather(self):
+        # https://github.com/pytorch/pytorch/issues/200379
+        def fn(a, b):
+            idx = (torch.arange(b.shape[0], device=b.device) - 1).clamp(min=0)
+            return torch.cat([a, b[idx]], 0) * 2
+
+        self.common(fn, (torch.randn(1, 8), torch.randn(6, 8)))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):
