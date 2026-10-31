@@ -174,7 +174,12 @@ class LRScheduler:
         self._initial_step()
 
     def _initial_step(self) -> None:
-        """Initialize step counts and perform a step."""
+        """Initialize the scheduler's state and starting learning rates.
+
+        Overrides must establish the initial state without advancing beyond it.
+        The default implementation resets the step count and calls step() in
+        initialization mode.
+        """
         self._step_count = 0
         with _initial_mode(self):
             self.step()
@@ -1168,6 +1173,7 @@ class SequentialLR(LRScheduler):
         self._initial_step()
 
     def _initial_step(self) -> None:
+        """Initialize the child active at step zero without advancing the schedule."""
         idx = bisect_right(self._milestones, 0)
         self._schedulers[idx]._initial_step()
 
@@ -1537,15 +1543,13 @@ class ChainedScheduler(LRScheduler):
                 )
         self._schedulers = schedulers
         self.optimizer = optimizer
-        # Unlike the other schedulers, this does not end with
-        # `self._initial_step()`: every scheduler in `schedulers` already took
-        # its own initial step when it was constructed, and those compose into
-        # the chained learning rate. Calling it here would apply each factor a
-        # second time. `_initial_step` is for an enclosing composite scheduler
-        # to call once it has undone those constructor steps.
+        # Children are already initialized; skip _initial_step() here.
+        # An enclosing SequentialLR calls _initial_step() after undoing
+        # their initialization.
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     def _initial_step(self) -> None:
+        """Initialize each child without advancing the chained schedule."""
         for scheduler in self._schedulers:
             scheduler._initial_step()
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
