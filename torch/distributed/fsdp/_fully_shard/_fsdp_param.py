@@ -25,9 +25,10 @@ if dist._is_spmd_types_available():
 
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed._local_tensor import enabled_local_tensor_mode
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
-from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
@@ -313,8 +314,6 @@ class FSDPParam:
             )
         self.fsdp_placement = fsdp_placement
         shard_dim = fsdp_placement.dim
-        # TODO: Replace the sharded DTensor parameter construction logic with
-        # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         # Tracks that this parameter contained FSDP-init-time spmd_types annotations;
@@ -344,10 +343,8 @@ class FSDPParam:
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         if isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP or HSDP
-            shard_rank = self.mesh_info.shard_mesh_rank
             shard_world_size = self.mesh_info.shard_mesh_size
-        else:  # DDP
-            shard_rank = 0
+        else:  # DDP: shard_mesh is the replicate mesh, do not split across it
             shard_world_size = 1
 
         if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
@@ -360,7 +357,28 @@ class FSDPParam:
                 f"{param_data.size()} (world size: {shard_world_size})"
             )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
-        sharded_param = chunks[shard_rank]
+        if shard_world_size == 1:
+            sharded_param = param_data
+        else:
+            if self.shard_mesh.size() != shard_world_size:
+                raise AssertionError(
+                    f"shard_mesh size ({self.shard_mesh.size()}) != "
+                    f"shard_world_size ({shard_world_size})"
+                )
+            if (
+                enabled_local_tensor_mode() is not None
+                and param_data.size(shard_dim) % shard_world_size != 0
+            ):
+                raise NotImplementedError(
+                    "FSDP uneven sharding is not supported under LocalTensorMode: "
+                    f"{param_data.size()} (world size: {shard_world_size})"
+                )
+            sharded_param = distribute_tensor(
+                param_data.detach(),
+                device_mesh=self.shard_mesh,
+                placements=[Shard(shard_dim)],
+                src_data_rank=None,
+            ).to_local()
         self.sharded_size = _get_dim_chunked_size(
             sharded_param, param_data.size(), dim=shard_dim
         )
@@ -373,7 +391,8 @@ class FSDPParam:
             ),
         )
         # Pre-pad the sharded parameter to avoid padding before all-gather
-        padded_sharded_param = param_data.new_zeros(padded_sharded_size)
+        # Allocate from sharded_param so LocalTensorMode keeps per-rank buffers
+        padded_sharded_param = sharded_param.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
             padded_sharded_param.narrow(
                 dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
@@ -1415,7 +1434,10 @@ class FSDPParam:
             return mesh
         if mesh.mesh_dim_names is None:
             raise AssertionError("Expected mesh_dim_names to not be None")
-        return mesh[mesh.mesh_dim_names[-1]]
+        shard_mesh_dim = self.mesh_info.shard_mesh_dim
+        if shard_mesh_dim is None:
+            raise AssertionError("Expected shard_mesh_dim to not be None")
+        return mesh[mesh.mesh_dim_names[shard_mesh_dim]]
 
     @property
     def shard_mesh(self):

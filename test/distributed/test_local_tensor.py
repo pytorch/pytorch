@@ -5,6 +5,7 @@ from contextlib import nullcontext
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._local_tensor import (
     local_tensor_mode,
@@ -16,6 +17,7 @@ from torch.distributed._local_tensor import (
     rank_map,
     tensor_map,
 )
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -882,6 +884,154 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
             dist_res = torch.cat([d1, d2], dim=-1)
             full_tensor = dist_res.full_tensor()
             self.assertEqual(full_tensor, local_res)
+
+    def _arange_linear_weight(self, out=8, inp=8):
+        return torch.arange(out * inp, dtype=torch.float32).reshape(out, inp)
+
+    def _eager_linear(self, weight, x, bias=None):
+        m = nn.Linear(weight.shape[1], weight.shape[0], bias=bias is not None)
+        m.weight.data.copy_(weight)
+        if bias is not None:
+            m.bias.data.copy_(bias)
+        return m(x).detach()
+
+    def _assert_per_rank_chunks(self, local, full, dim, num_chunks):
+        self.assertIsInstance(local, LocalTensor)
+        chunks = list(torch.chunk(full, num_chunks, dim=dim))
+        for r, shard in local._local_tensors.items():
+            self.assertEqual(shard, chunks[r])
+
+    def test_fully_shard_linear_matches_eager(self):
+        weight = self._arange_linear_weight()
+        x = torch.ones(2, weight.shape[1])
+        expected = self._eager_linear(weight, x)
+
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            m = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+            m.weight.data.copy_(weight)
+            fully_shard(m, mesh=mesh)
+            with torch.no_grad():
+                fsdp_local = m.weight.to_local()
+            self._assert_per_rank_chunks(
+                fsdp_local, weight, dim=0, num_chunks=self.world_size
+            )
+            y = m(x)
+            self.assertIsInstance(y, LocalTensor)
+            self.assertEqual(y, expected)
+
+    def test_fully_shard_linear_constructed_outside_mode(self):
+        weight = self._arange_linear_weight()
+        x = torch.ones(2, weight.shape[1])
+        m = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+        m.weight.data.copy_(weight)
+        expected = m(x).detach()
+
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            fully_shard(m, mesh=mesh)
+            with torch.no_grad():
+                fsdp_local = m.weight.to_local()
+            self.assertIsInstance(fsdp_local, LocalTensor)
+            self._assert_per_rank_chunks(
+                fsdp_local, weight, dim=0, num_chunks=self.world_size
+            )
+            shards = list(fsdp_local._local_tensors.values())
+            self.assertFalse(all(torch.equal(shards[0], s) for s in shards[1:]))
+            y = m(x)
+            self.assertIsInstance(y, LocalTensor)
+            self.assertEqual(y, expected)
+
+    def test_fully_shard_hsdp_linear_matches_eager(self):
+        weight = self._arange_linear_weight()
+        x = torch.ones(2, weight.shape[1])
+        expected = self._eager_linear(weight, x)
+        shard_world = 2
+        chunks = list(torch.chunk(weight, shard_world, dim=0))
+
+        with LocalTensorMode(self.world_size):
+            mesh = init_device_mesh(
+                "cpu", (2, 2), mesh_dim_names=("dp_replicate", "dp_shard")
+            )
+            m = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+            m.weight.data.copy_(weight)
+            fully_shard(m, mesh=mesh)
+            self.assertEqual(m.weight.placements, (Replicate(), Shard(0)))
+            with torch.no_grad():
+                fsdp_local = m.weight.to_local()
+            self.assertIsInstance(fsdp_local, LocalTensor)
+            shard_rows = weight.shape[0] // shard_world
+            expected_shape = torch.Size((shard_rows, weight.shape[1]))
+            self.assertEqual(fsdp_local.shape, expected_shape)
+            for r, shard in fsdp_local._local_tensors.items():
+                self.assertEqual(shard, chunks[r % shard_world])
+            y = m(x)
+            self.assertIsInstance(y, LocalTensor)
+            self.assertEqual(y, expected)
+
+    def test_fully_shard_linear_with_bias(self):
+        weight = self._arange_linear_weight()
+        bias = torch.arange(weight.shape[0], dtype=torch.float32)
+        x = torch.ones(2, weight.shape[1])
+        expected = self._eager_linear(weight, x, bias=bias)
+
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            m = nn.Linear(weight.shape[1], weight.shape[0], bias=True)
+            m.weight.data.copy_(weight)
+            m.bias.data.copy_(bias)
+            fully_shard(m, mesh=mesh)
+            with torch.no_grad():
+                self._assert_per_rank_chunks(
+                    m.weight.to_local(), weight, dim=0, num_chunks=self.world_size
+                )
+                self._assert_per_rank_chunks(
+                    m.bias.to_local(), bias, dim=0, num_chunks=self.world_size
+                )
+            y = m(x)
+            self.assertEqual(y, expected)
+
+    def test_fully_shard_linear_shard_dim1(self):
+        weight = self._arange_linear_weight()
+        x = torch.ones(2, weight.shape[1])
+        expected = self._eager_linear(weight, x)
+
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            m = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+            m.weight.data.copy_(weight)
+            fully_shard(m, mesh=mesh, shard_placement_fn=lambda p: Shard(1))
+            with torch.no_grad():
+                self._assert_per_rank_chunks(
+                    m.weight.to_local(), weight, dim=1, num_chunks=self.world_size
+                )
+            y = m(x)
+            self.assertEqual(y, expected)
+
+    def test_fully_shard_linear_cpu_offload(self):
+        weight = self._arange_linear_weight()
+        x = torch.ones(2, weight.shape[1])
+        expected = self._eager_linear(weight, x)
+
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            m = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+            m.weight.data.copy_(weight)
+            fully_shard(m, mesh=mesh, offload_policy=CPUOffloadPolicy(pin_memory=False))
+            with torch.no_grad():
+                self._assert_per_rank_chunks(
+                    m.weight.to_local(), weight, dim=0, num_chunks=self.world_size
+                )
+            y = m(x)
+            self.assertEqual(y, expected)
+
+    @parametrize("out_features", [6, 2])
+    def test_fully_shard_uneven_raises_under_local_tensor_mode(self, out_features):
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            m = nn.Linear(8, out_features, bias=False)
+            with self.assertRaisesRegex(NotImplementedError, "LocalTensorMode"):
+                fully_shard(m, mesh=mesh)
 
     def test_compile_all_gather(self):
         fake_pg = dist.distributed_c10d._get_default_group()
