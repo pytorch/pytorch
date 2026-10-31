@@ -198,7 +198,8 @@ class DataLoader(Generic[_T_co]):
             ``base_seed`` for workers. (default: ``None``)
         prefetch_factor (int, optional, keyword-only arg): Number of batches loaded
             in advance by each worker. ``2`` means there will be a total of
-            2 * num_workers batches prefetched across all workers. (default value depends
+            2 * num_workers batches prefetched across all workers. Must be greater
+            than ``0`` if specified. (default value depends
             on the set value for num_workers. If value of num_workers=0 default is ``None``.
             Otherwise, if value of ``num_workers > 0`` default is ``2``).
         persistent_workers (bool, optional): If ``True``, the data loader will not shut down
@@ -291,8 +292,8 @@ class DataLoader(Generic[_T_co]):
             )
         elif num_workers > 0 and prefetch_factor is None:
             prefetch_factor = 2
-        elif prefetch_factor is not None and prefetch_factor < 0:
-            raise ValueError("prefetch_factor option should be non-negative")
+        elif prefetch_factor is not None and prefetch_factor <= 0:
+            raise ValueError("prefetch_factor option should be greater than 0")
 
         if persistent_workers and num_workers == 0:
             raise ValueError("persistent_workers option needs num_workers > 0")
