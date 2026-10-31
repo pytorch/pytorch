@@ -1679,6 +1679,8 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
         # Must return instead of ::abort()ing the process, like stock NCCL.
         backend.abort()
         self.assertEqual(backend.get_error(), ErrorType.COMM_ERROR)
+        with self.assertRaisesRegex(RuntimeError, "aborted after a previous error"):
+            dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         dist.destroy_process_group(pg)
         self._check_all_reduce()

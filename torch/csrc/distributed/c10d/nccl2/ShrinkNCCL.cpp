@@ -104,11 +104,15 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
         childOptions->timeout,
         "NCCL commShrink failed");
   } catch (...) {
+    {
+      // The failed call may have aborted the parent; drop its symmetric-memory
+      // registration while nccl_comm_ still names it. Cleared before ERROR is
+      // published, so the watchdog finds no comm when it reacts to ERROR.
+      std::lock_guard<std::mutex> lock(nccl_comm_mutex_);
+      retireComm();
+      nccl_comm_ = nullptr;
+    }
     comm_state_ = CommState::ERROR;
-    // The failed call may have aborted the parent; drop its symmetric-memory
-    // registration while nccl_comm_ still names it.
-    retireComm();
-    nccl_comm_ = nullptr;
     throw;
   }
 
