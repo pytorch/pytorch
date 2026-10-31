@@ -5807,6 +5807,7 @@ class TestKLDevice(DistributionsTestCase):
 
         self.infinite_examples = [
             (Bernoulli(0), Bernoulli(1)),
+            (Poisson(3.0), Poisson(0.0)),
             (Bernoulli(1), Bernoulli(0)),
             (
                 Categorical(torch.tensor([0.9, 0.1])),
@@ -6135,6 +6136,14 @@ class TestKLDevice(DistributionsTestCase):
             0,
         )
         self.assertEqual(kl_divergence(Uniform(0, 1), Beta(1, 1)), 0)
+        self.assertEqual(kl_divergence(Poisson(0.0), Poisson(0.0)), 0)
+        self.assertEqual(kl_divergence(Poisson(0.0), Poisson(2.0)), 2.0)
+        self.assertEqual(
+            kl_divergence(
+                Poisson(torch.tensor([0.0, 3.0])), Poisson(torch.tensor([2.0, 2.0]))
+            ),
+            torch.tensor([2.0, 3.0 * math.log(1.5) - 1.0]),
+        )
 
     def test_kl_shape(self):
         for Dist, params in _get_examples():
