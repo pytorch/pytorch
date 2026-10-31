@@ -7240,10 +7240,11 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                if (
-                    not config.test_configs.force_extern_kernel_in_multi_template
-                    and not self._has_layout_conflict_for_template(multi_node)
-                ):
+                layout_conflict = (
+                    config.test_configs.force_extern_kernel_in_multi_template
+                    or self._has_layout_conflict_for_template(multi_node)
+                )
+                if not layout_conflict:
                     # TODO (PaulZhang12): Potentially support recompilation/benchmark for new strides
                     min_node_unfused, _ = multi_node.get_min_choice()
                 else:
@@ -7291,11 +7292,16 @@ class Scheduler:
                 # aten won this GEMM, so its tuned solutions are what runtime
                 # will look up. Widen the recorded coverage across the dynamic
                 # dim, after output_node() as the select_algorithm sites do.
+                # Not on the layout-conflict fallback: there an input is frozen
+                # to a layout the constraints disagree with, and the meta
+                # rebuild reads the constraint, so the ladder would record an
+                # ld runtime never passes.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
-                torch._inductor.select_algorithm._maybe_pretune_tunableop(
-                    min_node_unfused
-                )
+                if not layout_conflict:
+                    torch._inductor.select_algorithm._maybe_pretune_tunableop(
+                        min_node_unfused
+                    )
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 if not isinstance(out_storage, ir.StorageBox):
                     raise AssertionError("expected out_storage to be an ir.StorageBox")
