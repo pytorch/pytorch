@@ -1,7 +1,12 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 
 class DummyPrivateUse1Module:
@@ -31,6 +36,8 @@ class DummyPrivateUse1Module:
 
 
 class TestRenamePrivateuseoneToExistingBackend(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo(
         "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
     )
