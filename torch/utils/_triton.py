@@ -279,19 +279,22 @@ def has_triton_reduction_ordering() -> bool:
     return False
 
 
-def _device_supports_triton(device_interface) -> bool:
+def _device_supports_triton(device_interface, device: str | None = None) -> bool:
     # A device is usable when it is available, reports Triton capability, and
     # its Triton backend is actually built. Capability is gated first so that
     # raise_if_triton_unavailable() only surfaces missing-backend errors (and
     # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
     # specific TritonUnavailableError rather than RuntimeError so unexpected
-    # errors are not silently swallowed.
+    # errors are not silently swallowed. device is forwarded so index-specific
+    # capability checks (CUDA's per-SM probe) see the right GPU.
     from torch._dynamo.exc import TritonUnavailableError
 
-    if not (device_interface.is_available() and device_interface.is_triton_capable()):
+    if not (
+        device_interface.is_available() and device_interface.is_triton_capable(device)
+    ):
         return False
     try:
-        device_interface.raise_if_triton_unavailable()
+        device_interface.raise_if_triton_unavailable(device)
     except TritonUnavailableError:
         return False
     return True
@@ -319,7 +322,7 @@ def has_triton_for_device(device: str) -> bool:
         device_interface = get_interface_for_device(device_type)
     except NotImplementedError:
         return False
-    return _device_supports_triton(device_interface)
+    return _device_supports_triton(device_interface, device)
 
 
 @functools.cache

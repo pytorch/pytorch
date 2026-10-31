@@ -1880,6 +1880,23 @@ class TestHasTriton(TestCase):
             self.assertTrue(triton_utils.has_triton_for_device("cuda:0"))
             get_iface.assert_called_once_with("cuda")
 
+    def test_for_device_forwards_index_to_capability_probe(self):
+        iface = mock.MagicMock()
+        iface.is_available.return_value = True
+        iface.is_triton_capable.return_value = True
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            inductor_config.patch(triton_disable_device_detection=False),
+            mock.patch(
+                "torch._dynamo.device_interface.get_interface_for_device",
+                return_value=iface,
+            ),
+        ):
+            triton_utils.has_triton_for_device.cache_clear()
+            self.assertTrue(triton_utils.has_triton_for_device("cuda:1"))
+            iface.is_triton_capable.assert_called_once_with("cuda:1")
+            iface.raise_if_triton_unavailable.assert_called_once_with("cuda:1")
+
     def test_for_device_backend_missing_is_swallowed(self):
         iface = _make_triton_interface(raise_exc=TritonUnavailableError("no backend"))
         self.assertFalse(self._run_for_device("cuda", iface=iface))
