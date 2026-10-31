@@ -59,6 +59,9 @@ def _native_worker(rank, connection, progress_thread):
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
+        part = NIXLRemoteBuffer.deserialize(remote_source.slice(400, 800).serialize())
+        transport.read(other_memory.to_mutable_view(0, 800), part)
+        torch.testing.assert_close(other_target[:200], target[100:300])
         connection.send_bytes(b"finished")
         if _receive(connection) != b"finished":
             raise AssertionError("unexpected control-plane message")
@@ -89,6 +92,50 @@ def _native_worker(rank, connection, progress_thread):
     connection.close()
 
 
+def _multi_peer_worker(rank, connections):
+    # Rank 0 reads from ranks 1 and 2 through one endpoint.
+    with new_transport("nixl", "cpu", timeout=5) as transport:
+        tensor = torch.full((1024,), float(rank))
+        memory = transport.register_memory(tensor)
+        if rank == 0:
+            urls = [_receive(connection) for connection in connections]
+            for url in urls:
+                transport.connect(url)
+            remotes = [NIXLRemoteBuffer.deserialize(_receive(c)) for c in connections]
+            targets = [torch.zeros(1024) for _ in remotes]
+            views = [transport.register_memory(t).to_mutable_view() for t in targets]
+            for _ in range(2):
+                works = [
+                    transport.read(view, remote, async_op=True)
+                    for view, remote in zip(views, remotes)
+                ]
+                for work in works:
+                    work.wait()
+                for value, target in enumerate(targets, 1):
+                    torch.testing.assert_close(target, torch.full_like(target, value))
+                    target.zero_()
+                # Reconnecting with the same bind() bytes is a no-op.
+                transport.connect(urls[0])
+        else:
+            connections[0].send_bytes(transport.bind())
+            connections[0].send_bytes(memory.to_remote_buffer().serialize())
+        for connection in connections:
+            connection.send_bytes(b"done")
+            if _receive(connection) != b"done":
+                raise AssertionError("unexpected control-plane message")
+        transport.unregister_memory(memory)
+        asyncio.run(transport.close_async(timeout=5))
+    for connection in connections:
+        connection.close()
+
+
+def _run_worker(worker, *args):
+    # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
+    # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
+    os.environ.setdefault("UCX_MODULES", "^efa,rdmacm")
+    worker(*args)
+
+
 @instantiate_parametrized_tests
 @unittest.skipUnless(
     os.environ.get("TORCH_TEST_NIXL") == "1",
@@ -97,13 +144,26 @@ def _native_worker(rank, connection, progress_thread):
 class TestNIXLNative(TestCase):
     @parametrize("progress_thread", [True, False])
     def test_two_process_cpu_transfers(self, progress_thread):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _native_worker,
+            [(connection, progress_thread) for connection in connections],
+            connections,
+        )
+
+    def test_three_process_cpu_multi_peer(self):
+        pipes = [multiprocessing.Pipe() for _ in range(2)]
+        self._spawn(
+            _multi_peer_worker,
+            [([first for first, _ in pipes],), ([pipes[0][1]],), ([pipes[1][1]],)],
+            [connection for pipe in pipes for connection in pipe],
+        )
+
+    def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")
-        connections = context.Pipe()
         processes = [
-            context.Process(
-                target=_native_worker, args=(rank, connections[rank], progress_thread)
-            )
-            for rank in range(2)
+            context.Process(target=_run_worker, args=(worker, rank, *rank_args))
+            for rank, rank_args in enumerate(args)
         ]
         try:
             for process in processes:

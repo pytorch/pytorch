@@ -41,7 +41,7 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -257,7 +257,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         import types
 
         class FakeFastLauncher:
-            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+            def __init__(self, func, num_warps, shared, arg_tys, n_scratch, launch_pdl):
                 self.func = func
 
         kernel = object.__new__(StaticallyLaunchedCudaKernel)
@@ -267,6 +267,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel.arg_tys = "O"
         kernel.has_global_scratch = False
         kernel.has_profile_scratch = False
+        kernel.launch_pdl = False
 
         launcher_globals = {"runner": kernel.run}
 
@@ -1120,6 +1121,18 @@ class TestStaticTritonCompileResult(TestCase):
     """
 
     def test_basic_compile(self):
+        @torch.compile
+        def foo(x, y):
+            return x + y
+
+        x = torch.randn(10, device=GPU_TYPE)
+        y = torch.randn(10, device=GPU_TYPE)
+        self.assertEqual(foo(x, y), x + y)
+
+    @skipIfRocm
+    @unittest.skipIf(not SM90OrLater, "PDL requires sm90+")
+    @torch._inductor.config.patch("triton.enable_pdl", True)
+    def test_basic_compile_pdl(self):
         @torch.compile
         def foo(x, y):
             return x + y
