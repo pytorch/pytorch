@@ -642,6 +642,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _write_aoti_interface_header(self):
         """Emit the AOTI runtime interface include or inline."""
         if config.aot_inductor.dynamic_linkage:
+            if config.aot_inductor.cudagraphs:
+                self.header.splice_aot("#define AOTI_CUDA_GRAPHS")
             with open(
                 os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
             ) as f:
@@ -1497,6 +1499,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.prefix.writeline(
                 "this->kernels_ = std::make_unique<AOTInductorModelKernels>();"
             )
+            if config.aot_inductor.cudagraphs:
+                self.prefix.writeline("this->cudagraphs_ = true;")
 
         self.prefix.writeline("}")
 
