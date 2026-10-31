@@ -1748,6 +1748,7 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
 class TestHasTriton(TestCase):
     def tearDown(self):
         triton_utils.has_triton.cache_clear()
+        triton_utils.has_triton_for_device.cache_clear()
         super().tearDown()
 
     def _run(
@@ -1821,6 +1822,62 @@ class TestHasTriton(TestCase):
             ("good", _make_triton_interface()),
         ]
         self.assertTrue(self._run(registered))
+
+    def _run_for_device(
+        self,
+        device,
+        iface=None,
+        *,
+        has_package=True,
+        detection_disabled=False,
+        not_registered=False,
+    ):
+        with (
+            mock.patch.object(
+                triton_utils, "has_triton_package", return_value=has_package
+            ),
+            inductor_config.patch(triton_disable_device_detection=detection_disabled),
+            mock.patch(
+                "torch._dynamo.device_interface.get_interface_for_device",
+                side_effect=NotImplementedError if not_registered else None,
+                return_value=iface,
+            ),
+        ):
+            triton_utils.has_triton_for_device.cache_clear()
+            return triton_utils.has_triton_for_device(device)
+
+    def test_for_device_kill_switches(self):
+        self.assertFalse(self._run_for_device("cuda", has_package=False))
+        self.assertFalse(self._run_for_device("cuda", detection_disabled=True))
+
+    def test_for_device_unregistered_interface_returns_false(self):
+        self.assertFalse(self._run_for_device("fakeaccel", not_registered=True))
+
+    def test_for_device_invalid_string_returns_false(self):
+        self.assertFalse(self._run_for_device("not a device"))
+
+    def test_for_device_indexed_string_normalizes_type(self):
+        iface = _make_triton_interface()
+        with mock.patch(
+            "torch._dynamo.device_interface.get_interface_for_device"
+        ) as get_iface:
+            get_iface.return_value = iface
+            triton_utils.has_triton_for_device.cache_clear()
+            self.assertTrue(triton_utils.has_triton_for_device("cuda:0"))
+            get_iface.assert_called_with("cuda")
+
+    def test_for_device_backend_missing_is_swallowed(self):
+        iface = _make_triton_interface(raise_exc=TritonUnavailableError("no backend"))
+        self.assertFalse(self._run_for_device("cuda", iface=iface))
+
+    def test_for_device_runtime_error_propagates(self):
+        iface = _make_triton_interface(raise_exc=RuntimeError("boom"))
+        with self.assertRaises(RuntimeError):
+            self._run_for_device("cuda", iface=iface)
+
+    def test_for_device_capability_checked_before_probe(self):
+        iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
+        self.assertFalse(self._run_for_device("cuda", iface=iface))
 
     def test_capability_gate_precedes_backend_probe(self):
         # A sub-capable device whose backend probe would throw a NON-RuntimeError.
