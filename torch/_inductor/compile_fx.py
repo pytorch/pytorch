@@ -2686,8 +2686,8 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    device_context = get_device_context(gm)
-    with device_context:
+    cuda_context = get_cuda_device_context(gm)
+    with cuda_context:
         # We can skip the invoke_subgraph because the
         # entire_partition_fn is called recursively for invoke_subgraph
         # in partitioning.
