@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import abc
-import ctypes
 import importlib.util
-import os
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
@@ -15,88 +13,28 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
 
-# Keeps preloaded shared libraries resident for the process lifetime.
-_NCCL_EP_KEEPALIVE: list[ctypes.CDLL] = []
-
-
-def _find_pkg_dir(name: str) -> str | None:
-    # Locate an installed package's directory without importing it. find_spec
-    # raises (rather than returning None) when a dotted name's parent namespace
-    # is absent, so guard that.
+def _prepare_nccl_ep() -> None:
     try:
-        spec = importlib.util.find_spec(name)
-    except ModuleNotFoundError:
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    return spec.submodule_search_locations[0]
-
-
-def _prepare_nccl4py() -> None:
-    # Dynamic (USE_SYSTEM_NCCL=ON / wheel) build only: the extension NEEDED-links
-    # libnccl_ep.so, which the nccl4py wheel provides at runtime. Point nccl-ep's
-    # JIT at nccl4py's EP headers (NCCL_EP_HOME) and the nvidia.nccl wheel's NCCL
-    # headers (NCCL_HOME), and make libnccl_ep resolvable, before importing the
-    # extension (its libnccl dependency is already loaded by torch). The static
-    # build bakes all of this in and never reaches here.
-    nccl_pkg = _find_pkg_dir("nccl")
-    if nccl_pkg is None:
+        # pyrefly: ignore [missing-import]  # optional nccl-extensions package
+        import nccl.ep as ep
+    except ModuleNotFoundError as e:
+        if e.name not in ("nccl", "nccl.ep"):
+            raise
         raise ImportError(
-            "TokenSwitchNCCL needs the 'nccl4py' package for this build's "
-            "libnccl_ep.so and runtime JIT headers. Install it with "
-            "`pip install nccl4py==0.3.1`."
-        )
-    ep_dir = os.path.join(nccl_pkg, "ep")
-    if "NCCL_EP_HOME" not in os.environ:
-        ep_headers = os.path.join(ep_dir, "include", "nccl_ep")
-        if not os.path.isdir(ep_headers):
-            raise ImportError(
-                f"nccl4py at {nccl_pkg} is missing the EP JIT headers expected "
-                f"at {ep_headers}; reinstall nccl4py or set NCCL_EP_HOME."
-            )
-        os.environ["NCCL_EP_HOME"] = ep_dir
+            "TokenSwitchNCCL requires the nccl-extensions package. "
+            "Install it with `pip install nccl-extensions==0.1.0`."
+        ) from e
 
-    # Point the JIT at NCCL headers. libnccl.so itself needs no preload here: a
-    # USE_SYSTEM_NCCL=ON torch (the only build that reaches this path) already
-    # dynamically loaded the system libnccl, so libnccl_ep.so's NEEDED
-    # libnccl.so.2 resolves to that already-loaded copy.
-    nvidia_nccl = _find_pkg_dir("nvidia.nccl")
-    if nvidia_nccl is not None and os.path.isdir(os.path.join(nvidia_nccl, "include")):
-        os.environ.setdefault("NCCL_HOME", nvidia_nccl)
-
-    # nccl4py ships libnccl_ep unversioned (libnccl_ep.so) while the extension's
-    # NEEDED entry is its SONAME libnccl_ep.so.0; load it by path to register
-    # that SONAME for the import below.
-    lib = os.path.join(ep_dir, "lib", "libnccl_ep.so")
-    if os.path.isfile(lib):
-        _NCCL_EP_KEEPALIVE.append(ctypes.CDLL(lib, mode=ctypes.RTLD_LOCAL))
+    # The public API loads libnccl_ep with RTLD_GLOBAL for our native bindings.
+    ep.get_lib_version()
 
 
 def _import_nccl_ep() -> Any:
-    # The EP bindings live in the optional torch._nccl_ep extension (USE_NCCL_EP).
-    # A USE_SYSTEM_NCCL=OFF build links libnccl_ep statically and bakes its JIT
-    # header paths, so the extension imports directly -- self-contained, no
-    # nccl4py. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from the nccl4py
-    # wheel, so the first import fails until nccl4py is set up; fall back to that
-    # and retry.
-    try:
-        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
-        import torch._nccl_ep as _ep
-
-        return _ep
-    except ImportError:
-        pass
-
-    _prepare_nccl4py()
-    try:
-        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
-        import torch._nccl_ep as _ep
-    except ImportError as e:
-        raise ImportError(
-            "torch._nccl_ep is unavailable; this PyTorch was not built with "
-            "USE_NCCL_EP (or, for a USE_SYSTEM_NCCL=ON build, the nccl4py wheel "
-            "is missing)."
-        ) from e
+    if importlib.util.find_spec("torch._nccl_ep") is None:
+        raise ImportError("TokenSwitchNCCL requires PyTorch built with USE_NCCL_EP=1.")
+    _prepare_nccl_ep()
+    # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
+    import torch._nccl_ep as _ep
 
     return _ep
 
@@ -350,10 +288,12 @@ class TokenSwitch(abc.ABC):
 
 
 class TokenSwitchNCCL(TokenSwitch):
-    """Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
+    r"""Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
 
     The dispatch output layout is chosen per routing via
     :meth:`create_routing`'s ``layout`` argument.
+    Symmetric-memory token outputs and outputs used during CUDA graph capture
+    must cover ``max_recv_tokens_per_rank``.
     """
 
     def __init__(
@@ -444,14 +384,62 @@ class TokenSwitchNCCL(TokenSwitch):
         out_topk_weights: torch.Tensor | None,
         out_topk_idx: torch.Tensor | None,
     ) -> None:
+        outputs = (out_tokens, out_topk_weights, out_topk_idx)
+        capacity = self._max_recv_tokens_per_rank
+        padded = list(outputs)
+        # Fixed-budget EP requires full-capacity buffers even outside capture.
+        if any(t is not None and t.ndim > 0 and t.shape[0] < capacity for t in outputs):
+            for t in outputs:
+                if t is not None and (t.ndim == 0 or not t.is_contiguous()):
+                    raise ValueError(
+                        "nccl_ep outputs must have rank >= 1 and be contiguous"
+                    )
+            if (
+                out_topk_weights is not None
+                and out_topk_idx is not None
+                and out_topk_weights.shape != out_topk_idx.shape
+            ):
+                raise ValueError(
+                    "nccl_ep output weights and indices must have matching shapes"
+                )
+            if torch.cuda.is_current_stream_capturing():
+                raise ValueError(
+                    "CUDA graph dispatch outputs must cover the receive capacity"
+                )
+            import torch.distributed._symmetric_memory as symm_mem
+
+            if out_tokens.shape[0] < capacity and symm_mem.is_symm_mem_tensor(
+                out_tokens
+            ):
+                raise ValueError(
+                    "Symmetric-memory dispatch outputs must cover the receive capacity"
+                )
+            num_recv = cast(Any, routing.handle).get_num_recv_tokens()
+            for i, t in enumerate(outputs):
+                if t is None:
+                    continue
+                if t.shape[0] < num_recv:
+                    raise ValueError(
+                        f"Dispatch output has {t.shape[0]} rows but receives {num_recv} tokens"
+                    )
+                if t.shape[0] < capacity:
+                    full = t.new_empty((capacity, *t.shape[1:]))
+                    # All ranks must agree on whether token outputs use windows.
+                    if i == 0 and symm_mem.is_symm_mem_tensor(full):
+                        raise ValueError(
+                            "Allocate dispatch staging outside the symmetric-memory pool"
+                        )
+                    padded[i] = full
+
         self._ep._nccl_ep_dispatch(
             routing.handle,
             tokens,
             topk_weights,
-            out_tokens,
-            out_topk_weights,
-            out_topk_idx,
+            *padded,
         )
+        for original, full in zip(outputs, padded):
+            if original is not None and full is not None and full is not original:
+                original.copy_(full[: original.shape[0]])
 
     def _combine(
         self,
