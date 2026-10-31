@@ -61,9 +61,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_cycles_per_ms,
     set_rng_seed,
-    TEST_CUDA,
     TEST_HPU,
-    TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
@@ -82,6 +80,22 @@ if torch.accelerator.is_available():
         DISTRIBUTED_BACKEND = get_default_backend_for_device(acc)
         DEVICE_COUNT = torch.accelerator.device_count()
     del acc  # avoid exposing a module-level temporary
+
+
+def _device_sleep(ms: int) -> None:
+    """Sleep for ``ms`` milliseconds on the current accelerator.
+
+    Uses the device-side ``_sleep`` when the accelerator's device module
+    provides one (keeping the device busy so FSDP stream/overlap logic is
+    actually exercised); otherwise falls back to host-side ``time.sleep``.
+    This lets delay tests run on any accelerator instead of silently no-op'ing
+    on backends that are not hard-coded in the original CUDA/HPU/XPU branches.
+    """
+    device_module = torch.get_device_module(DEVICE_TYPE)
+    if hasattr(device_module, "_sleep"):
+        device_module._sleep(int(ms * get_cycles_per_ms(DEVICE_TYPE)))
+    else:
+        time.sleep(ms / 1000)
 
 
 class FSDPInitMode(Enum):
@@ -655,14 +669,7 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU:
-                time.sleep(self.delay_after_loss_ms / 1000)
-            elif TEST_XPU:
-                torch.xpu._sleep(
-                    int(self.delay_after_loss_ms * get_cycles_per_ms("xpu"))
-                )
-            elif TEST_CUDA:
-                torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
+            _device_sleep(self.delay_after_loss_ms)
 
         return loss
 
@@ -671,16 +678,7 @@ class ModuleWithDelay(FSDPTestModel):
 
         def _delayed_reduce_scatter(*args, **kwargs):
             if self.delay_before_reduction_ms > 0:
-                if TEST_CUDA:
-                    torch.cuda._sleep(
-                        int(self.delay_before_reduction_ms * get_cycles_per_ms())
-                    )
-                elif TEST_XPU:
-                    torch.xpu._sleep(
-                        int(self.delay_before_reduction_ms * get_cycles_per_ms("xpu"))
-                    )
-                elif TEST_HPU:
-                    time.sleep(self.delay_before_reduction_ms / 1000)
+                _device_sleep(self.delay_before_reduction_ms)
             return orig_reduce_scatter(*args, **kwargs)
 
         with mock.patch(
@@ -814,17 +812,7 @@ class MixtureOfExperts(NestedWrappedModule):
                 orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
 
                 def _delayed_reshard(*args, **kwargs):
-                    if TEST_CUDA:
-                        torch.cuda._sleep(
-                            int(self.delay_before_free_ms * get_cycles_per_ms())
-                        )
-                    elif TEST_XPU:
-                        torch.xpu._sleep(
-                            int(self.delay_before_free_ms * get_cycles_per_ms("xpu"))
-                        )
-                    elif TEST_HPU:
-                        time.sleep(self.delay_before_free_ms / 1000)
-
+                    _device_sleep(self.delay_before_free_ms)
                     return orig_reshard(*args, **kwargs)
 
                 # This patch covers any `import torch..._reshard` uses.
