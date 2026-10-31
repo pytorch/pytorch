@@ -213,6 +213,19 @@ FSDP_FLATTENED = "_fsdp_flattened"
 # heuristic like this to predict the desired output dtype.
 _MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
+# Attributes FSDP requires on any fast-path backend module; memory_summary,
+# used only for DebugLevel.DETAIL logging, is deliberately not required.
+_HANDLE_REQUIRED_ATTRS: tuple[str, ...] = (
+    "current_stream",
+    "stream",
+    "synchronize",
+    "device_count",
+    "current_device",
+    "is_available",
+    "Event",
+    "Stream",
+)
+
 
 class _FSDPDeviceHandle:
     """
@@ -220,6 +233,10 @@ class _FSDPDeviceHandle:
     which enables custom backends that implement CUDA-like
     semantics to be integrated with FSDP.
     """
+
+    # Return these backend modules directly to avoid proxy overhead.
+    # Other backends are accessed through the device-handle proxy.
+    _FAST_PATH_BACKENDS: set[str] = {"cuda", "mtia"}
 
     def __init__(self, device: torch.device, backend: Any = None):
         if backend is None:
@@ -232,19 +249,59 @@ class _FSDPDeviceHandle:
                 ) from exc
         else:
             self.__backend = backend
+            self.__device = device
+
+    @classmethod
+    def register_fast_path_backend(cls, device_type: str) -> None:
+        """
+        Register a device type whose backend module is returned directly
+        from ``from_device`` instead of being wrapped in the
+        attribute-forwarding proxy.
+
+        The backend must already be registered as ``torch.<device_type>``
+        and must implement every attribute in ``_HANDLE_REQUIRED_ATTRS``.
+        Must be called at import time in a single-threaded context; not
+        thread-safe.
+        """
+        backend = getattr(torch, device_type, None)
+        if backend is None:
+            raise AttributeError(
+                f"Device type '{device_type}' does not have a corresponding backend "
+                f"registered as 'torch.{device_type}'."
+            )
+        missing = [a for a in _HANDLE_REQUIRED_ATTRS if not hasattr(backend, a)]
+        if missing:
+            raise AttributeError(
+                f"Backend 'torch.{device_type}' is missing attributes required by "
+                f"FSDP: {', '.join(missing)}."
+            )
+        cls._FAST_PATH_BACKENDS.add(device_type)
+
+    @classmethod
+    def unregister_fast_path_backend(cls, device_type: str) -> None:
+        """
+        Remove a device type from the direct-return registry so subsequent
+        ``from_device`` calls wrap it in the proxy. Existing handles are
+        unaffected. Removing an unregistered device type is a no-op. Must
+        be called at import time in a single-threaded context; not
+        thread-safe.
+        """
+        cls._FAST_PATH_BACKENDS.discard(device_type)
 
     @classmethod
     def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
-        Return a device handle corresponding to the device, and through this handle,
-        operations with the same semantics as CUDA can be performed on the device.
-        Just return torch.cuda if the device is cuda to make attribute-access faster.
-        Custom backend must first register a module with the same name with {device.type} on torch.
+        Return a device handle corresponding to the device.
+
+        Registered fast-path backends return ``torch.<device_type>``
+        directly to avoid proxy overhead. Other backends use a proxy
+        that forwards attribute access to the corresponding module.
+
+        Custom backends must first register their module as
+        ``torch.<device_type>``.
         """
-        if device.type == "cuda":
-            return cast(_FSDPDeviceHandle, torch.cuda)
-        elif device.type == "mtia":
-            return cast(_FSDPDeviceHandle, torch.mtia)
+        if device.type in cls._FAST_PATH_BACKENDS:
+            return cast(_FSDPDeviceHandle, getattr(torch, device.type))
         return cls(device)
 
     def __getattr__(self, name: str, /) -> Any:
