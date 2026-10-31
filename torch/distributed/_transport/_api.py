@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import numbers
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from functools import partial
 from typing import Any, cast, Literal, Protocol, runtime_checkable, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
+import torch.distributed as dist
 from torch.distributed import Work
 
 from ._work import _validate_timeout, wait_all
@@ -16,6 +20,10 @@ if TYPE_CHECKING:
     import builtins
 
     from ._cuda_stream import _CudaStreamOrdering
+
+
+# TCPStore polls with an int millisecond timeout.
+_MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
 
 
 @runtime_checkable
@@ -161,7 +169,12 @@ class Transport(ABC):
 
     @abstractmethod
     def bind(self, *, timeout: float | None = None) -> bytes:
-        """Bind the endpoint and return its opaque connection URL."""
+        """Bind the endpoint and return its opaque connection URL.
+
+        Implementations must support repeated calls on an open transport,
+        returning its current connection bytes; ``connect_rank`` binds on each
+        call.
+        """
 
     @abstractmethod
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
@@ -172,9 +185,120 @@ class Transport(ABC):
         disconnect; ``close`` releases all peers. Transfers to descriptors naming
         an unconnected peer raise ``ValueError``.
 
-        Rank-to-endpoint lookup belongs in a separate application control-plane
-        adapter; this interface addresses peers using opaque connection bytes.
+        Peers are addressed by opaque connection bytes; ``connect_rank``
+        exchanges them through a Store by rank.
         """
+
+    def connect_rank(
+        self,
+        peer_rank: int,
+        *,
+        store: dist.Store | None = None,
+        rank: int | None = None,
+        tag: str,
+        timeout: float | timedelta | None = None,
+    ) -> int:
+        """Connect to the peer identified by ``peer_rank`` through a Store.
+
+        Both peers call this with each other's identity. It binds, exchanges
+        connection bytes through the Store, connects, and returns zero on
+        success. It blocks until the peer makes the matching call or a timeout
+        expires.
+
+        Args:
+            peer_rank: Nonnegative integer identifying the peer in this Store namespace.
+            store: Trusted rendezvous Store, such as ``torch.distributed.TCPStore``;
+                defaults to the default process group's Store. No collectives are
+                performed. ``bind()`` bytes may describe registered memory, such
+                as NIXL agent metadata; each peer deletes the peer bytes it reads,
+                best effort. Per-pair attempt counters persist, as can endpoint
+                bytes and small markers after timeouts and other failures. The
+                Store must implement an atomic ``compare_set``.
+            rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
+                explicit override requires no initialized process group. Identities
+                need not be contiguous, but must be distinct for the two peers.
+            tag: Rendezvous namespace; both peers must pass the same tag. Use
+                a distinct tag for each component connecting the same rank pair.
+            timeout: Timeout for each of bind, the Store wait, and connect, in
+                seconds or as a ``timedelta``, from 1 ms to about 24.8 days (Store
+                waits use 32-bit milliseconds). ``None`` uses the transport's
+                default timeout, such as NIXL's constructor ``timeout``, which must
+                then be in this range. Without one, the backend's and the Store's
+                timeouts apply; with ``store=None``, the wait then holds the
+                default Store's client, shared with the default process group, for
+                up to the Store's timeout.
+
+        Calls are matched in order per rank pair and tag: the Nth call on each
+        peer connects to the other's Nth call, including calls that failed after
+        validating their arguments. When connecting to several peers, call in a
+        consistent order on all ranks, such as ascending peer rank, or from
+        separate threads if the backend's ``bind`` and ``connect`` are
+        thread-safe, as NIXL's are. Give each thread its own Store client, such
+        as ``store.clone()``: a ``TCPStore`` client blocks other calls while it
+        waits, and ``store=None`` shares the default Store's client. Cyclic
+        waits time out. A call whose wait fails, such as by timing out, claims
+        the peer's slot, so the peer's matching call fails too, unless the peer
+        already published and both proceed. Other failures, such as in
+        ``connect``, do not imply that the peer's call failed.
+        """
+        if type(tag) is not str:
+            raise TypeError("tag must be a string")
+        timeout = self._default_timeout if timeout is None else timeout
+        wait = None
+        if timeout is not None:
+            if isinstance(timeout, timedelta):
+                timeout = timeout.total_seconds()
+            if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
+                raise TypeError("timeout must be seconds or a timedelta")
+            timeout = float(timeout)
+            if not 0.001 <= timeout <= _MAX_STORE_TIMEOUT:
+                raise ValueError(
+                    f"timeout must be in [1 ms, 2**31 - 1 ms], got {timeout} s"
+                )
+            wait = timedelta(seconds=timeout)
+        rank = dist.get_rank() if rank is None else rank
+        store = dist.distributed_c10d._get_default_store() if store is None else store
+        if type(rank) is not int or rank < 0:
+            raise ValueError("rank must be a nonnegative integer")
+        if type(peer_rank) is not int or peer_rank < 0:
+            raise ValueError("peer_rank must be a nonnegative integer")
+        if peer_rank == rank:
+            raise ValueError("peer_rank must differ from the local rank")
+        pair = f"transport_connect_rank/{tag}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
+        attempt = store.add(f"{pair}/attempts/{rank}", 1)
+        root, store = store, dist.PrefixStore(f"{pair}/{attempt}", store)
+        url = b"\x01" + self.bind(timeout=timeout)
+
+        def discard(*keys):
+            # Best effort: some Stores do not implement delete_key or raise
+            # for missing keys, and PrefixStore's deleteKey does not reach
+            # Python overrides.
+            for key in keys:
+                with contextlib.suppress(Exception):
+                    root.delete_key(f"{pair}/{attempt}/{key}")
+
+        # compare_set decides whether our bytes or the b"\x00" of a peer that
+        # stopped waiting land; the prefix keeps them distinct. Waiters wait on
+        # a separate flag: legacy TCPStore's compare_set does not wake them.
+        # pyrefly: ignore [bad-argument-type]
+        if store.compare_set(str(rank), b"", url) != url:
+            discard(rank)
+            raise RuntimeError(f"peer {peer_rank} stopped waiting for this call")
+        store.set(f"{rank}/ready", "1")
+        try:
+            store.wait([f"{peer_rank}/ready"], *([] if wait is None else [wait]))
+        except Exception:
+            # Fail the peer's late call too, keeping attempts matched.
+            # pyrefly: ignore [bad-argument-type]
+            peer_url = store.compare_set(str(peer_rank), b"", b"\x00")
+            if peer_url == b"\x00":
+                discard(rank, f"{rank}/ready")
+                raise
+        else:
+            peer_url = store.get(str(peer_rank))
+        # Only this call reads the peer's bytes; later calls use new attempts.
+        discard(peer_rank, f"{peer_rank}/ready")
+        return self.connect(peer_url[1:], timeout=timeout)
 
     @abstractmethod
     def connected(self) -> bool:
