@@ -6007,7 +6007,7 @@ Examples::
 add_docstr(
     torch.kthvalue,
     r"""
-kthvalue(input, k, dim=None, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+kthvalue(input, k, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
 smallest element of each row of the :attr:`input` tensor in the given dimension
@@ -11879,7 +11879,7 @@ Alias for :func:`torch.nn.functional.softmax`.
 add_docstr(
     torch.topk,
     r"""
-topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
+topk(input, k, dim=-1, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` largest elements of the given :attr:`input` tensor along
 a given dimension.
