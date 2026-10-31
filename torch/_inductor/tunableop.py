@@ -34,7 +34,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from .autotune_process import TuningProcess
+    from .autotune_process import TensorMeta, TuningProcess
     from .select_algorithm import ExternKernelCaller
 
 
@@ -684,6 +684,136 @@ _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 _TUNABLEOP_MAX_DYN_SYM = 16384
 
 
+def _has(expr: Any, s: sympy.Symbol) -> bool:
+    return s in getattr(expr, "free_symbols", ())
+
+
+def _as_buffer(node: Any) -> Any:
+    """A Layout wrapped so it answers get_size/get_stride like a Buffer.
+
+    Same wrapping TensorMeta.from_irnodes does; a bare Layout has neither.
+    """
+    return ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
+
+
+def _node_sig(n: Any) -> Any:
+    """(dtype, sizes, strides) as strings, or None if the node cannot be read.
+
+    Goes through _as_buffer because winner.layout is a Layout: reading its
+    stride any other way drops it, and two GEMMs differing only in output
+    layout then share a memo key.
+    """
+    try:
+        b = _as_buffer(n)
+        return (
+            str(b.get_dtype()),
+            tuple(str(x) for x in b.get_size()),
+            tuple(str(x) for x in b.get_stride()),
+        )
+    except (AttributeError, TypeError):
+        return None
+
+
+def _declared(expr: Any) -> tuple[int | None, int | None]:
+    """(lower, upper) from ShapeEnv, each None when unbounded or symbolic.
+
+    This range is the ladder's domain. It ignores guards and runtime asserts so
+    it can be looser than the true bound, which is the safe direction:
+    under-covering means a runtime miss.
+    """
+    try:
+        vr = V.graph.sizevars.shape_env.bound_sympy(expr)
+    except (AttributeError, TypeError, ValueError, KeyError):
+        # No usable range: unbacked symbol, or no shape env at all.
+        return None, None
+    lo = hi = None
+    try:
+        if vr.lower != -int_oo and vr.lower != -sympy.oo:
+            lo = int(vr.lower)
+    except (TypeError, ValueError):  # symbolic bound
+        pass
+    try:
+        if vr.upper != int_oo and vr.upper != sympy.oo:
+            hi = int(vr.upper)
+    except (TypeError, ValueError):  # symbolic bound
+        pass
+    return lo, hi
+
+
+def _eval_at(expr: Any, sym_val: int, s: sympy.Symbol) -> int:
+    """Value of a size expression with the dynamic symbol set to sym_val."""
+    if isinstance(expr, sympy.Expr) and expr.free_symbols:
+        return int(V.graph.sizevars.optimization_hint(expr.subs(s, sym_val)))
+    return int(expr)
+
+
+def _is_densely_packed(node: Any) -> bool:
+    """Traced strides are the dense strides for the traced sizes.
+
+    _meta_at recomputes strides densely, so a padded operand would be tuned at
+    the wrong leading dimension -- [s, 256] strided [300, 1] becomes [256, 1].
+    TunableOp keys on ld, so such an entry can never match the runtime call,
+    and the nearest matcher will not borrow across a padded ld either.
+    """
+    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
+
+    sizevars = V.graph.sizevars
+    n = _as_buffer(node)
+    real_strides = [
+        int(x)
+        for x in sizevars.optimization_hints(get_strides_with_layout_constraints(n))
+    ]
+    real_sizes = [int(x) for x in sizevars.optimization_hints(n.get_size())]
+    order = ir.get_stride_order(real_strides)
+    dense = [int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)]
+    return real_strides == dense
+
+
+def _meta_at(node: Any, sym_val: int, s: sympy.Symbol) -> TensorMeta:
+    """The node's TensorMeta with the dynamic symbol set to sym_val.
+
+    Substitutes into the SIZE expressions only, then recomputes dense strides: a
+    stride expression is not a size-product formula in the symbol, and a
+    bare-symbol batch stride would collapse to the bucket value instead of
+    value * inner_dims. The stride ORDER comes from the traced real-size
+    strides, since small-bucket strides can reorder dims and silently turn a
+    plain GEMM into a transposed one.
+    """
+    from torch._inductor.autotune_process import TensorMeta as _TensorMeta
+    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
+
+    n = _as_buffer(node)
+    sizes = [_eval_at(sz, sym_val, s) for sz in n.get_size()]
+    traced = V.graph.sizevars.optimization_hints(get_strides_with_layout_constraints(n))
+    if any(st == 0 for st in traced):
+        # A broadcast operand -- only the exempt bias reaches here, the density
+        # guard rejects the rest. Its stride-0 dims tie, so the inferred order
+        # is arbitrary; fall back to natural contiguous.
+        strides = [int(x) for x in ir.FlexibleLayout.contiguous_strides(sizes)]
+    else:
+        order = ir.get_stride_order(traced)
+        strides = [int(x) for x in ir.FlexibleLayout.stride_ordered(sizes, order)]
+    return _TensorMeta(
+        device=n.get_device(),
+        dtype=n.get_dtype(),
+        sizes=sizes,
+        strides=strides,
+        offset=0,
+        name=n.get_name(),
+    )
+
+
+def _meta_bytes(m: Any) -> float:
+    # inf, not 0: a size we cannot compute must fail the cap, not pass it.
+    try:
+        numel = 1
+        for d in m.sizes:
+            numel *= int(d)
+        return numel * m.dtype.itemsize
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return float("inf")
+
+
 def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     """Tune a dynamic-shape GEMM at a range of sizes of its dynamic dim.
 
@@ -714,15 +844,12 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     layout_device = getattr(winner.layout, "device", None)
     if layout_device is None or layout_device.type != "cuda":
         return
-    # Match on the underlying ExternKernelChoice name. ExternKernelCaller
-    # always sets self.choice (and its own name from it). Compared by string
-    # so a double import of the kernel modules cannot break the match. Covers
-    # the _dtype out-variants and _scaled_mm_v2; _int_mm and the sparse
-    # variants are not hipBLASLt-tunable.
+    # ExternKernelCaller always sets self.choice; match on that rather than
+    # winner.name, so the _dtype and v2 variants route correctly.
     choice_name = winner.choice.name
     if not is_tunableop_gemm(choice_name):
         return
-    if getattr(winner, "bmreq", None) is None:
+    if winner.bmreq is None:
         return
 
     # Require exactly one free symbol across the operands (one dynamic dim).
@@ -752,21 +879,18 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if len(a_sz) < 2 or len(b_sz) < 2:
         return
 
-    def _has(expr: Any) -> bool:
-        return s in getattr(expr, "free_symbols", ())
-
     dims: OrderedSet[str] = OrderedSet()
     dyn_expr: Any = None  # size expression of the single dynamic dim
-    if _has(a_sz[-2]):  # A is [..., M, K]
+    if _has(a_sz[-2], s):  # A is [..., M, K]
         dims.add("M")
         dyn_expr = a_sz[-2]
-    if _has(b_sz[-1]):  # B is [..., K, N]
+    if _has(b_sz[-1], s):  # B is [..., K, N]
         dims.add("N")
         dyn_expr = b_sz[-1]
-    if _has(a_sz[-1]) or _has(b_sz[-2]):  # contraction dim K
+    if _has(a_sz[-1], s) or _has(b_sz[-2], s):  # contraction dim K
         dims.add("K")
     for sz in list(a_sz[:-2]) + list(b_sz[:-2]):  # leading batch dims (bmm)
-        if _has(sz):
+        if _has(sz, s):
             dims.add("B")
             dyn_expr = sz
     # Exactly one axis. dyn_expr holds whichever axis was seen last, and the
@@ -779,13 +903,8 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if "K" in dims or len(dims) != 1 or dyn_expr is None:
         return
 
-    # The ladder walks the SYMBOL, not the dim: for a dim like 200*s, stepping the
-    # dim through powers of two would tune sizes it can never take. The domain is
-    # the symbol's declared ShapeEnv range, which ignores guards and runtime
-    # asserts and so can be looser than the true bound -- the safe direction,
-    # since under-covering means a runtime miss.
-    sizevars = V.graph.sizevars
-
+    # The ladder walks the SYMBOL, not the dim: for a dim like 200*s, stepping
+    # the dim through powers of two would tune sizes it can never take.
     # Skip repeat GEMMs: identical layers in one model (and recompiles) share
     # traced metas, so the first ladder already recorded every bucket. Keyed on
     # the SYMBOLIC sizes and strides (not hints: mm([s,256],[256,512]) and
@@ -794,53 +913,10 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # worker is keyed on -- a second compile targeting another device or file
     # must not skip. Strides included: mm(A,B) and mm(A,B_colmajor) are both
     # dense with different TunableOp signatures (NN vs NT).
-    def _as_buffer(node: Any) -> Any:
-        return (
-            ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
-        )
-
-    def _node_sig(n: Any) -> Any:
-        # Via _as_buffer: winner.layout is a Layout, which has no get_stride.
-        # Probing for one and falling back left the output stride out of the
-        # signature, so two GEMMs differing only in output layout collided in
-        # the memo and the second was never tuned.
-        try:
-            b = _as_buffer(n)
-            return (
-                str(b.get_dtype()),
-                tuple(str(x) for x in b.get_size()),
-                tuple(str(x) for x in b.get_stride()),
-            )
-        except (AttributeError, TypeError):
-            return None
+    sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
 
     try:
-        sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
-    except (AttributeError, TypeError):
-        sigs = [None]
-
-    def _declared(expr: Any) -> tuple[int | None, int | None]:
-        """(lower, upper) from ShapeEnv, each None when unbounded or symbolic."""
-        try:
-            vr = sizevars.shape_env.bound_sympy(expr)
-        except (AttributeError, TypeError, ValueError, KeyError):
-            # No usable range: unbacked symbol, or no shape env at all.
-            return None, None
-        lo = hi = None
-        try:
-            if vr.lower != -int_oo and vr.lower != -sympy.oo:
-                lo = int(vr.lower)
-        except (TypeError, ValueError):  # symbolic bound
-            pass
-        try:
-            if vr.upper != int_oo and vr.upper != sympy.oo:
-                hi = int(vr.upper)
-        except (TypeError, ValueError):  # symbolic bound
-            pass
-        return lo, hi
-
-    try:
-        sym_hint = sizevars.optimization_hint(s)
+        sym_hint = V.graph.sizevars.optimization_hint(s)
     except (AttributeError, TypeError, ValueError, KeyError):
         # No hint for this symbol, so there is no traced size to anchor on.
         return
@@ -872,12 +948,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if (key := _memo_key()) is not None and key in _pretuned_gemms.seen:
         return
 
-    def _eval_at(expr: Any, sym_val: int) -> int:
-        """Value of a size expression with the dynamic symbol set to sym_val."""
-        if isinstance(expr, sympy.Expr) and expr.free_symbols:
-            return int(sizevars.optimization_hint(expr.subs(s, sym_val)))
-        return int(expr)
-
     # The "too small to tune" threshold applies in DIM space, not symbol space:
     # for a dim like 200*s, s=2 is already a dim of 400, so starting the walk at
     # 8 would skip sizes runtime genuinely asks for.
@@ -893,7 +963,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # magnitude. Floored at the served dim, so the ceiling can never truncate
     # below the size the model actually runs.
     try:
-        served_dim = _eval_at(dyn_expr, sym_hint)
+        served_dim = _eval_at(dyn_expr, sym_hint, s)
     except (AttributeError, TypeError, ValueError):  # unevaluatable at the hint
         served_dim = 0
     dim_ceiling = max(_TUNABLEOP_MAX_DYN_SYM, served_dim)
@@ -902,7 +972,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     dim_vals: list[int] = []
     for sym_val in sym_vals:
         try:
-            dim_val = _eval_at(dyn_expr, sym_val)
+            dim_val = _eval_at(dyn_expr, sym_val, s)
         except (AttributeError, TypeError, ValueError):  # unevaluatable here
             continue
         if not (_TUNABLEOP_MIN_DYN_DIM <= dim_val <= dim_ceiling):
@@ -936,30 +1006,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not buckets:
         return
 
-    # Copy the winner's serializable bmreq and rebuild its tensor metas per
-    # bucket, reusing Inductor's meta machinery rather than rebuilding the GEMM.
-    from torch._inductor.autotune_process import TensorMeta
-    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
-
-    def _is_densely_packed(node: Any) -> bool:
-        """Traced strides are the dense strides for the traced sizes.
-
-        _meta_at recomputes strides densely, so a padded or broadcast operand
-        would be tuned at the wrong leading dimension -- [s, 256] strided
-        [300, 1] becomes [256, 1]. TunableOp keys on ld, so such an entry can
-        never match the runtime call, and the nearest matcher will not borrow
-        across a padded ld either. Tuning it is pure waste; skip instead.
-        """
-        n = _as_buffer(node)
-        real_strides = [
-            int(x)
-            for x in sizevars.optimization_hints(get_strides_with_layout_constraints(n))
-        ]
-        real_sizes = [int(x) for x in sizevars.optimization_hints(n.get_size())]
-        order = ir.get_stride_order(real_strides)
-        dense = [int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)]
-        return real_strides == dense
-
     try:
         operands = [*winner.input_nodes, winner.layout]
         if bias_first:
@@ -988,39 +1034,16 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         )
         return
 
-    def _meta_at(node: Any, sym_val: int) -> TensorMeta:
-        n = _as_buffer(node)
-        # Substitute into the SIZE expressions only, then recompute dense strides:
-        # a stride expression is not a size-product formula in the symbol, and a
-        # bare-symbol batch stride would collapse to the bucket value instead of
-        # value * inner_dims. The stride ORDER must come from the traced real-size
-        # strides, since small-bucket strides can reorder dims and silently turn a
-        # plain GEMM into a transposed one.
-        sizes = [_eval_at(sz, sym_val) for sz in n.get_size()]
-        traced = sizevars.optimization_hints(get_strides_with_layout_constraints(n))
-        if any(st == 0 for st in traced):
-            # A broadcast operand -- only the exempt bias reaches here, the
-            # density guard rejects the rest. Its stride-0 dims tie, so the
-            # inferred order is arbitrary; fall back to natural contiguous.
-            strides = [int(x) for x in ir.FlexibleLayout.contiguous_strides(sizes)]
-        else:
-            order = ir.get_stride_order(traced)
-            strides = [int(x) for x in ir.FlexibleLayout.stride_ordered(sizes, order)]
-        return TensorMeta(
-            device=n.get_device(),
-            dtype=n.get_dtype(),
-            sizes=sizes,
-            strides=strides,
-            offset=0,
-            name=n.get_name(),
-        )
-
+    # Copy the winner's serializable bmreq and rebuild its tensor metas per
+    # bucket, reusing Inductor's meta machinery rather than rebuilding the GEMM.
     bmreqs: list[Any] = []
     try:
         for v in buckets:
             sized_bmreq: Any = copy.copy(winner.bmreq)
-            sized_bmreq.input_tensor_meta = [_meta_at(n, v) for n in winner.input_nodes]
-            sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v)
+            sized_bmreq.input_tensor_meta = [
+                _meta_at(n, v, s) for n in winner.input_nodes
+            ]
+            sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v, s)
             bmreqs.append(sized_bmreq)
     except (AttributeError, TypeError, ValueError, IndexError, KeyError) as e:
         # A meta we cannot rebuild must not fail the compile, but it is a defect
@@ -1036,20 +1059,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not bmreqs:
         return
 
-    # Drop buckets no GPU could materialize. The dim ceiling bounds the dynamic
-    # dim, not the problem size: a bmm with dynamic batch at dim 16384 and
-    # K = N = 4096 fp16 is 512 GiB per operand, and the biggest sizes run early
-    # -- each fault can cost a cold worker restart.
-    def _meta_bytes(m: Any) -> float:
-        # inf, not 0: a size we cannot compute must fail the cap, not pass it.
-        try:
-            numel = 1
-            for d in m.sizes:
-                numel *= int(d)
-            return numel * m.dtype.itemsize
-        except (AttributeError, TypeError, ValueError, OverflowError):
-            return float("inf")
-
+    # Drop buckets no GPU could materialize (see _TUNABLEOP_MAX_LADDER_BYTES).
     kept: list[Any] = []
     kept_dims: list[int] = []
     for bmreq, dim_val in zip(bmreqs, dim_vals):
