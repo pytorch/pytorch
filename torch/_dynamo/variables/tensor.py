@@ -365,6 +365,13 @@ class CurrentDeviceVariable(VariableTracker):
         )
 
 
+# Tensor method forms of the data-dependent linalg ops (see
+# DATA_DEPENDENT_LINALG_FUNCTIONS in variables/torch.py). Only "inverse"
+# is a genuine gap: Tensor.cholesky is a removed API that always raises
+# RuntimeError, so the existing handler path already covers it.
+DATA_DEPENDENT_LINALG_METHODS: frozenset[str] = frozenset({"inverse"})
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -1300,6 +1307,13 @@ class TensorVariable(VariableTracker):
         with ctx():
             result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(tx, version_before)
+
+        # Same data-dependent break as the function forms: a Tensor.inverse
+        # call inside an except handler region would compile into a graph
+        # that drops the handler, since fake tracing cannot see that the
+        # input is singular.
+        if name in DATA_DEPENDENT_LINALG_METHODS and tx.in_except_handler_region():
+            tx.raise_data_dependent_linalg_graph_break()
 
         return result
 

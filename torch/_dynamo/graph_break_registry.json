@@ -7003,5 +7003,16 @@
         "Please open an issue."
       ]
     }
+  ],
+  "GB9959": [
+    {
+      "Gb_type": "Data-dependent exception in try block",
+      "Context": "called a data-dependent linalg function inside a try block",
+      "Explanation": "Dynamo cannot trace an exception handler for errors that depend on tensor data (for example, a singular matrix for torch.linalg.inv or torch.inverse, or a non-positive-definite input for torch.linalg.cholesky): fake-tensor tracing succeeds, so the compiled graph would drop the handler and the error would escape at runtime instead of reaching the except block. Graph-breaking here may leave the enclosing function uncompiled: Dynamo can only roll back to an earlier checkpoint, which exists only with at least two graph calls before the try, outside it, with an empty stack; without one, the whole frame, including code before the try, runs eagerly, and so does every later call to that code object.",
+      "Hints": [
+        "Use torch.linalg.inv_ex or torch.linalg.cholesky_ex and branch on info.",
+        "Move the try/except outside the compiled region."
+      ]
+    }
   ]
 }

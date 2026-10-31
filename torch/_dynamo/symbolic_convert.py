@@ -1811,6 +1811,35 @@ class InstructionTranslatorBase(
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
+    def raise_data_dependent_linalg_graph_break(self) -> NoReturn:
+        # Single literal call site for the data-dependent linalg break, so
+        # the graph-break registry tooling sees one gb_type, one context,
+        # and one hints list instead of a constant expanded at two sites.
+        unimplemented(
+            gb_type="Data-dependent exception in try block",
+            context="called a data-dependent linalg function inside a try block",
+            explanation=(
+                "Dynamo cannot trace an exception handler for errors "
+                "that depend on tensor data (for example, a singular "
+                "matrix for torch.linalg.inv or torch.inverse, or a "
+                "non-positive-definite input for torch.linalg.cholesky): "
+                "fake-tensor tracing succeeds, so the compiled graph "
+                "would drop the handler and the error would escape at "
+                "runtime instead of reaching the except block. "
+                "Graph-breaking here may leave the enclosing function "
+                "uncompiled: Dynamo can only roll back to an earlier "
+                "checkpoint, which exists only with at least two graph "
+                "calls before the try, outside it, with an empty stack; "
+                "without one, the whole frame, including code before the "
+                "try, runs eagerly, and so does every later call to that "
+                "code object."
+            ),
+            hints=[
+                "Use torch.linalg.inv_ex or torch.linalg.cholesky_ex and branch on info.",
+                "Move the try/except outside the compiled region.",
+            ],
+        )
+
     def inline_generator_function(
         self,
         fn: BaseUserFunctionVariable,
@@ -4062,6 +4091,48 @@ class InstructionTranslatorBase(
             # Do not allow nested graph breaks in HOPs
             and self.output.current_tracer.parent is None
         )
+
+    def in_except_handler_region(self) -> bool:
+        # True when the current instruction, in this frame or in a caller
+        # frame through inlining, sits inside a try body whose except
+        # handler the compiled graph would drop. The check walks the
+        # translator chain because a call may be inlined from a helper
+        # whose own frame has no try, while the caller call site sits
+        # inside one. Per frame, it follows the exception table chain
+        # starting from the current instruction's own entry: each
+        # instruction has exactly one covering entry, and following each
+        # entry's target to the entry covering that target reaches the
+        # handler through with cleanups (a with entry routes to cleanup,
+        # and the cleanup entries route onward to the try handler). An
+        # entry counts as a handler entry when it is not a with cleanup
+        # entry (its target is a with block on the block stack, the same
+        # discriminator should_compile_partial_graph uses, and a with
+        # block catches nothing) and it is not marked lasti (handler
+        # body entries, which route an error raised inside a handler to
+        # cleanup, are marked lasti and protect no handler for it).
+        # try/finally entries count here: Dynamo itself treats finally
+        # regions as try blocks for partial graphs, so a call there
+        # still breaks (correct, only eager). Frames inside a
+        # comprehension never count: a bare comprehension has no handler,
+        # and a comprehension inside a try is not fixed by breaking
+        # (Dynamo's comprehension resume drops the outer handler anyway),
+        # so breaking there buys nothing; that shape stays a residual.
+        tx: InstructionTranslatorBase | None = self
+        while tx is not None:
+            if tx._comprehension_depth == 0:
+                entry = tx.current_instruction.exn_tab_entry
+                visited = set()
+                while entry is not None:
+                    if id(entry) in visited:
+                        break
+                    visited.add(id(entry))
+                    if not entry.lasti and not any(
+                        entry.target is block.target for block in tx.block_stack
+                    ):
+                        return True
+                    entry = entry.target.exn_tab_entry
+            tx = tx.parent
+        return False
 
     @break_graph_if_unsupported(
         push=False,
