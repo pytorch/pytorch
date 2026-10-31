@@ -3,9 +3,11 @@
 
 A review notifies the PR author and puts findings on their lines.
 
-Input is the terminal row (terminal.json) that emit_row.py already checked.
-Every string is checked again with the sanitizer's predicates; anything that
-fails is dropped, never repaired.
+`--row-file` posts the terminal row (terminal.json) that emit_row.py already
+checked. Every string is checked again with the sanitizer's predicates; anything
+that fails is dropped, never repaired. `--mark-pending` and `--restore-pending`
+take no row: they mark the previous review in progress for RUN_ID, or put it
+back (see Invariants).
 
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
@@ -23,7 +25,12 @@ Invariants:
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissal is a run retracting its own review because the
-  head moved. Failed, skipped and opted-out runs change nothing.
+  head moved.
+- While a run reviews, the newest visible review is marked in progress, its
+  body collapsed under a status line (`--mark-pending`). A run that ends
+  without replacing it, failed, skipped or opted out, puts the body back
+  (`--restore-pending`). Another run's mark is left alone, though with no
+  compare-and-set on review edits two runs writing at once can still clash.
 - `@pytorchbot` is escaped in all posted text, because pytorch-bot reads
   commands from review bodies.
 - API errors are warnings. The step fails only when an earlier change request
@@ -603,7 +610,7 @@ FOLDED_REVIEW = "<details><summary>Outdated automated review"
 
 def folded(review: dict, reason: str = SUPERSEDED) -> str:
     """The review's body inside a collapsed section, marker still first."""
-    rest = (review.get("body") or "")[len(MARKER) :].lstrip("\n")
+    rest = unwrapped(review.get("body") or "")[len(MARKER) :].lstrip("\n")
     sha = str(review.get("commit_id") or "")[:12]
     # Defused again: the body may come from an older version of this script,
     # and pytorch-bot reads edited review bodies.
@@ -619,6 +626,118 @@ def folded(review: dict, reason: str = SUPERSEDED) -> str:
             ]
         )
     )
+
+
+# A review marked in progress keeps its own body collapsed under a status line.
+# The tag names the run that marked it: only that run puts the body back.
+# `neutralize` escapes `<` in model prose, so no summary can forge the tag.
+PENDING_TAG = "<!-- hardened-pr-review-pending run="
+_PENDING_LINE = re.compile(r"<!-- hardened-pr-review-pending run=(\d+) -->")
+PREVIOUS_REVIEW = "<details><summary>Previous automated review"
+
+
+def pending_run(body: str) -> str | None:
+    """The run a review is marked in progress for, or None."""
+    lines = (body or "").replace("\r\n", "\n").split("\n")
+    m = len(lines) > 1 and lines[0] == MARKER and _PENDING_LINE.fullmatch(lines[1])
+    return m.group(1) if m else None
+
+
+def unwrapped(body: str) -> str:
+    """The body as it was before it was marked in progress. A marked body that
+    does not have the shape `pending` writes comes back unchanged."""
+    if pending_run(body) is None:
+        return body
+    lines = body.replace("\r\n", "\n").split("\n")
+    if (
+        len(lines) < 9
+        or not lines[4].startswith(PREVIOUS_REVIEW)
+        or lines[5:6] != [""]
+        or lines[-2:] != ["", "</details>"]
+    ):
+        return body
+    return "\n".join([MARKER, *lines[6:-2]])
+
+
+def pending(review: dict, run_id: str, sha: str, repo: str) -> str:
+    """`review` marked in progress for `run_id`, which reviews `sha`."""
+    rest = unwrapped(review.get("body") or "")[len(MARKER) :].lstrip("\n")
+    old = str(review.get("commit_id") or "")[:12]
+    return defuse_bot_commands(
+        "\n".join(
+            [
+                MARKER,
+                f"{PENDING_TAG}{run_id} -->",
+                f"\u23f3 **Automated review in progress** for {sha[:12]} "
+                f"([run](https://github.com/{repo}/actions/runs/{run_id})); "
+                "its result will replace this review.",
+                "",
+                f"{PREVIOUS_REVIEW} of {old}</summary>",
+                "",
+                rest,
+                "",
+                "</details>",
+            ]
+        )
+    )
+
+
+def mark_pending(
+    gh: GitHub, pr: int, sha: str, author: str, run_id: str, opt_out: str
+) -> None:
+    """Mark the newest visible review of this workflow in progress for `run_id`.
+
+    A mark by a newer run (run ids only grow) is left alone, so a delayed older
+    run cannot take it over and then put the body back while the newer runs.
+    """
+    if head_sha(gh, pr) != sha:
+        print("head moved; the run for the newer head marks the review")
+        return
+    if opted_out(gh, pr, opt_out):
+        print(f"PR carries '{opt_out}'; not marking")
+        return
+    visible, _ = earlier_reviews(gh, pr, author, sys.maxsize)
+    if not visible:
+        print("no visible automated review to mark")
+        return
+    newest = max(visible, key=lambda r: r["id"])
+    body = newest.get("body") or ""
+    owner = pending_run(body)
+    if body.startswith(f"{MARKER}\n{FOLDED_REVIEW}") or (
+        owner is not None and int(owner) >= int(run_id)
+    ):
+        return
+    gh.request(
+        "PUT",
+        f"/repos/{gh.repo}/pulls/{pr}/reviews/{newest['id']}",
+        {"body": pending(newest, run_id, sha, gh.repo)},
+    )
+    print(f"marked automated review {newest['id']} in progress")
+
+
+def restore_pending(gh: GitHub, pr: int, author: str, run_id: str) -> None:
+    """Put back the body of every review still marked in progress for `run_id`.
+
+    A review this run replaced was folded, which drops the mark, so what is
+    left is a review this run did not replace.
+    """
+    for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews"):
+        body = r.get("body") or ""
+        if (r.get("user") or {}).get("login") != author or pending_run(body) != run_id:
+            continue
+        original = unwrapped(body)
+        if original == body:
+            warn(f"review {r['id']} is marked in progress in a shape not ours")
+            continue
+        try:
+            gh.request(
+                "PUT",
+                f"/repos/{gh.repo}/pulls/{pr}/reviews/{r['id']}",
+                {"body": defuse_bot_commands(original)},
+            )
+            print(f"put back automated review {r['id']}")
+        except GitHubError as exc:
+            warn(f"could not put back review {r['id']}: {exc}")
 
 
 def fold(
@@ -913,6 +1032,13 @@ def withdraw(
             warn(f"could not dismiss review {r['id']}: {exc}")
 
 
+def opted_out(gh: GitHub, pr: int, opt_out: str) -> bool:
+    labels = (
+        gh.request("GET", f"/repos/{gh.repo}/issues/{pr}/labels?per_page=100") or []
+    )
+    return any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels)
+
+
 def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> int:
     review = load_review(row)
     current = head_sha(gh, pr)
@@ -920,10 +1046,7 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
         # A run for the newer head will handle it.
         print(f"head moved {sha} -> {current}; not posting a stale review")
         return 0
-    labels = (
-        gh.request("GET", f"/repos/{gh.repo}/issues/{pr}/labels?per_page=100") or []
-    )
-    if any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels):
+    if opted_out(gh, pr, opt_out):
         print(f"PR carries '{opt_out}'; not posting")
         return 0
     if review is None:
@@ -1055,11 +1178,40 @@ def hide_earlier(gh, pr, author, new):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--row-file", required=True, help="terminal.json from emit_row.py")
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--row-file", help="terminal.json from emit_row.py")
+    mode.add_argument(
+        "--mark-pending",
+        action="store_true",
+        help="mark the newest automated review in progress for RUN_ID",
+    )
+    mode.add_argument(
+        "--restore-pending",
+        action="store_true",
+        help="put back reviews still marked in progress for RUN_ID",
+    )
     args = ap.parse_args()
     try:
-        row = json.loads(Path(args.row_file).read_text())
         gh = GitHub(os.environ["GH_TOKEN"], os.environ["REPO"])
+        if args.mark_pending or args.restore_pending:
+            run_id = os.environ["RUN_ID"]
+            if not run_id.isdigit():
+                raise ValueError(f"RUN_ID is not a run id: {run_id!r}")
+            pr = int(os.environ["PR_NUMBER"])
+            author = os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR)
+            if args.mark_pending:
+                mark_pending(
+                    gh,
+                    pr,
+                    os.environ["REVIEWED_SHA"],
+                    author,
+                    run_id,
+                    os.environ.get("OPT_OUT_LABEL", "no automated review"),
+                )
+            else:
+                restore_pending(gh, pr, author, run_id)
+            return 0
+        row = json.loads(Path(args.row_file).read_text())
         return run(
             gh,
             row if isinstance(row, dict) else {},
@@ -1069,7 +1221,10 @@ def main() -> int:
             os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
         )
     except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
-        warn(f"automated review not posted: {exc!r}")
+        what = (
+            "posted" if args.row_file else "marked" if args.mark_pending else "put back"
+        )
+        warn(f"automated review not {what}: {exc!r}")
         return 0
 
 

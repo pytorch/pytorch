@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
+from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
@@ -371,6 +372,25 @@ class MPSBasicTests(TestCase):
 
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
+
+    def test_assert_async_message(self):
+        def fn(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        with self.assertRaisesRegex(torch.AcceleratorError, "x must be positive"):
+            torch.compile(fn, fullgraph=True)(-torch.ones(3, device="mps"))
+            torch.mps.synchronize()
+
+    def test_error_header_not_shared_across_kernels(self):
+        def with_assert(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        x = torch.ones(3, device="mps")
+        torch.compile(with_assert)(x)
+        _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2), x)
+        self.assertNotIn("error_buf", code)
 
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")

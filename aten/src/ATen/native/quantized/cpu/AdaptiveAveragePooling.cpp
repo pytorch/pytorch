@@ -71,20 +71,20 @@ void adaptive_avg_pool_single_out_frame(
   at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
     for (const auto c : c10::irange(start, end)) {
       /* loop over output */
-      for (int64_t od = 0; od < osizeD; od++) {
+      for (const auto od : c10::irange(osizeD)) {
         int istartD = start_index(od, osizeD, isizeD);
         int iendD = end_index(od, osizeD, isizeD);
         int kD = iendD - istartD;
         // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float kDr = 1.0 / kD;
-        for (int64_t oh = 0; oh < osizeH; oh++) {
+        for (const auto oh : c10::irange(osizeH)) {
           int istartH = start_index(oh, osizeH, isizeH);
           int iendH = end_index(oh, osizeH, isizeH);
           int kH = iendH - istartH;
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           float kDHr = kDr / kH;
 
-          for (int64_t ow = 0; ow < osizeW; ow++) {
+          for (const auto ow : c10::irange(osizeW)) {
             int istartW = start_index(ow, osizeW, isizeW);
             int iendW = end_index(ow, osizeW, isizeW);
             int kW = iendW - istartW;
@@ -105,9 +105,9 @@ void adaptive_avg_pool_single_out_frame(
 
             /* compute local average: */
             int64_t sum = 0;
-            for (int id = 0; id < kD; id++) {
-              for (int ih = 0; ih < kH; ih++) {
-                for (int iw = 0; iw < kW; iw++) {
+            for (const auto id : c10::irange(kD)) {
+              for (const auto ih : c10::irange(kH)) {
+                for (const auto iw : c10::irange(kW)) {
                   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
                   int64_t val = (ip +
                                  id * istrideD +

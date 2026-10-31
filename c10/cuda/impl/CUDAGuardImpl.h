@@ -22,7 +22,8 @@
 
 namespace c10::cuda::impl {
 
-struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct C10_CUDA_API CUDAGuardImpl final
+    : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
 
   CUDAGuardImpl() = default;
@@ -235,6 +236,12 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   bool isStreamCapturing(const Stream& stream) const override {
     CUDAStream cuda_stream{stream};
     return cuda_stream.is_capturing();
+  }
+
+  uint64_t getStreamCaptureId(const Stream& stream) const override;
+
+  void waitStream(const Stream& waiter, const Stream& source) const override {
+    stream_wait_stream(CUDAStream(waiter), CUDAStream(source));
   }
 
   void synchronizeEvent(void* event) const override {

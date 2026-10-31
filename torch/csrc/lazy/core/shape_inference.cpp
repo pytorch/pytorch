@@ -63,6 +63,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
@@ -217,7 +218,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
 
   std::vector<int64_t> new_shape;
   new_shape.reserve((size_t)l_diff);
-  for (size_t i = 0; i < (size_t)l_diff; i++) {
+  for (const auto i : c10::irange((size_t)l_diff)) {
     new_shape.emplace_back(input_sizes[i]);
   }
 

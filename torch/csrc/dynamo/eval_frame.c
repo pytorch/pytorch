@@ -199,17 +199,12 @@ DECLARE_PYOBJ_ATTR(f_code)
 static PyObject* THPPyInterpreterFrame_f_lasti(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
-#else
-  return PyLong_FromLong(self->frame->f_lasti);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_f_lineno(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   if (!self->frame->frame_obj) {
     return PyLong_FromLong(F_CODE(self->frame)->co_firstlineno);
   }
@@ -218,47 +213,22 @@ static PyObject* THPPyInterpreterFrame_f_lineno(
     Py_RETURN_NONE;
   }
   return PyLong_FromLong(lineno);
-#else
-  return PyLong_FromLong(self->frame->f_lineno);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_f_back(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   if (!self->frame->frame_obj) {
     Py_RETURN_NONE;
   }
   return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
-#else
-  return Py_XNewRef(self->frame->f_back);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_closure(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   PyObject* closure = FUNC(self->frame)->func_closure;
   return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
-#else
-  PyCodeObject* code = self->frame->f_code;
-  // Why this check? See
-  // https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1058-L1065
-  if (code->co_flags & CO_OPTIMIZED) {
-    int size = PyTuple_GET_SIZE(code->co_freevars);
-    PyObject* freevars = PyTuple_New(size);
-    int ncells = PyTuple_GET_SIZE(code->co_cellvars);
-    PyObject** freevarArr =
-        self->frame->f_localsplus + code->co_nlocals + ncells;
-    for (int i = 0; i < size; i++) {
-      PyTuple_SET_ITEM(freevars, i, Py_XNewRef(freevarArr[i]));
-    }
-    return freevars;
-  }
-  return PyTuple_New(0);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
@@ -375,8 +345,6 @@ static PyObject* dynamo_eval_custom_code_impl(
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
 
-#if IS_PYTHON_3_11_PLUS
-
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
   PyFunctionObject* old_func = FUNC(frame);
@@ -429,23 +397,6 @@ static PyObject* dynamo_eval_custom_code_impl(
   }
 #endif
 
-#else
-
-  THP_EVAL_API_FRAME_OBJECT* shadow =
-      PyFrame_New(tstate, code, frame->f_globals, NULL);
-  if (shadow == NULL) {
-    return NULL;
-  }
-
-  PyObject** fastlocals_old = frame->f_localsplus;
-  PyObject** fastlocals_new = shadow->f_localsplus;
-  Py_ssize_t n_old = F_CODE(frame)->co_nlocals +
-      PyCode_GetNFreevars(F_CODE(frame)) + PyCode_GetNCellvars(F_CODE(frame));
-  Py_ssize_t n_new =
-      code->co_nlocals + PyCode_GetNFreevars(code) + PyCode_GetNCellvars(code);
-
-#endif
-
   // ============== Initialize new frame from old frame ============
   // Python internal for executing a function:
   //  1. CPython interpreter first creates an empty frame according to the code
@@ -465,17 +416,13 @@ static PyObject* dynamo_eval_custom_code_impl(
   // |   args   |   new_locals    |    cell_variables |   free_variables    |
   // | <--- from left to right, index from 0 to n - 1 ---> |
   // code.co_varnames == args + new_locals, code.co_nlocals ==
-  // len(code.co_varnames) code.co_freevars == free_variables In Python 3.10 and
-  // lower, `n == code.co_nlocals + len(code.co_cellvars) +
-  // len(code.co_freevars)` (Python expression) In Python 3.11 and higher, `n <=
+  // len(code.co_varnames) code.co_freevars == free_variables, and `n <=
   // code.co_nlocals + len(code.co_cellvars) + len(code.co_freevars)` (Python
   // expression). There is an extra field in Python C-API: `n ==
   // code->co_nlocalsplus` (C expression) to retrieve the length of array. The
   // complexity happens if an argument becomes a cell variable:
-  //  In Python 3.10 and lower, `code.co_cellvars == cell_variables`, and the
-  //  corresponding slot in args becomes `NULL`. In Python 3.11 and higher,
-  //  `code.co_cellvars > cell_variables`, that cell variable is still stored in
-  //  args, with a flag set in corresponding item's `co_localspluskinds` .
+  // `code.co_cellvars > cell_variables`, that cell variable is still stored in
+  // args, with a flag set in corresponding item's `co_localspluskinds` .
   //
   // ideally, we need to look up new localsplus from old localsplus by name:
   // for i, name, value in enumerate(localsplusnames_old):
@@ -532,23 +479,12 @@ static PyObject* dynamo_eval_custom_code_impl(
   for (Py_ssize_t i = n_old - nfrees_old - 1, j = n_new - nfrees_old - 1;
        i >= total_argcount_old;
        i--, j--) {
-    // conditional test to tell if a variable is not a cell variable
-    // this is straightforward in Python 3.11 and higher, as there are bit flags
-    // in `co_localspluskinds` to tell if a variable is a cell variable. in
-    // Python 3.10 and lower, essentially we are checking if a variable is a new
-    // local variable (because of the layout mentioned above, the first variable
-    // that is not cell variable is the first new local variable). the
-    // corresponding slot in `flocalsplus` is NULL for new local variables.
-#if IS_PYTHON_3_11_PLUS
+    // conditional test to tell if a variable is not a cell variable, using the
+    // bit flags in `co_localspluskinds`.
     if (!(_PyLocals_GetKind(F_CODE(frame)->co_localspluskinds, i) &
           CO_FAST_CELL)) {
       break;
     }
-#else
-    if (fastlocals_old[i] == NULL) {
-      break;
-    }
-#endif
 
     dup_obj(&fastlocals_new[j], fastlocals_old[i]);
   }
@@ -565,17 +501,13 @@ static PyObject* dynamo_eval_custom_code_impl(
   // frame is cleared by caller
   Py_DECREF(func);
 
-#elif IS_PYTHON_3_11_PLUS
+#else
 
   // In 3.11, shadow has is_entry set to true, so _PyEvalFrameClearAndPop is not
   // called, so we manually clear and pop the shadow frame.
   THP_PyFrame_Clear(shadow);
   THP_PyThreadState_PopFrame(tstate, shadow);
   Py_DECREF(func);
-
-#else
-
-  Py_DECREF(shadow);
 
 #endif
 

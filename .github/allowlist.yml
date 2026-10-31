@@ -62,8 +62,14 @@ L2:
       events:
         - pull_request
         - nightly
-  - pytorch/crcr-test
+  - aws-neuron/private-torch-neuronx:
+      events:
+        - nightly
 
 L3:
   npu:
     Ascend/pytorch: [huangjingwei, kerer-ai, zyw-hw]
+
+L4:
+  # Canonical test repos for CRCR.
+  - pytorch/crcr-test: [atalman, can-gaa-hou, fffrog, jewelkm89, KarhouTam, subinz1]

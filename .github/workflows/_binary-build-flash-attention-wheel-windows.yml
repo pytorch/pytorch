@@ -37,8 +37,8 @@ jobs:
             cuda_short: "128"
             torch_cuda_arch_list: "8.0;8.6;9.0"
             runner: "windows.12xlarge"
-            # python 3.10 because 3.9 is not supported by torch >= 2.9; FA3 is ABI stable after 2.9
-            python_version: "3.10"
+            # FA3 is ABI stable after 2.9
+            python_version: "3.11"
             pytorch_version: "2.10.0"
             pytorch_min_version: "2.9.0"
             einops_version: "0.8.2"

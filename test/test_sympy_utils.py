@@ -234,6 +234,22 @@ class TestNumbers(TestCase):
         self.assertTrue(-int_oo > -sympy.oo)
         self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
 
+        # oo is "bigger" than int_oo, so mixing them in +/- gives the float
+        # infinity. https://github.com/pytorch/pytorch/issues/195464
+        oo = sympy.oo
+        self.assertIs(int_oo + oo, oo)
+        self.assertIs(int_oo + -oo, -oo)
+        self.assertIs(int_oo - oo, -oo)
+        self.assertIs(int_oo - -oo, oo)
+        self.assertIs(-int_oo + oo, oo)
+        self.assertIs(-int_oo + -oo, -oo)
+        self.assertIs(-int_oo - oo, -oo)
+        self.assertIs(-int_oo - -oo, oo)
+        # and + commutes
+        for a in (int_oo, -int_oo):
+            for b in (oo, -oo):
+                self.assertIs(a + b, b + a)
+
 
 class TestCppPrinter(TestCase):
     def test_min_max_preserve_float_expressions(self):

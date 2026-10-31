@@ -767,6 +767,7 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._subclasses.fake_tensor import maybe_clear_fake_constant
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -832,9 +833,8 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
+                cloned_carry = cast(TensorVariable, carry.clone())
+                maybe_clear_fake_constant(cloned_carry.proxy.node.meta["example_value"])
                 return cloned_carry
 
         # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
@@ -2355,7 +2355,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from torch._higher_order_ops import BaseHOP
 
         if isinstance(value, BaseHOP):
-            return BaseHOPVariable(value, source, **kwargs)
+            from .builder import VariableBuilder
+
+            return VariableBuilder.create_internal_base_hop(value, source, **kwargs)
         unimplemented(
             gb_type="unsupported HigherOrderOperator",
             context=str(value),
@@ -2427,15 +2429,17 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         if self.source is None:
             raise AssertionError("source must not be None")
         call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            torch._dynamo.variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 self.value.__call__.__func__,
                 source=AttrSource(call_source, "__func__"),
             ),
-            torch._dynamo.variables.UserDefinedObjectVariable(
+            VariableBuilder.create_internal_user_defined_object(
                 self.value, source=self.source
             ),
             source=call_source,
@@ -3854,6 +3858,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
+        # noqa: RVT001
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])  # type: ignore[arg-type]
 
 
@@ -5742,10 +5747,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
+                    rewritten = autograd_function_backward_rewritten(
+                        self.bwd_fn.__func__
+                    )
+                    fn_vt = SourcelessBuilder.create_internal_user_function(rewritten)
                     bwd_fn = UserMethodVariable(
-                        torch._dynamo.variables.UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        ),
+                        fn_vt,
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -6161,6 +6168,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         args: list[VariableTracker],
     ) -> tuple[VariableTracker, list[VariableTracker]]:
         from . import UserMethodVariable
+        from .builder import VariableBuilder
 
         source = None
         if self.parent_source:
@@ -6178,7 +6186,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                torch._dynamo.variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn.__func__,
                     source=source and AttrSource(source, "__func__"),
                 ),

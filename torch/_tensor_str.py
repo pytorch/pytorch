@@ -159,7 +159,7 @@ class _Formatter:
                 # no valid number, do nothing
                 return
 
-            if tensor.dtype == torch.float8_e8m0fnu:  # type: ignore[attr-defined]
+            if tensor.dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):  # type: ignore[attr-defined]
                 # float8_e8m0fnu is special and does not define arithmetic ops,
                 # and printing code further in this file assumes the existence
                 # of various arithmetic ops to figure out what to print. We hack

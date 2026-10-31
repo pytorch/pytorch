@@ -713,8 +713,9 @@ def _scan_for_missing_instrumentation(source, label):
 
     A compile site is any function carrying a DSL rule's ``jit_decorator`` or
     its ``combined_decorator``. A violation is such a site that isn't fully
-    instrumented (see :func:`_is_instrumented`). ``n_compile_sites`` lets
-    callers assert the scan saw something rather than passing vacuously.
+    instrumented (see :func:`_is_instrumented`).
+    ``n_compile_sites`` lets callers assert the scan saw something rather than
+    passing vacuously.
     """
     violations = []
     n_compile_sites = 0
@@ -826,9 +827,11 @@ class TestInstrumentationCoverage(TestCase):
         checked = 0
         for path in self._native_files():
             with open(path) as f:
-                violations, n = _scan_for_missing_instrumentation(
-                    f.read(), os.path.relpath(path).replace(os.sep, "/")
-                )
+                source = f.read()
+            violations, n = _scan_for_missing_instrumentation(
+                source,
+                os.path.relpath(path).replace(os.sep, "/"),
+            )
             missing += violations
             checked += n
 

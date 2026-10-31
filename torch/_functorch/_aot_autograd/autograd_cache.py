@@ -173,7 +173,10 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
     if dist.get_world_size() < 2:
         return local_hit
 
-    from torch._dynamo.distributed import get_compile_sync_pg
+    from torch._dynamo.distributed import (
+        _compile_sync_pg_available,
+        get_compile_sync_pg,
+    )
 
     if not config._sync_cache_decision_cross_ranks:
         # Nothing to decide, but _sync_decision_cross_ranks builds this same group lazily
@@ -181,9 +184,10 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
         # missed: a subset of ranks building a group hangs in the rendezvous, and worse,
         # advances _world.group_count only on those ranks, which is the salt every later
         # group name is derived from. Build it here instead, where every rank is. Skipped
-        # without gloo so such a build keeps failing where it did before, in the
-        # partitioner and only for the graphs it actually syncs.
-        if config._sync_decision_cross_ranks and dist.is_gloo_available():
+        # where the group cannot be built (a real world without gloo), so such a build
+        # keeps failing where it did before, in the partitioner and only for the graphs
+        # it actually syncs.
+        if config._sync_decision_cross_ranks and _compile_sync_pg_available():
             get_compile_sync_pg()
         return local_hit
 

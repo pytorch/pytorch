@@ -1960,8 +1960,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -11059,6 +11058,35 @@ from user code:
 
         for eg, cg in zip(eager_grads, compiled_grads):
             self.assertEqual(eg, cg)
+
+    def test_cross_aot_compile_parameter(self):
+        # The loaded guards must expect a Parameter where a fake Parameter was
+        # compiled, though that fake records no pytype
+        def fn(x, w):
+            return x @ w
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = torch.randn(2, 4)
+            made_under_mode = torch.nn.Parameter(torch.randn(4, 4))
+        converted = fake_mode.from_tensor(torch.nn.Parameter(torch.randn(4, 4)))
+        fake_ws = {"made_under_mode": made_under_mode, "converted": converted}
+        for name, fake_w in fake_ws.items():
+            with self.subTest(name):
+                compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+                aot_fn = compiled_fn.aot_compile(((fake_x, fake_w), {}))
+                aot_fn.save_compiled_function(self.path())
+                torch._dynamo.reset()
+
+                with open(self.path(), "rb") as f:
+                    loaded_fn = torch.compiler.load_compiled_function(f)
+
+                x, w = torch.randn(2, 4), torch.nn.Parameter(torch.randn(4, 4))
+                self.assertEqual(loaded_fn(x, w), fn(x, w))
+                # Differs from w only in type
+                plain_w = w.detach().requires_grad_()
+                with self.assertRaisesRegex(RuntimeError, "expected type of"):
+                    loaded_fn(x, plain_w)
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not HAS_GPU, "requires gpu")

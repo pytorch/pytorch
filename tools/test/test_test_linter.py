@@ -48,7 +48,7 @@ class TestHwClassificationLinter(unittest.TestCase):
         msgs = self._run("this is not valid python @@@")
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0].name, test_linter.PARSE_ERROR_NAME)
-        self.assertEqual(msgs[0].severity, LintSeverity.ADVICE)
+        self.assertEqual(msgs[0].severity, LintSeverity.ERROR)
         self.assertEqual(msgs[0].line, 1)
         self.assertEqual(
             msgs[0].description, "Failed to parse the file: invalid syntax"
@@ -61,7 +61,7 @@ class TestHwClassificationLinter(unittest.TestCase):
     def test_lint_msg_defaults(self) -> None:
         """Pin lint_msg defaults so tests don't silently inherit a wrong severity/code."""
         msg = lint_msg(name="[test]", path="some.py", line=None, description="boom")
-        self.assertEqual(msg.severity, LintSeverity.ADVICE)
+        self.assertEqual(msg.severity, LintSeverity.ERROR)
         self.assertEqual(msg.code, "TEST_LINTER")
 
     # --- allowlist ---

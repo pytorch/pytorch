@@ -466,6 +466,7 @@ PickleOpCode Unpickler::readInstruction() {
           " and start index is ",
           start,
           ", but stack_ is iterated by two elements at a time");
+      dict.reserve((stack_.size() - start) / 2);
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
@@ -488,6 +489,7 @@ PickleOpCode Unpickler::readInstruction() {
           " and start index is ",
           start,
           ", but stack_ is iterated by two elements at a time");
+      dict.reserve(dict.size() + (stack_.size() - start) / 2);
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
@@ -662,7 +664,7 @@ PickleOpCode Unpickler::readInstruction() {
           reinterpret_cast<void*>(opcode),
           ": ",
           int(static_cast<uint8_t>(opcode)));
-    } break;
+    }
   }
   return opcode;
 }
@@ -951,7 +953,6 @@ void Unpickler::rebuildSparseTensor() {
             false,
             "Unsupported sparse tensor layout type in serialization ",
             static_cast<c10::Layout>(layout));
-        break;
     }
     stack_.emplace_back(std::move(result));
   });
@@ -991,7 +992,6 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
               false,
               "Unsupported tensor quantization type in serialization ",
               toString(qscheme));
-          break;
       }
     }
     bool requires_grad = elements.at(idx++).toBool();

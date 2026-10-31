@@ -55,6 +55,7 @@
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <numeric>
 
@@ -832,7 +833,7 @@ static inline SymDimVector compute_strides_for_view_dtype_downsize(
       old_strides[ndim - 1]);
 
   SymDimVector new_strides(ndim);
-  for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
+  for (const auto dim_idx : c10::irange(ndim - 1)) {
     new_strides[dim_idx] = old_strides[dim_idx] * size_ratio;
   }
   new_strides[ndim - 1] = 1;
@@ -857,7 +858,7 @@ static inline SymDimVector compute_strides_for_view_dtype_upsize(
       old_strides[ndim - 1]);
 
   SymDimVector new_strides(ndim);
-  for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
+  for (const auto dim_idx : c10::irange(ndim - 1)) {
     TORCH_CHECK(
         (old_strides[dim_idx] % size_ratio) == 0,
         "self.stride(",
@@ -2019,13 +2020,13 @@ static void _compressed_to_block_compressed_cpu_kernel(
   result_compressed_indices[0] = 0;
 
   // Iterate over blocks along compressed dim
-  for (index_t block_c = 0; block_c < n_bcompressed; block_c++) {
+  for (const auto block_c : c10::irange(n_bcompressed)) {
     // Iterate over blocks along plain dim to locate non-zero blocks,
     // this guarantees sorted plain dim indices
-    for (index_t block_p = 0; block_p < n_bplain; block_p++) {
-      for (index_t i = input_compressed_indices[C * block_c];
-           i < input_compressed_indices[C * (block_c + 1)];
-           i++) {
+    for (const auto block_p : c10::irange(n_bplain)) {
+      for (const auto i : c10::irange(
+               input_compressed_indices[C * block_c],
+               input_compressed_indices[C * (block_c + 1)])) {
         index_t p = input_plain_indices[i]; // plain dim element index
         if (p / P == block_p) {
           blocks[block_p] = result_values + CPD * n_blks;
@@ -2037,11 +2038,10 @@ static void _compressed_to_block_compressed_cpu_kernel(
     }
 
     // Iterate over compressed dim within block
-    for (index_t cb = 0; cb < C; cb++) {
+    for (const auto cb : c10::irange(C)) {
       index_t c = C * block_c + cb; // compressed dim index
-      for (index_t i = input_compressed_indices[c];
-           i < input_compressed_indices[c + 1];
-           i++) {
+      for (const auto i : c10::irange(
+               input_compressed_indices[c], input_compressed_indices[c + 1])) {
         index_t p = input_plain_indices[i]; // plain dim index
 
         // Block corresponding to plain dim index
@@ -2092,9 +2092,9 @@ static index_t compressed_count_blocks(
 ) {
   std::vector<index_t> mask(n_plain / P + 1, -1);
   index_t n_blks = 0;
-  for (index_t c = 0; c < n_compressed; c++) {
+  for (const auto c : c10::irange(n_compressed)) {
     index_t bc = c / C;
-    for (index_t i = Ac[c]; i < Ac[c + 1]; i++) {
+    for (const auto i : c10::irange(Ac[c], Ac[c + 1])) {
       index_t bp = Ap[i] / P;
       if (mask[bp] != bc) {
         mask[bp] = bc;

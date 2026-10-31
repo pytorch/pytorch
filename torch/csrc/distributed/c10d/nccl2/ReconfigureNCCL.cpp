@@ -26,6 +26,7 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -143,7 +144,7 @@ ReconfigureQuorum findReconfigureQuorum(
     return {};
   }
   int previousRank = -1;
-  for (int i = 0; i < quorum.size; ++i) {
+  for (const auto i : c10::irange(quorum.size)) {
     auto info = parseNCCLReconfigureHandle(handles[i]);
     if (info.uuid != quorum.uuid || info.rank <= previousRank) {
       return {};
@@ -387,7 +388,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         reconfigure_uuid_,
         " but it is not initialized");
     std::unordered_set<int> keptRanks;
-    for (int i = 0; i < quorum.size; ++i) {
+    for (const auto i : c10::irange(quorum.size)) {
       keptRanks.insert(parseNCCLReconfigureHandle(handles[i]).rank);
     }
     for (int rank = 0; rank < comm_size_; ++rank) {

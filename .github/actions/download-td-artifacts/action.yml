@@ -12,13 +12,13 @@ runs:
   steps:
     - name: Download TD Artifacts from S3
       if: inputs.use-gha == '' || inputs.use-gha == 'false'
-      uses: seemethere/download-artifact-s3@v4
+      uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
       with:
         name: td_results
 
     - name: Download TD Artifacts from GHA
       if: inputs.use-gha != '' && inputs.use-gha != 'false'
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: td_results.json
 

@@ -14,7 +14,28 @@ on:
   release:
     types: [published]
   pull_request:
-    paths: [.github/workflows/create_release.yml]
+    # Files this job reads or ships: the sdist config and its submodule inputs, the
+    # version/metadata providers that `python -m build --sdist` runs, .gitignore (the
+    # sdist walk uses gitignore semantics) and the files copied or force-included into
+    # the archives, including docs/requirements.txt, which the "Create source
+    # distribution" step removes with `rm` under `bash -e`. A change to any of them
+    # must exercise this job before merge.
+    # It does not cover the other tracked symlinks in the sdist `exclude` list of
+    # pyproject.toml (.dockerignore, AGENTS.md, ...), or a new symlink elsewhere in
+    # the tree: running a full sdist build for every change to those is not worth it.
+    paths:
+      - .github/workflows/create_release.yml
+      - pyproject.toml
+      - .gitmodules
+      - .gitignore
+      - third_party/**
+      - version.txt
+      - tools/metadata/**
+      - tools/generate_torch_version.py
+      - tools/optional_submodules.py
+      - .ci/docker/ci_commit_pins/nccl*.txt
+      - .ci/docker/requirements-docs.txt
+      - docs/requirements.txt
 
 jobs:
   check-ci:
