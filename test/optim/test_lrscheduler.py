@@ -3240,24 +3240,44 @@ class TestLRScheduler(TestCase):
             self.opt.step()
             scheduler.step(metrics=1.3)
 
-    @parametrize("min_lr", [0, [1e-5, 1e-4]])
+    @parametrize("min_lr", ["scalar", "list"])
     def test_add_param_group_does_not_break_reduce_lr_on_plateau(self, min_lr):
-        scheduler = ReduceLROnPlateau(self.opt, factor=0.1, patience=0, min_lr=min_lr)
-        self.opt.step()
-        scheduler.step(1.0)
-
-        self.opt.add_param_group(
-            {"params": [torch.nn.Parameter(torch.rand(2, 3))], "lr": 0.05}
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
+        metrics = [1] * 7 + [0.6] + [0.5] * 12
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=0.1,
+            patience=5,
+            cooldown=5,
+            min_lr=0 if min_lr == "scalar" else [1e-5, 1e-4],
         )
-        if isinstance(min_lr, list):
-            scheduler.min_lrs.append(1e-6)
-        self.opt.step()
-        scheduler.step(2.0)
-
-        self.assertEqual(
-            [group["lr"] for group in self.opt.param_groups],
-            [0.005, 0.05, 0.005],
-        )
+        for epoch in range(epochs):
+            # Point is to test the use case in #104361
+            if epoch == 8:
+                param = torch.nn.Parameter(torch.rand(2, 3))
+                self.opt.add_param_group({"params": [param], "lr": 0.05})
+                if min_lr == "list":
+                    scheduler.min_lrs.append(1e-6)
+            self.opt.step()
+            scheduler.step(metrics[epoch])
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertEqual(
+                    target[epoch],
+                    param_group["lr"],
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
+                    ),
+                    atol=1e-5,
+                    rtol=0,
+                )
 
     def test_add_param_group_errors_reduce_lr_on_plateau(self):
         scheduler = ReduceLROnPlateau(
