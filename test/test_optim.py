@@ -1239,10 +1239,12 @@ class TestOptimRenewed(TestCase):
                         self.assertEqual(v, ref_state[k].expand(numel))
 
     # amsgrad's NaN-propagating maximum (fmax_nan on the RVV path) must agree
-    # with the scalar forloop update, whose std::max also propagates NaN. This
-    # is the behaviour fmax_nan exists to preserve.
+    # with the scalar forloop reference, which uses torch.maximum (adam.py) and
+    # propagates NaN. Only Adam/AdamW accept amsgrad; SGD and Adagrad do not.
+    # Non-RVV fused kernels use std::max for the scalar tail, which drops a NaN
+    # exp_avg_sq, so the max_exp_avg_sq equality only holds on the RVV build.
     @optims(
-        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=(torch.float32, torch.float64),
     )
     def test_fused_matches_forloop_nan_amsgrad(self, device, dtype, optim_info):
@@ -1252,6 +1254,7 @@ class TestOptimRenewed(TestCase):
             )
         if _get_device_type(device) == "mps" and dtype == torch.float64:
             self.skipTest("MPS does not support torch.float64")
+        is_rvv = torch._C._cpu._has_rvv()
         optim_cls = optim_info.optim_cls
         for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
             kwargs = deepcopy(optim_input.kwargs)
@@ -1275,10 +1278,11 @@ class TestOptimRenewed(TestCase):
                 opt_fused.step()
                 opt_forloop.step()
                 self.assertEqual(param_fused, param_forloop)
-                self.assertEqual(
-                    opt_fused.state[param_fused]["max_exp_avg_sq"],
-                    opt_forloop.state[param_forloop]["max_exp_avg_sq"],
-                )
+                if is_rvv:
+                    self.assertEqual(
+                        opt_fused.state[param_fused]["max_exp_avg_sq"],
+                        opt_forloop.state[param_forloop]["max_exp_avg_sq"],
+                    )
 
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],

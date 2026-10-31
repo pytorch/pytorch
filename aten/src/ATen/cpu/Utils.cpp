@@ -183,6 +183,14 @@ std::unordered_map<std::string, c10::IValue> get_cpu_capabilities() {
   return capabilities;
 }
 
+bool has_rvv() {
+#ifdef TORCH_RVV_FP64_ENABLED
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool is_avx512_vnni_supported() {
 #if !defined(__s390x__) && !defined(__powerpc__)
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512vnni();
