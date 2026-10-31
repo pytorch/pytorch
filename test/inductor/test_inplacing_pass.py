@@ -12,7 +12,11 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized_v2,
 )
 from torch._inductor import inductor_prims
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    _aliases_graph_input,
+    _result_escapes_graph,
+    reinplace_inplaceable_ops_core,
+)
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -397,6 +401,42 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         if not auto_functionalized_found:
             raise AssertionError
         return counter
+
+    @parametrize("enable_v2", [False, True])
+    def test_functionalized_result_aliases_graph_input(self, enable_v2):
+        def f(x):
+            if enable_v2:
+                result = auto_functionalized_v2(
+                    boo._opoverload,
+                    _x_base_index=0,
+                    _x_size=(3,),
+                    _x_stride=(1,),
+                    _x_storage_offset=0,
+                    _all_bases=[x],
+                )
+            else:
+                result = auto_functionalized(boo._opoverload, x=x)
+            return result[1]
+
+        x = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+        functionalized = next(
+            node
+            for node in gm.graph.nodes
+            if node.target
+            in (
+                torch.ops.higher_order.auto_functionalized,
+                torch.ops.higher_order.auto_functionalized_v2,
+            )
+        )
+        result = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is operator.getitem and node.args[0] is functionalized
+        )
+        self.assertTrue(_aliases_graph_input(result, {}))
+        self.assertTrue(_result_escapes_graph(functionalized, {}))
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
