@@ -12,7 +12,10 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipPRIVATEUSE1,
+)
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton
@@ -411,14 +414,15 @@ instantiate_device_type_tests(
 )
 
 
+@unittest.skipIf(not has_triton(), "requires Triton")
 class TestCompilerBisectorRNG(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     # `preserve_rng_state` only saves/restores CPU, CUDA and XPU RNG state, so
     # the eager-vs-compiled RNG comparison below is only meaningful on those
-    # accelerator devices; other out-of-tree backends are instantiated out via
-    # `only_for` rather than silently diverging.
-    @unittest.skipIf(not has_triton(), "requires Triton")
+    # accelerator devices; PrivateUse1 backends are skipped explicitly rather
+    # than silently diverging.
+    @skipPRIVATEUSE1
     def test_rng(self, device):
         def foo():
             return torch.rand([10], device=device) + 1
@@ -440,7 +444,7 @@ class TestCompilerBisectorRNG(TestCase):
 
 
 instantiate_device_type_tests(
-    TestCompilerBisectorRNG, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestCompilerBisectorRNG, globals(), except_for="cpu", allow_xpu=True
 )
 
 
