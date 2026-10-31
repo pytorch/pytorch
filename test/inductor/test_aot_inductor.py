@@ -95,6 +95,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_CI,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -10850,6 +10851,38 @@ class AOTInductorTestsTemplate:
                     if "NEEDED" in line:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
+
+    @unittest.skipUnless(IS_LINUX, "the flag it checks is passed to ELF linkers")
+    def test_libtorch_free_so_has_no_unused_openmp_dependency(self):
+        # _get_openmp_args adds OpenMP to every Linux link. A model that calls no
+        # OpenMP function must still not record libgomp, or the artifact fails to
+        # load on a machine without it. Reading the dynamic section rather than
+        # the link line is what makes this fail if the flag stops having the
+        # effect it is added for. A compiler that links as needed by default,
+        # such as Ubuntu's GCC, passes this either way.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(8, device=self.device),)
+        so_path = AOTIRunnerUtil.legacy_compile(
+            Model(), example_inputs, options={"aot_inductor.link_libtorch": False}
+        )
+        dynamic = subprocess.run(
+            ["readelf", "-d", so_path], check=True, capture_output=True, text=True
+        ).stdout
+        needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", dynamic)
+        if not needed:
+            raise AssertionError(f"readelf reported no dependencies for {so_path}")
+
+        # Named rather than counted, so a failure says which library came back.
+        openmp = [lib for lib in needed if "omp" in lib.lower()]
+        if openmp:
+            raise AssertionError(f"unused OpenMP dependency in {so_path}: {openmp}")
+
+        # A library the model does reach has to survive.
+        if not any(lib.startswith("libc.so") for lib in needed):
+            raise AssertionError(f"expected libc among {needed}")
 
     def test_unbounded_expr_substitutions(self):
         class Model(torch.nn.Module):

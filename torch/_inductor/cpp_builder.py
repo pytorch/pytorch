@@ -2346,6 +2346,20 @@ def get_cpp_torch_device_options(
         if _IS_MACOS and aot_mode and not link_libtorch:
             ldflags.append("Wl,-dead_strip_dylibs")
 
+    # _get_openmp_args adds OpenMP to every Linux link too, and unless the
+    # compiler asks the linker to link as needed, as Ubuntu's GCC does by
+    # default, the linker records libgomp even when the model calls no OpenMP
+    # function. The artifact then fails to load without torch on a machine that
+    # has no libgomp. As above, dropping libraries nothing references cannot
+    # drop one the model uses, and links with libtorch are left alone.
+    if (
+        _IS_LINUX
+        and aot_mode
+        and not link_libtorch
+        and config.aot_inductor.cross_target_platform is None
+    ):
+        ldflags.append("Wl,--as-needed")
+
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
@@ -3085,12 +3099,11 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options({self._target_name} PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {self._ldflags_args})
 
             # Add libraries
             target_link_libraries({self._target_name} PRIVATE {libs})
