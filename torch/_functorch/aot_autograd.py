@@ -146,7 +146,7 @@ from ._aot_autograd.to_standalone_python import (  # noqa: F401
     load_from_python,
 )
 from ._aot_autograd.utils import (  # noqa: F401
-    _get_autocast_states,
+    _get_autocast_dtypes,
     call_func_at_runtime_with_args,
     create_tree_flattened_fn,
     KNOWN_TYPES,

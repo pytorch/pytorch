@@ -5500,6 +5500,181 @@ def get_fw_bw_graph(
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
+class TestAOTAutocastStates(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        from torch._dynamo.test_case import _snapshot_autocast_state
+
+        self._prior_autocast_state = _snapshot_autocast_state()
+
+    def tearDown(self):
+        from torch._dynamo.test_case import _restore_autocast_state
+
+        try:
+            super().tearDown()
+        finally:
+            _restore_autocast_state(self._prior_autocast_state)
+
+    def _collect_metadata(self, f: Callable[..., list[torch.Tensor]]):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+
+        collect = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+        )
+        fake_mode = FakeTensorMode()
+        x = fake_mode.from_tensor(torch.randn(2))
+        return collect, x
+
+    @parametrize("device_type", list(torch._C._autocast_supported_devices()))
+    def test_collect_metadata_detects_autocast_dtype_mutation(self, device_type: str):
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        prior_dtype = torch.get_autocast_dtype(device_type)
+        prior_nesting = _get_autocast_nesting()
+        new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_dtype(device_type, new_dtype)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        with self.assertRaisesRegex(RuntimeError, f"{device_type} autocast dtype"):
+            collect(x)
+        self.assertEqual(torch.get_autocast_dtype(device_type), prior_dtype)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_collect_metadata_restores_dtype_when_forward_raises(self):
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_dtype("cpu", new_dtype)
+            raise RuntimeError("forward failed after dtype mutation")
+
+        collect, x = self._collect_metadata(f)
+        with self.assertRaisesRegex(
+            RuntimeError, "forward failed after dtype mutation"
+        ):
+            collect(x)
+        self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
+
+    def test_collect_metadata_ignores_autocast_enabled_mutation(self):
+        # Enabled TLS is restored by ExcludeDispatchKeyGuard; only dtype is checked.
+        prior_enabled = torch.is_autocast_enabled("cpu")
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_enabled("cpu", not prior_enabled)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        collect(x)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+
+    def test_collect_metadata_restores_autocast_nesting(self):
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        prior_nesting = _get_autocast_nesting()
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.autocast_increment_nesting()
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        collect(x)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_collect_metadata_restores_autocast_nesting_when_forward_raises(self):
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        prior_nesting = _get_autocast_nesting()
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.autocast_increment_nesting()
+            raise RuntimeError("forward failed after nesting bump")
+
+        collect, x = self._collect_metadata(f)
+        with self.assertRaisesRegex(RuntimeError, "forward failed after nesting bump"):
+            collect(x)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_aot_function_restores_autocast_nesting(self):
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        prior_nesting = _get_autocast_nesting()
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            torch.autocast_increment_nesting()
+            return x + 1
+
+        x = torch.randn(2)
+        compiled = aot_function(f, nop)
+        out = compiled(x)
+        self.assertEqual(out, x + 1)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_enter_exit_autocast_graph_break_aot_eager(self):
+        # Dynamo splits unmanaged _enter/_exit_autocast across graphs so each
+        # AOT graph has unbalanced nesting; nesting must be restored, not raised.
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            m = torch.amp.autocast_mode._enter_autocast("cpu")
+            x = x @ y
+            torch._dynamo.graph_break()
+            x = x @ z
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        prior_nesting = _get_autocast_nesting()
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        x = torch.randn(3, 3, dtype=torch.float32)
+        y = torch.randn(3, 3, dtype=torch.float32)
+        z = torch.randn(3, 3, dtype=torch.float32)
+        out = f(x, y, z)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=False)(x, y, z)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(out.dtype, opt_out.dtype)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    @parametrize("cache_enabled", [True, False])
+    def test_collect_metadata_ignores_autocast_cache_enabled(self, cache_enabled: bool):
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_cache_enabled(not cache_enabled)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        torch.set_autocast_cache_enabled(cache_enabled)
+        collect(x)
+        self.assertEqual(torch.is_autocast_cache_enabled(), cache_enabled)
+
+    def test_aot_function_allows_balanced_cpu_autocast(self):
+        from torch.amp.autocast_mode import _get_autocast_nesting
+        from torch._functorch._aot_autograd.utils import _get_autocast_dtypes
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            with torch.autocast("cpu"):
+                return x + 1
+
+        x = torch.randn(2)
+        prior_dtypes = _get_autocast_dtypes()
+        prior_nesting = _get_autocast_nesting()
+        expected = f(x)
+        compiled = aot_function(f, nop)
+        out = compiled(x)
+        self.assertEqual(out, expected)
+        self.assertEqual(out.dtype, expected.dtype)
+        self.assertEqual(_get_autocast_dtypes(), prior_dtypes)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+
 class TestMod(torch.nn.Module):
     def __init__(self, fn):
         super().__init__()
@@ -13738,6 +13913,7 @@ class TestAOTAutogradDeviceWithCache(
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestAOTAutocastStates)
 instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True

@@ -16,6 +16,7 @@ from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.fake_tensor import maybe_get_item_memo, maybe_set_item_memo
 from torch._subclasses.functional_tensor import FunctionalTensorMode
+from torch.amp.autocast_mode import _preserve_autocast_nesting
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
@@ -126,10 +127,14 @@ def _create_graph(
             _keep_input_mutations=aot_config.keep_inference_input_mutations,
         )
 
+    # Dynamo may emit unbalanced autocast_increment/decrement_nesting across
+    # graph breaks; restore nesting after make_fx so capture matches metadata
+    # collect (which also restores nesting and does not raise on it).
     with (
         enable_python_dispatcher(),
         ctx,
         torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+        _preserve_autocast_nesting(),
     ):
         fx_g = make_fx(
             inner_f,

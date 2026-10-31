@@ -23,6 +23,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.amp.autocast_mode import _preserve_autocast_nesting
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -61,7 +62,13 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
+from .utils import (
+    _get_autocast_dtypes,
+    _preserve_autocast_dtypes,
+    KNOWN_TYPES,
+    simple_wraps,
+    strict_zip,
+)
 
 
 if TYPE_CHECKING:
@@ -201,7 +208,6 @@ def run_functionalized_fw_and_collect_metadata(
         output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
-        prior_autocast_states = _get_autocast_states()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -218,7 +224,22 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending, disable_autocast_cache():
+        # ExcludeDispatchKeyGuard restores autocast enabled TLS on exit, so enabled
+        # mutations are not checked. Autocast dtypes are independent TLS and are
+        # checked for every _autocast_supported_devices() entry. Nesting is restored
+        # (not raised on): Dynamo intentionally emits unbalanced increment/decrement
+        # across graph breaks, and graph capture restores nesting the same way in
+        # _create_graph. Cache is forced off by disable_autocast_cache and restored
+        # on exit. Note: an unbalanced _enter_autocast that also changes dtype still
+        # fails the dtype check (including across graph breaks).
+        with (
+            disable_above,
+            _preserve_autocast_nesting(),
+            _preserve_autocast_dtypes() as prior_autocast_dtypes,
+            mode,
+            suppress_pending,
+            disable_autocast_cache(),
+        ):
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
@@ -245,13 +266,23 @@ def run_functionalized_fw_and_collect_metadata(
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 
-        if prior_autocast_states != _get_autocast_states():
-            raise RuntimeError(
-                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
-                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
-                "which will unwind all of their mutations to autocast state before the graph exits. "
-                "If you encounter this error while using torch.compile, please file a bug."
-            )
+            current_autocast_dtypes = _get_autocast_dtypes()
+            mismatches = []
+            for device_type, prior_dtype in prior_autocast_dtypes.items():
+                cur_dtype = current_autocast_dtypes[device_type]
+                if prior_dtype != cur_dtype:
+                    mismatches.append(
+                        f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
+                    )
+            if mismatches:
+                raise RuntimeError(
+                    "AOTAutograd detected that the traced graph left autocast dtype "
+                    "changed:\n"
+                    + "\n".join(mismatches)
+                    + "\nPrefer `with torch.autocast(...)` so dtype is restored before "
+                    "the graph exits, or avoid calling torch.set_autocast_dtype inside "
+                    "the compiled region."
+                )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
