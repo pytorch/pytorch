@@ -494,23 +494,6 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
         if inp_storage is not None and inp_storage == get_node_storage(src):
             return False
 
-    # Read the live registries once for both alias walks.
-    mutated_args_by_op = {
-        op.inplace_op: op.mutated_args
-        for op in itertools.chain(
-            inplaceable_ops.values(), inplaceable_foreach_ops.values()
-        )
-    }
-
-    # Reinplacing makes the result the same tensor as inp. When inp is a graph
-    # input, or aliases one, reinplacing here is paired with dropping the copy_
-    # back into it, so the caller holds inp itself; returning the result as well
-    # would hand back an alias of inp where the functional scatter returns a
-    # fresh tensor.
-    aliases_input = _aliases_graph_input(inp, mutated_args_by_op)  # type: ignore[arg-type]
-    if aliases_input and _result_escapes_graph(node, mutated_args_by_op):
-        return False
-
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
         return True
@@ -1106,7 +1089,24 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         )
         return tensors_to_clone
 
+    mutated_args_by_op = {
+        op.inplace_op: op.mutated_args
+        for op in itertools.chain(
+            inplaceable_ops.values(), inplaceable_foreach_ops.values()
+        )
+    }
+
     def reinplace_registry_op(node, inplaceable_op) -> None:
+        if node.target in {
+            _generalized_scatter,
+            aten.index_put.default,
+            aten._unsafe_index_put.default,
+        }:
+            inp = node.args[0]
+            if _aliases_graph_input(inp, mutated_args_by_op) and _result_escapes_graph(
+                node, mutated_args_by_op
+            ):
+                return
         # Check if ALL mutated args can be inplaced
         # Only convert if we don't need to clone any tensor
         mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
