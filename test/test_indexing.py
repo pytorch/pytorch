@@ -20,7 +20,9 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
     skipXLA,
@@ -1087,6 +1089,23 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(a[1, -2], 1)
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
+
+    @skipIfTorchDynamo(
+        "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
+    )
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    @serialTest()
+    def test_index_add_deterministic_large_outer_dim(self, device):
+        # The number of elements before the indexed dim is in [2^31, 2^32).
+        # The deterministic kernel used to narrow it to a negative int when
+        # computing grid.z and collapse to a single block, see #201574.
+        N = (1 << 31) + 5
+        index = torch.tensor([0], device=device)
+        with DeterministicGuard(True):
+            a = torch.zeros(N, 1, dtype=torch.int8, device=device)
+            a.index_add_(1, index, torch.ones(N, 1, dtype=torch.int8, device=device))
+        self.assertTrue(bool((a == 1).all()))
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_expanded_values(self, device):
