@@ -1268,6 +1268,33 @@ def optim_error_inputs_func_rprop(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid eta values: 1.0, 0.5",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(step_sizes=(-2.0, -1.0)),
+                    desc="negative step size bounds",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: -2.0, -1.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(step_sizes=(-1.0, 50.0)),
+                    desc="negative minimum step size",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: -1.0, 50.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(step_sizes=(2.0, 1.0)),
+                    desc="reversed step size bounds",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: 2.0, 1.0",
+            ),
         ]
     return error_inputs
 
