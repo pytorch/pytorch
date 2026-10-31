@@ -2848,9 +2848,10 @@ class TestPredispatchSerialization(TestCase):
             self.assertEqual(expected, loaded_ep.module()(*inp))
             torch.export.save(loaded_ep, io.BytesIO())
 
-            # Load and run in a new process. Load imports the module of
-            # ModIndex, which the indexing calls use, but no other module, so
-            # the process imports the module that defines TwoTensor first.
+            # Load and run in a new process. Load imports the modules in its
+            # table, such as the one of ModIndex, which the indexing calls use,
+            # but not the module that defines TwoTensor, so the process
+            # imports that first.
             self.assertIn(ModIndex.__module__, _FLAT_APPLY_MODULES)
             # Packaged fbcode test binaries cannot start a plain Python with torch.
             if not IS_FBCODE:
@@ -2868,6 +2869,18 @@ class TestPredispatchSerialization(TestCase):
                 self.assertEqual(
                     out.strip().splitlines()[-1], str([t.tolist() for t in expected])
                 )
+
+        # A spec that lives on a submodule, as in a hand-built graph, is read
+        # with its dotted get_attr target.
+        spec_node = flat_apply_nodes[0].args[1]
+        owner = spec_node.graph.owning_module
+        owner.sub = torch.nn.Module()
+        owner.sub.spec = getattr(owner, spec_node.target)
+        spec_node.target = "sub.spec"
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(expected, torch.export.load(buffer).module()(*inp))
 
     def test_predispatch_flat_apply_unloadable_function_raises(self):
         from torch._export.wrappers import allow_in_pre_dispatch_graph
@@ -3053,6 +3066,21 @@ class TestPredispatchSerialization(TestCase):
                         with self.assertRaisesRegex(SerializeError, reason):
                             load(artifact.exported_program.replace(old, new))
                         self.assertFalse(os.path.exists(ran))
+
+                # Only a module that _FLAT_APPLY_MODULES lists gets imported.
+                with (
+                    patch(
+                        "torch._export.serde.serialize._FLAT_APPLY_MODULES",
+                        {"flat_apply_side_effect"},
+                    ),
+                    self.assertRaisesRegex(SerializeError, "not a class or function"),
+                ):
+                    load(
+                        artifact.exported_program.replace(
+                            func_name, b'"flat_apply_side_effect.F"'
+                        )
+                    )
+                self.assertTrue(os.path.exists(ran))
 
         # The input spec decides which input the helper gets as the class name.
         program = json.loads(artifact.exported_program)
