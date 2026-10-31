@@ -1960,8 +1960,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -2452,6 +2451,35 @@ from user code:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_loaded_graph_does_not_rerun_inlined_saved_tensors_hooks(self):
+        def fn(x, w):
+            return (x.sin() * w).cos().sum()
+
+        # Inlineable hooks with a lossy pack: packing twice changes the grads.
+        hooks = (
+            torch.fx.symbolic_trace(lambda x: x * 2),
+            torch.fx.symbolic_trace(lambda x: x),
+        )
+
+        def grads(f):
+            x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
+            w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                f(x, w).backward()
+            return x.grad, w.grad
+
+        example_args = tuple(torch.randn(4, requires_grad=True) for _ in range(2))
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor")
+        with torch.autograd.graph.saved_tensors_hooks(*hooks):
+            compiled_fn = compiled.aot_compile((example_args, {}))
+        expected = grads(compiled_fn)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(grads(loaded), expected)
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
