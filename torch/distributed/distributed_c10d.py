@@ -1511,11 +1511,7 @@ class _World:
 
     @property
     def pg_work_status_hooks(self) -> dict[ProcessGroup, WorkStatusHook]:
-        """
-        Owning handles for the work status hooks attached at group creation.
-
-        Like pg_flight_recorder_hooks: dropping a handle detaches its hook.
-        """
+        """Owning handles of the groups' work status hooks; see pg_flight_recorder_hooks."""
         return self._pg_work_status_hooks
 
     @property
@@ -2967,11 +2963,10 @@ def _maybe_attach_flight_recorder(
 
 
 def _maybe_attach_work_status(pg: ProcessGroup, global_ranks: list[int]) -> None:
-    # Groups replaced wholesale by a ProcessGroup subclass have no backend to
-    # name them; see _maybe_attach_flight_recorder.
+    # See _maybe_attach_flight_recorder.
     if not pg._device_types:
         return
-    # None if disabled or stock ProcessGroupNCCL reports the group itself.
+    # None if disabled or nccl-legacy reports the group itself.
     hook = WorkStatusHook.attach(pg, global_ranks)
     if hook is not None:
         _world.pg_work_status_hooks[pg] = hook

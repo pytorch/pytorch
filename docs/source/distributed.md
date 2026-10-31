@@ -996,9 +996,10 @@ PyTorch attaches these built-in hooks to new process groups:
   inputs for NaNs. Enabled by `TORCH_DIST_NAN_CHECK=1`.
 - {class}`~torch.distributed.distributed_c10d.HealthCheckHook` reports aborted
   backends through the `/c10d_health_check` debug server endpoint.
-- `WorkStatusHook` periodically logs each group's last enqueued and completed
-  operation through the registered C10dLogger, as `nccl-legacy` does. Period
-  set by `TORCH_DIST_WORK_STATUS_PERIOD_MS` (default 30000; 0 disables).
+- {class}`~torch.distributed.distributed_c10d.WorkStatusHook` periodically logs
+  each group's last enqueued and completed operation through the registered
+  C10dLogger, as `nccl-legacy` does. Set the period with
+  `TORCH_DIST_WORK_STATUS_PERIOD_MS` (default 30000; 0 disables).
 
 ```{eval-rst}
 .. automethod:: torch.distributed.ProcessGroup.register_pre_hook
@@ -1020,6 +1021,8 @@ PyTorch attaches these built-in hooks to new process groups:
 .. autoclass:: torch.distributed.distributed_c10d.NanCheckHook
    :members:
 .. autoclass:: torch.distributed.distributed_c10d.HealthCheckHook
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.WorkStatusHook
    :members:
 ```
 

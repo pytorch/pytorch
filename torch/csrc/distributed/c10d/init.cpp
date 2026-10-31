@@ -5527,23 +5527,19 @@ be removed again via remove().)")
       module,
       "WorkStatusHook",
       R"(
-Periodically reports a process group's last enqueued and completed work, as
-stock ProcessGroupNCCL's watchdog does, while a C10dLogger is registered: a
-record with the same keys to the logger and, where glog provides LOG_EVERY_MS,
-the same INFO log line. One thread reports every attached group every
-``TORCH_DIST_WORK_STATUS_PERIOD_MS`` (default 30000). Attached automatically to
-new process groups unless the period is 0 or a backend of the group is stock
-ProcessGroupNCCL, which reports natively.)")
+Logs a process group's last enqueued and completed work to the registered
+C10dLogger every ``TORCH_DIST_WORK_STATUS_PERIOD_MS`` (default 30000), with
+nccl-legacy's keys. Attached to new process groups unless the period is 0 or
+the group uses nccl-legacy, which logs natively.)")
       .def_static(
           "attach",
           &::c10d::WorkStatusHook::attach,
           py::arg("pg"),
           py::arg("global_ranks") = std::vector<uint64_t>{},
           R"(
-Attach a work status hook to a process group. Returns None if the group
-reports natively or reporting is disabled. The hook detaches when remove() is
-called or the returned handle is garbage collected. global_ranks maps the
-group's ranks to world ranks and fills the ``global_rank`` key.)")
+Attach a hook, or return None if the group reports natively or reporting is
+disabled. Detaches on remove() or when the handle is garbage collected.
+global_ranks maps group ranks to world ranks.)")
       .def(
           "remove",
           &::c10d::WorkStatusHook::remove,

@@ -7,9 +7,11 @@
 #include <ATen/Context.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/thread_name.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -34,16 +36,14 @@ namespace c10d {
 
 namespace {
 
-// Hook ids must not collide with user-registered or other built-in hooks.
+// Must not collide with other hooks' ids.
 std::atomic<int64_t> next_hook_id{0x57535441 /* 'WSTA' */};
-// Stands in for stock ProcessGroupNCCL's local_id_, which numbers its groups
-// per process.
+// Stands in for stock ProcessGroupNCCL's per-process local_id_.
 std::atomic<size_t> next_pg_id{0};
 
-// Cap on ops awaiting a completion push. One that never gets one (a hang, or a
-// Work the backend never completes on its own) is evicted oldest first.
+// Caps on ops awaiting completion (one never completed, e.g. hung, is evicted
+// oldest first) and on completion keys pushed before their post-hook ran.
 constexpr size_t kMaxInflight = 4096;
-// Cap on completion keys pushed before the op's post-hook registered them.
 constexpr size_t kMaxEarlyKeys = 1024;
 
 const std::vector<std::string> TORCH_DIST_WORK_STATUS_PERIOD_MS = {
@@ -51,65 +51,41 @@ const std::vector<std::string> TORCH_DIST_WORK_STATUS_PERIOD_MS = {
 
 // Stock ProcessGroupNCCL's NCCL_BACKEND_NAME; its header is CUDA-only.
 constexpr const char* kStockNcclName = "nccl";
+constexpr const char* kGlooName = "gloo";
 
-// Stock ProcessGroupNCCL's kWorkStatusUpdatePeriodMs.
-constexpr int kDefaultPeriodMs = 30 * 1000;
-
+// Stock ProcessGroupNCCL's kWorkStatusUpdatePeriodMs. Read once per process.
 std::chrono::milliseconds period() {
-  static const int ms =
-      getCvarInt(TORCH_DIST_WORK_STATUS_PERIOD_MS, kDefaultPeriodMs);
+  static const int ms = getCvarInt(TORCH_DIST_WORK_STATUS_PERIOD_MS, 30 * 1000);
   return std::chrono::milliseconds(ms);
 }
 
-// The op names stock reports (opTypeToString).
-OpType toOpType(HookOpName name, bool any_source) {
-  switch (name) {
-    case HookOpName::SEND:
-      return OpType::SEND;
-    case HookOpName::RECV:
-      return any_source ? OpType::RECVANYSOURCE : OpType::RECV;
-    case HookOpName::BROADCAST:
-      return OpType::BROADCAST;
-    case HookOpName::ALLREDUCE:
-      return OpType::ALLREDUCE;
-    case HookOpName::ALLREDUCE_COALESCED:
-      return OpType::ALLREDUCE_COALESCED;
-    case HookOpName::REDUCE:
-      return OpType::REDUCE;
-    case HookOpName::ALLGATHER:
-      return OpType::ALLGATHER;
-    case HookOpName::ALLGATHER_BASE:
-      return OpType::_ALLGATHER_BASE;
-    case HookOpName::ALLGATHER_COALESCED:
-      return OpType::ALLGATHER_COALESCED;
-    case HookOpName::ALLGATHER_INTO_TENSOR_COALESCED:
-      return OpType::ALLGATHER_INTO_TENSOR_COALESCED;
-    case HookOpName::REDUCE_SCATTER:
-      return OpType::REDUCE_SCATTER;
-    case HookOpName::REDUCE_SCATTER_BASE:
-      return OpType::_REDUCE_SCATTER_BASE;
-    case HookOpName::REDUCE_SCATTER_TENSOR_COALESCED:
-      return OpType::REDUCE_SCATTER_TENSOR_COALESCED;
-    case HookOpName::ALLTOALL:
-      return OpType::ALLTOALL;
-    case HookOpName::ALLTOALL_BASE:
-      return OpType::ALLTOALL_BASE;
-    case HookOpName::BARRIER:
-      return OpType::BARRIER;
-    case HookOpName::SCATTER:
-      return OpType::SCATTER;
-    case HookOpName::GATHER:
-      return OpType::GATHER;
-    case HookOpName::SPLIT:
-    case HookOpName::NEW_WINDOW:
-    case HookOpName::UNKNOWN:
-      break;
-  }
-  return OpType::UNKNOWN;
-}
+// The op names stock reports, indexed by HookOpName.
+static_assert(static_cast<int>(HookOpName::UNKNOWN) == 20, "update kOpTypes");
+constexpr std::array<OpType, 21> kOpTypes = {
+    OpType::SEND,
+    OpType::RECV,
+    OpType::BROADCAST,
+    OpType::ALLREDUCE,
+    OpType::REDUCE,
+    OpType::ALLGATHER,
+    OpType::REDUCE_SCATTER,
+    OpType::ALLTOALL,
+    OpType::BARRIER,
+    OpType::SCATTER,
+    OpType::GATHER,
+    OpType::UNKNOWN, // SPLIT
+    OpType::UNKNOWN, // NEW_WINDOW
+    OpType::ALLREDUCE_COALESCED,
+    OpType::_ALLGATHER_BASE,
+    OpType::ALLGATHER_COALESCED,
+    OpType::ALLGATHER_INTO_TENSOR_COALESCED,
+    OpType::_REDUCE_SCATTER_BASE,
+    OpType::REDUCE_SCATTER_TENSOR_COALESCED,
+    OpType::ALLTOALL_BASE,
+    OpType::UNKNOWN};
 
-// Ops on a single tensor list, which the pre-hook passes on one side only
-// (inputs, or outputs for recv). Stock counts the list on both sides.
+// Ops on one tensor list, which the pre-hook passes on one side only. Stock
+// counts it on both.
 bool singleBuffer(HookOpName name) {
   return name == HookOpName::ALLREDUCE ||
       name == HookOpName::ALLREDUCE_COALESCED || name == HookOpName::REDUCE ||
@@ -142,8 +118,7 @@ bool reporting() {
   return C10dLogger::getLogger() != nullptr;
 }
 
-// FlightRecorderHook's: whether the calling thread's current stream on the
-// device is capturing a CUDA graph.
+// Whether the calling thread's current stream on the device is capturing.
 bool streamIsCapturing(c10::Device device) {
   if (device.is_cpu() || !c10::impl::hasDeviceGuardImpl(device.type())) {
     return false;
@@ -156,16 +131,16 @@ bool streamIsCapturing(c10::Device device) {
   }
 }
 
-// Whether the calling thread's current stream on its current device of the
-// type is capturing. Devices without a context are skipped, as a stream there
-// cannot be capturing, so that the check does not create one.
+// As above, on the current device of the type. One without a CUDA context
+// cannot be capturing and is skipped, so that none is created.
 bool currentStreamIsCapturing(c10::DeviceType type) {
   if (type == c10::DeviceType::CPU || !c10::impl::hasDeviceGuardImpl(type)) {
     return false;
   }
   try {
     auto device = c10::impl::getDeviceGuardImpl(type)->getDevice();
-    if (!at::globalContext()
+    if ((type == c10::DeviceType::CUDA || type == c10::DeviceType::HIP) &&
+        !at::globalContext()
              .getAcceleratorHooksInterface(type)
              .hasPrimaryContext(device.index())) {
       return false;
@@ -187,9 +162,9 @@ std::optional<c10::Device> opDevice(const PreHookArgs& args) {
   return std::nullopt;
 }
 
-// One process-wide thread reports every attached group. Leaked, so neither it
-// nor the hooks race static destruction; the thread itself is stopped at exit
-// (see stopAtExit) because it calls the C10dLogger, which is a static.
+// One process-wide thread reports every attached group. Leaked, so that it
+// and the hooks do not race static destruction; the thread is stopped at exit
+// as it calls the C10dLogger, a static.
 struct Registry {
   std::mutex mutex;
   std::condition_variable cv;
@@ -201,53 +176,42 @@ struct Registry {
 
 Registry* registry_ptr = new Registry();
 
-Registry& registry() {
-  return *registry_ptr;
+using Records = std::vector<C10dLoggingData>;
+
+Records snapshotLocked(Registry& r) {
+  Records records;
+  for (auto* hook : r.hooks) {
+    records.push_back(hook->status());
+  }
+  return records;
 }
 
-void emit(
-    const std::vector<std::pair<std::string, C10dLoggingData>>& records,
-    const std::atomic<bool>& stop) {
+void emit(const Records& records, const std::atomic<bool>& stop) {
   auto* logger = C10dLogger::getLogger();
-  for (const auto& [prefix, data] : records) {
+  for (const auto& data : records) {
     // A logger blocking on one group must not delay exit by the rest.
-    if (stop) {
+    if (stop || logger == nullptr) {
       return;
-    }
-    // Stock's line, verbatim for log parsers, and rate-limited per call site
-    // like stock's.
-#ifdef LOG_EVERY_MS
-    C10_LOG_EVERY_MS(INFO, period().count())
-        << prefix << "NCCL Work update periodically: "
-        << "last enqueued NCCL work: " << data.integers.at("last_enqueued_work")
-        << ", last completed NCCL work: "
-        << data.integers.at("last_completed_work") << ".";
-#endif // LOG_EVERY_MS
-    if (logger == nullptr) {
-      continue;
     }
     try {
       logger->log(data);
     } catch (const std::exception& e) {
-      LOG(ERROR) << prefix << "WorkStatusHook: logger failed: " << e.what();
+      LOG(ERROR) << "WorkStatusHook: logger failed for group "
+                 << data.strings.at("pg_name") << ": " << e.what();
     }
   }
 }
 
 void runLoop() {
   c10::setThreadName("pt_work_status");
-  auto& r = registry();
+  auto& r = *registry_ptr;
   std::unique_lock<std::mutex> lock(r.mutex);
   while (!r.cv.wait_for(lock, period(), [&] { return r.stop.load(); })) {
     if (!reporting()) {
       continue;
     }
-    std::vector<std::pair<std::string, C10dLoggingData>> records;
-    for (auto* hook : r.hooks) {
-      records.emplace_back(hook->logPrefix(), hook->status());
-    }
-    // A slow or blocking logger holds up this thread only: attach and remove
-    // need the registry lock, which is not held while logging.
+    auto records = snapshotLocked(r);
+    // Logged unlocked, so a blocking logger holds up this thread only.
     lock.unlock();
     emit(records, r.stop);
     lock.lock();
@@ -257,10 +221,10 @@ void runLoop() {
 }
 
 void stopAtExit() {
-  auto& r = registry();
+  auto& r = *registry_ptr;
 #if defined(_WIN32) && !defined(C10_USE_MSVC_STATIC_RUNTIME)
   // The CRT has already terminated the thread, possibly holding the mutex, as
-  // Engine::~Engine explains. The thread object is leaked, never destroyed.
+  // Engine::~Engine explains.
   r.stop = true;
 #else
   std::unique_lock<std::mutex> lock(r.mutex);
@@ -269,9 +233,7 @@ void stopAtExit() {
   }
   r.stop = true;
   r.cv.notify_all();
-  // Bounded: a logger that never returns must not hang the exit. Leaving the
-  // thread running then risks it touching the logger as it is destroyed,
-  // which is no worse than the hang.
+  // Bounded, so a logger that never returns does not hang the exit.
   if (r.thread->get_id() == std::this_thread::get_id() ||
       !r.cv.wait_for(
           lock, std::chrono::seconds(10), [&] { return r.exited; })) {
@@ -283,25 +245,16 @@ void stopAtExit() {
 #endif
 }
 
-// Starts the thread on first use, under the registry lock.
-void ensureThreadLocked(Registry& r) {
-  if (r.thread != nullptr) {
-    return;
-  }
-  // Installed first, so that a child forked as the thread starts, with the
-  // registry lock held, starts afresh too.
-  static bool hooks_installed = [] {
+void installProcessHooks() {
+  static c10::once_flag once;
+  c10::call_once(once, [] {
     std::atexit(stopAtExit);
 #ifndef _WIN32
-    // A forked child has no thread, and the registry lock may have been held
-    // by it at the fork. Start the child afresh; its inherited hooks stop
-    // reporting.
+    // A forked child has no thread and may inherit a held registry lock.
+    // Start it afresh; its inherited hooks stop reporting.
     pthread_atfork(nullptr, nullptr, [] { registry_ptr = new Registry(); });
 #endif
-    return true;
-  }();
-  (void)hooks_installed;
-  r.thread = new std::thread(runLoop);
+  });
 }
 
 } // namespace
@@ -319,11 +272,9 @@ struct WorkStatusHook::State {
   };
 
   struct OpInfo {
-    // Sequence number reported for the op: like stock, collectives and p2p
-    // ops are numbered by separate 1-based counters.
+    // Like stock, collectives and p2p ops are numbered separately, from 1.
     int64_t seq = -1;
-    HookOpName name = HookOpName::UNKNOWN;
-    bool any_source = false;
+    OpType type = OpType::UNKNOWN;
     size_t numel_in = 0;
     size_t numel_out = 0;
     Completion completion = Completion::kNone;
@@ -334,47 +285,37 @@ struct WorkStatusHook::State {
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args, const std::weak_ptr<State>& weak);
   void onCompletionKey(uint64_t completion_key);
-  void markCompleted(int64_t op_id, const OpInfo& info);
+  void completeLocked(int64_t op_id, const OpInfo& info);
   void fill(C10dLoggingData& data);
-
   Completion completionFor(c10::DeviceType type) const;
 
-  // Fixed before any hook is registered. Device types whose backend is the
-  // group's default one, which alone has the completion hook registered, and
-  // pushes completions.
+  // Fixed before the hooks are registered. Device types served by the
+  // default backend, which alone has the completion hook, if it pushes.
   std::vector<c10::DeviceType> push_types;
-  // Device types an op without tensors may have been issued on.
   std::vector<c10::DeviceType> device_types;
-  // For ops without tensors (barrier), whose device is not passed: unknown if
-  // the group has several backends.
+  // For barrier, whose device is not passed.
   Completion barrier_completion = Completion::kNone;
 
-  // Numbered whether or not the status is reported, so that ranks agree once
-  // a logger is registered.
+  // Numbered even when not reporting, so ranks agree once a logger is set.
   std::atomic<int64_t> collective_seq{0};
   std::atomic<int64_t> p2p_seq{0};
 
-  // Guards everything below. Lock order: the registry's mutex, then this one.
-  // Nothing under it calls into a backend or takes the GIL, for the reasons
-  // given on FlightRecorderHook::mutex_.
+  // Guards everything below; taken after the registry's. Nothing under it
+  // blocks, takes the GIL or takes a backend lock.
   std::mutex mutex;
   bool removed = false;
   OpInfo last_enqueued;
   OpInfo last_completed;
   int64_t last_completed_op_id = -1;
-  // Ops awaiting completion, by op_id, and the completion key index. Bounded;
-  // see onPre.
+  // Ops awaiting completion, by op_id, and the completion key index.
   std::map<int64_t, OpInfo> inflight;
   std::unordered_map<uint64_t, int64_t> work_ids;
-  // Completion keys pushed before the op's post-hook indexed them, so that
-  // the post-hook need not ask the Work, which is unsafe under graph capture
-  // and wrong for nccl2's batched send/recv, whose placeholder Work reads
-  // completed at once. Bounded, oldest first: keys of ops issued around the
-  // hooks (directly on a backend) are never claimed.
+  // Keys pushed before the op's post-hook indexed them, so it need not ask
+  // whether the Work completed. Bounded: keys of ops issued directly on a
+  // backend are never claimed.
   std::unordered_set<uint64_t> early_keys;
   std::deque<uint64_t> early_order;
-  // Work types whose getFuture() threw (Work's default does, as do gloo's p2p
-  // works), so it is not asked, and an exception thrown, for every op.
+  // Work types whose getFuture() threw (e.g. gloo's p2p), so not asked again.
   std::unordered_set<std::type_index> futureless_types;
 };
 
@@ -385,14 +326,15 @@ std::shared_ptr<WorkStatusHook> WorkStatusHook::attach(
   if (period().count() <= 0) {
     return nullptr;
   }
-  // Stock ProcessGroupNCCL reports its own status. It only counts its own ops,
-  // so a mixed group it serves is left to it entirely rather than reported
-  // twice under the same pg_name.
+  // Stock ProcessGroupNCCL reports its own ops under the same pg_name, so a
+  // group it serves is left to it entirely.
+  std::set<Backend*> backends;
   for (const auto& device : pg->getDeviceTypes()) {
     auto backend = tryGetBackend(*pg, device.type());
     if (backend && backend->getBackendName() == kStockNcclName) {
       return nullptr;
     }
+    backends.insert(backend.get());
   }
 
   auto hook = std::shared_ptr<WorkStatusHook>(
@@ -401,28 +343,28 @@ std::shared_ptr<WorkStatusHook> WorkStatusHook::attach(
   auto& state = *hook->state_;
   hook->push_completion_ = pg_ref.supportsCompletionHooks();
   auto default_backend = tryGetBackend(pg_ref, std::nullopt);
-  std::set<Backend*> backends;
+  bool all_cpu = true;
   for (const auto& device : pg_ref.getDeviceTypes()) {
-    auto backend = tryGetBackend(pg_ref, device.type());
-    backends.insert(backend.get());
     state.device_types.push_back(device.type());
-    if (hook->push_completion_ && backend == default_backend) {
+    all_cpu = all_cpu && device.type() == c10::DeviceType::CPU;
+    if (hook->push_completion_ &&
+        tryGetBackend(pg_ref, device.type()) == default_backend) {
       state.push_types.push_back(device.type());
     }
   }
+  // A barrier's backend is known only if the group has one. Its future
+  // completes properly only if it runs on CPU, as gloo's always does.
   if (backends.size() == 1) {
-    state.barrier_completion = state.completionFor(state.device_types.front());
-    // Its CPU ops, if it has any, complete their futures properly.
-    if (state.barrier_completion == State::Completion::kNone &&
-        std::find(
-            state.device_types.begin(),
-            state.device_types.end(),
-            c10::DeviceType::CPU) != state.device_types.end()) {
-      state.barrier_completion = State::Completion::kFuture;
-    }
+    auto* backend = *backends.begin();
+    const bool cpu_barrier =
+        all_cpu || (backend && backend->getBackendName() == kGlooName);
+    state.barrier_completion = !state.push_types.empty()
+        ? State::Completion::kPush
+        : cpu_barrier ? State::Completion::kFuture
+                      : State::Completion::kNone;
   }
-  // The callbacks hold the state weakly, as FlightRecorderHook's hold it, so
-  // that dropping the returned handle detaches the hook.
+  // Held weakly, like FlightRecorderHook's state, so that dropping the
+  // returned handle detaches the hook.
   std::weak_ptr<State> weak = hook->state_;
   pg_ref.registerPreHook(hook->hook_id_, [weak](const PreHookArgs& args) {
     if (auto self = weak.lock()) {
@@ -443,23 +385,27 @@ std::shared_ptr<WorkStatusHook> WorkStatusHook::attach(
         });
   }
 
-  auto& r = registry();
+  installProcessHooks();
+  auto& r = *registry_ptr;
   std::lock_guard<std::mutex> lock(r.mutex);
   r.hooks.insert(hook.get());
-  ensureThreadLocked(r);
+  if (r.thread == nullptr) {
+    r.thread = new std::thread(runLoop);
+  }
   return hook;
 }
 
 void WorkStatusHook::logAll() {
-  std::vector<std::pair<std::string, C10dLoggingData>> records;
-  {
-    auto& r = registry();
-    std::lock_guard<std::mutex> lock(r.mutex);
-    for (auto* hook : r.hooks) {
-      records.emplace_back(hook->logPrefix(), hook->status());
-    }
+  if (!reporting()) {
+    return;
   }
-  emit(records, registry().stop);
+  auto& r = *registry_ptr;
+  Records records;
+  {
+    std::lock_guard<std::mutex> lock(r.mutex);
+    records = snapshotLocked(r);
+  }
+  emit(records, r.stop);
 }
 
 WorkStatusHook::WorkStatusHook(
@@ -506,7 +452,7 @@ void WorkStatusHook::remove() {
     state_->early_order.clear();
   }
   {
-    auto& r = registry();
+    auto& r = *registry_ptr;
     std::lock_guard<std::mutex> lock(r.mutex);
     r.hooks.erase(this);
   }
@@ -515,24 +461,6 @@ void WorkStatusHook::remove() {
   if (push_completion_) {
     pg->unregisterCompletionHook(hook_id_);
   }
-}
-
-std::string WorkStatusHook::logPrefix() const {
-  // Stock ProcessGroupNCCL::createLogPrefix.
-  if (!pg_desc_.empty() && pg_desc_ != "undefined") {
-    return c10::str(
-        "[PG ID ",
-        pg_id_,
-        " PG GUID ",
-        pg_name_,
-        "(",
-        pg_desc_,
-        ") Rank ",
-        rank_,
-        "] ");
-  }
-  return c10::str(
-      "[PG ID ", pg_id_, " PG GUID ", pg_name_, " Rank ", rank_, "] ");
 }
 
 C10dLoggingData WorkStatusHook::status() {
@@ -553,14 +481,14 @@ C10dLoggingData WorkStatusHook::status() {
 
 void WorkStatusHook::State::fill(C10dLoggingData& data) {
   std::lock_guard<std::mutex> lock(mutex);
-  auto fill_op = [&](const std::string& which, const OpInfo& op) {
-    data.integers[c10::str("last_", which, "_work")] = op.seq;
-    data.integers[c10::str("last_", which, "_numel_in")] =
-        static_cast<int64_t>(op.numel_in);
-    data.integers[c10::str("last_", which, "_numel_out")] =
-        static_cast<int64_t>(op.numel_out);
-    data.strings[c10::str("last_", which, "_work_name")] =
-        op.seq < 0 ? "" : opTypeToString(toOpType(op.name, op.any_source));
+  auto fill_op = [&](const char* which, const OpInfo& op) {
+    auto key = [&](const char* field) {
+      return c10::str("last_", which, "_", field);
+    };
+    data.integers[key("work")] = op.seq;
+    data.integers[key("numel_in")] = static_cast<int64_t>(op.numel_in);
+    data.integers[key("numel_out")] = static_cast<int64_t>(op.numel_out);
+    data.strings[key("work_name")] = op.seq < 0 ? "" : opTypeToString(op.type);
   };
   fill_op("enqueued", last_enqueued);
   fill_op("completed", last_completed);
@@ -584,8 +512,9 @@ void WorkStatusHook::State::onPre(const PreHookArgs& args) {
   }
   OpInfo op;
   op.seq = seq;
-  op.name = args.name;
-  op.any_source = args.name == HookOpName::RECV && args.root < 0;
+  op.type = args.name == HookOpName::RECV && args.root < 0
+      ? OpType::RECVANYSOURCE
+      : kOpTypes.at(static_cast<size_t>(args.name));
   op.numel_in = totalNumel(args.input_tensors);
   op.numel_out = totalNumel(args.output_tensors);
   if (singleBuffer(args.name)) {
@@ -596,7 +525,7 @@ void WorkStatusHook::State::onPre(const PreHookArgs& args) {
     capturing = streamIsCapturing(*device);
     op.completion = completionFor(device->type());
   } else {
-    // barrier(): its device is not passed, but it is one of the group's.
+    // barrier(): its device is one of the group's.
     op.completion = barrier_completion;
     for (auto type : device_types) {
       capturing = capturing || currentStreamIsCapturing(type);
@@ -604,14 +533,12 @@ void WorkStatusHook::State::onPre(const PreHookArgs& args) {
   }
 
   std::lock_guard<std::mutex> lock(mutex);
-  if (removed) {
-    return;
-  }
-  if (capturing) {
-    // Like stock: numbered, but neither enqueued nor completed.
+  // Like stock, captured ops are numbered but neither enqueued nor completed.
+  if (removed || capturing) {
     return;
   }
   last_enqueued = op;
+  // Stays until evicted if the backend throws, as no post-hook follows.
   inflight[args.op_id] = op;
   while (inflight.size() > kMaxInflight) {
     auto oldest = inflight.begin();
@@ -630,7 +557,9 @@ void WorkStatusHook::State::onPost(
   }
   std::optional<std::type_index> work_type;
   if (args.work) {
-    work_type.emplace(typeid(*args.work));
+    // Bound first: typeid evaluates an operand with side effects.
+    const Work& work = *args.work;
+    work_type.emplace(typeid(work));
   }
   OpInfo op;
   {
@@ -640,22 +569,19 @@ void WorkStatusHook::State::onPost(
       return;
     }
     op = it->second;
-    if (args.work && op.completion == Completion::kPush) {
-      // Completion is pushed by key, possibly already.
-      auto key = args.work->getCompletionKey();
-      if (early_keys.erase(key) == 0) {
-        work_ids[key] = args.op_id;
-        it->second.completion_key = key;
-        return;
-      }
-      inflight.erase(it);
-      if (args.op_id > last_completed_op_id) {
-        last_completed_op_id = args.op_id;
-        last_completed = op;
-      }
+    const bool push = args.work && op.completion == Completion::kPush;
+    // Completion is pushed by key, possibly already.
+    const uint64_t key = push ? args.work->getCompletionKey() : 0;
+    if (push && early_keys.erase(key) == 0) {
+      work_ids[key] = args.op_id;
+      it->second.completion_key = key;
       return;
     }
     inflight.erase(it);
+    if (push) {
+      completeLocked(args.op_id, op);
+      return;
+    }
     if (!args.work || op.completion != Completion::kFuture ||
         futureless_types.count(*work_type)) {
       return;
@@ -673,15 +599,18 @@ void WorkStatusHook::State::onPost(
   if (!future) {
     return;
   }
-  // Runs inline if the future is already complete. uses_future=false: only
-  // the error state is read, so CUDA futures need not sync streams for it.
+  // Runs inline if already complete. uses_future=false: only the error state
+  // is read, so CUDA futures need not sync streams.
   future->addCallback(
       [weak, op_id = args.op_id, op](c10::ivalue::Future& f) {
         if (f.hasError()) {
           return;
         }
         if (auto self = weak.lock()) {
-          self->markCompleted(op_id, op);
+          std::lock_guard<std::mutex> lock(self->mutex);
+          if (!self->removed) {
+            self->completeLocked(op_id, op);
+          }
         }
       },
       /*uses_future=*/false);
@@ -713,21 +642,16 @@ void WorkStatusHook::State::onCompletionKey(uint64_t completion_key) {
   if (it == inflight.end()) {
     return;
   }
-  if (op_id > last_completed_op_id) {
-    last_completed_op_id = op_id;
-    last_completed = it->second;
-  }
+  completeLocked(op_id, it->second);
   inflight.erase(it);
 }
 
-void WorkStatusHook::State::markCompleted(int64_t op_id, const OpInfo& info) {
-  std::lock_guard<std::mutex> lock(mutex);
-  // Futures may complete out of issue order; report the latest op.
-  if (removed || op_id <= last_completed_op_id) {
-    return;
+void WorkStatusHook::State::completeLocked(int64_t op_id, const OpInfo& info) {
+  // Ops may complete out of issue order; report the latest.
+  if (op_id > last_completed_op_id) {
+    last_completed_op_id = op_id;
+    last_completed = info;
   }
-  last_completed_op_id = op_id;
-  last_completed = info;
 }
 
 } // namespace c10d

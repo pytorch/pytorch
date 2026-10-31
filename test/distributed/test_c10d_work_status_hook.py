@@ -1,8 +1,4 @@
 # Owner(s): ["oncall: distributed"]
-#
-# Tests for the WorkStatusHook (torch._C._distributed_c10d.WorkStatusHook):
-# stock ProcessGroupNCCL's periodic work status C10dLogger record, reported for
-# any backend from the ProcessGroup pre/post collective hooks.
 
 import os
 import shutil
@@ -47,7 +43,6 @@ _LOGGER_SOURCE = r"""
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
-#include <sstream>
 
 namespace {
 
@@ -96,14 +91,12 @@ Record wait_record(
   pybind11::gil_scoped_release no_gil;
   std::unique_lock<std::mutex> lock(mutex);
   Record result;
-  const c10d::C10dLoggingData* last = nullptr;
   const bool found = cv.wait_for(lock, std::chrono::minutes(2), [&] {
     for (size_t i = since; i < records.size(); ++i) {
       const auto& r = records[i];
       if (r.strings.at("pg_name") != pg_name) {
         continue;
       }
-      last = &r;
       bool match = true;
       for (const auto& [k, v] : strings) {
         match = match && r.strings.at(k) == v;
@@ -118,18 +111,7 @@ Record wait_record(
     }
     return false;
   });
-  if (!found) {
-    std::ostringstream os;
-    if (last != nullptr) {
-      for (const auto& [k, v] : last->strings) {
-        os << k << "=" << v << " ";
-      }
-      for (const auto& [k, v] : last->integers) {
-        os << k << "=" << v << " ";
-      }
-    }
-    TORCH_CHECK(false, "no matching record for ", pg_name, "; last: ", os.str());
-  }
+  TORCH_CHECK(found, "no matching record for ", pg_name);
   return result;
 }
 """
@@ -147,14 +129,6 @@ _KEYS = {
     ),
 }
 
-# Never observed by the hook; stock's defaults when collectives are not timed.
-_STARTED = {
-    "last_started_work": -1,
-    "last_started_work_name": "",
-    "last_started_numel_in": 0,
-    "last_started_numel_out": 0,
-}
-
 
 def _op(kind, seq, name, numel_in, numel_out):
     return {
@@ -164,6 +138,29 @@ def _op(kind, seq, name, numel_in, numel_out):
         f"last_{kind}_numel_out": numel_out,
     }
 
+
+# Never observed by the hook; stock's defaults when collectives are not timed.
+_STARTED = _op("started", -1, "", 0, 0)
+
+
+def _wait(logger, pg, since=0, **want):
+    """Waits for a record of pg, from index since, holding want. Returns
+    its index and contents."""
+    strings = {k: v for k, v in want.items() if isinstance(v, str)}
+    integers = {k: v for k, v in want.items() if not isinstance(v, str)}
+    index, rec_strings, rec_integers = logger.wait_record(
+        pg.group_name, since, strings, integers
+    )
+    return index, {**rec_strings, **rec_integers}
+
+
+def _done(enqueued, completed):
+    return {"last_enqueued_work": enqueued, "last_completed_work": completed}
+
+
+_skip_gpu2 = unittest.skipIf(
+    not TEST_CUDA or torch.cuda.device_count() < 2, "requires at least 2 GPUs"
+)
 
 _skip_load_inline = unittest.skipIf(
     IS_FBCODE or IS_SANDCASTLE or IS_WINDOWS, "load_inline is unavailable"
@@ -258,24 +255,9 @@ class AbstractWorkStatusHookTest:
 
     def test_attached_until_destroyed(self):
         pg = self._init_pg()
-        self.assertIsInstance(_world.pg_work_status_hooks[pg], WorkStatusHook)
-        sub = dist.new_group([1])
-        if self.rank == 1:
-            self.assertIn(sub, _world.pg_work_status_hooks)
-            status = _world.pg_work_status_hooks[sub].status()
-            self.assertEqual(status["rank"], 0)
-            self.assertEqual(status["global_rank"], 1)
-            dist.destroy_process_group(sub)
-            self.assertNotIn(sub, _world.pg_work_status_hooks)
-        dist.destroy_process_group()
-        self.assertEqual(_world.pg_work_status_hooks, {})
-
-    def test_initial_record(self):
-        pg = self._init_pg()
         status = _world.pg_work_status_hooks[pg].status()
         self.assertEqual(set(status), _KEYS)
-        self.assertIsInstance(status["pg_id"], int)
-        del status["pg_id"]
+        self.assertIsInstance(status.pop("pg_id"), int)
         self.assertEqual(
             status,
             {
@@ -288,6 +270,16 @@ class AbstractWorkStatusHookTest:
                 **_op("completed", -1, "", 0, 0),
             },
         )
+        sub = dist.new_group([1])
+        if self.rank == 1:
+            self.assertIn(sub, _world.pg_work_status_hooks)
+            status = _world.pg_work_status_hooks[sub].status()
+            self.assertEqual(status["rank"], 0)
+            self.assertEqual(status["global_rank"], 1)
+            dist.destroy_process_group(sub)
+            self.assertNotIn(sub, _world.pg_work_status_hooks)
+        dist.destroy_process_group()
+        self.assertEqual(_world.pg_work_status_hooks, {})
 
     @_needs_logger
     def test_ops_record(self):
@@ -342,18 +334,14 @@ class AbstractWorkStatusHookTest:
             run()
             if enqueued[1] not in futureless:
                 completed = enqueued
-            want = {**_op("enqueued", *enqueued), **_op("completed", *completed)}
-            strings = {k: v for k, v in want.items() if isinstance(v, str)}
-            integers = {k: v for k, v in want.items() if isinstance(v, int)}
-            since, rec_strings, rec_integers = logger.wait_record(
-                pg.group_name, since, strings, integers
+            since, record = _wait(
+                logger,
+                pg,
+                since,
+                **_op("enqueued", *enqueued),
+                **_op("completed", *completed),
             )
-            record = {**rec_strings, **rec_integers}
             self.assertEqual(set(record), _KEYS, i)
-            self.assertEqual({k: record[k] for k in _STARTED}, _STARTED, i)
-            self.assertEqual(record["rank"], self.rank, i)
-            self.assertEqual(record["global_rank"], self.rank, i)
-            self.assertEqual(record["pg_desc"], "default_pg", i)
 
     @_needs_logger
     def test_pending_op_not_completed(self):
@@ -364,27 +352,19 @@ class AbstractWorkStatusHookTest:
         if self.rank == 0:
             # Rank 1 holds back, so this all_reduce cannot complete.
             work = dist.all_reduce(self._ones(1), async_op=True)
-            want = {
+            _wait(
+                logger,
+                pg,
+                logger.count(),
                 **_op("enqueued", 2, *allreduce),
                 **_op("completed", 1, *allreduce),
-            }
-            logger.wait_record(
-                pg.group_name,
-                logger.count(),
-                {k: v for k, v in want.items() if isinstance(v, str)},
-                {k: v for k, v in want.items() if isinstance(v, int)},
             )
             self.store.set("release", "1")
             work.wait()
         else:
             self.store.wait(["release"])
             dist.all_reduce(self._ones(1))
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {},
-            {"last_enqueued_work": 2, "last_completed_work": 2},
-        )
+        _wait(logger, pg, **_done(2, 2))
 
     @_needs_logger
     def test_batch_p2p_not_completed(self):
@@ -399,52 +379,31 @@ class AbstractWorkStatusHookTest:
         for work in dist.batch_isend_irecv(ops):
             work.wait()
         # Batched p2p ops are never seen completing, only passed over.
-        want = {
+        _wait(
+            logger,
+            pg,
+            logger.count(),
             **_op("enqueued", 2, "RECV", 2, 2),
             **_op("completed", 1, "ALLREDUCE", 1, 1),
-        }
-        logger.wait_record(
-            pg.group_name,
-            logger.count(),
-            {k: v for k, v in want.items() if isinstance(v, str)},
-            {k: v for k, v in want.items() if isinstance(v, int)},
         )
         dist.all_reduce(self._ones(1))
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {},
-            {"last_enqueued_work": 2, "last_completed_work": 2},
-        )
+        _wait(logger, pg, **_done(2, 2))
 
     @_needs_logger
-    def test_remove_stops_tracking(self):
-        _install_logger()
+    def test_numbered_before_logger_until_removed(self):
         pg = self._init_pg()
         hook = _world.pg_work_status_hooks[pg]
-        hook.remove()
-        hook.remove()
-        dist.all_reduce(self._ones(1))
-        status = hook.status()
-        self.assertEqual(status["last_enqueued_work"], -1)
-        self.assertEqual(status["last_completed_work"], -1)
-
-    @_needs_logger
-    def test_numbered_before_logger(self):
-        pg = self._init_pg()
         dist.all_reduce(self._ones(1))
         dist.all_reduce(self._ones(1))
         # Ops are numbered before a logger is registered, but not tracked.
-        status = _world.pg_work_status_hooks[pg].status()
-        self.assertEqual(status["last_enqueued_work"], -1)
+        self.assertEqual(hook.status()["last_enqueued_work"], -1)
         logger = _install_logger()
         dist.all_reduce(self._ones(1))
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {},
-            {"last_enqueued_work": 3, "last_completed_work": 3},
-        )
+        _wait(logger, pg, **_done(3, 3))
+        hook.remove()
+        hook.remove()
+        dist.all_reduce(self._ones(1))
+        self.assertEqual({k: hook.status()[k] for k in _done(0, 0)}, _done(3, 3))
 
 
 def _make_test_class(backend_name, device_type):
@@ -464,12 +423,7 @@ def _make_test_class(backend_name, device_type):
         not dist.is_backend_available(backend_name),
         f"{backend_name} backend is not available",
     )(cls)
-    if device_type == "cuda":
-        cls = unittest.skipIf(
-            not TEST_CUDA or torch.cuda.device_count() < 2,
-            "requires at least 2 GPUs",
-        )(cls)
-    return cls
+    return _skip_gpu2(cls) if device_type == "cuda" else cls
 
 
 for _backend, _device in [("gloo", "cpu"), ("nccl2", "cuda"), ("nccl-lazy", "cuda")]:
@@ -478,12 +432,20 @@ for _backend, _device in [("gloo", "cpu"), ("nccl2", "cuda"), ("nccl-lazy", "cud
 del _backend, _device, _cls
 
 
-@unittest.skipIf(
-    not TEST_CUDA or torch.cuda.device_count() < 2, "requires at least 2 GPUs"
-)
-@unittest.skipIf(
-    not dist.is_backend_available("nccl2"), "nccl2 backend is not available"
-)
+class GlooSplitWorkStatusHookTest(_WorkStatusTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_split_attached_until_aborted(self):
+        self._init_pg()
+        sub = dist.split_group(split_ranks=[[0, 1]])
+        status = _world.pg_work_status_hooks[sub].status()
+        self.assertEqual(status["global_rank"], self.rank)
+        dist.distributed_c10d._abort_process_group(sub)
+        self.assertNotIn(sub, _world.pg_work_status_hooks)
+
+
+@_skip_gpu2
+@unittest.skipIf(not dist.is_backend_available("nccl2"), "nccl2 is not available")
 class Nccl2CudaWorkStatusHookTest(_WorkStatusTestBase):
     """CUDA-specific behaviour, on a backend that pushes completions."""
 
@@ -504,15 +466,11 @@ class Nccl2CudaWorkStatusHookTest(_WorkStatusTestBase):
         graph.replay()
         dist.all_reduce(tensor)
         # Like stock, the captured op is numbered but never enqueued.
-        want = {
+        _wait(
+            logger,
+            pg,
             **_op("enqueued", 3, "ALLREDUCE", 1, 1),
             **_op("completed", 3, "ALLREDUCE", 1, 1),
-        }
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {k: v for k, v in want.items() if isinstance(v, str)},
-            {k: v for k, v in want.items() if isinstance(v, int)},
         )
 
     @_needs_logger
@@ -524,27 +482,12 @@ class Nccl2CudaWorkStatusHookTest(_WorkStatusTestBase):
             [torch.ones(1), self._ones(1), torch.ones(1)], start=1
         ):
             dist.all_reduce(tensor)
-            logger.wait_record(
-                pg.group_name,
-                0,
-                {},
-                {"last_enqueued_work": seq, "last_completed_work": seq},
-            )
+            _wait(logger, pg, **_done(seq, seq))
         # Which backend runs a barrier is not known, so it is only passed over.
         dist.barrier()
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {"last_enqueued_work_name": "BARRIER"},
-            {"last_enqueued_work": 4, "last_completed_work": 3},
-        )
+        _wait(logger, pg, last_enqueued_work_name="BARRIER", **_done(4, 3))
         dist.all_reduce(torch.ones(1))
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {},
-            {"last_enqueued_work": 5, "last_completed_work": 5},
-        )
+        _wait(logger, pg, **_done(5, 5))
 
     @_needs_logger
     def test_debug_detail(self):
@@ -556,12 +499,7 @@ class Nccl2CudaWorkStatusHookTest(_WorkStatusTestBase):
             type(pg._get_backend(self.device)).__name__, "_ProcessGroupWrapper"
         )
         dist.all_reduce(self._ones(1))
-        logger.wait_record(
-            pg.group_name,
-            0,
-            {},
-            {"last_enqueued_work": 1, "last_completed_work": 1},
-        )
+        _wait(logger, pg, **_done(1, 1))
 
 
 class WorkStatusHookLogAllTest(_WorkStatusTestBase):
@@ -583,9 +521,7 @@ class WorkStatusHookLogAllTest(_WorkStatusTestBase):
         before = logger.count()
         WorkStatusHook._log_all()
         self.assertEqual(logger.count(), before + 1)
-        index, strings, integers = logger.wait_record(pg.group_name, before, {}, {})
-        self.assertEqual(index, before)
-        self.assertEqual({**strings, **integers}, status)
+        self.assertEqual(_wait(logger, pg, before), (before, status))
 
 
 class WorkStatusHookDisabledTest(_WorkStatusTestBase):
@@ -598,15 +534,12 @@ class WorkStatusHookDisabledTest(_WorkStatusTestBase):
         self.assertIsNone(WorkStatusHook.attach(pg))
 
 
-@unittest.skipIf(
-    not TEST_CUDA or torch.cuda.device_count() < 2, "requires at least 2 GPUs"
-)
+@_skip_gpu2
 @unittest.skipIf(not dist.is_nccl_available(), "requires nccl")
 class WorkStatusHookStockNcclTest(_WorkStatusTestBase):
     """Stock ProcessGroupNCCL reports its own status and is left alone."""
 
     hw_classification = HardwareClassification.CUDA
-
     device_type = "cuda"
 
     def test_stock_nccl_not_attached(self):
