@@ -83,7 +83,9 @@ class _FakeWinner(sa.ExternKernelCaller):
     the base __init__ is deliberately not called.
     """
 
-    def __init__(self, name, input_nodes, out_sizes, choice_name=None):
+    def __init__(
+        self, name, input_nodes, out_sizes, choice_name=None, out_strides=None
+    ):
         from types import SimpleNamespace
 
         self.name = name
@@ -93,7 +95,7 @@ class _FakeWinner(sa.ExternKernelCaller):
         self.choice = SimpleNamespace(name=choice_name or name)
         self.input_nodes = input_nodes
         self.layout = ir.FixedLayout(
-            DEVICE, DTYPE, out_sizes, _contiguous_strides(out_sizes)
+            DEVICE, DTYPE, out_sizes, out_strides or _contiguous_strides(out_sizes)
         )
         self.bmreq = mock.Mock()
         self.bmreq.input_tensor_meta = None
@@ -358,6 +360,28 @@ class TestTunableOpPretune(TestCase):
             [s2, m, n],
         )
         self.assertEqual(_run(winner2, sym=s2), [])
+
+    def test_memo_distinguishes_output_stride(self):
+        # winner.layout is a Layout, which has no get_stride. When the signature
+        # probed for one and fell back, every output stride read as (), so two
+        # GEMMs differing only in output layout shared a memo key and the second
+        # was silently skipped.
+        s = sympy.Symbol("s_outstride", positive=True, integer=True)
+        m, k, n = s, 256, 512
+        inputs = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
+        contiguous = _FakeWinner("mm", inputs, [m, n])
+        # Same inputs and output sizes, column-major output: a different ld, so
+        # it needs its own tuning entry.
+        transposed = _FakeWinner("mm", inputs, [m, n], out_strides=[1, m])
+
+        with _ladder(s) as submitted:
+            tunableop.maybe_range_pretune(contiguous)
+            first = len(submitted)
+            self.assertTrue(first, "the first winner must submit")
+            tunableop.maybe_range_pretune(transposed)
+            self.assertGreater(
+                len(submitted), first, "a different output stride must not be memoed"
+            )
 
     def test_choice_variants_produce_buckets(self):
         # Matching runs on winner.choice.name, which covers the _dtype
