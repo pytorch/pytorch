@@ -1988,9 +1988,6 @@ class PrecompileSession(Generic[_P, _R]):
         self._cudagraph_inputs: dict[str, Any] = {}
         # Whether the capture asked for CUDA graphs, before a cpp_wrapper downgrade.
         self._requests_cudagraphs = False
-        # What each captured call compiles under: the record for a CUDA graph
-        # capture; otherwise only CUDA graphs off, so the rest stays ambient.
-        self._call_config: dict[str, bool] = {}
         if self._backend_name == "inductor":
             inputs = self._cudagraph_inputs = _cudagraph_inputs()
             config = self._cudagraph_config = {
@@ -2001,9 +1998,6 @@ class PrecompileSession(Generic[_P, _R]):
                 config.update((k, v) for k, v in backend.config.items() if k in config)
                 cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
             self._requests_cudagraphs = config["triton.cudagraphs"]
-            self._call_config = config
-            if not self._requests_cudagraphs:
-                self._call_config = {"triton.cudagraphs": False}
             from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
             # Record what compile_fx compiles (get_cpp_wrapper_config).
@@ -2011,6 +2005,10 @@ class PrecompileSession(Generic[_P, _R]):
                 config["graph_partition"]
             ):
                 config["triton.cudagraphs"] = False
+            # A capture without CUDA graphs records only that, and its calls
+            # compile the rest as configured.
+            if not self._requests_cudagraphs:
+                config = self._cudagraph_config = {"triton.cudagraphs": False}
             _check_cudagraph_policy(config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
@@ -2129,9 +2127,16 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
-        if self._requests_cudagraphs:
+        if self._cudagraph_inputs:
             ambient = _cudagraph_inputs()
-            changed = [k for k, v in self._cudagraph_inputs.items() if ambient[k] != v]
+            snapshot = self._cudagraph_inputs
+            changed = [k for k, v in snapshot.items() if ambient[k] != v]
+            if not self._requests_cudagraphs:
+                # Only turning CUDA graphs on would compile what the record says
+                # is off.
+                changed = [
+                    k for k in changed if k == "triton.cudagraphs" and ambient[k]
+                ]
             if changed:
                 raise PackageError(
                     f"{changed} changed since capture() began: the artifact "
@@ -2139,13 +2144,13 @@ class PrecompileSession(Generic[_P, _R]):
                     "for every captured call. Restore it for the captured calls; to "
                     "capture under another value, set it before capture()."
                 )
+            _check_cudagraph_policy(self._cudagraph_config)
         try:
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
-                torch._inductor.config.patch(self._call_config),
+                torch._inductor.config.patch(self._cudagraph_config),
             ):
-                _check_cudagraph_policy(self._cudagraph_config)
                 return self._compiled(*args, **kwargs)
         except Exception as e:
             message = f"{type(e).__name__}: {e}"

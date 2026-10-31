@@ -4978,6 +4978,18 @@ class TestPrecompileDynamoCapture(TestCase):
                     cap(self.model, self.x2)
             cap(self.model, self.x2)
 
+    def test_a_capture_without_cudagraphs_refuses_turning_them_on(self):
+        single = self.mod.single
+        with self._capture(single) as cap:
+            with torch._inductor.config.patch({"triton.cudagraphs": True}):
+                with self.assertRaisesRegex(PrecompileError, "changed since capture"):
+                    cap(self.model, self.x2)
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            meta = _parse_artifact_metadata(f.read())
+        # It records only that CUDA graphs are off.
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], {"triton.cudagraphs": False})
+
     @parametrize("key", ["cpp_wrapper", "graph_partition", "triton.cudagraph_trees"])
     def test_a_capture_without_cudagraphs_compiles_under_an_inner_patch(self, key):
         from torch._dynamo import callback
@@ -5073,11 +5085,14 @@ class TestPrecompileDynamoCapture(TestCase):
         with torch._inductor.config.patch(cudagraph_policy=object()):
             with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
                 self._capture(single, options=on)
-        # It is checked on every call, so one set after capture() began refuses too.
-        with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
-            with self._capture(single, options=on) as cap:
-                with torch._inductor.config.patch(cudagraph_policy=object()):
+        # It is checked on every call, so one set after capture() began refuses too,
+        # before compiling: a capture that recovers still saves.
+        with self._capture(single, options=on) as cap:
+            with torch._inductor.config.patch(cudagraph_policy=object()):
+                with self.assertRaisesRegex(PrecompileError, "Unset it while"):
                     cap(self.model, self.x2)
+            cap(self.model, self.x2)
+        self.assertTrue(os.path.exists(self.artifact))
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,

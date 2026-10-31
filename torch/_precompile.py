@@ -4117,8 +4117,9 @@ def capture(
     records that. ``triton.cudagraphs``, ``triton.cudagraph_trees``,
     ``graph_partition`` and ``cpp_wrapper`` are read when ``capture()`` is
     called. A capture with CUDA graphs on compiles every call under them and
-    raises on a call made after one of them changed; one without compiles
-    every call with CUDA graphs off and the rest as configured. As under ``torch.compile``, a
+    raises on a call made after one of them changed; one without records only
+    that they are off, compiles the rest as configured, and raises on a call
+    made after ``triton.cudagraphs`` was turned on. As under ``torch.compile``, a
     graph's outputs are overwritten by its next replay, so clone what you keep
     across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated
