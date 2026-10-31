@@ -75,6 +75,10 @@ template <>
 struct OpMathType<c10::Half> {
   using type = float;
 };
+template <>
+struct OpMathType<c10::BFloat16> {
+  using type = float;
+};
 
 
 template<typename T>
@@ -524,7 +528,17 @@ std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) 
 template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
-    //missing
+    // Keep the partial products finite: once they overflow, the sign of the
+    // result depends on FMA contraction. Scale rather than clamp, since equal
+    // magnitudes make ac - bd cancel to an FMA rounding error.
+    using VT = typename T::value_type;
+    const VT limit = std::sqrt(std::numeric_limits<VT>::max()) / 2;
+    auto shrink = [limit](T v) {
+        const VT m = std::max(std::abs(v.real()), std::abs(v.imag()));
+        return m > limit ? v * (limit / m) : v;
+    };
+    val1 = shrink(val1);
+    val2 = shrink(val2);
 }
 
 template <typename T>
@@ -543,8 +557,10 @@ std::enable_if_t<!is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
     if constexpr (std::is_integral_v<T> == false) return;
     if (!is_zero(val2)) {
+        // Only shrink val1; earlier pairs sharing it must stay in range.
         T c = (std::numeric_limits<T>::max() - 1) / val2;
-        if (std::abs(val1) >= c) {
+        T limit = c < 0 ? T(-c) : c;
+        if (val1 > limit || val1 < -limit) {
             // correct first;
             val1 = c;
         }
@@ -1320,7 +1336,8 @@ std::enable_if_t<!is_complex<T>::value, T> local_division(T x, T y) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Complex<T> x, Complex<T> y) {
-#if defined(TEST_AGAINST_DEFAULT)
+#if defined(TEST_AGAINST_DEFAULT) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+    // AVX2 and AVX512 complex division uses c10::complex per element.
     return x / y;
 #else /* defined(TEST_AGAINST_DEFAULT) */
     //re = (ac + bd)/abs_2()
@@ -1389,20 +1406,96 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 }
 
 
+// MSVC defines TEST_AGAINST_DEFAULT for AVX builds too, whose fused ops are
+// still the AVX ones.
+#if defined(TEST_AGAINST_DEFAULT) && !defined(CPU_CAPABILITY_AVX2) && \
+    !defined(CPU_CAPABILITY_AVX512)
+inline constexpr bool kTestAgainstDefault = true;
+#else
+inline constexpr bool kTestAgainstDefault = false;
+#endif
+#if defined(CPU_CAPABILITY_VSX)
+inline constexpr bool kVsx = true;
+#else
+inline constexpr bool kVsx = false;
+#endif
+#if defined(CPU_CAPABILITY_ZVECTOR)
+inline constexpr bool kZvector = true;
+#else
+inline constexpr bool kZvector = false;
+#endif
+// NEON Half arithmetic rounds once in fp16.
+#if defined(__aarch64__) && !defined(C10_MOBILE) && \
+    !defined(CPU_CAPABILITY_SVE256) && \
+    defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+inline constexpr bool kNativeFp16Fma = true;
+#else
+inline constexpr bool kNativeFp16Fma = false;
+#endif
+
+// Rounds a * b + c to Half once. For Half inputs the double FMA never lands on
+// an fp16 rounding tie unless the exact value does, and rounding it to odd in
+// float keeps the final rounding to Half correct.
+inline c10::Half fma_round_once(double a, double b, double c) {
+    const double d = std::fma(a, b, c);
+    float f = static_cast<float>(d);
+    if (static_cast<double>(f) != d && (c10::bit_cast<uint32_t>(f) & 1) == 0) {
+        f = std::nextafter(f, d > f ? std::numeric_limits<float>::infinity()
+                                    : -std::numeric_limits<float>::infinity());
+    }
+    return static_cast<c10::Half>(f);
+}
+
+// Fusedness depends on the operation and element type as well as the ISA.
+template <bool neg_ab, bool neg_c, typename T>
+T local_fused(T a, T b, T c) {
+    if constexpr (kNativeFp16Fma && std::is_same_v<T, c10::Half>) {
+        const double x = static_cast<double>(a), z = static_cast<double>(c);
+        return fma_round_once(neg_ab ? -x : x, static_cast<double>(b), neg_c ? -z : z);
+    } else if constexpr (c10::is_reduced_floating_point_v<T> &&
+                         (kTestAgainstDefault || kVsx || kZvector)) {
+        T ab = a * b;
+        if constexpr (neg_ab) ab = -ab;
+        return neg_c ? ab - c : ab + c;
+    } else {
+        using op_math_t = typename OpMathType<T>::type;
+        auto x = static_cast<op_math_t>(a);
+        auto y = static_cast<op_math_t>(b);
+        auto z = static_cast<op_math_t>(c);
+        if constexpr (neg_ab) x = -x;
+        if constexpr (neg_c) z = -z;
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(__aarch64__)
+        constexpr bool fused = true;
+#else
+        constexpr bool fused = !neg_ab && !neg_c &&
+            (kZvector || (kVsx && std::is_same_v<T, double>));
+#endif
+        if constexpr (fused) {
+            return static_cast<T>(std::fma(x, y, z));
+        } else {
+            return static_cast<T>(PreventFma{}.add(x * y, z));
+        }
+    }
+}
+
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.add(ab, op_math_t(c)));
+    return local_fused<false, false>(a, b, c);
 }
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.sub(ab, op_math_t(c)));
+    return local_fused<false, true>(a, b, c);
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fnmadd(T a, T b, T c) {
+    return local_fused<true, false>(a, b, c);
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fnmsub(T a, T b, T c) {
+    return local_fused<true, true>(a, b, c);
 }
 
 template <typename T>

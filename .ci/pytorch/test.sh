@@ -2540,20 +2540,49 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
-test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
-    pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
-    for vec256_exec in $vec256_tests
-    do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
-    done
-    popd
-    assert_git_not_dirty
+test_vec() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ||
+        "$BUILD_ENVIRONMENT" == *xpu* || "$TEST_CONFIG" == "slow" ]]; then
+    return
   fi
+  # Test the vectorized instructions for DEFAULT and each CPU capability this
+  # machine supports; the binaries for capabilities it lacks would hit SIGILL.
+  echo "Testing vectorized instructions"
+  local cpu_capability
+  cpu_capability=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability())") || return 1
+  # get_cpu_capability spells ZVECTOR as "Z VECTOR".
+  cpu_capability=${cpu_capability// /}
+  local capabilities=(DEFAULT "$cpu_capability")
+  if [[ "$cpu_capability" == AVX512 ]]; then
+    capabilities+=(AVX2)
+  fi
+  local test_bin_dir="$BUILD_BIN_DIR"
+  if [[ -n "$IN_WHEEL_TEST" ]]; then
+    test_bin_dir="$TORCH_TEST_DIR"
+  fi
+  if [[ ! -x "$test_bin_dir/vec_test_all_types_DEFAULT" ]]; then
+    echo "Missing required vec test: $test_bin_dir/vec_test_all_types_DEFAULT" >&2
+    return 1
+  fi
+  # Run every capability before failing so one report shows all of them.
+  local failed=()
+  local capability vec_exec
+  for capability in $(printf '%s\n' "${capabilities[@]}" | sort -u); do
+    vec_exec="$test_bin_dir/vec_test_all_types_${capability}"
+    if [[ -x "$vec_exec" ]]; then
+      CPP_TESTS_DIR="$test_bin_dir" NO_TD=1 \
+        LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" \
+        python test/run_test.py --cpp --verbose -i "cpp/vec_test_all_types_${capability}" ||
+        failed+=("$capability")
+    else
+      echo "Warning: vec test for detected capability $capability is missing: $vec_exec" >&2
+    fi
+  done
+  if [[ ${#failed[@]} -gt 0 ]]; then
+    echo "vec_test_all_types failed for: ${failed[*]}"
+    return 1
+  fi
+  assert_git_not_dirty
 }
 
 test_docs_test() {
@@ -2966,6 +2995,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     test_rocm_packed_atomic
@@ -3027,7 +3057,7 @@ else
   test_cpuset_num_threads
   test_python
   test_aten
-  test_vec256
+  test_vec
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
