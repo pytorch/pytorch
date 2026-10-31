@@ -13,6 +13,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._inductor import inductor_prims
 from torch._inductor.fx_passes.reinplace import (
+    _alias_sources,
     _aliases_graph_input,
     _result_escapes_graph,
     reinplace_inplaceable_ops_core,
@@ -911,6 +912,37 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             # The inner op should be the functional version
             inner_op_before = with_effects_nodes_before[0].args[1]
             self.assertEqual(inner_op_before, my_swap_functional._opoverload)
+
+            # with_effects wraps multiple inner results in one nested tuple.
+            alias_args = {
+                my_swap_functional._opoverload: (0, 1),
+            }
+            result_tuple = next(
+                n for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_before[0]
+                and n.args[1] == 1
+            )
+            first_result = next(
+                n for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is result_tuple
+                and n.args[1] == 0
+            )
+            second_result = next(
+                n for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is result_tuple
+                and n.args[1] == 1
+            )
+            self.assertEqual(
+                _alias_sources(first_result, alias_args),
+                [with_effects_nodes_before[0].args[2]],
+            )
+            self.assertEqual(
+                _alias_sources(second_result, alias_args),
+                [with_effects_nodes_before[0].args[3]],
+            )
 
             # Run reinplace pass
             reinplace_inplaceable_ops_core(gm.graph)
