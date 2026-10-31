@@ -342,11 +342,15 @@ def _multi_output_aliases(
         inner_mutated_args = mutated_args_by_op.get(inner_op)  # type: ignore[arg-type]
         if inner_mutated_args is None:
             return {}
-        return {
-            position + 1: node.args[idx + 2]
-            for position, idx in enumerate(inner_mutated_args)
+        mutated_values = tuple(
+            node.args[idx + 2]
+            for idx in inner_mutated_args
             if idx + 2 < len(node.args)
-        }
+        )
+        if not mutated_values:
+            return {}
+        # with_effects nests a multi-result inner op under result index 1.
+        return {1: mutated_values[0] if len(mutated_values) == 1 else mutated_values}
 
     if target in inplaceable_triton_ops:
         # The wrapper only returns the tensors it cloned. Dropping a name from
