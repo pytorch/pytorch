@@ -399,6 +399,62 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 self.payload(device="cuda", tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "HIP launch kernel names are ROCm-only")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_hip_launch_events_have_kernel_name(self):
+        """HIP launch runtime events carry the launched kernel's name, including
+        during CUDA graph capture, where no GPU kernel record names the launch."""
+        launch_apis = {
+            "hipLaunchKernel",
+            "hipModuleLaunchKernel",
+            "hipExtModuleLaunchKernel",
+        }
+        activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+
+        def trace_events(prof):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+            launches = [
+                e
+                for e in events
+                if e.get("cat") == "cuda_runtime" and e["name"] in launch_apis
+            ]
+            self.assertGreater(len(launches), 0)
+            return events, launches
+
+        x = torch.randn(256, 256, device="cuda")
+        _ = torch.mm(x, x) + x
+        torch.cuda.synchronize()
+
+        with profile(activities=activities) as prof:
+            _ = torch.mm(x, x) + x
+            torch.cuda.synchronize()
+        events, launches = trace_events(prof)
+        kernels = {
+            e["args"]["correlation"]: e["name"]
+            for e in events
+            if e.get("cat") == "kernel"
+        }
+        for launch in launches:
+            self.assertIn("kernel", launch["args"])
+            # GPU kernel records use the code-object descriptor symbol, which
+            # can append a ".kd" or " [clone .kd]" suffix to the same name.
+            self.assertTrue(
+                kernels[launch["args"]["correlation"]].startswith(
+                    launch["args"]["kernel"]
+                )
+            )
+
+        graph = torch.cuda.CUDAGraph()
+        with profile(activities=activities) as prof:
+            with torch.cuda.graph(graph):
+                _ = torch.mm(x, x) + x
+        _, launches = trace_events(prof)
+        for launch in launches:
+            self.assertTrue(launch["args"].get("kernel"))
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_mixed_syntax(self):
         """Enum and dict entries can coexist for different activity groups."""
