@@ -1,14 +1,14 @@
 # Security Policy
 
- - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
+ - [**Reporting Security Issues**](#reporting-security-issues)
  - [**Issues That Are Not Security Vulnerabilities**](#issues-that-are-not-security-vulnerabilities)
  - [**Using PyTorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
    - [TorchScript models](#torchscript-models)
-   - [Untrusted inputs](#untrusted-inputs)
+   - [Untrusted inputs](#untrusted-inputs-during-training-and-prediction)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
-- [**Backporting Security Fixes**](#security-fixes-and-old-releases)
+- [**Backporting Security Fixes**](#backporting-security-fixes)
 - [**CI/CD security principles**](#cicd-security-principles)
 ## Reporting Security Issues
 
