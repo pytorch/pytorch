@@ -2950,19 +2950,35 @@ class TestOptimRenewed(TestCase):
 
 
 class TestScalarDtype(TestCase):
-    @parametrize("default_dtype", [torch.float16, torch.float32, torch.float64])
+    @parametrize("default_dtype", [torch.float16, torch.float32])
     @parametrize("is_fused", [None, False, True])
     @parametrize("target_device", [None, "cpu", "cuda", "mps", "xpu"])
     def test_get_scalar_dtype(self, default_dtype, is_fused, target_device):
         target_device = torch.device(target_device) if target_device else None
-        expected = torch.float32
-        if default_dtype == torch.float64 and (
-            not is_fused
-            or (target_device is not None and target_device.type in ("cpu", "cuda"))
-        ):
-            expected = torch.float64
         with set_default_dtype(default_dtype):
-            self.assertEqual(_get_scalar_dtype(is_fused, target_device), expected)
+            self.assertEqual(_get_scalar_dtype(is_fused, target_device), torch.float32)
+
+    @parametrize("is_fused", [None, False])
+    @parametrize("target_device", [None, "cpu", "cuda", "mps", "xpu"])
+    def test_get_scalar_dtype_float64_non_fused(self, is_fused, target_device):
+        target_device = torch.device(target_device) if target_device else None
+        with set_default_dtype(torch.float64):
+            self.assertEqual(_get_scalar_dtype(is_fused, target_device), torch.float64)
+
+    @parametrize(
+        "target_device,expected",
+        [
+            ("cpu", torch.float64),
+            ("cuda", torch.float64),
+            ("mps", torch.float32),
+            ("xpu", torch.float32),
+            (None, torch.float32),
+        ],
+    )
+    def test_get_scalar_dtype_float64_fused(self, target_device, expected):
+        target_device = torch.device(target_device) if target_device else None
+        with set_default_dtype(torch.float64):
+            self.assertEqual(_get_scalar_dtype(True, target_device), expected)
 
 
 instantiate_parametrized_tests(TestScalarDtype)

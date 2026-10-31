@@ -5,7 +5,6 @@
 #include <ATen/native/cuda/FusedOptimizerUtils.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/fused_adagrad_utils.cuh>
-#include <algorithm>
 
 namespace at::native {
 
@@ -36,6 +35,7 @@ void _fused_adagrad_cuda_impl_(
       params[0].scalar_type(),
       "fused_adagrad_kernel_cuda",
       [&]() {
+        check_fused_optimizer_step_dtypes(state_steps);
         AT_DISPATCH_FUSED_OPTIMIZER_STEP_TYPES(
             state_steps[0].scalar_type(), "fused_adagrad_step_cuda", [&]() {
               multi_tensor_apply_for_fused_optimizer<3>(
@@ -81,6 +81,7 @@ void _fused_adagrad_cuda_impl_(
       params[0].scalar_type(),
       "fused_adagrad_kernel_cuda",
       [&]() {
+        check_fused_optimizer_step_dtypes(state_steps);
         AT_DISPATCH_FUSED_OPTIMIZER_STEP_TYPES(
             state_steps[0].scalar_type(), "fused_adagrad_step_cuda", [&]() {
               multi_tensor_apply_for_fused_optimizer<3>(
