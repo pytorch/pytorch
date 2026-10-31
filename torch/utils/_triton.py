@@ -230,12 +230,13 @@ def has_triton_cuda_tma_device() -> bool:
 
 @functools.cache
 def has_datacenter_blackwell_tma_device() -> bool:
+    """Same SM 10.x and 11.x range as Inductor's is_datacenter_blackwell_arch()."""
     import torch
 
     if (
         torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (10, 0)
-        and torch.cuda.get_device_capability() < (11, 0)
+        and torch.cuda.get_device_capability() < (12, 0)
         and not torch.version.hip
     ):
         return has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()

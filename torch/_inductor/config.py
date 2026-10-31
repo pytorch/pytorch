@@ -705,7 +705,7 @@ multi_kernel_hints: list[int] = []
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
-# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM 10.x and 11.x only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).

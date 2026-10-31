@@ -29,11 +29,17 @@ def get_cuda_arch() -> str | None:
 @clear_on_fresh_cache
 @functools.lru_cache(1)
 def is_datacenter_blackwell_arch() -> bool:
+    """True for NVIDIA GPUs with tcgen05: SM 10.x and SM 11.x (Jetson Thor)."""
+    # ROCm reports the gfx version as the capability, e.g. (11, 0) for RDNA3.
+    if torch.version.hip:
+        return False
     arch = get_cuda_arch()
     if arch is None:
         return False
     arch_number = int(arch)
-    return arch_number >= 100 and arch_number < 110
+    # CUDA 13 renumbered Jetson Thor from SM 10.1 to SM 11.0. Like SM 10.x it has
+    # tcgen05; SM 12.x (consumer Blackwell) does not.
+    return arch_number >= 100 and arch_number < 120
 
 
 @clear_on_fresh_cache
