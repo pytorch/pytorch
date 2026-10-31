@@ -2862,6 +2862,39 @@ def _fold_scaled_mm_output_scale(
     scaled_mm.meta[FOLDED_SCALED_MM_OUTPUT_SCALE] = True
 
 
+@register_graph_pattern(
+    CallFunction(
+        operator.getitem,
+        CallFunction(aten.max.dim, KeywordArg("input"), KeywordArg("dim")),
+        0,
+    ),
+    extra_check=lambda match: match.kwargs["input"].target is aten.abs.default,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+@register_graph_pattern(
+    CallFunction(
+        operator.getitem,
+        CallFunction(
+            aten.max.dim,
+            KeywordArg("input"),
+            KeywordArg("dim"),
+            KeywordArg("keepdim"),
+        ),
+        0,
+    ),
+    extra_check=lambda match: match.kwargs["input"].target is aten.abs.default,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+def abs_max_values(match: Match, input, dim, keepdim=False):
+    # abs gives zeros the same sign; max's single user excludes saved indices.
+    def replacement(input):
+        return aten.amax.default(input, [dim], keepdim)
+
+    match.replace_by_example(replacement, [input])
+
+
 def register_partial_reduction_pattern():
     "Reuse partial reductions in complete reductions"
 
