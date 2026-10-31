@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_CUDNN,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skipIfNoONEDNN,
@@ -371,9 +372,9 @@ def _test_qlinear_fp8_fast_path_helper(error_conn=None):
         if error_conn is not None:
             error_conn.close()
 
-class TestQuantizedOps(TestCase):
-
+class TestQuantizedOpsBase(TestCase):
     """Helper function to test quantized activation functions."""
+
     def _test_activation_function(self, X, fn_name, test_configs):
         r"""
             When writing a unit test for the activation function,
@@ -467,42 +468,8 @@ class TestQuantizedOps(TestCase):
 
                     self.assertEqual(qY, qY_hat, msg=lambda msg: f'{msg}\n{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
-    """Tests the correctness of the quantized::relu op."""
-    @override_qengines
-    def test_qrelu(self):
-        relu_test_configs = [
-            {
-                'quantized_fn': [
-                    torch.relu,
-                    torch.relu_,
-                    torch.nn.functional.relu,
-                    torch.nn.functional.relu,
-                ],
-                'reference_fn': torch.nn.functional.relu
-            },
-            {
-                'quantized_fn': [
-                    torch.nn.functional.relu,
-                    torch.nn.functional.relu,
-                ],
-                'reference_fn': torch.nn.functional.relu,
-                'extra_kwargs': {
-                    'inplace': True
-                }
-            }
-        ]
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for device in devices:
-            shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
-            dtypes = (torch.quint8, torch.qint8)
-            scales = (0.05, 0.1)
-            zero_points = (0, 5)
-            test_cases = itertools.product(shapes, dtypes, scales, zero_points)
-            for shape, dtype, scale, zero_point in test_cases:
-                X = torch.randn(*shape, device=device)
-                X = (X, (scale, zero_point, dtype))
-                self._test_activation_function(X, 'relu', relu_test_configs)
 
+class TestQuantizedOps(TestQuantizedOpsBase):
     """Tests the correctness of the quantized::relu6 op."""
     def test_qrelu6(self):
         relu6_test_configs = [
@@ -704,35 +671,6 @@ class TestQuantizedOps(TestCase):
         qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
                          msg=lambda msg: f"{msg}\nF.celu failed ({qY} vs {qY_hat})")
-
-    """Tests the correctness of the quantized::gelu op."""
-    def test_qgelu(self):
-        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
-        dtypes = (torch.quint8, torch.qint8)
-        memory_formats = (torch.channels_last, torch.contiguous_format)
-        approximation = ['none', 'tanh']
-        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for shape, dtype, memory_format, approximate in test_cases:
-            if memory_format == torch.channels_last and len(shape) != 4:
-                continue
-
-            X, scale, zero_point, torch_type = \
-                torch.randn(*shape), 0.1, 0, dtype
-            X = X.to(memory_format=memory_format)
-            for device in devices:
-                X = X.to(device=device)
-                qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                               dtype=torch_type)
-                dqX = qX.dequantize()
-
-                op = torch.nn.functional.gelu
-                dqY = op(dqX, approximate=approximate)
-                qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
-                                               dtype=torch_type)
-                qY_hat = op(qX)
-                self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                                 msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::prelu op."""
     def test_qprelu(self):
@@ -1133,77 +1071,6 @@ class TestQuantizedOps(TestCase):
             add_relu_out(qA, qB, out=qCrelu_out_hat)
             self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                              msg="AddReLU.out failed")
-
-    """Tests the correctness of the cudnn add and add_relu op
-    (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qadd_relu_cudnn(self):
-        dtype = torch.qint8
-        add_relu = torch.ops.quantized.add_relu
-        add = torch.ops.quantized.add
-
-        A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
-        B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
-        scale_A = 2.5
-        scale_B = 6.3
-        scale_C = 12.9
-        zero_point = 0
-        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
-                                       dtype=dtype)
-        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
-                                       dtype=dtype)
-        # Add ground truth
-        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
-        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
-        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized addition failed.")
-
-        # Add + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
-        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized addition with ReLU failed.")
-
-    """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qadd_relu_cudnn_nhwc(self):
-        dtype = torch.qint8
-        add_relu = torch.ops.quantized.add_relu
-        add = torch.ops.quantized.add
-
-        A = torch.rand(16, 8, 4, 12).to(device="cuda")
-        B = torch.rand(16, 8, 4, 12).to(device="cuda")
-        scale_A = 2.5
-        scale_B = 6.3
-        scale_C = 12.9
-        zero_point = 0
-        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
-                                       dtype=dtype)
-        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
-                                       dtype=dtype)
-        # Add ground truth
-        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
-        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
-        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized addition failed.")
-
-        # Add + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
-        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized addition with ReLU failed.")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
@@ -1610,50 +1477,6 @@ class TestQuantizedOps(TestCase):
             ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool1d results are off")
-
-    # TODO: merge this test with test_max_pool2d
-    """Tests 2D cudnn max pool operation on quantized tensors."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10),
-                       # cudnn's support for quantized pooling is limited to
-                       # int8 currently
-                       qparams=hu.qparams(dtypes=[torch.qint8])),
-           kernel=st.sampled_from((3, 5, 7)),
-           stride=st.sampled_from((None, 1, 2)),
-           # currently there is no support for dilation for cudnn
-           # pooling
-           dilation=st.integers(1, 1),
-           padding=st.integers(0, 2),
-           ceil_mode=st.booleans())
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
-        X, (scale, zero_point, torch_type) = X
-        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
-        iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
-        assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
-        assume(oW > 0)
-
-        a = torch.from_numpy(X).to(device="cuda")
-        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
-                                                stride=stride,
-                                                padding=padding, dilation=dilation,
-                                                ceil_mode=ceil_mode)
-        a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
-                                          zero_point=zero_point, dtype=torch_type)
-        a_ref = a_ref.dequantize()
-        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-
-        # Test the ops.quantized separately, because None is not treated.
-        a_hat = torch.ops.quantized.max_pool2d(
-            qa, kernel_size=_pair(kernel),
-            stride=_pair(kernel if stride is None else stride),
-            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
-        self.assertEqual(a_ref, a_hat.dequantize(),
-                         msg="ops.quantized.max_pool2d results are off")
 
     """Tests 2D max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -2202,86 +2025,6 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
                                  msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point())))
-
-    @unittest.skip("not currently working and feature isn't used")
-    def test_adaptive_avg_pool(self):
-
-        side_lens = (range(1, 10))
-        dim_lens = (range(3, 5))
-        torch_type = torch.qint8
-        zero_points = (0, 1)
-        combined = [side_lens, dim_lens, zero_points]
-        test_cases = itertools.product(*combined)
-        for test_case in test_cases:
-            output_size_d = random.randint(1, 10)
-            output_size_h = random.randint(1, 10)
-            output_size_w = random.randint(1, 10)
-            side_len, dim_len, zero_point = test_case
-            shapes = [side_len] * dim_len
-            X, X_scale, X_zero_point = \
-                _get_random_tensor_and_q_params(shapes, 1.0, zero_point)
-            X = np.array(X)
-            scale = 1
-            ndim = X.ndim
-            dim_to_check = []
-            if ndim <= 4:
-                dim_to_check.append(2)
-            if ndim >= 4:
-                dim_to_check.append(3)
-
-            D, H, W = X.shape[-3:]
-            output_size_d = min(output_size_d, D)
-            output_size_h = min(output_size_h, H)
-            output_size_w = min(output_size_w, W)
-
-            X = torch.from_numpy(X)
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                           dtype=torch_type)
-
-            for dim in dim_to_check:
-                if dim == 2:
-                    if output_size_h == output_size_w:
-                        output_size = output_size_h
-                    else:
-                        output_size = (output_size_h, output_size_w)
-                elif dim == 3:
-                    if output_size_d == output_size_h == output_size_w:
-                        output_size = output_size_h
-                    else:
-                        output_size = (output_size_d, output_size_h, output_size_w)
-
-                # Run reference on int_repr + round to avoid double rounding error.
-                ref_op = getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d')
-                X_ref = ref_op(qX.int_repr().to(torch.float), output_size).round()
-
-                ops_under_test = {
-                    "nn.functional":
-                        getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d'),
-                    "nn.quantized.functional":
-                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d'),
-                    "ao.nn.quantized.functional":
-                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d')
-                }
-
-                error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
-
-                for name, op in ops_under_test.items():
-                    # TODO: torch.cuda.is_available() should be swapped for a flag that checks if cudnn
-                    # is enabled in the build when cudnn supports adaptive average pooling
-                    devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
-                    for device in devices:
-                        qX_hat = op(qX.to(device=device), output_size=output_size)
-                        self.assertEqual(
-                            X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, qX_hat)), exact_dtype=False)
-                        self.assertEqual(
-                            scale, qX_hat.q_scale(),
-                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale,
-                                                     qX_hat.q_scale())))
-                        self.assertEqual(
-                            zero_point, qX_hat.q_zero_point(),
-                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
-                                                     qX_hat.q_zero_point())))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
@@ -5181,67 +4924,7 @@ class TestQuantizedLinear(TestCase):
 
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
-class TestQuantizedEmbeddingOps(TestCase):
-
-    def _test_embedding_bag_unpack_impl(self, pack_fn, unpack_fn, bit_rate, optimized_qparams, weights):
-        data_type = weights.dtype
-
-        qtype = torch.quint8
-        if bit_rate == 8:
-            w_packed = pack_fn(weights)
-        else:
-            w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
-        w_unpacked = unpack_fn(w_packed)
-
-        if (bit_rate == 8 or bit_rate == 4) and data_type != torch.float16:
-            # torch.quantize_per_channel does not support float16 yet.
-
-            obs_weights = weights
-            # Combine 3D embeddings (e.g. stacked combination of embeddings)
-            # in a dimension orthogonal to channels.
-            if (len(obs_weights.shape) > 2):
-                stacked_shape = list(weights.size())
-                stacked_shape[1] *= stacked_shape[0]
-                obs_weights = weights.reshape(stacked_shape[1:])
-
-            # Check numerics of prepack function that accepts qtensor as input.
-            # We use min-max observer to mimic the quantization performed in the original function.
-            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
-            obs(obs_weights)
-            # Get the scale and zero point for the weight tensor
-            qparams = obs.calculate_qparams()
-            if bit_rate == 4:
-                qtype = torch.quint4x2
-            # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(obs_weights, qparams[0], qparams[1], axis=0, dtype=qtype)
-            real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
-            self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
-            unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
-            self.assertEqual(unpacked_weight.int_repr().numpy(), qweight.int_repr().numpy())
-            self.assertEqual(unpacked_weight.q_per_channel_scales(), qweight.q_per_channel_scales())
-            self.assertEqual(unpacked_weight.q_per_channel_zero_points(), qweight.q_per_channel_zero_points())
-
-
-
-
-    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate,
-                                      optimized_qparams, num_batches, data_type=np.float32):
-
-        # when num_batches = 1, it will create a 2D tensor
-        unsplit_weight = torch.from_numpy((np.random.random_sample((
-            num_batches, num_embeddings, embedding_dim)).squeeze() + 1).astype(np.float32))
-
-        # test unsplit weight (memory format is `contiguous`)
-        self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, unsplit_weight)
-
-        # test split weights (memory format is not `contiguous`)
-        split_dim = len(unsplit_weight.shape) - 2
-        split_weights = torch.split(unsplit_weight, 1, dim=split_dim)
-        for weight in split_weights:
-            self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, weight)
-
-
-
+class TestQuantizedEmbeddingOpsBase(TestCase):
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
             embedding_dim, num_offsets,
@@ -5366,6 +5049,68 @@ class TestQuantizedEmbeddingOps(TestCase):
                         compressed_indices_mapping=torch.tensor(mapping_table),
                         include_last_offset=include_last_offset)
             torch.testing.assert_close(reference_result, result, atol=atol, rtol=rtol)
+
+
+class TestQuantizedEmbeddingOps(TestQuantizedEmbeddingOpsBase):
+
+    def _test_embedding_bag_unpack_impl(self, pack_fn, unpack_fn, bit_rate, optimized_qparams, weights):
+        data_type = weights.dtype
+
+        qtype = torch.quint8
+        if bit_rate == 8:
+            w_packed = pack_fn(weights)
+        else:
+            w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
+        w_unpacked = unpack_fn(w_packed)
+
+        if (bit_rate == 8 or bit_rate == 4) and data_type != torch.float16:
+            # torch.quantize_per_channel does not support float16 yet.
+
+            obs_weights = weights
+            # Combine 3D embeddings (e.g. stacked combination of embeddings)
+            # in a dimension orthogonal to channels.
+            if (len(obs_weights.shape) > 2):
+                stacked_shape = list(weights.size())
+                stacked_shape[1] *= stacked_shape[0]
+                obs_weights = weights.reshape(stacked_shape[1:])
+
+            # Check numerics of prepack function that accepts qtensor as input.
+            # We use min-max observer to mimic the quantization performed in the original function.
+            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(obs_weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+            if bit_rate == 4:
+                qtype = torch.quint4x2
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(obs_weights, qparams[0], qparams[1], axis=0, dtype=qtype)
+            real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+            self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
+            unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
+            self.assertEqual(unpacked_weight.int_repr().numpy(), qweight.int_repr().numpy())
+            self.assertEqual(unpacked_weight.q_per_channel_scales(), qweight.q_per_channel_scales())
+            self.assertEqual(unpacked_weight.q_per_channel_zero_points(), qweight.q_per_channel_zero_points())
+
+
+
+
+    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate,
+                                      optimized_qparams, num_batches, data_type=np.float32):
+
+        # when num_batches = 1, it will create a 2D tensor
+        unsplit_weight = torch.from_numpy((np.random.random_sample((
+            num_batches, num_embeddings, embedding_dim)).squeeze() + 1).astype(np.float32))
+
+        # test unsplit weight (memory format is `contiguous`)
+        self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, unsplit_weight)
+
+        # test split weights (memory format is not `contiguous`)
+        split_dim = len(unsplit_weight.shape) - 2
+        split_weights = torch.split(unsplit_weight, 1, dim=split_dim)
+        for weight in split_weights:
+            self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, weight)
+
+
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
@@ -5557,356 +5302,7 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                include_last_offset,
                                                fallback_to_no_sparse,
                                                sparsity=sparsity,
-                                               atol=1.0, rtol=1e-1)
-
-    """ Tests that the CUDA quantized embedding_bag operators agree with their
-        CPU counterparts. This covers the bit-field extraction the dequantization
-        path is built on, which is shared by both bit widths. """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_rowwise_offsets_cuda(self):
-        # 24 satisfies both ops: the byte op requires D % 4 == 0, the 4-bit op
-        # requires D % 8 == 0.
-        num_embeddings, embedding_dim = 32, 24
-        weights = torch.from_numpy((np.random.random_sample(
-            (num_embeddings, embedding_dim)) + 1).astype(np.float32))
-        indices = torch.tensor([3, 1, 4, 1, 5, 9, 2, 6], dtype=torch.int)
-        offsets = torch.tensor([0, 3, 5], dtype=torch.int)
-
-        for bit_rate, prepack_op, op, atol in (
-            (8, torch.ops.quantized.embedding_bag_byte_prepack,
-             torch.ops.quantized.embedding_bag_byte_rowwise_offsets, 0.005),
-            (4, torch.ops.quantized.embedding_bag_4bit_prepack,
-             torch.ops.quantized.embedding_bag_4bit_rowwise_offsets, 0.1),
-        ):
-            q_weights = prepack_op(weights)
-
-            def run(device, q_weights=q_weights, op=op):
-                return op(q_weights.to(device), indices.to(device),
-                          offsets.to(device), mode=0, pruned_weights=False,
-                          include_last_offset=False)
-
-            cuda_result = run("cuda").cpu()
-            self.assertTrue(
-                torch.isfinite(cuda_result).all(),
-                f"{bit_rate}-bit CUDA output is not finite: {cuda_result}")
-            torch.testing.assert_close(
-                run("cpu"), cuda_result, atol=atol, rtol=1e-2)
-
-    # Fixtures and helpers shared by the pruned-lookup tests below.
-    _PRUNED_ROWS, _PRUNED_DIM = 32, 16
-
-    def _pruned_byte_table(self):
-        """A byte-quantized table with every third row pruned away.
-
-        Returns the float weights, the packed full table, the packed table with
-        the pruned rows removed, and the mapping from a row of the full table
-        onto a row of the pruned one (-1 marking a pruned row).
-        """
-        weights = torch.from_numpy(np.random.uniform(
-            low=-1, high=1,
-            size=[self._PRUNED_ROWS, self._PRUNED_DIM]).astype(np.float32))
-        q_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
-        mapping = torch.empty(self._PRUNED_ROWS, dtype=torch.int32)
-        kept_rows = []
-        for i in range(self._PRUNED_ROWS):
-            if i % 3 == 0:
-                mapping[i] = -1
-            else:
-                mapping[i] = len(kept_rows)
-                kept_rows.append(i)
-        return weights, q_weights, q_weights[kept_rows].contiguous(), mapping
-
-    @staticmethod
-    def _pruned_bags(include_last_offset=False):
-        """Five bags mixing kept and pruned ids; bag 2 is entirely pruned."""
-        indices = torch.tensor(
-            [1, 2, 0, 4, 5, 3, 6, 9, 7, 8, 31, 30], dtype=torch.int)
-        offsets = [0, 3, 6, 8, 10]
-        if include_last_offset:
-            offsets.append(indices.numel())
-        return indices, torch.tensor(offsets, dtype=torch.int)
-
-    @staticmethod
-    def _byte_rowwise_offsets(weight, indices, offsets, device, mapping=None,
-                              per_sample_weights=None, pruned_weights=None,
-                              include_last_offset=False):
-        if pruned_weights is None:
-            # pruned_weights with no mapping is bad_optional_access on CPU.
-            pruned_weights = mapping is not None
-        return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
-            weight.to(device), indices.to(device), offsets.to(device), mode=0,
-            pruned_weights=pruned_weights,
-            per_sample_weights=(None if per_sample_weights is None
-                                else per_sample_weights.to(device)),
-            compressed_indices_mapping=(None if mapping is None
-                                        else mapping.to(device)),
-            include_last_offset=include_last_offset)
-
-    @staticmethod
-    def _sample_weights(n):
-        return torch.from_numpy(np.random.uniform(
-            low=0.01, high=0.5, size=[n]).astype(np.float32))
-
-    @staticmethod
-    def _drop_pruned(indices, offsets, mapping, per_sample_weights=None):
-        """Rewrite the lookup with the pruned ids removed and the kept ids
-        translated into compressed row space -- the dense lookup that the remap
-        must reproduce."""
-        bounds = offsets.tolist() + [indices.numel()]
-        new_indices, new_offsets, new_weights = [], [], []
-        for bag in range(offsets.numel()):
-            new_offsets.append(len(new_indices))
-            for pos in range(bounds[bag], bounds[bag + 1]):
-                row = int(mapping[int(indices[pos])])
-                if row != -1:
-                    new_indices.append(row)
-                    if per_sample_weights is not None:
-                        new_weights.append(float(per_sample_weights[pos]))
-        return (torch.tensor(new_indices, dtype=indices.dtype),
-                torch.tensor(new_offsets, dtype=offsets.dtype),
-                (None if per_sample_weights is None
-                 else torch.tensor(new_weights, dtype=torch.float)))
-
-    def _pruned_table_of(self, kind):
-        """Either a partially or a fully pruned table, with its mapping."""
-        _, q_weights, q_pruned, mapping = self._pruned_byte_table()
-        if kind == "all_pruned":
-            return (q_weights[[]].contiguous(),
-                    torch.full((self._PRUNED_ROWS,), -1, dtype=torch.int32))
-        return q_pruned, mapping
-
-    """ Tests that CUDA embedding_bag_byte matches CPU on a pruned table """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_byte_cuda_pruned(self):
-        for include_last_offset in (False, True):
-            for use_weights in (False, True):
-                with self.subTest(include_last_offset=include_last_offset, use_weights=use_weights):
-                    _, _, q_pruned, mapping = self._pruned_byte_table()
-                    # CPU and CUDA factor the dequantization and the per-sample-weight
-                    # multiply differently, so these agree to float32 rounding rather than
-                    # bitwise; the measured worst case is 8.9e-08, below one float32 ulp at
-                    # these magnitudes. That the remap adds no error of its own is a
-                    # separate, stronger claim, asserted on-device in
-                    # test_embedding_bag_byte_cuda_pruned_remap_is_exact.
-                    indices, offsets = self._pruned_bags(include_last_offset)
-                    weights = self._sample_weights(indices.numel()) if use_weights else None
-                    self.assertEqual(
-                        self._byte_rowwise_offsets(
-                            q_pruned, indices, offsets, "cuda", mapping, weights,
-                            include_last_offset=include_last_offset).cpu(),
-                        self._byte_rowwise_offsets(
-                            q_pruned, indices, offsets, "cpu", mapping, weights,
-                            include_last_offset=include_last_offset),
-                        rtol=0, atol=1e-6)
-
-                    # Bag 2 is ids [6, 9], both pruned, so it must come out as zeros -- the
-                    # case the zero-weight trick exists for, asserted directly.
-                    indices, offsets = self._pruned_bags()
-                    all_pruned_bag = self._byte_rowwise_offsets(
-                        q_pruned, indices, offsets, "cuda", mapping)[2]
-                    self.assertEqual(all_pruned_bag, torch.zeros_like(all_pruned_bag),
-                                     rtol=0, atol=0)
-
-    """ Tests that translating the indices adds no numeric error of its own """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_byte_cuda_pruned_remap_is_exact(self):
-        for use_weights in (False, True):
-            with self.subTest(use_weights=use_weights):
-                # Compared against the same kernel on the same device, fed the pruned
-                # ids dropped and the kept ids already translated. A CPU reference could
-                # not make this point: it would additionally assert that FBGEMM and the
-                # CUDA kernel contract their multiply-adds identically, which is a
-                # property of the build and the GPU architecture, not of this remap.
-                _, _, q_pruned, mapping = self._pruned_byte_table()
-                indices, offsets = self._pruned_bags()
-                weights = self._sample_weights(indices.numel()) if use_weights else None
-                ref_indices, ref_offsets, ref_weights = self._drop_pruned(
-                    indices, offsets, mapping, weights)
-                self.assertEqual(
-                    self._byte_rowwise_offsets(
-                        q_pruned, indices, offsets, "cuda", mapping, weights),
-                    self._byte_rowwise_offsets(
-                        q_pruned, ref_indices, ref_offsets, "cuda",
-                        per_sample_weights=ref_weights, pruned_weights=False),
-                    rtol=0, atol=0)
-
-    """ Tests the single-entry "table is not pruned" sentinel mapping """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_byte_cuda_pruned_sentinel(self):
-        for use_weights in (False, True):
-            with self.subTest(use_weights=use_weights):
-                _, q_weights, _, _ = self._pruned_byte_table()
-                indices, offsets = self._pruned_bags()
-                zero = torch.tensor([0], dtype=torch.int32)
-                minus_one = torch.tensor([-1], dtype=torch.int32)
-                weights = self._sample_weights(indices.numel()) if use_weights else None
-
-                # {0} means "not pruned", so the ids address the full table.
-                self.assertEqual(
-                    self._byte_rowwise_offsets(
-                        q_weights, indices, offsets, "cuda", zero, weights).cpu(),
-                    self._byte_rowwise_offsets(
-                        q_weights, indices, offsets, "cpu", zero, weights),
-                    rtol=0, atol=1e-6)
-
-                # {-1} is a single entry too, so it takes the same sentinel path here.
-                # CPU honours only {0} and reads {-1} as a real one-row mapping,
-                # rejecting these ids against its length. Telling the two apart on CUDA
-                # needs a device read, i.e. a synchronization on every call, so every
-                # single-entry mapping is taken as the sentinel. Pinned on both sides so
-                # the divergence cannot change unnoticed.
-                self.assertEqual(
-                    self._byte_rowwise_offsets(
-                        q_weights, indices, offsets, "cuda", minus_one, weights),
-                    self._byte_rowwise_offsets(
-                        q_weights, indices, offsets, "cuda", zero, weights),
-                    rtol=0, atol=0)
-                # FBGEMM and the non-FBGEMM fallback word the rejection differently.
-                with self.assertRaisesRegex(
-                        RuntimeError, "out of bounds|Invalid indices data"):
-                    self._byte_rowwise_offsets(
-                        q_weights, indices, offsets, "cpu", minus_one, weights)
-
-    """ Tests a mapping that prunes away every row of the table """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_byte_cuda_pruned_all_rows(self):
-        for include_last_offset in (False, True):
-            with self.subTest(include_last_offset=include_last_offset):
-                # Both backends must return zeros rather than index the empty table.
-                empty, mapping = self._pruned_table_of("all_pruned")
-                indices, offsets = self._pruned_bags(include_last_offset)
-                cuda = self._byte_rowwise_offsets(
-                    empty, indices, offsets, "cuda", mapping,
-                    include_last_offset=include_last_offset)
-                self.assertEqual(
-                    cuda.cpu(),
-                    self._byte_rowwise_offsets(
-                        empty, indices, offsets, "cpu", mapping,
-                        include_last_offset=include_last_offset),
-                    rtol=0, atol=0)
-                self.assertEqual(cuda, torch.zeros_like(cuda), rtol=0, atol=0)
-
-    """ Tests the inputs a lookup carrying a mapping must reject """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_byte_cuda_pruned_input_checks(self):
-        for table in ("populated", "all_pruned"):
-            with self.subTest(table=table):
-                # Run against both table shapes: returning early for a fully pruned
-                # table must not let anything through that a populated one rejects.
-                weight, mapping = self._pruned_table_of(table)
-                indices, offsets = self._pruned_bags()
-
-                def call(mapping_tensor=None, idx=None, off=None, psw=None):
-                    # Overrides are passed through untouched: a .to() here would make
-                    # the sliced case contiguous again and move the CPU mapping case.
-                    return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
-                        weight.cuda(),
-                        indices.cuda() if idx is None else idx,
-                        offsets.cuda() if off is None else off, mode=0,
-                        pruned_weights=True, per_sample_weights=psw,
-                        compressed_indices_mapping=(mapping.cuda()
-                                                    if mapping_tensor is None
-                                                    else mapping_tensor),
-                        include_last_offset=False)
-
-                with self.assertRaisesRegex(TypeError, "must have dtype Int"):
-                    call(mapping.long().cuda())
-                with self.assertRaisesRegex(RuntimeError, "same device as weight"):
-                    call(mapping)  # left on CPU
-                with self.assertRaisesRegex(ValueError, "must not be empty"):
-                    call(torch.empty(0, dtype=torch.int32, device="cuda"))
-                with self.assertRaisesRegex(RuntimeError, "1D indices"):
-                    call(idx=indices.reshape(2, 6).cuda())
-                with self.assertRaisesRegex(RuntimeError, "contiguous"):
-                    # Sliced after the transfer on purpose: slicing first would hand the
-                    # op a contiguous copy and the check would never fire.
-                    call(idx=indices.cuda().repeat_interleave(2)[::2])
-                with self.assertRaisesRegex(RuntimeError, "Per sample weights"):
-                    call(psw=torch.ones(indices.numel(), dtype=torch.half,
-                                        device="cuda"))
-                with self.assertRaisesRegex(RuntimeError, "32 or 64 bit indices"):
-                    call(idx=indices.float().cuda())
-                with self.assertRaisesRegex(RuntimeError, "32 or 64 bit offsets"):
-                    call(off=offsets.float().cuda())
-                with self.assertRaisesRegex(RuntimeError, "1D offsets"):
-                    call(off=offsets.reshape(1, -1).cuda())
-                # A row narrower than the scale and bias satisfies the remainder check
-                # -- (4 - 8) % 4 is 0 -- so the lower bound has to be its own condition.
-                with self.assertRaisesRegex(RuntimeError, r"weight\.size\(1\) >= 8"):
-                    torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
-                        torch.zeros((2, 4), dtype=torch.uint8, device="cuda"),
-                        indices.cuda(), offsets.cuda(), mode=0, pruned_weights=False,
-                        per_sample_weights=None, compressed_indices_mapping=None,
-                        include_last_offset=False)
-
-    """ Tests that a mapping is ignored unless pruned_weights is set """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_byte_cuda_mapping_ignored_when_not_pruned(self):
-        # CPU reads the mapping only under `if (pruned_weights)`, so a mapping
-        # passed with pruned_weights=False is a plain dense lookup on the full
-        # table. Match that rather than translating the ids anyway.
-        _, q_weights, _, mapping = self._pruned_byte_table()
-        indices, offsets = self._pruned_bags()
-        with_mapping = self._byte_rowwise_offsets(
-            q_weights, indices, offsets, "cuda", mapping, pruned_weights=False)
-        self.assertEqual(
-            with_mapping,
-            self._byte_rowwise_offsets(q_weights, indices, offsets, "cuda"),
-            rtol=0, atol=0)
-        self.assertEqual(
-            with_mapping.cpu(),
-            self._byte_rowwise_offsets(q_weights, indices, offsets, "cpu",
-                                       mapping, pruned_weights=False),
-            rtol=0, atol=1e-6)
-
-    """ Tests that indices and offsets are allowed to differ in dtype """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_cuda_mixed_index_offset_dtypes(self):
-        for indices_dtype, offsets_dtype in (
-                (torch.int64, torch.int), (torch.int, torch.int64)):
-            with self.subTest(indices_dtype=indices_dtype, offsets_dtype=offsets_dtype):
-                # Both are read through the same index_t accessor, but the dispatch keys
-                # only on indices, so the op casts offsets to the index dtype; without
-                # the cast a mismatched pair throws from the accessor. How the pair was
-                # spelled must not change the answer, so compare against the matched
-                # call on the same device -- bitwise, and free of any CPU reference.
-                weights, _, q_pruned, mapping = self._pruned_byte_table()
-                indices, offsets = self._pruned_bags()
-                q_4bit = torch.ops.quantized.embedding_bag_4bit_prepack(weights)
-
-                def run_4bit(idx, off):
-                    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(
-                        q_4bit.cuda(), idx.cuda(), off.cuda(), mode=0,
-                        pruned_weights=False, per_sample_weights=None,
-                        compressed_indices_mapping=None, include_last_offset=False)
-
-                # The 4-bit op has no mapping support, so it is only reachable as a
-                # dense lookup; the 8-bit call goes through the remap.
-                byte_matched = self._byte_rowwise_offsets(
-                    q_pruned, indices, offsets, "cuda", mapping)
-                bit4_matched = run_4bit(indices, offsets)
-                idx = indices.to(indices_dtype)
-                off = offsets.to(offsets_dtype)
-                self.assertEqual(
-                    self._byte_rowwise_offsets(q_pruned, idx, off, "cuda", mapping),
-                    byte_matched, rtol=0, atol=0)
-                self.assertEqual(run_4bit(idx, off), bit4_matched, rtol=0, atol=0)
-
-    """ Tests that the 4-bit CUDA op still rejects a compressed mapping """
-    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
-    def test_embedding_bag_4bit_cuda_rejects_mapping(self):
-        weights, _, _, mapping = self._pruned_byte_table()
-        indices, offsets = self._pruned_bags()
-        q_4bit = torch.ops.quantized.embedding_bag_4bit_prepack(weights)
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "not yet implemented for "
-                "embedding_bag_4bit_rowwise_offsets_cuda"):
-            torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(
-                q_4bit.cuda(), indices.cuda(), offsets.cuda(), mode=0,
-                pruned_weights=True, per_sample_weights=None,
-                compressed_indices_mapping=mapping.cuda(),
-                include_last_offset=False)
+                                                atol=1.0, rtol=1e-1)
 
     """ Tests the correctness of the quantized 8 bit embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
@@ -6000,6 +5396,349 @@ class TestQuantizedEmbeddingOps(TestCase):
         qresult = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, mode=0)
 
         torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
+
+
+class TestQuantizedEmbeddingOpsAccelerator(TestQuantizedEmbeddingOpsBase):
+
+    """ Tests that the quantized embedding_bag operators agree with their
+        CPU counterparts on every accelerator. This covers the bit-field
+        extraction the dequantization path is built on, which is shared by
+        both bit widths. """
+    def test_embedding_bag_rowwise_offsets_device(self, device):
+        # 24 satisfies both ops: the byte op requires D % 4 == 0, the 4-bit op
+        # requires D % 8 == 0.
+        num_embeddings, embedding_dim = 32, 24
+        weights = torch.from_numpy((np.random.random_sample(
+            (num_embeddings, embedding_dim)) + 1).astype(np.float32))
+        indices = torch.tensor([3, 1, 4, 1, 5, 9, 2, 6], dtype=torch.int)
+        offsets = torch.tensor([0, 3, 5], dtype=torch.int)
+
+        for bit_rate, prepack_op, op, atol in (
+            (8, torch.ops.quantized.embedding_bag_byte_prepack,
+             torch.ops.quantized.embedding_bag_byte_rowwise_offsets, 0.005),
+            (4, torch.ops.quantized.embedding_bag_4bit_prepack,
+             torch.ops.quantized.embedding_bag_4bit_rowwise_offsets, 0.1),
+        ):
+            q_weights = prepack_op(weights)
+
+            def run(device, q_weights=q_weights, op=op):
+                return op(q_weights.to(device), indices.to(device),
+                          offsets.to(device), mode=0, pruned_weights=False,
+                          include_last_offset=False)
+
+            device_result = run(device).cpu()
+            self.assertTrue(
+                torch.isfinite(device_result).all(),
+                f"{bit_rate}-bit accelerator output is not finite: {device_result}")
+            torch.testing.assert_close(
+                run("cpu"), device_result, atol=atol, rtol=1e-2)
+
+    # Fixtures and helpers shared by the pruned-lookup tests below.
+    _PRUNED_ROWS, _PRUNED_DIM = 32, 16
+
+    def _pruned_byte_table(self):
+        """A byte-quantized table with every third row pruned away.
+
+        Returns the float weights, the packed full table, the packed table with
+        the pruned rows removed, and the mapping from a row of the full table
+        onto a row of the pruned one (-1 marking a pruned row).
+        """
+        weights = torch.from_numpy(np.random.uniform(
+            low=-1, high=1,
+            size=[self._PRUNED_ROWS, self._PRUNED_DIM]).astype(np.float32))
+        q_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
+        mapping = torch.empty(self._PRUNED_ROWS, dtype=torch.int32)
+        kept_rows = []
+        for i in range(self._PRUNED_ROWS):
+            if i % 3 == 0:
+                mapping[i] = -1
+            else:
+                mapping[i] = len(kept_rows)
+                kept_rows.append(i)
+        return weights, q_weights, q_weights[kept_rows].contiguous(), mapping
+
+    @staticmethod
+    def _pruned_bags(include_last_offset=False):
+        """Five bags mixing kept and pruned ids; bag 2 is entirely pruned."""
+        indices = torch.tensor(
+            [1, 2, 0, 4, 5, 3, 6, 9, 7, 8, 31, 30], dtype=torch.int)
+        offsets = [0, 3, 6, 8, 10]
+        if include_last_offset:
+            offsets.append(indices.numel())
+        return indices, torch.tensor(offsets, dtype=torch.int)
+
+    @staticmethod
+    def _byte_rowwise_offsets(weight, indices, offsets, device, mapping=None,
+                              per_sample_weights=None, pruned_weights=None,
+                              include_last_offset=False):
+        if pruned_weights is None:
+            # pruned_weights with no mapping is bad_optional_access on CPU.
+            pruned_weights = mapping is not None
+        return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+            weight.to(device), indices.to(device), offsets.to(device), mode=0,
+            pruned_weights=pruned_weights,
+            per_sample_weights=(None if per_sample_weights is None
+                                else per_sample_weights.to(device)),
+            compressed_indices_mapping=(None if mapping is None
+                                        else mapping.to(device)),
+            include_last_offset=include_last_offset)
+
+    @staticmethod
+    def _sample_weights(n):
+        return torch.from_numpy(np.random.uniform(
+            low=0.01, high=0.5, size=[n]).astype(np.float32))
+
+    @staticmethod
+    def _drop_pruned(indices, offsets, mapping, per_sample_weights=None):
+        """Rewrite the lookup with the pruned ids removed and the kept ids
+        translated into compressed row space -- the dense lookup that the remap
+        must reproduce."""
+        bounds = offsets.tolist() + [indices.numel()]
+        new_indices, new_offsets, new_weights = [], [], []
+        for bag in range(offsets.numel()):
+            new_offsets.append(len(new_indices))
+            for pos in range(bounds[bag], bounds[bag + 1]):
+                row = int(mapping[int(indices[pos])])
+                if row != -1:
+                    new_indices.append(row)
+                    if per_sample_weights is not None:
+                        new_weights.append(float(per_sample_weights[pos]))
+        return (torch.tensor(new_indices, dtype=indices.dtype),
+                torch.tensor(new_offsets, dtype=offsets.dtype),
+                (None if per_sample_weights is None
+                 else torch.tensor(new_weights, dtype=torch.float)))
+
+    def _pruned_table_of(self, kind):
+        """Either a partially or a fully pruned table, with its mapping."""
+        _, q_weights, q_pruned, mapping = self._pruned_byte_table()
+        if kind == "all_pruned":
+            return (q_weights[[]].contiguous(),
+                    torch.full((self._PRUNED_ROWS,), -1, dtype=torch.int32))
+        return q_pruned, mapping
+
+    """ Tests that accelerator embedding_bag_byte matches CPU on a pruned table """
+    def test_embedding_bag_byte_device_pruned(self, device):
+        for include_last_offset in (False, True):
+            for use_weights in (False, True):
+                with self.subTest(include_last_offset=include_last_offset, use_weights=use_weights):
+                    _, _, q_pruned, mapping = self._pruned_byte_table()
+                    # CPU and the accelerator factor the dequantization and the per-sample-weight
+                    # multiply differently, so these agree to float32 rounding rather than
+                    # bitwise; the measured worst case is 8.9e-08, below one float32 ulp at
+                    # these magnitudes. That the remap adds no error of its own is a
+                    # separate, stronger claim, asserted on-device in
+                    # test_embedding_bag_byte_device_pruned_remap_is_exact.
+                    indices, offsets = self._pruned_bags(include_last_offset)
+                    weights = self._sample_weights(indices.numel()) if use_weights else None
+                    self.assertEqual(
+                        self._byte_rowwise_offsets(
+                            q_pruned, indices, offsets, device, mapping, weights,
+                            include_last_offset=include_last_offset).cpu(),
+                        self._byte_rowwise_offsets(
+                            q_pruned, indices, offsets, "cpu", mapping, weights,
+                            include_last_offset=include_last_offset),
+                        rtol=0, atol=1e-6)
+
+                    # Bag 2 is ids [6, 9], both pruned, so it must come out as zeros -- the
+                    # case the zero-weight trick exists for, asserted directly.
+                    indices, offsets = self._pruned_bags()
+                    all_pruned_bag = self._byte_rowwise_offsets(
+                        q_pruned, indices, offsets, device, mapping)[2]
+                    self.assertEqual(all_pruned_bag, torch.zeros_like(all_pruned_bag),
+                                     rtol=0, atol=0)
+
+    """ Tests that translating the indices adds no numeric error of its own """
+    def test_embedding_bag_byte_device_pruned_remap_is_exact(self, device):
+        for use_weights in (False, True):
+            with self.subTest(use_weights=use_weights):
+                # Compared against the same kernel on the same device, fed the pruned
+                # ids dropped and the kept ids already translated. A CPU reference could
+                # not make this point: it would additionally assert that FBGEMM and the
+                # accelerator kernel contract their multiply-adds identically, which is a
+                # property of the build and the accelerator architecture, not of this remap.
+                _, _, q_pruned, mapping = self._pruned_byte_table()
+                indices, offsets = self._pruned_bags()
+                weights = self._sample_weights(indices.numel()) if use_weights else None
+                ref_indices, ref_offsets, ref_weights = self._drop_pruned(
+                    indices, offsets, mapping, weights)
+                self.assertEqual(
+                    self._byte_rowwise_offsets(
+                        q_pruned, indices, offsets, device, mapping, weights),
+                    self._byte_rowwise_offsets(
+                        q_pruned, ref_indices, ref_offsets, device,
+                        per_sample_weights=ref_weights, pruned_weights=False),
+                    rtol=0, atol=0)
+
+    """ Tests the single-entry "table is not pruned" sentinel mapping """
+    def test_embedding_bag_byte_device_pruned_sentinel(self, device):
+        for use_weights in (False, True):
+            with self.subTest(use_weights=use_weights):
+                _, q_weights, _, _ = self._pruned_byte_table()
+                indices, offsets = self._pruned_bags()
+                zero = torch.tensor([0], dtype=torch.int32)
+                minus_one = torch.tensor([-1], dtype=torch.int32)
+                weights = self._sample_weights(indices.numel()) if use_weights else None
+
+                # {0} means "not pruned", so the ids address the full table.
+                self.assertEqual(
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, device, zero, weights).cpu(),
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cpu", zero, weights),
+                    rtol=0, atol=1e-6)
+
+                # {-1} is a single entry too, so it takes the same sentinel path here:
+                # on accelerators every single-entry mapping is taken as the sentinel.
+                # CPU honours only {0} and reads {-1} as a real one-row mapping,
+                # rejecting these ids against its length. Both sides are pinned so the
+                # divergence cannot change unnoticed.
+                self.assertEqual(
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, device, minus_one, weights),
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, device, zero, weights),
+                    rtol=0, atol=0)
+                # FBGEMM and the non-FBGEMM fallback word the rejection differently.
+                with self.assertRaisesRegex(
+                        RuntimeError, "out of bounds|Invalid indices data"):
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cpu", minus_one, weights)
+
+    """ Tests a mapping that prunes away every row of the table """
+    def test_embedding_bag_byte_device_pruned_all_rows(self, device):
+        for include_last_offset in (False, True):
+            with self.subTest(include_last_offset=include_last_offset):
+                # Both backends must return zeros rather than index the empty table.
+                empty, mapping = self._pruned_table_of("all_pruned")
+                indices, offsets = self._pruned_bags(include_last_offset)
+                device_result = self._byte_rowwise_offsets(
+                    empty, indices, offsets, device, mapping,
+                    include_last_offset=include_last_offset)
+                self.assertEqual(
+                    device_result.cpu(),
+                    self._byte_rowwise_offsets(
+                        empty, indices, offsets, "cpu", mapping,
+                        include_last_offset=include_last_offset),
+                    rtol=0, atol=0)
+                self.assertEqual(device_result, torch.zeros_like(device_result),
+                                 rtol=0, atol=0)
+
+    """ Tests the inputs a lookup carrying a mapping must reject """
+    def test_embedding_bag_byte_device_pruned_input_checks(self, device):
+        for table in ("populated", "all_pruned"):
+            with self.subTest(table=table):
+                # Run against both table shapes: returning early for a fully pruned
+                # table must not let anything through that a populated one rejects.
+                weight, mapping = self._pruned_table_of(table)
+                indices, offsets = self._pruned_bags()
+
+                def call(mapping_tensor=None, idx=None, off=None, psw=None):
+                    # Overrides are passed through untouched: a .to() here would make
+                    # the sliced case contiguous again and move the CPU mapping case.
+                    return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                        weight.to(device),
+                        indices.to(device) if idx is None else idx,
+                        offsets.to(device) if off is None else off, mode=0,
+                        pruned_weights=True, per_sample_weights=psw,
+                        compressed_indices_mapping=(mapping.to(device)
+                                                    if mapping_tensor is None
+                                                    else mapping_tensor),
+                        include_last_offset=False)
+
+                with self.assertRaisesRegex(TypeError, "must have dtype Int"):
+                    call(mapping.long().to(device))
+                with self.assertRaisesRegex(RuntimeError, "same device as weight"):
+                    call(mapping)  # left on CPU
+                with self.assertRaisesRegex(ValueError, "must not be empty"):
+                    call(torch.empty(0, dtype=torch.int32, device=device))
+                with self.assertRaisesRegex(RuntimeError, "1D indices"):
+                    call(idx=indices.reshape(2, 6).to(device))
+                with self.assertRaisesRegex(RuntimeError, "contiguous"):
+                    # Sliced after the transfer on purpose: slicing first would hand the
+                    # op a contiguous copy and the check would never fire.
+                    call(idx=indices.to(device).repeat_interleave(2)[::2])
+                with self.assertRaisesRegex(RuntimeError, "Per sample weights"):
+                    call(psw=torch.ones(indices.numel(), dtype=torch.half,
+                                        device=device))
+                with self.assertRaisesRegex(RuntimeError, "32 or 64 bit indices"):
+                    call(idx=indices.float().to(device))
+                with self.assertRaisesRegex(RuntimeError, "32 or 64 bit offsets"):
+                    call(off=offsets.float().to(device))
+                with self.assertRaisesRegex(RuntimeError, "1D offsets"):
+                    call(off=offsets.reshape(1, -1).to(device))
+                # A row narrower than the scale and bias satisfies the remainder check
+                # -- (4 - 8) % 4 is 0 -- so the lower bound has to be its own condition.
+                with self.assertRaisesRegex(RuntimeError, r"weight\.size\(1\) >= 8"):
+                    torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                        torch.zeros((2, 4), dtype=torch.uint8, device=device),
+                        indices.to(device), offsets.to(device), mode=0, pruned_weights=False,
+                        per_sample_weights=None, compressed_indices_mapping=None,
+                        include_last_offset=False)
+
+    """ Tests that a mapping is ignored unless pruned_weights is set """
+    def test_embedding_bag_byte_device_mapping_ignored_when_not_pruned(self, device):
+        # CPU reads the mapping only under `if (pruned_weights)`, so a mapping
+        # passed with pruned_weights=False is a plain dense lookup on the full
+        # table. Match that rather than translating the ids anyway.
+        _, q_weights, _, mapping = self._pruned_byte_table()
+        indices, offsets = self._pruned_bags()
+        with_mapping = self._byte_rowwise_offsets(
+            q_weights, indices, offsets, device, mapping, pruned_weights=False)
+        self.assertEqual(
+            with_mapping,
+            self._byte_rowwise_offsets(q_weights, indices, offsets, device),
+            rtol=0, atol=0)
+        self.assertEqual(
+            with_mapping.cpu(),
+            self._byte_rowwise_offsets(q_weights, indices, offsets, "cpu",
+                                       mapping, pruned_weights=False),
+            rtol=0, atol=1e-6)
+
+    """ Tests that indices and offsets are allowed to differ in dtype """
+    def test_embedding_bag_device_mixed_index_offset_dtypes(self, device):
+        for indices_dtype, offsets_dtype in (
+                (torch.int64, torch.int), (torch.int, torch.int64)):
+            with self.subTest(indices_dtype=indices_dtype, offsets_dtype=offsets_dtype):
+                # Both are read through the same index_t accessor, but the dispatch keys
+                # only on indices, so the op casts offsets to the index dtype; without
+                # the cast a mismatched pair throws from the accessor. How the pair was
+                # spelled must not change the answer, so compare against the matched
+                # call on the same device -- bitwise, and free of any CPU reference.
+                weights, _, q_pruned, mapping = self._pruned_byte_table()
+                indices, offsets = self._pruned_bags()
+                q_4bit = torch.ops.quantized.embedding_bag_4bit_prepack(weights)
+
+                def run_4bit(idx, off):
+                    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(
+                        q_4bit.to(device), idx.to(device), off.to(device), mode=0,
+                        pruned_weights=False, per_sample_weights=None,
+                        compressed_indices_mapping=None, include_last_offset=False)
+
+                # The 4-bit op has no mapping support, so it is only reachable as a
+                # dense lookup; the 8-bit call goes through the remap.
+                byte_matched = self._byte_rowwise_offsets(
+                    q_pruned, indices, offsets, device, mapping)
+                bit4_matched = run_4bit(indices, offsets)
+                idx = indices.to(indices_dtype)
+                off = offsets.to(offsets_dtype)
+                self.assertEqual(
+                    self._byte_rowwise_offsets(q_pruned, idx, off, device, mapping),
+                    byte_matched, rtol=0, atol=0)
+                self.assertEqual(run_4bit(idx, off), bit4_matched, rtol=0, atol=0)
+
+    """ Tests that the 4-bit accelerator op still rejects a compressed mapping """
+    def test_embedding_bag_4bit_device_rejects_mapping(self, device):
+        weights, _, _, mapping = self._pruned_byte_table()
+        indices, offsets = self._pruned_bags()
+        q_4bit = torch.ops.quantized.embedding_bag_4bit_prepack(weights)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "not yet implemented"):
+            torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(
+                q_4bit.to(device), indices.to(device), offsets.to(device), mode=0,
+                pruned_weights=True, per_sample_weights=None,
+                compressed_indices_mapping=mapping.to(device),
+                include_last_offset=False)
 
 
 class TestQuantizedConv(TestCase):
@@ -9783,6 +9522,265 @@ class TestQuantizedWithMinMax(TestCase):
                             "weight_incorrectly_quantized should not equal "
                             "weight_quantized_no_rowwise_min_max"
                         )
+
+class TestQuantizedOpsAccelerator(TestQuantizedOpsBase):
+
+    """Tests the correctness of the quantized::relu op."""
+    @override_qengines
+    def test_qrelu(self, device):
+        relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.relu,
+                    torch.relu_,
+                    torch.nn.functional.relu,
+                    torch.nn.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.functional.relu,
+                    torch.nn.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu,
+                'extra_kwargs': {
+                    'inplace': True
+                }
+            }
+        ]
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        scales = (0.05, 0.1)
+        zero_points = (0, 5)
+        test_cases = itertools.product(shapes, dtypes, scales, zero_points)
+        for shape, dtype, scale, zero_point in test_cases:
+            X = torch.randn(*shape, device=device)
+            X = (X, (scale, zero_point, dtype))
+            self._test_activation_function(X, 'relu', relu_test_configs)
+
+    """Tests the correctness of the quantized::gelu op."""
+    def test_qgelu(self, device):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+            X = X.to(device=device)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            op = torch.nn.functional.gelu
+            dqY = op(dqX, approximate=approximate)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = op(qX)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
+
+    @unittest.skip("not currently working and feature isn't used")
+    def test_adaptive_avg_pool(self, device):
+
+        side_lens = (range(1, 10))
+        dim_lens = (range(3, 5))
+        torch_type = torch.qint8
+        zero_points = (0, 1)
+        combined = [side_lens, dim_lens, zero_points]
+        test_cases = itertools.product(*combined)
+        for test_case in test_cases:
+            output_size_d = random.randint(1, 10)
+            output_size_h = random.randint(1, 10)
+            output_size_w = random.randint(1, 10)
+            side_len, dim_len, zero_point = test_case
+            shapes = [side_len] * dim_len
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, 1.0, zero_point)
+            X = np.array(X)
+            scale = 1
+            ndim = X.ndim
+            dim_to_check = []
+            if ndim <= 4:
+                dim_to_check.append(2)
+            if ndim >= 4:
+                dim_to_check.append(3)
+
+            D, H, W = X.shape[-3:]
+            output_size_d = min(output_size_d, D)
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
+
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+            for dim in dim_to_check:
+                if dim == 2:
+                    if output_size_h == output_size_w:
+                        output_size = output_size_h
+                    else:
+                        output_size = (output_size_h, output_size_w)
+                elif dim == 3:
+                    if output_size_d == output_size_h == output_size_w:
+                        output_size = output_size_h
+                    else:
+                        output_size = (output_size_d, output_size_h, output_size_w)
+
+                # Run reference on int_repr + round to avoid double rounding error.
+                ref_op = getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d')
+                X_ref = ref_op(qX.int_repr().to(torch.float), output_size).round()
+
+                ops_under_test = {
+                    "nn.functional":
+                        getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d'),
+                    "nn.quantized.functional":
+                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d'),
+                    "ao.nn.quantized.functional":
+                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d')
+                }
+
+                error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+
+                for name, op in ops_under_test.items():
+                    qX_hat = op(qX.to(device=device), output_size=output_size)
+                    self.assertEqual(
+                        X_ref, qX_hat.int_repr(), atol=1.0,
+                        rtol=0, msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, qX_hat)), exact_dtype=False)
+                    self.assertEqual(
+                        scale, qX_hat.q_scale(),
+                        msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale,
+                                                 qX_hat.q_scale())))
+                    self.assertEqual(
+                        zero_point, qX_hat.q_zero_point(),
+                        msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                 qX_hat.q_zero_point())))
+
+    """Tests the correctness of the cudnn add and add_relu op
+    (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qadd_relu_cudnn(self, device):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        A = torch.arange(-128, 130, dtype=torch.float).to(device)
+        B = torch.arange(-128, 130, dtype=torch.float).to(device)
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
+
+    """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qadd_relu_cudnn_nhwc(self, device):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        A = torch.rand(16, 8, 4, 12).to(device)
+        B = torch.rand(16, 8, 4, 12).to(device)
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
+
+    # TODO: merge this test with test_max_pool2d
+    """Tests 2D cudnn max pool operation on quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       # cudnn's support for quantized pooling is limited to
+                       # int8 currently
+                       qparams=hu.qparams(dtypes=[torch.qint8])),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           # currently there is no support for dilation for cudnn
+           # pooling
+           dilation=st.integers(1, 1),
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode, device):
+        X, (scale, zero_point, torch_type) = X
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
+        assume(oW > 0)
+
+        a = torch.from_numpy(X).to(device)
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
+        a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
+                                          zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         msg="ops.quantized.max_pool2d results are off")
+
+
+instantiate_device_type_tests(TestQuantizedOpsAccelerator, globals())
+instantiate_device_type_tests(TestQuantizedEmbeddingOpsAccelerator, globals(), allow_xpu=True)
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
