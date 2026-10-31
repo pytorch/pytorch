@@ -1212,6 +1212,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, torch.overrides.get_default_nowrap_functions()
             )
 
+        @register(torch.nn.functional.multi_head_attention_forward)
+        def handle_multi_head_attention_forward(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            bound = inspect.signature(self.value).bind(*args, **kwargs)
+            rotary = bound.arguments.get("rotary_pos_emb")
+            if rotary is None or (
+                rotary.is_python_constant() and rotary.as_python_constant() is None
+            ):
+                return None
+            # Inline the positional transformation rather than passing a Python
+            # callable to an opaque graph node. Keep ordinary MHA calls opaque.
+            return tx.inline_user_function_return(
+                UserFunctionVariable(self.value), list(args), kwargs
+            )
+
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(
             self,

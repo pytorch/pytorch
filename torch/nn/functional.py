@@ -6768,6 +6768,7 @@ def multi_head_attention_forward(
     static_v: Tensor | None = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
+    rotary_pos_emb: _Any = None,
 ) -> tuple[Tensor, Tensor | None]:
     r"""Forward method for MultiHeadAttention.
 
@@ -6812,6 +6813,22 @@ def multi_head_attention_forward(
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
             Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
             when ``need_weights=True.``. Default: True
+        rotary_pos_emb:
+            Optional callable that applies rotary positional embeddings (RoPE) to the
+            projected query and key tensors.
+
+            When provided, the callable is invoked on the reshaped query and key tensors
+            with shape ``(batch_size, seq_len, num_heads, head_dim)`` and is expected to
+            return tensors of the same shape and dtype, with rotary positional information
+            applied along the sequence dimension.
+
+            If ``None`` (default), no rotary positional embeddings are applied and the
+            attention computation is identical to the standard multi-head attention
+            implementation.
+
+            Note:
+                The callable must be side-effect free and preserve tensor contiguity
+                semantics expected by the subsequent attention computation.
 
 
     Shape:
@@ -6886,6 +6903,7 @@ def multi_head_attention_forward(
             static_k=static_k,
             static_v=static_v,
             average_attn_weights=average_attn_weights,
+            rotary_pos_emb=rotary_pos_emb,
         )
 
     is_batched = _mha_shape_check(
@@ -7081,6 +7099,27 @@ def multi_head_attention_forward(
                 f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
             )
         v = static_v
+
+    # TorchScript does not support passing callables as function arguments.
+    if not torch.jit.is_scripting():
+        if rotary_pos_emb is not None:
+            # The projected tensors are [batch * heads, sequence, head_dim].
+            # Keep the optional learned bias key outside the positional rotation.
+            rotary_src_len = k.size(1) - (1 if bias_k is not None else 0)
+            q_rotary = q.reshape(bsz, num_heads, tgt_len, head_dim).transpose(1, 2)
+            k_rotary = k[:, :rotary_src_len].reshape(
+                bsz, num_heads, rotary_src_len, head_dim
+            ).transpose(1, 2)
+            q = rotary_pos_emb(q_rotary).transpose(1, 2).reshape(
+                bsz * num_heads, tgt_len, head_dim
+            )
+            k_rotary = rotary_pos_emb(k_rotary).transpose(1, 2).reshape(
+                bsz * num_heads, rotary_src_len, head_dim
+            )
+            if bias_k is not None:
+                k = torch.cat([k_rotary, k[:, rotary_src_len:]], dim=1)
+            else:
+                k = k_rotary
 
     # add zero attention along batch dimension (now first)
     if add_zero_attn:
