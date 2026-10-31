@@ -199,6 +199,25 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_x, expected_x)
 
+    def test_scatter_chain_does_not_alias_mutated_input(self):
+        def f(x, src1, src2):
+            first = aten.slice_scatter.default(x, src1, 0, 1, 4)
+            out = aten.slice_scatter.default(first, src2, 0, 2, 5)
+            x.copy_(out)
+            return out
+
+        x = torch.arange(6, device=device, dtype=torch.float)
+        src1 = torch.tensor([20.0, 30.0, 40.0], device=device)
+        src2 = torch.tensor([50.0, 60.0, 70.0], device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, src1, src2)
+        actual = torch.compile(f)(actual_x, src1, src2)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
+
     def test_index_put_result_does_not_alias_mutated_input(self):
         def f(x, idx, val):
             out = torch.index_put(x, (idx,), val)
@@ -213,7 +232,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         actual = torch.compile(f)(actual_x, idx, val)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_x, expected_x)
-        self.assertNotEqual(actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr())
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
 
     @parametrize(
         "op",
