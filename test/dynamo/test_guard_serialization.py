@@ -5706,19 +5706,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3)
         ref = weakref.ref(x)
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump(ref)
+        GuardsStatePickler({}, {}, {}, {}, buf).dump(ref)
         buf.seek(0)
         restored = pickle.load(buf)
 
         self.assertIs(type(restored), weakref.ref)
         self.assertIsNone(restored())
 
+    def test_guarded_weakref_is_refused(self):
+        # A weakref that guards were built on must not come back as a dead ref
+        # those guards could match.
+        x = torch.randn(3)
+        ref = weakref.ref(x)
+        with self.assertRaisesRegex(PackageError, "a guard reads a ReferenceType"):
+            GuardsStatePickler({id(ref): ref}, {}, {}, {}, io.BytesIO()).dump(ref)
+
     def test_dead_weakref_distinct_hashes(self):
         # Restored refs must hash distinctly, or unpickling goes quadratic.
         tensors = [torch.randn(3) for _ in range(2000)]
         d = {weakref.ref(t): i for i, t in enumerate(tensors)}
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump(d)
+        GuardsStatePickler({}, {}, {}, {}, buf).dump(d)
         buf.seek(0)
         restored = pickle.load(buf)
 

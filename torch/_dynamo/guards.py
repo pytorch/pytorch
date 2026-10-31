@@ -5444,6 +5444,13 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, weakref.ReferenceType):
+            if id(obj) in self.guard_tree_values:
+                # Refused like the unsupported types below: a dead weakref.ref
+                # would let the rebuilt TYPE_MATCH and referent guards pass, and
+                # would erase subclasses like KeyedRef or WeakMethod.
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads a {type(obj).__name__}, which cannot be serialized"
+                )
             # The referent isn't serialized, so restore a weakref that is
             # already dead rather than a live-looking placeholder. Code holding
             # a weakref universally spells the liveness check as
