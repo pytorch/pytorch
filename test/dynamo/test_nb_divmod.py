@@ -8,6 +8,20 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class UserDefinedTensor(torch.Tensor):
+    def __new__(cls, data):
+        return torch.Tensor._make_subclass(cls, data)
+
+    intercepted = False
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if func in (torch.Tensor.__divmod__, torch.divmod):
+            cls.intercepted = True
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 @torch._dynamo.config.patch(enable_trace_load_build_class=True)
 class TestNbDivmod(torch._dynamo.test_case.TestCase):
@@ -150,16 +164,91 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "B.__rdivmod__ called")
 
     # --- Tensor ---
-
-    def test_divmod_tensor_raises_type_error(self):
+    def test_divmod_tensor(self):
         def fn(x, y):
             return divmod(x, y)
 
         x = torch.randn(4)
         y = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager")
-        with self.assertRaises(TypeError):
-            opt_fn(x, y)
+        ret = divmod(x, y)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(ret, opt_fn(x, y))
+
+    def test_divmod_tensor_scalar(self):
+        def fn(x):
+            return divmod(x, 2), divmod(2, x)
+
+        x = torch.randn(4)
+        ret = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(ret, opt_fn(x))
+
+    def test_divmod_scalar_tensor_inductor(self):
+        """divmod(Scalar, Tensor), examine aten.divmod.Scalar_Tensor decomp path."""
+
+        def fn(x):
+            return divmod(8, x)
+
+        x = 2
+        qt, rt = torch.compile(
+            fn,
+            backend="inductor",
+            fullgraph=True,
+        )(torch.as_tensor(x))
+        q, r = fn(x)
+        self.assertEqual(torch.as_tensor(q), qt)
+        self.assertEqual(torch.as_tensor(r), rt)
+
+    def test_divmod_compile_subclass_preserve_type(self):
+        x, y = (
+            torch.tensor([10.0, 20.0]).as_subclass(UserDefinedTensor),
+            torch.tensor([3.0, 4.0]).as_subclass(UserDefinedTensor),
+        )
+
+        def fn(_x, _y):
+            return divmod(_x, _y)
+
+        def _assert(q, r):
+            self.assertIsInstance(q, UserDefinedTensor)
+            self.assertIsInstance(r, UserDefinedTensor)
+            self.assertTrue(UserDefinedTensor.intercepted)
+
+        eager_q, eager_r = fn(x, y)
+        _assert(eager_q, eager_r)
+
+        torch._dynamo.reset()
+        UserDefinedTensor.intercepted = False
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_q, compiled_r = compiled_fn(x, y)
+
+        _assert(compiled_q, compiled_r)
+        self.assertEqual(eager_q, compiled_q)
+        self.assertEqual(eager_r, compiled_r)
+        UserDefinedTensor.intercepted = False
+
+    def test_divmod_torch_function_mode(self):
+        class Mode(torch.overrides.TorchFunctionMode):
+            def __init__(self):
+                self.call_count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func is torch.divmod:
+                    self.call_count += 1
+                return func(*args)
+
+        mode = Mode()
+        x, y = torch.tensor([10.0, 20.0]), torch.tensor([3.0, 4.0])
+
+        def fn(_x, _y):
+            return divmod(_x, _y)
+
+        torch._dynamo.reset()
+        with mode:
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            compiled_q, compiled_r = compiled_fn(x, y)
+
+        self.assertEqual(mode.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -175,6 +175,7 @@ blocklist = [
     "div",
     "div_",
     "div_out",
+    "divmod",
     "true_divide",
     "true_divide_",
     "true_divide_out",
@@ -213,6 +214,8 @@ arithmetic_ops = (
     "isub",
     "ifloordiv",
     "imod",  # inplace ops
+    "divmod",
+    "rdivmod",
 )
 # `@` is the only binary operator that never accepts a Python scalar: matmul
 # between a Tensor and an int/float/bool raises TypeError at runtime, so it must
@@ -254,6 +257,10 @@ def sig_for_ops(opname: str) -> list[str]:
     if name == "rpow":
         return [  # somehow required to make mypy ci happy?
             f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[has-type]"
+        ]
+    elif name in ["divmod", "rdivmod"]:
+        return [
+            f"def {opname}(self, other: Tensor | Number) -> tuple[Tensor, Tensor]: ..."
         ]
     elif name in arithmetic_ops:
         if name.startswith("i"):
@@ -1448,6 +1455,16 @@ def gen_pyi(
                         "out: Tensor | None = None",
                     ],
                     "Tensor",
+                )
+            ],
+            "divmod": [
+                defs(
+                    "divmod",
+                    [
+                        "input: Tensor | Number",
+                        "other: Tensor | Number",
+                    ],
+                    "tuple[Tensor, Tensor]",
                 )
             ],
         }
