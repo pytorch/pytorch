@@ -4150,7 +4150,8 @@ def capture(
     ``cpp_wrapper``, ``fx_wrapper``, ``benchmark_harness`` or ``freezing`` on
     (freezing's compiler would rewrite the graph the module is built from).
     Either tracer refuses ``triton.autotune_at_compile_time`` off and a nonzero
-    ``triton.multi_kernel``, which the paragraph above turns off. Other options
+    ``triton.multi_kernel``, which an ``"inductor"`` capture turns off while its
+    graphs lower (see the tuning paragraph above). Other options
     pass through unchecked, as under :func:`torch.compile`.
 
     .. note::
@@ -4340,7 +4341,10 @@ def load(
     capture's ``mode`` or ``options`` and ``CUDAGRAPH_CONFIG`` over the loading
     process's config, but Dynamo traces it under the loading process's own
     ``triton.cudagraphs``, which decides whether a Python float that changed
-    since capture is specialized; set it as the capture did to trace alike.
+    since capture is specialized; set it as the capture did to trace alike. A
+    loaded artifact does not apply :func:`torch.compile`'s CUPTI workaround for
+    CUDA graphs: when profiling repeatedly on CUDA older than 12.6, set
+    ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build

@@ -2008,7 +2008,9 @@ class PrecompileSession(Generic[_P, _R]):
 
             # Record what compile_fx compiles (get_cpp_wrapper_config).
             supported = cpp_wrapper_supports_cudagraphs(config["graph_partition"])
-            self._cpp_wrapper_drops_cudagraphs = cpp_wrapper and not supported
+            self._cpp_wrapper_drops_cudagraphs = (
+                self._requests_cudagraphs and cpp_wrapper and not supported
+            )
             if self._cpp_wrapper_drops_cudagraphs:
                 config["triton.cudagraphs"] = False
             # A capture without CUDA graphs records only that, and its calls
