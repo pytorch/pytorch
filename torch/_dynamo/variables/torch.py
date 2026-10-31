@@ -4067,6 +4067,55 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 return self.call_tensor_method(tx, list(args), kwargs)
 
+        # `is_tensor_method()` above covers `x.unsqueeze_(0)` and
+        # `torch.Tensor.unsqueeze_(x, 0)`. Calls made through the ops API,
+        # `torch.ops.aten.unsqueeze_(x, 0)` (OpOverloadPacket) and
+        # `torch.ops.aten.unsqueeze_.default(x, 0)` (OpOverload), do not go
+        # through it. Guard them the same way: otherwise the inplace view is
+        # traced into the graph, mutating the graph input's fake tensor shape,
+        # and guard creation later raises IndexError while indexing the size
+        # list of the input with its original rank.
+        if (
+            args
+            and isinstance(
+                self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+            )
+        ):
+            packet = (
+                self.value
+                if isinstance(self.value, torch._ops.OpOverloadPacket)
+                else self.value.overloadpacket
+            )
+            # Inplace ops are the only ones that can hit this; skip the
+            # overload resolution below for everything else.
+            if packet.__name__.endswith("_"):
+                from .tensor import TensorVariable
+
+                tensor_var = args[0]
+                if isinstance(tensor_var, TensorVariable):
+                    overload = self.value
+                    if isinstance(overload, torch._ops.OpOverloadPacket):
+                        from ..output_graph import resolve_op_overload
+
+                        proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+                        overload = resolve_op_overload(
+                            tx.output, overload, proxy_args, proxy_kwargs
+                        )
+                    if (
+                        isinstance(overload, torch._ops.OpOverload)
+                        and torch.Tag.inplace_view in overload.tags
+                        and tensor_var.graph_input_source(tx) is not None
+                    ):
+                        unimplemented(
+                            gb_type="Inplace op on input tensor",
+                            context="",
+                            explanation=f"Attempted to trace an inplace view op on input tensor {str(self.value)}.",
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                                "Ensure you do not modify input tensor in place.",
+                            ],
+                        )
+
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
