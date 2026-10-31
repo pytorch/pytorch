@@ -4096,7 +4096,12 @@ def capture(
     as the capture compiled under them (``mode`` and ``options`` over the
     process's ``torch._inductor.config`` when ``capture()`` is called) in its
     ``CUDAGRAPH_CONFIG``, and the loading process records its CUDA graphs
-    afresh on its first calls. Whether a graph can run as a CUDA graph at all
+    afresh on its first calls. Unlike under ``torch.compile``, whose options
+    reach only Inductor, the capture's calls are traced under these three
+    keys too, so with CUDA graphs on Dynamo specializes every Python float
+    argument (each distinct value is its own captured variant) rather than
+    turning one that changes into a CPU scalar tensor, which would keep the
+    graph out of CUDA graphs. Whether a graph can run as a CUDA graph at all
     (``triton.cudagraph_support_input_mutation``,
     ``force_disable_cudagraph_TESTING_ONLY``) is decided when it compiles, and
     that decision ships with it. The settings CUDA graph trees read while the
