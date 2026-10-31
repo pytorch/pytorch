@@ -21,13 +21,17 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_single_coalesced,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     IS_LINUX,
     run_tests,
     TEST_WITH_TORCHINDUCTOR,
@@ -62,6 +66,8 @@ if not dist.is_available():
 
 @requires_accelerator_dist_backend()
 class TestWithNCCL(DistributedTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -72,14 +78,14 @@ class TestWithNCCL(DistributedTestBase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self.rank)
+        return torch.device(self.device_type, self.rank)
 
     def _init_process_group(self) -> None:
         self.create_pg(self.device.type)
         torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_single(self) -> None:
+    def test_all_reduce_single(self, device) -> None:
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
@@ -111,7 +117,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output.completed to be True after access")
 
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_single_(self) -> None:
+    def test_all_reduce_single_(self, device) -> None:
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
@@ -128,7 +134,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError(f"Expected output to equal {expect}")
 
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced(self) -> None:
+    def test_all_reduce_coalesced(self, device) -> None:
         self._init_process_group()
 
         inputs = [
@@ -166,7 +172,7 @@ class TestWithNCCL(DistributedTestBase):
                 )
 
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced_(self) -> None:
+    def test_all_reduce_coalesced_(self, device) -> None:
         self._init_process_group()
 
         inputs = [
@@ -187,7 +193,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal {expected}")
 
     @skip_if_lt_x_gpu(2)
-    def test_all_gather_into_tensor_single(self) -> None:
+    def test_all_gather_into_tensor_single(self, device) -> None:
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
@@ -239,7 +245,7 @@ class TestWithNCCL(DistributedTestBase):
 
     # https://github.com/pytorch/pytorch/issues/133421
     @skip_if_lt_x_gpu(2)
-    def test_functional_collectives_inference_mode(self) -> None:
+    def test_functional_collectives_inference_mode(self, device) -> None:
         self._init_process_group()
 
         with torch.inference_mode():
@@ -260,7 +266,7 @@ class TestWithNCCL(DistributedTestBase):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_functional_collectives_batched(self) -> None:
+    def test_functional_collectives_batched(self, device) -> None:
         self._init_process_group()
 
         def f(x):
@@ -291,7 +297,7 @@ class TestWithNCCL(DistributedTestBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # https://github.com/pytorch/pytorch/issues/126338
-    def test_inductor_dtypeview_memory_leak(self):
+    def test_inductor_dtypeview_memory_leak(self, device):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -329,7 +335,7 @@ class TestWithNCCL(DistributedTestBase):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_all_gather_into_tensor_coalesced(self) -> None:
+    def test_all_gather_into_tensor_coalesced(self, device) -> None:
         self._init_process_group()
 
         inputs = [
@@ -371,7 +377,7 @@ class TestWithNCCL(DistributedTestBase):
                 )
 
     @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor_single(self) -> None:
+    def test_reduce_scatter_tensor_single(self, device) -> None:
         self._init_process_group()
 
         input = torch.tensor(self.ranks, device=self.device)
@@ -402,7 +408,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output.completed to be True after access")
 
     @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor_out(self) -> None:
+    def test_reduce_scatter_tensor_out(self, device) -> None:
         self._init_process_group()
 
         input = torch.tensor(self.ranks, device=self.device)
@@ -419,7 +425,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError(f"Expected out to equal {self.rank}")
 
     @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor_coalesced(self) -> None:
+    def test_reduce_scatter_tensor_coalesced(self, device) -> None:
         self._init_process_group()
 
         inputs = [torch.tensor(self.ranks, device=self.device) * i for i in range(10)]
@@ -454,7 +460,7 @@ class TestWithNCCL(DistributedTestBase):
                 )
 
     @skip_if_lt_x_gpu(2)
-    def test_all_to_all_single(self) -> None:
+    def test_all_to_all_single(self, device) -> None:
         self._init_process_group()
         torch.accelerator.set_device_index(self.rank)
 
@@ -495,7 +501,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output.completed to be True after access")
 
     @skip_if_lt_x_gpu(2)
-    def test_broadcast(self) -> None:
+    def test_broadcast(self, device) -> None:
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
@@ -527,7 +533,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output.completed to be True after access")
 
     @skip_if_lt_x_gpu(2)
-    def test_wait_tensor(self) -> None:
+    def test_wait_tensor(self, device) -> None:
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
@@ -543,7 +549,7 @@ class TestWithNCCL(DistributedTestBase):
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
     @skip_if_lt_x_gpu(2)
-    def test_unwaited(self) -> None:
+    def test_unwaited(self, device) -> None:
         # Verify that the process can terminate gracefully
         # even with unwaited tensors
         self._init_process_group()
@@ -560,7 +566,7 @@ class TestWithNCCL(DistributedTestBase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
-    def test_threading(self):
+    def test_threading(self, device):
         self._init_process_group()
         device = self.device
 
@@ -605,7 +611,7 @@ class TestWithNCCL(DistributedTestBase):
     )
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
-    def test_fixed_striding(self):
+    def test_fixed_striding(self, device):
         self._init_process_group()
 
         def scale(t):
@@ -746,6 +752,8 @@ class CrossThreadWaitTest(TestCase):
     than where the collective was initiated.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wait_tensor_cross_thread(self) -> None:
         """
         Test that wait_tensor works when called from a different thread
@@ -823,6 +831,8 @@ class PyWorkTest(TestCase):
     aren't getting prematurely freed.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wait_tensor(self) -> None:
         wait_called = False
 
@@ -889,6 +899,8 @@ class ProcessGroupArgTest(TestCase):
     (not just string group names) via the Any-typed group argument.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         dummy_init_pg()
@@ -926,6 +938,8 @@ class ProcessGroupArgTest(TestCase):
 
 
 class ProcessGroupOpaqueTypeRegistrationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_process_group_is_registered_on_distributed_import(self) -> None:
         from torch._library.opaque_object import (
             get_member_type,
@@ -954,6 +968,8 @@ def find_buffer_assignments(code):
 
 
 class CompileTestCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
 
@@ -1004,12 +1020,12 @@ class CompileTestCPU(TestCase):
             AOTIRunnerUtil.run(func, (arg,))
         torch.cpu.synchronize()
 
-    def test_inductor_all_reduce_cpu(self):
+    def test_inductor_all_reduce_cpu(self, device):
         self._test_inductor_all_reduce_cpu(cpp_wrapper=False)
         self._test_inductor_all_reduce_cpu(cpp_wrapper=True)
 
     @fresh_cache()
-    def test_inductor_all_reduce_coalesced_cpu(self):
+    def test_inductor_all_reduce_coalesced_cpu(self, device):
         def func(args: list[torch.Tensor]) -> list[torch.Tensor]:
             return funcol.all_reduce_coalesced([arg + 42 for arg in args], "avg", "0")
 
@@ -1029,7 +1045,7 @@ class CompileTestCPU(TestCase):
             torch.compile(func)(args)
 
     @fresh_cache()
-    def test_inductor_rooted_collectives_cpu(self):
+    def test_inductor_rooted_collectives_cpu(self, device):
         def func(arg: torch.Tensor) -> list[torch.Tensor]:
             return [
                 funcol.wait_tensor(funcol.reduce(arg + 1, 1, "sum", "0")),
@@ -1045,13 +1061,18 @@ class CompileTestCPU(TestCase):
 
 
 class CompileTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(self.device_type, self.rank)
+
     def setUp(self):
         super().setUp()
 
         self.rank = 0
         self.world_size = 2
         torch.accelerator.set_device_index(0)
-        self.device = torch.accelerator.current_accelerator()
 
         if not dist.is_initialized():
             store = FakeStore()
@@ -1071,7 +1092,7 @@ class CompileTest(TestCase):
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.enable_simple_overlap": False}
     )
-    def test_inductor_all_reduce_single(self):
+    def test_inductor_all_reduce_single(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             # Expect in-place with inductor allocated buf
@@ -1122,7 +1143,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_all_reduce_coalesced(self):
+    def test_inductor_all_reduce_coalesced(self, device):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
             # Expect in-place with inductor allocated buf
@@ -1162,7 +1183,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_inplace_op_on_view(self):
+    def test_inductor_inplace_op_on_view(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = (arg + 10)[:2]
             ar0 = funcol.all_reduce(buf0, "avg", "0")
@@ -1187,7 +1208,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_all_reduce_non_contig_input(self):
+    def test_inductor_all_reduce_non_contig_input(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             ar0 = funcol.all_reduce(arg, "avg", "0")
             ar0 = funcol.wait_tensor(ar0)
@@ -1218,7 +1239,7 @@ class CompileTest(TestCase):
         torch._inductor.config.triton.native_matmul, "no extern_kernels.mm"
     )
     @fresh_cache()
-    def test_inductor_reuse_buffer_after_inplace_collective(self):
+    def test_inductor_reuse_buffer_after_inplace_collective(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             # Expect allocation
             buf0 = arg + 42
@@ -1258,7 +1279,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_all_gather_into_tensor_single(self):
+    def test_inductor_all_gather_into_tensor_single(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             ag0 = funcol.all_gather_single(arg, 0, "0")
             ag0 = funcol.wait_tensor(ag0)
@@ -1292,7 +1313,7 @@ class CompileTest(TestCase):
     )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_all_gather_into_tensor_coalesced(self):
+    def test_inductor_all_gather_into_tensor_coalesced(self, device):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
             return funcol.all_gather_single_coalesced(args, "0")
 
@@ -1322,7 +1343,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_all_reduce_output_stride_matches_eager(self):
+    def test_inductor_all_reduce_output_stride_matches_eager(self, device):
         def func(x):
             x = x.t()
             y = torch.ops._c10d_functional.all_reduce.default(x, "sum", "0")
@@ -1341,7 +1362,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_cache()
-    def test_wait_tensor(self):
+    def test_wait_tensor(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             t = torch.ops._c10d_functional.all_reduce(arg, "avg", "0")
             return funcol.wait_tensor(t)
@@ -1363,7 +1384,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_reduce_scatter_tensor_single(self):
+    def test_inductor_reduce_scatter_tensor_single(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             rs0 = funcol.reduce_scatter_single(arg, "avg", 0, "0")
             rs0 = funcol.wait_tensor(rs0)
@@ -1389,7 +1410,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_reduce_scatter_tensor_coalesced(self):
+    def test_inductor_reduce_scatter_tensor_coalesced(self, device):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
             return funcol.reduce_scatter_single_coalesced(
                 args, "avg", [0] * len(args), "0"
@@ -1421,7 +1442,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_inductor_all_to_all_single(self):
+    def test_inductor_all_to_all_single(self, device):
         def func(
             input: torch.Tensor,
             output_split_sizes: torch.Tensor,
@@ -1468,7 +1489,7 @@ class CompileTest(TestCase):
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.enable_simple_overlap": False}
     )
-    def test_inductor_broadcast(self):
+    def test_inductor_broadcast(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             # Expect in-place with inductor allocated buf
@@ -1506,7 +1527,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_ranks_and_tag(self):
+    def test_ranks_and_tag(self, device):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             # Expect in-place with inductor allocated buf
@@ -1525,7 +1546,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_compile_all_gather_into_tensor_out(self):
+    def test_compile_all_gather_into_tensor_out(self, device):
         def func(input, out):
             y = torch.ops._c10d_functional.all_gather_into_tensor_out(
                 input, self.world_size, "0", out=out
@@ -1552,7 +1573,7 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
-    def test_compile_reduce_scatter_tensor_out(self):
+    def test_compile_reduce_scatter_tensor_out(self, device):
         def func(input, out):
             y = torch.ops._c10d_functional.reduce_scatter_tensor_out(
                 input, "sum", self.world_size, "0", out=out
@@ -1586,6 +1607,8 @@ class ACTCompileTest(TestCase):
     types, AOT autograd records them in tangent metadata and then hits a type
     mismatch at runtime because autograd produces plain-tensor tangents.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_act_compile_backward_tangent_mismatch(self):
         """
@@ -1732,6 +1755,14 @@ class ACTCompileTest(TestCase):
         self.assertEqual(r3, elem * 2)
         self.assertEqual(cnt.frame_count, 2)
 
+
+instantiate_device_type_tests(
+    TestWithNCCL, globals(), allow_xpu=True, except_for=("cpu",)
+)
+instantiate_device_type_tests(
+    CompileTest, globals(), allow_xpu=True, except_for=("cpu",)
+)
+instantiate_device_type_tests(CompileTestCPU, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
