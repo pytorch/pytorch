@@ -1422,7 +1422,8 @@ class TestMatmulCuda(InductorTestCase):
         # env var that enables the backend, and a substring of its kernel name for both equal and unequal K
         env_var, CK_EQUAL_K_HINT, CK_UNEQUAL_K_HINT = {
             "ck": ("ROCM_ALLOW_GROUP_GEMM_CK", "kernel_grouped_gemm_xdl_splitk", "kernel_grouped_gemm_xdl_splitk"),
-            "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile::GroupedGemmKernel", "ck_tile::GroupedGemmKernel"),
+            # matches ck_tile::GroupedGemmKernel and the StreamingGroupedGemmKernel built on it
+            "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "GroupedGemmKernel", "GroupedGemmKernel"),
         }[backend]
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
