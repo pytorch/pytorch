@@ -2132,17 +2132,19 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if self._cudagraph_inputs:
             ambient = _cudagraph_inputs()
-            snapshot = self._cudagraph_inputs
-            changed = [k for k, v in snapshot.items() if ambient[k] != v]
-            if not self._requests_cudagraphs:
+            changed: list[str]
+            if self._requests_cudagraphs:
+                snapshot = self._cudagraph_inputs
+                changed = [k for k, v in snapshot.items() if ambient[k] != v]
+            else:
                 # The calls compile with CUDA graphs off, as recorded: refuse an
                 # ambient request for them, which would be silently ignored,
                 # unless the capture's options decide it, as under torch.compile.
                 on = ambient["triton.cudagraphs"] and not self._options_set_cudagraphs
-                changed = [k for k in ("triton.cudagraphs",) if on]
+                changed = ["triton.cudagraphs"] if on else []
             if changed:
                 raise PackageError(
-                    f"{changed} changed since capture() began: the artifact "
+                    f"{', '.join(changed)} changed since capture() began: the artifact "
                     "records one CUDA graph config, read when capture() is called, "
                     "for every captured call. Restore it for the captured calls; to "
                     "capture under another value, set it before capture()."
