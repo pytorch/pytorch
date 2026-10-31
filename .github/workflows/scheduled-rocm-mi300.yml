@@ -1,0 +1,25 @@
+# Owner(s): ["module: rocm"]
+name: scheduled-rocm-mi300
+
+on:
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  default:
+    uses: ./.github/workflows/rocm-mi300.yml
+    secrets: inherit
+
+  distributed:
+    uses: ./.github/workflows/periodic-rocm-mi300.yml
+    secrets: inherit
+
+  inductor:
+    uses: ./.github/workflows/inductor-rocm-mi300.yml
+    secrets: inherit

@@ -2,8 +2,7 @@
 name: inductor-rocm-mi300
 
 on:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  workflow_call:
   push:
     branches:
       - release/*
@@ -12,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: inductor-rocm-mi300-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 permissions:
