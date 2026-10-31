@@ -17,6 +17,18 @@ class GlobalStateGuard:
 class LeafGuard:
     def verbose_code_parts(self) -> list[str]: ...
 
+class ORDERED_DICT_ORDER_MATCH(LeafGuard):
+    def __init__(
+        self,
+        root: RootGuardManager,
+        order: Sequence[int],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def __call__(self, value: Any) -> bool: ...
+
+def ordered_dict_keys(value: Any) -> list[Any] | None: ...
+
 class RelationalGuard: ...
 
 class GuardDebugInfo:
@@ -406,19 +418,18 @@ class GuardManager:
     ) -> None: ...
     def mark_tag_safe(self) -> None: ...
     def mark_tag_safe_root(self) -> None: ...
+    def add_ordered_dict_order_guard(
+        self,
+        order: Sequence[int],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
     def add_epilogue_lambda_guard(
         self,
         guard: LeafGuard,
-        verbose_code_parts: list[str],
-        user_stack: traceback.StackSummary | None,
-    ) -> None: ...
-    def add_ordered_dict_order_guard(
-        self,
-        get_value: Callable[[dict[str, Any]], Any],
-        order: Sequence[int],
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...

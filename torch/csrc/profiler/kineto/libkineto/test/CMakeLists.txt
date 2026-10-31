@@ -77,6 +77,17 @@ if(NOT WIN32)
     gtest_discover_tests(ConfigLoaderPollThreadExceptionTest)
 endif()
 
+# InitTest
+# Linux only: KINETO_USE_DAEMON is read only on Linux.
+if(NOT WIN32 AND NOT APPLE)
+    add_executable(InitTest InitTest.cpp)
+    target_link_libraries(InitTest PRIVATE
+        gtest_main
+        kineto_base kineto_api
+        ${XPU_XPUPTI_LIBRARY})
+    gtest_discover_tests(InitTest)
+endif()
+
 # AsyncE2ECpuTraceTest
 # Not supported on Windows: it drives an on-demand config, and Config only
 # accepts on-demand trace files under a directory that defaults to /tmp.
