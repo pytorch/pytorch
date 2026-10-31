@@ -1505,6 +1505,19 @@ class TestSparseCSR(TestCase):
         values = torch.tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7], dtype=dtype, device=device)
         self.assertEqual(csr.values(), values)
 
+        # Non-contiguous CSR values buffer should remain alive across cuSPARSE descriptor creation and matmul
+        crow = torch.tensor([0, 2, 3, 4], dtype=torch.int32, device=device)
+        col = torch.tensor([0, 2, 1, 3], dtype=torch.int32, device=device)
+        vals_2col = torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0]], dtype=dtype, device=device)
+        vals_noncontig = vals_2col[:, 0]
+        self.assertFalse(vals_noncontig.is_contiguous())
+        csr_noncontig = torch.sparse_csr_tensor(crow, col, vals_noncontig, size=(3, 4), dtype=dtype, device=device)
+        csr_contig = torch.sparse_csr_tensor(
+            crow, col, vals_noncontig.contiguous(), size=(3, 4), dtype=dtype, device=device
+        )
+        rhs = torch.randn((4, 2), dtype=dtype, device=device)
+        self.assertEqual(csr_noncontig @ rhs, csr_contig @ rhs)
+
     @parametrize("blocksize", [2, 4])
     @dtypes((torch.double, torch.int32), (torch.double, torch.int64))
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
