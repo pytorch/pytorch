@@ -343,22 +343,8 @@ class TORCH_API Optimizer {
   /// A loss function closure, which is expected to return the loss value.
   virtual Tensor step(LossClosure closure = nullptr) = 0;
 
-  /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters);
-
   /// Zeros out the gradients of all parameters.
   void zero_grad(bool set_to_none = true);
-
-  /// Provides a const reference to the parameters in the first param_group this
-  /// optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept;
-
-  /// Provides a reference to the parameters in the first param_group this
-  /// optimizer holds.
-  std::vector<Tensor>& parameters() noexcept;
-
-  /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept;
 
   OptimizerOptions& defaults() noexcept;
 
