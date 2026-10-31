@@ -443,7 +443,7 @@ class TestHandlerPartialDumps(TestCase):
         def fetch(*args, timeout):
             if payloads[args] is None:
                 raise RuntimeError("boom")
-            return ["http://h0:1"], [Response(200, payloads[args])]
+            return ["http://h0:1"], [Response(200, payloads[args])]  # @lint-ignore
 
         mock_fetch_all.side_effect = fetch
         mock_tables.side_effect = lambda title, addrs, resps: [
