@@ -1835,19 +1835,24 @@ class PlateauLR(LRScheduler):
     # `epoch` was added for API parity with LRScheduler while its step argument is
     # being deprecated.
     @override
-    def step(self, epoch: int | None = None, **kwargs: Any) -> None:
+    def step(
+        self,
+        epoch: int | None = None,
+        *,
+        metrics: SupportsFloat | None = None,
+        **kwargs: Any,
+    ) -> None:
         r"""Perform a step.
 
         Args:
             epoch (int, optional):
                 .. deprecated:: 1.4
                     Use :meth:`step` without this argument instead.
-            **kwargs: Scheduling inputs. The ``metrics`` entry is the current
-                value of the quantity being monitored, such as a validation
-                loss, and is required on every call except the implicit one
-                performed at construction.
+            metrics (SupportsFloat, optional): Current value of the quantity
+                being monitored, such as a validation loss. Required on every
+                call except the implicit one performed at construction.
+            **kwargs: Additional scheduling inputs, forwarded unchanged.
         """
-        metrics = kwargs.get("metrics")
         if epoch is not None and metrics is None:
             raise ValueError(
                 "`PlateauLR.step` received an `epoch` argument but no "
@@ -1862,7 +1867,7 @@ class PlateauLR(LRScheduler):
                 "`ChainedScheduler`, pass the metric to that scheduler's "
                 "`step` instead and it reaches this one from there."
             )
-        super().step(epoch, **kwargs)
+        super().step(epoch, metrics=metrics, **kwargs)
 
     @override
     def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
