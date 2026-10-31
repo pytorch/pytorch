@@ -17,6 +17,7 @@ import types
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
+from torch._guards import Source
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
@@ -44,11 +45,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import (
-    BaseUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
+from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
@@ -56,7 +53,6 @@ from .user_defined import UserDefinedObjectVariable
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._guards import Source
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +199,10 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
         return self.descriptor
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.owner)
+        codegen.load_attr(self.descriptor.__name__)
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
@@ -228,7 +228,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
             )
         obj, *rest = args
         _check_descriptor_obj_type(tx, self.descriptor, obj, is_wrapper_call=True)
-        # Dispatch through the owner (UDCV for the defining class) rather
+        # Dispatch through the defining type's builtin or user-defined tracker rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
@@ -250,7 +250,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(VariableTracker):
+class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
@@ -414,6 +414,10 @@ class MethodDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.MethodDescriptorType:
         return self.descriptor
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.owner)
+        codegen.load_attr(self.descriptor.__name__)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -512,7 +516,7 @@ def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
     return descriptor.__get__(obj, type(obj))
 
 
-class BoundBuiltinMethodVariable(VariableTracker):
+class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     """Bound builtin_function_or_method (PyCFunction_Type).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
@@ -602,7 +606,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
     def _call_qualname(self, tx: "InstructionTranslatorBase") -> str:
         # Only wrong-arity calls need guards distinguishing LOAD_METHOD from binding.
         if self.is_method_load and isinstance(self.obj, UserDefinedObjectVariable):
-            self.obj.install_method_load_guards()
+            self.obj.install_method_load_guards(tx)
             if self.method_load_qualname is not None:
                 return self.method_load_qualname
         return self._qualname(tx).as_python_constant()
@@ -733,7 +737,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
         ):
             # LOAD_METHOD selected descriptor + self before evaluating arguments.
             # Binding across a graph break would change its TypeError qualname.
-            self.obj.install_method_load_guards()
+            self.obj.install_method_load_guards(codegen.tx)
             codegen.add_push_null(
                 lambda: codegen.load_import_from("functools", "partial")
             )
@@ -772,6 +776,13 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: types.ClassMethodDescriptorType,
+        source: Source | None = None,
+    ) -> "ClassMethodDescriptorVariable":
+        return ClassMethodDescriptorVariable(descriptor, source=source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
@@ -899,6 +910,10 @@ class StaticMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "StaticMethodVariable":
+        return StaticMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -976,6 +991,10 @@ class ClassMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "ClassMethodVariable":
+        return ClassMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -989,7 +1008,7 @@ class ClassMethodVariable(VariableTracker):
         # as `owner.<name>`, so build the VT that can source it.
         # A classmethod may wrap any callable, so let the builder pick the VT;
         # tp_descr_get_impl rejects the ones it cannot bind.
-        return ClassAttrClassMethodVariable(
+        return ClassAttrClassMethodVariable(  # noqa: RVT001
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
             source=source,
@@ -1114,6 +1133,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: types.MemberDescriptorType,
+        source: Source | None = None,
+    ) -> "MemberDescriptorVariable":
+        return MemberDescriptorVariable(descriptor, source=source)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # member_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L57-L62
         return descr_repr(tx, self.descriptor, "member")
@@ -1213,6 +1239,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: types.GetSetDescriptorType,
+        source: Source | None = None,
+    ) -> "GetSetDescriptorVariable":
+        return GetSetDescriptorVariable(descriptor, source=source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
@@ -1406,12 +1439,12 @@ class PropertyVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
         from ..polyfills import property_isabstractmethod
+        from .builder import SourcelessBuilder
 
         # Trace truth testing so user-defined __bool__ methods and their
         # exceptions are handled within the traced program.
-        return UserFunctionVariable(property_isabstractmethod).call_function(
-            tx, [self], {}
-        )
+        fn = SourcelessBuilder.create_internal_user_function(property_isabstractmethod)
+        return fn.call_function(tx, [self], {})
 
     tp_getset = {
         "__name__": GetSet(_name_getter, getset_set("__name__")),
@@ -1428,6 +1461,12 @@ class PropertyVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: property, source: Source | None = None
+    ) -> "PropertyVariable":
+        return PropertyVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         fget_name = getattr(self.descriptor.fget, "__name__", "?")
@@ -1510,6 +1549,13 @@ class TupleGetterVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: "_collections._tuplegetter",
+        source: Source | None = None,
+    ) -> "TupleGetterVariable":
+        return TupleGetterVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         _, (idx, doc) = self.descriptor.__reduce__()
