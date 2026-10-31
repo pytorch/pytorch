@@ -322,17 +322,54 @@ class TestTunableOpPretune(TestCase):
         )
         self.assertEqual(_run(padded, sym=s), [])
 
+    def test_expanded_bias_still_produces_buckets(self):
+        # mm_args expands a broadcast bias to the output shape, so addmm and
+        # baddbmm normally arrive with a stride-0 bias. No TunableOp Signature()
+        # carries the bias, so density there is irrelevant -- requiring it would
+        # drop almost every addmm/baddbmm. mat1/mat2/output are still checked.
+        s = sympy.Symbol("s_expbias", positive=True, integer=True)
+        b, m, k, n = s, 32, 256, 512
+        mat1 = _buffer("mat1", [b, m, k], _contiguous_strides([b, m, k]))
+        mat2 = _buffer("mat2", [b, k, n], _contiguous_strides([b, k, n]))
+        # [N] broadcast to [B, M, N]: zero stride on both leading dims.
+        bias = _buffer("bias", [b, m, n], [0, 0, 1])
+        winner = _FakeWinner("baddbmm", [bias, mat1, mat2], [b, m, n])
+        submitted = _run(winner, sym=s)
+        self.assertTrue(submitted, "an expanded bias must not block the ladder")
+        for bmreq in submitted:
+            bias_meta = bmreq.input_tensor_meta[0]
+            self.assertEqual(
+                bias_meta.strides,
+                _contiguous_strides(bias_meta.sizes),
+                "the bias must be rebuilt dense, not left stride-0",
+            )
+
+        # A non-dense mat1 is still rejected: that ld is in the signature.
+        tunableop._pretuned_gemms.cache_clear()
+        s2 = sympy.Symbol("s_expbias2", positive=True, integer=True)
+        padded_mat1 = _buffer("mat1", [s2, m, k], [m * 300, 300, 1])
+        winner2 = _FakeWinner(
+            "baddbmm",
+            [
+                _buffer("bias", [s2, m, n], [0, 0, 1]),
+                padded_mat1,
+                _buffer("mat2", [s2, k, n], _contiguous_strides([s2, k, n])),
+            ],
+            [s2, m, n],
+        )
+        self.assertEqual(_run(winner2, sym=s2), [])
+
     def test_choice_variants_produce_buckets(self):
         # Matching runs on winner.choice.name, which covers the _dtype
         # out-variants and _scaled_mm_v2.
         from types import SimpleNamespace
 
-        for choice_name in (
-            "mm_dtype",
-            "addmm_dtype",
-            "bmm_dtype",
-            "_scaled_mm_v2",
-        ):
+        # addmm_dtype is in the set on ROCm only (it hard-errors under
+        # TunableOp on CUDA), so drive it only where the ladder accepts it.
+        variants = ["mm_dtype", "bmm_dtype", "_scaled_mm_v2"]
+        if torch.version.hip is not None:
+            variants.append("addmm_dtype")
+        for choice_name in variants:
             # Clear the cross-GEMM memo: every variant below reuses the same
             # traced shapes by design (the point is the choice gate, not the
             # sizes), so without this only the first variant would submit.
@@ -529,9 +566,9 @@ class TestTunableOpPretune(TestCase):
             tunableop._pretuned_gemms.cache_clear()
 
     def test_bias_addmm_is_skipped(self):
-        # bias_addmm is only chosen for broadcast (stride-0) bias, which the
-        # density guard rejects: rebuilding its metas densely would tune a
-        # layout runtime never asks for. Excluded from _TUNABLEOP_GEMM_CHOICES.
+        # bias_addmm rewrites its own bias (inp[0]) before dispatching, so the
+        # meta the ladder rebuilds is not what aten receives. Excluded from
+        # _TUNABLEOP_GEMM_CHOICES, so it never reaches the density guard.
         s = sympy.Symbol("s_biasaddmm", positive=True, integer=True)
         m, k, n = s, 256, 512
         winner = _FakeWinner(
