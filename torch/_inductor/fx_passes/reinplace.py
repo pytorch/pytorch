@@ -1218,14 +1218,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
             node.target = inplaceable_op.inplace_op
 
-    # Decide registry ops after the other reinplacing paths have been rewritten.
-    # Processing them downstream-first lets an upstream op see aliases introduced
-    # by a later registry op in the same chain.
-    deferred_registry_ops: list[tuple[torch.fx.Node, InplaceableOp]] = []
-
-    for node in graph.nodes:
+    # Process consumers before their producers. That way every escape check
+    # sees aliases introduced by downstream registry, HOP, Triton and foreach
+    # rewrites before deciding whether its own result can be reinplaced.
+    for node in reversed(graph.nodes):
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
-            deferred_registry_ops.append((node, inplaceable_op))
+            reinplace_registry_op(node, inplaceable_op)
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
@@ -1468,11 +1466,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
-
-    # Resolve registry ops in reverse graph order so downstream reinplacing
-    # decisions are visible to upstream escape checks.
-    for node, inplaceable_op in reversed(deferred_registry_ops):
-        reinplace_registry_op(node, inplaceable_op)
 
     for node, replacement in replace_dict.items():
         while replacement in replace_dict:
