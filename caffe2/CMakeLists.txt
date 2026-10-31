@@ -1265,8 +1265,14 @@ if(USE_XPU)
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
   set(TORCH_XPU_OPS_REPO_URL https://github.com/intel/torch-xpu-ops.git)
-  file(READ "${TORCH_ROOT}/third_party/xpu.txt" TORCH_XPU_OPS_COMMIT)
-  string(REGEX REPLACE "\n$" "" TORCH_XPU_OPS_COMMIT "${TORCH_XPU_OPS_COMMIT}")
+  file(READ "${TORCH_ROOT}/third_party/xpu.txt" TORCH_XPU_OPS_REF)
+  string(STRIP "${TORCH_XPU_OPS_REF}" TORCH_XPU_OPS_REF)
+  string(LENGTH "${TORCH_XPU_OPS_REF}" _ref_length)
+  if(TORCH_XPU_OPS_REF MATCHES "^release/[0-9]+\\.[0-9]+$")
+    set(TORCH_XPU_OPS_REF "refs/heads/${TORCH_XPU_OPS_REF}")
+  elseif(NOT (_ref_length EQUAL 40 AND TORCH_XPU_OPS_REF MATCHES "^[0-9a-f]+$"))
+    message(FATAL_ERROR "Invalid torch-xpu-ops ref: ${TORCH_XPU_OPS_REF}; expected a full SHA or release/X.Y")
+  endif()
   if(NOT EXISTS "${TORCH_XPU_OPS_DIR}/.git")
     execute_process(
       COMMAND git clone --quiet ${TORCH_XPU_OPS_REPO_URL} ${TORCH_XPU_OPS_DIR}
@@ -1284,21 +1290,41 @@ if(USE_XPU)
   if(NOT _exitcode EQUAL 0)
     set(TORCH_XPU_OPS_CURRENT_COMMIT "")
   endif()
-  if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_COMMIT)
+  set(TORCH_XPU_OPS_RESOLVED_COMMIT "${TORCH_XPU_OPS_REF}")
+  if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_REF)
     execute_process(
-      COMMAND git fetch --quiet
+      COMMAND git fetch --quiet "${TORCH_XPU_OPS_REPO_URL}" "${TORCH_XPU_OPS_REF}"
       WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
       RESULT_VARIABLE _exitcode)
     if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+      message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL} ref ${TORCH_XPU_OPS_REF}")
     endif()
+  endif()
+  if(TORCH_XPU_OPS_REF MATCHES "^refs/heads/")
     execute_process(
-      COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
+      COMMAND git rev-parse --verify "FETCH_HEAD^{commit}"
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      OUTPUT_VARIABLE TORCH_XPU_OPS_RESOLVED_COMMIT
+      RESULT_VARIABLE _exitcode
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to resolve torch-xpu-ops ref ${TORCH_XPU_OPS_REF}")
+    endif()
+  endif()
+  if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_RESOLVED_COMMIT)
+    execute_process(
+      COMMAND git checkout --quiet --detach "${TORCH_XPU_OPS_RESOLVED_COMMIT}"
       WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
       RESULT_VARIABLE _exitcode)
     if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+      message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_RESOLVED_COMMIT}")
     endif()
+  endif()
+  message(STATUS "torch-xpu-ops: ${TORCH_XPU_OPS_REF} -> ${TORCH_XPU_OPS_RESOLVED_COMMIT}")
+  if(SKBUILD)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/xpu.txt" "${TORCH_XPU_OPS_RESOLVED_COMMIT}\n")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/xpu.txt"
+            DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
   endif()
 
   set(TORCH_XPU_OPS_INCLUDE_DIRS
