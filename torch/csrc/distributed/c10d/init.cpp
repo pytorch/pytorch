@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/hooks/CompletionCallbackHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
@@ -74,6 +75,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <torch/custom_class.h>
 
@@ -155,6 +157,35 @@ class IntrusivePtrNoGilDestructor {
   operator bool() const noexcept {
     return impl_;
   }
+};
+
+// Runs a Python callable from CompletionCallbackHook's dispatch thread. Python
+// is not entered once finalization has begun; the callable is leaked then.
+class PythonCompletionCallback {
+ public:
+  explicit PythonCompletionCallback(pybind11::object fn)
+      : fn_(fn.release().ptr(), [](PyObject* obj) {
+          if (!Py_IsInitialized() || Py_IsFinalizing()) {
+            return;
+          }
+          pybind11::gil_scoped_acquire gil;
+          Py_DECREF(obj);
+        }) {}
+
+  void operator()(const ::c10d::CompletedOpInfo& info) const {
+    if (!Py_IsInitialized() || Py_IsFinalizing()) {
+      return;
+    }
+    pybind11::gil_scoped_acquire gil;
+    try {
+      pybind11::handle(fn_.get())(info);
+    } catch (pybind11::error_already_set& e) {
+      e.discard_as_unraisable("CompletionCallbackHook callback");
+    }
+  }
+
+ private:
+  std::shared_ptr<PyObject> fn_;
 };
 
 } // anonymous namespace
@@ -5521,6 +5552,77 @@ be removed again via remove().)")
           "remove",
           &::c10d::NanCheckHook::remove,
           "Detach the hook from its process group.");
+
+  py::class_<::c10d::CompletedOpInfo>(
+      module,
+      "CompletedOpInfo",
+      "An operation reported complete by CompletionCallbackHook.")
+      .def_readonly("name", &::c10d::CompletedOpInfo::name)
+      .def_readonly(
+          "op_id",
+          &::c10d::CompletedOpInfo::op_id,
+          "Per-group issue order; compare with CompletionCallbackHook.last_op_id.")
+      .def_readonly(
+          "duration_ms",
+          &::c10d::CompletedOpInfo::duration_ms,
+          R"(
+The backend's measurement of the op, or None if it does not time ops. nccl2
+times ops with CUDA events around the op on its stream, only when
+``TORCH_NCCL_ENABLE_TIMING=1`` or after ``_enable_collectives_timing()`` (nccl2
+only, not nccl-lazy).)");
+
+  py::class_<
+      ::c10d::CompletionCallbackHook,
+      std::shared_ptr<::c10d::CompletionCallbackHook>>(
+      module,
+      "CompletionCallbackHook",
+      R"(
+Calls a Python function for every operation of a process group that completes
+successfully, using post and completion hooks.)")
+      .def_static(
+          "attach",
+          [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+             py::object callback) {
+            TORCH_CHECK_TYPE(
+                PyCallable_Check(callback.ptr()),
+                "CompletionCallbackHook: callback must be callable");
+            return ::c10d::CompletionCallbackHook::attach(
+                pg, PythonCompletionCallback(std::move(callback)));
+          },
+          py::arg("pg"),
+          py::arg("callback"),
+          R"(
+Attach ``callback(info: CompletedOpInfo)`` to a process group. It is called on
+a dedicated thread, one op at a time, in the order the backend reports
+completions, which is not necessarily issue order (nccl2 reports per CUDA
+stream); the backend never waits for it. Not reported: failed, timed-out and
+aborted ops, ops issued before attach, ops on the group's non-default backends,
+and nccl2 p2p inside batch_isend_irecv. Exceptions are reported as unraisable
+and do not stop later callbacks. Raises if the default backend does not support
+completion hooks (nccl2 and nccl-lazy do). The process group owns the hook and
+the callback, so the returned handle only has to be kept to call remove() or
+read last_op_id; a callback that references its group keeps it alive until
+remove(). Must not be called from a callback. At interpreter exit, queued
+callbacks are dropped and exit waits for a running callback to return.)")
+      .def(
+          "remove",
+          &::c10d::CompletionCallbackHook::remove,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Detach the hook and drop callbacks not yet delivered. Waits for a running
+callback to return unless called from a callback (of any hook); there, it does
+not wait and the hook stays registered with the group, inert, until a later
+``remove()`` from another thread or the group is destroyed.)")
+      .def_property_readonly(
+          "last_op_id",
+          &::c10d::CompletionCallbackHook::lastOpId,
+          "op_id of the most recently issued op since attach(), or -1.");
+  // Stop dispatch threads before the interpreter finalizes, while they can
+  // still finish a running callback and release their callables.
+  py::module_::import("atexit").attr("register")(py::cpp_function([] {
+    py::gil_scoped_release release;
+    ::c10d::CompletionCallbackHook::stopAll();
+  }));
 
   py::class_<::c10d::HealthCheckHook>(
       module,
