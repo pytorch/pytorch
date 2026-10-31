@@ -1430,6 +1430,16 @@ def _call_overload_packet_from_python(
 # to work from script, we need to ensure ops and foo are modules
 
 
+# Namespaces of the ops that torch defines in Python modules which `import torch`
+# skips because importing them is costly, mapped to those modules. A lookup that
+# misses imports the module, so a saved program that calls these ops loads after
+# a plain `import torch`.
+_LAZY_OP_NAMESPACES = {
+    "quantized_decomposed": "torch.ao.quantization.fx._decomposed",
+    "torch_attn": "torch.nn.attention.varlen",
+}
+
+
 class _OpNamespace(types.ModuleType):
     """
     An op namespace to dynamically bind Operators into Python.
@@ -1475,6 +1485,12 @@ class _OpNamespace(types.ModuleType):
 
         try:
             op, overload_names = _get_packet(qualified_op_name, module_name)
+            if op is None and namespace_name in _LAZY_OP_NAMESPACES:
+                importlib.import_module(_LAZY_OP_NAMESPACES[namespace_name])
+                # The module may have looked up this op while it was imported.
+                if op_name in self.__dict__:
+                    return self.__dict__[op_name]
+                op, overload_names = _get_packet(qualified_op_name, module_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"

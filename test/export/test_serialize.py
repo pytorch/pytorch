@@ -2097,6 +2097,40 @@ class TestSaveLoad(TestCase):
             self.assertEqual(loaded_ep.module()(x), m(x))
             save(loaded_ep, io.BytesIO())
 
+    @unittest.skipIf(IS_FBCODE, "Packaged fbcode test binaries cannot start Python")
+    def test_load_torch_python_ops_in_new_process(self):
+        # These imports define the ops here. The new process below only imports torch.
+        import torch.ao.quantization.fx._decomposed
+        from torch.nn.attention.varlen import varlen_attn
+
+        class M(torch.nn.Module):
+            def forward(self, q, cu, x):
+                attn = varlen_attn(q, q, q, cu, cu, 4, 4)
+                x_int8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, 0.5, 0, -128, 127, torch.int8
+                )
+                return attn, x_int8
+
+        inp = (
+            torch.randn(8, 2, 16, dtype=torch.bfloat16),
+            torch.tensor([0, 4, 8], dtype=torch.int32),
+            torch.randn(4),
+        )
+        ep = export(M(), inp)
+        ops = sorted(str(n.target) for n in ep.graph.nodes if n.op == "call_function")
+        with TemporaryFileName(suffix=".pt2") as path:
+            save(ep, path)
+            script = (
+                "import torch;"
+                f"ep = torch.export.load(r'{path}');"
+                "print(sorted(str(n.target) for n in ep.graph.nodes"
+                " if n.op == 'call_function'))"
+            )
+            out = subprocess.check_output(
+                [sys.executable, "-c", script], cwd=os.path.dirname(path), text=True
+            )
+        self.assertEqual(out.strip().splitlines()[-1], str(ops))
+
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
         buf = io.BytesIO()
