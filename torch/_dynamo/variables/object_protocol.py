@@ -2505,6 +2505,26 @@ def object_generic_getattr(
     )
 
 
+def generic_getmethod(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, name: str
+) -> VariableTracker:
+    result = generic_getattr(tx, obj, name)
+    if (
+        isinstance(obj, variables.UserDefinedObjectVariable)
+        and isinstance(result, variables.BoundBuiltinMethodVariable)
+        and result.obj is obj
+    ):
+        # Argument evaluation can shadow the method after LOAD_METHOD chose its owner.
+        qualname = obj.method_load_qualname(tx, name, result.descriptor)
+        return result.clone(
+            is_method_load=True,
+            method_load_qualname=qualname,
+            # getattr's source reconstructs a bound method, not descriptor + self.
+            source=None if qualname is not None else result.source,
+        )
+    return result
+
+
 def generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,

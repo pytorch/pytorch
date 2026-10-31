@@ -525,7 +525,9 @@ class BaseBuiltinVariable(VariableTracker):
                 )
                 items[ConstantVariable.create(key)] = value_vt
             return variables.MappingProxyVariable(variables.ConstDictVariable(items))
-        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+        if isinstance(
+            attr, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
             from .builder import VariableBuilder
@@ -533,6 +535,10 @@ class BaseBuiltinVariable(VariableTracker):
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
                 owner = VariableTracker.build(tx, attr.__objclass__)
+            if isinstance(attr, types.WrapperDescriptorType):
+                return VariableBuilder.create_internal_wrapper_descriptor(
+                    attr, owner=owner, source=source
+                )
             return VariableBuilder.create_internal_method_descriptor(
                 attr, owner=owner, source=source
             )
@@ -3583,7 +3589,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
+            obj = args[0].realize()
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
