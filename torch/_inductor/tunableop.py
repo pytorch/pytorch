@@ -34,6 +34,7 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     from .autotune_process import TuningProcess
+    from .select_algorithm import ExternKernelCaller
 
 
 log = logging.getLogger(__name__)
@@ -547,21 +548,24 @@ _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 # ExternKernelChoice names (winner.choice.name) the ladder covers. Matched by
 # string so a double import of the kernel modules cannot break the match.
 # _int_mm / sparse semi-structured variants are not hipBLASLt-tunable.
-# bias_addmm is excluded: it is only chosen for broadcast (stride-0) bias
-# (kernel/mm.py), which the density guard below rejects -- and correctly so,
-# since rebuilding its metas densely would tune a layout runtime never asks
-# for.
+# bias_addmm is excluded because it rewrites its own bias (inp[0]) before
+# dispatching, so the meta the ladder rebuilds is not what aten receives.
+# addmm_dtype is ROCm-only: on CUDA its reduced-input/float-output case stays on
+# the cublasLt path, which hard-errors while TunableOp is enabled ("Tunable GEMM
+# is not supported for float output with reduced float input", cuda/Blas.cpp), so
+# every bucket would raise and cost a worker restart. ROCm disables that Lt path
+# before reaching the check, so the GEMM tunes normally there.
 _TUNABLEOP_GEMM_CHOICES = frozenset(
     [
         "mm",
         "mm_dtype",
         "addmm",
-        "addmm_dtype",
         "bmm",
         "bmm_dtype",
         "baddbmm",
         "_scaled_mm",
         "_scaled_mm_v2",
+        *(["addmm_dtype"] if torch.version.hip is not None else []),
     ]
 )
 
@@ -584,7 +588,7 @@ _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 _TUNABLEOP_MAX_DYN_SYM = 16384
 
 
-def maybe_range_pretune(winner) -> None:
+def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     """Tune a dynamic-shape GEMM at a range of sizes of its dynamic dim.
 
     TunableOp keys a solution on an exact shape signature, so tuning only the
@@ -709,26 +713,27 @@ def maybe_range_pretune(winner) -> None:
                     stride = sizevars.optimization_hints(
                         get_strides_with_layout_constraints(n)
                     )
-                except Exception:
+                except (ImportError, AttributeError, TypeError):
                     stride = ()
             return (
                 str(dtype),
                 tuple(str(x) for x in size),
                 tuple(str(x) for x in stride),
             )
-        except Exception:
+        except (AttributeError, TypeError):
             return None
 
     try:
         sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
-    except Exception:
+    except (AttributeError, TypeError):
         sigs = [None]
 
     def _declared(expr: Any) -> tuple[int | None, int | None]:
         """(lower, upper) from ShapeEnv, each None when unbounded or symbolic."""
         try:
             vr = sizevars.shape_env.bound_sympy(expr)
-        except Exception:  # no range for this expression
+        except (AttributeError, TypeError, ValueError, KeyError):
+            # No usable range: unbacked symbol, or no shape env at all.
             return None, None
         lo = hi = None
         try:
@@ -745,7 +750,8 @@ def maybe_range_pretune(winner) -> None:
 
     try:
         sym_hint = sizevars.optimization_hint(s)
-    except Exception:
+    except (AttributeError, TypeError, ValueError, KeyError):
+        # No hint for this symbol, so there is no traced size to anchor on.
         return
     sym_lo, sym_hi = _declared(s)
     # A declared bound narrower than the cap wins. The cap is raised to the
@@ -797,7 +803,7 @@ def maybe_range_pretune(winner) -> None:
     # below the size the model actually runs.
     try:
         served_dim = _eval_at(dyn_expr, sym_hint)
-    except Exception:  # unevaluatable at the hint
+    except (AttributeError, TypeError, ValueError):  # unevaluatable at the hint
         served_dim = 0
     dim_ceiling = max(_TUNABLEOP_MAX_DYN_SYM, served_dim)
 
@@ -806,7 +812,7 @@ def maybe_range_pretune(winner) -> None:
     for sym_val in sym_vals:
         try:
             dim_val = _eval_at(dyn_expr, sym_val)
-        except Exception:  # unevaluatable at this value
+        except (AttributeError, TypeError, ValueError):  # unevaluatable here
             continue
         if not (_TUNABLEOP_MIN_DYN_DIM <= dim_val <= dim_ceiling):
             continue
@@ -870,6 +876,15 @@ def maybe_range_pretune(winner) -> None:
 
     try:
         operands = [*winner.input_nodes, winner.layout]
+        if bias_first:
+            # The bias is exempt: no TunableOp Signature() carries it -- all of
+            # them key on trans/M/N/K/ld (plus batch), with ldc taken from the
+            # result (GemmCommon.h) -- and addmm/baddbmm copy the bias into the
+            # result before the GEMM. mm_args expands a broadcast bias to the
+            # output shape, so demanding density here would reject almost every
+            # addmm/baddbmm while protecting a field the signature does not have.
+            # _meta_at rebuilds it dense, which is the layout runtime asks for.
+            operands = operands[1:]
         if not all(_is_densely_packed(n) for n in operands):
             log.info(
                 "TunableOp range pre-tune: skipping %s, an operand is not "
@@ -877,7 +892,9 @@ def maybe_range_pretune(winner) -> None:
                 winner.name,
             )
             return
-    except Exception as e:  # cannot prove density, do not guess
+    except (AttributeError, IndexError, TypeError) as e:
+        # Raised by get_size/get_stride on a node shape we did not expect; a
+        # layout we cannot read is one we must not guess at.
         log.info(
             "TunableOp range pre-tune: skipping %s, layout check failed: %s",
             winner.name,
@@ -894,10 +911,15 @@ def maybe_range_pretune(winner) -> None:
         # strides, since small-bucket strides can reorder dims and silently turn a
         # plain GEMM into a transposed one.
         sizes = [_eval_at(sz, sym_val) for sz in n.get_size()]
-        order = ir.get_stride_order(
-            sizevars.optimization_hints(get_strides_with_layout_constraints(n))
-        )
-        strides = [int(x) for x in ir.FlexibleLayout.stride_ordered(sizes, order)]
+        traced = sizevars.optimization_hints(get_strides_with_layout_constraints(n))
+        if any(st == 0 for st in traced):
+            # A broadcast operand -- only the exempt bias reaches here, the
+            # density guard rejects the rest. Its stride-0 dims tie, so the
+            # inferred order is arbitrary; fall back to natural contiguous.
+            strides = [int(x) for x in ir.FlexibleLayout.contiguous_strides(sizes)]
+        else:
+            order = ir.get_stride_order(traced)
+            strides = [int(x) for x in ir.FlexibleLayout.stride_ordered(sizes, order)]
         return TensorMeta(
             device=n.get_device(),
             dtype=n.get_dtype(),
@@ -914,11 +936,14 @@ def maybe_range_pretune(winner) -> None:
             sized_bmreq.input_tensor_meta = [_meta_at(n, v) for n in winner.input_nodes]
             sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v)
             bmreqs.append(sized_bmreq)
-    except Exception as e:  # bmreq build must not fail the compile
+    except (AttributeError, TypeError, ValueError, IndexError, KeyError) as e:
+        # A meta we cannot rebuild must not fail the compile, but it is a defect
+        # rather than a shape we declined, so log the traceback to find it.
         log.warning(
             "TunableOp range pre-tune: failed to build bmreqs for %s: %s",
             winner.name,
             e,
+            exc_info=True,
         )
         return
 
@@ -936,7 +961,7 @@ def maybe_range_pretune(winner) -> None:
             for d in m.sizes:
                 numel *= int(d)
             return numel * m.dtype.itemsize
-        except Exception:
+        except (AttributeError, TypeError, ValueError, OverflowError):
             return float("inf")
 
     kept: list[Any] = []
@@ -946,7 +971,7 @@ def maybe_range_pretune(winner) -> None:
             metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
             # Summed: the worker allocates every operand and the output at once.
             footprint = sum(_meta_bytes(m) for m in metas)
-        except Exception:
+        except (AttributeError, TypeError):
             footprint = float("inf")
         if footprint > _TUNABLEOP_MAX_LADDER_BYTES:
             log.warning(
