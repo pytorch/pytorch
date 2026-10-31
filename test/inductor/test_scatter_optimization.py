@@ -1372,7 +1372,6 @@ class TestPartitionedScatterOpt(TestCase):
             "floor=total_gpu: output should still be correct (pass gracefully skips)",
         )
 
-    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
     def test_memory_budget_shared_across_scatters(self):
