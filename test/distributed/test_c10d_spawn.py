@@ -121,7 +121,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _test_broadcast(self, backend, device_type=device_type):
+    def _test_broadcast(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
@@ -141,7 +141,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         elif self.rank == 0:
             self.assertEqual(x.grad, torch.zeros(5, 5, device=device))
 
-    def _test_reduce(self, backend, device_type=device_type):
+    def _test_reduce(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
@@ -162,7 +162,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_g = (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_g)
 
-    def _test_allreduce(self, backend, device_type=device_type):
+    def _test_allreduce(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
@@ -181,7 +181,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_g = 2 * (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_g)
 
-    def _test_all_gather(self, backend, device_type=device_type):
+    def _test_all_gather(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
@@ -201,7 +201,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_s = 2 * (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
 
-    def _test_all_to_all(self, backend, device_type=device_type):
+    def _test_all_to_all(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
@@ -225,7 +225,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x0.grad, x_s)
         self.assertEqual(x1.grad, x_s)
 
-    def _test_all_to_all_single(self, backend, device_type=device_type):
+    def _test_all_to_all_single(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
