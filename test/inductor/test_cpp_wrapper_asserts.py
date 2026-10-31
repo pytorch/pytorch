@@ -49,10 +49,6 @@ class CppWrapperAssertTests(InductorTestCase):
             def get_op_name():
                 return "torch.ops.aten.set_.source_Tensor"
 
-            @staticmethod
-            def is_zero_elements():
-                return False
-
         class RecordingWrapper:
             comment = "//"
 
@@ -195,6 +191,30 @@ class CppWrapperAssertTests(InductorTestCase):
 
         compiled = torch.compile(fn)
         self.assertEqual(compiled(sample), fn(sample))
+
+    @config.patch(
+        cpp_wrapper=True,
+        fx_graph_cache=False,
+        implicit_fallbacks=True,
+        alignment_asserts=True,
+    )
+    def test_fallback_undefined_output(self):
+        def fn(*args):
+            q, qkv_weight, qkv_bias, proj_weight, proj_bias = (a + 1 for a in args)
+            return torch._native_multi_head_attention(
+                q, q, q, 6, 2, qkv_weight, qkv_bias, proj_weight, proj_bias, None, False
+            )
+
+        args = (
+            torch.randn(1, 3, 6),
+            torch.randn(18, 6),
+            torch.randn(18),
+            torch.randn(6, 6),
+            torch.randn(6),
+        )
+        out, code = run_and_get_cpp_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check_count("assert_alignment(", 2, exactly=True).run(code)
 
 
 if __name__ == "__main__":
