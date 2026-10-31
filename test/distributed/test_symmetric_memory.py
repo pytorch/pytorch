@@ -1535,6 +1535,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(pad, torch.zeros_like(pad))
 
 
+skip_if_no_rocm_async_mm = lazy_skip_if(
+    lambda: TEST_WITH_ROCM and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH),
+    "ROCm native async-TP kernel (AsyncMM.hip) is only built for gfx942/gfx950",
+)
+
+
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
 # MultiProcContinuousTest will skip all the following tests if a test fails (
@@ -1628,10 +1634,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         SM100OrLater and not TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/162917",
     )
-    @lazy_skip_if(
-        lambda: TEST_WITH_ROCM and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH),
-        "ROCm native async-TP kernel (AsyncMM.hip) is only built for gfx942/gfx950",
-    )
+    @skip_if_no_rocm_async_mm
     @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
@@ -1690,10 +1693,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 
     @skipIf(not TEST_WITH_ROCM, "Native graph capture is only validated on ROCm")
     @skip_if_lt_x_gpu(2)
-    @lazy_skip_if(
-        lambda: TEST_WITH_ROCM and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH),
-        "ROCm native async-TP kernel (AsyncMM.hip) is only built for gfx942/gfx950",
-    )
+    @skip_if_no_rocm_async_mm
     @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native_graph_capture(self) -> None:
         self._init_process()
