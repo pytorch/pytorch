@@ -195,6 +195,59 @@ class TestSingleRankSaveLoad(TestCase):
             )
 
     @with_temp_dir
+    def test_mxfp4_blocks_loading(self) -> None:
+        """Load GPT-OSS MXFP4 _blocks/_scales end-to-end through the planner."""
+        try:
+            import safetensors  # noqa: F401
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+        num_experts, rows, groups = 2, 3, 4
+        blocks_fqn = "model.layers.0.mlp.experts.gate_up_proj_blocks"
+        scales_fqn = "model.layers.0.mlp.experts.gate_up_proj_scales"
+        blocks = torch.randint(256, (num_experts, rows, groups, 16), dtype=torch.uint8)
+        scales = torch.randint(124, 131, (num_experts, rows, groups), dtype=torch.uint8)
+        files = {"model.safetensors": {blocks_fqn: blocks, scales_fqn: scales}}
+        save_hf_checkpoint(CHECKPOINT_DIR, files)
+
+        # Reference decode: low nibble first, each value times 2**(scale - 127).
+        fp4_values = torch.tensor(
+            [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+            + [-0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0]
+        )
+        expected = torch.stack(
+            [fp4_values[(blocks & 0x0F).long()], fp4_values[(blocks >> 4).long()]],
+            dim=-1,
+        ).flatten(-2)
+        expected = torch.ldexp(
+            expected, scales.to(torch.int32).unsqueeze(-1) - 127
+        ).flatten(-2)
+
+        state_dict_to_load = {blocks_fqn: torch.zeros(num_experts, rows, groups * 32)}
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=QuantizedHuggingFaceStorageReader(
+                path=CHECKPOINT_DIR, target_dtype=torch.float32
+            ),
+        )
+
+        torch.testing.assert_close(
+            state_dict_to_load[blocks_fqn], expected, rtol=0, atol=0
+        )
+
+        # Empty-state-dict loads allocate their destination from the metadata,
+        # so the result must come back dequantized, not truncated to uint8.
+        loaded = _load_state_dict_from_keys(
+            storage_reader=QuantizedHuggingFaceStorageReader(
+                path=CHECKPOINT_DIR, target_dtype=torch.float32
+            ),
+        )
+        self.assertEqual(loaded[blocks_fqn].dtype, torch.float32)
+        torch.testing.assert_close(loaded[blocks_fqn], expected, rtol=0, atol=0)
+
+    @with_temp_dir
     def test_quantized_checkpoint_loading(self) -> None:
         """Test end-to-end saving a quantizaed checkpoint and loading it."""
         try:
