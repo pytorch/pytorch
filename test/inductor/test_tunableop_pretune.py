@@ -22,6 +22,7 @@ import sympy
 
 import torch
 from torch._inductor import config, ir, select_algorithm as sa, tunableop
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -89,9 +90,8 @@ class _FakeWinner(sa.ExternKernelCaller):
         from types import SimpleNamespace
 
         self.name = name
-        # The ladder matches on winner.choice.name (the ExternKernelChoice,
-        # always set by the base __init__ in production). Pass choice_name to
-        # exercise the _dtype / v2 / bias variants.
+        # Production always has choice.name == name; pass choice_name to
+        # drive a variant without building a real ExternKernelChoice.
         self.choice = SimpleNamespace(name=choice_name or name)
         self.input_nodes = input_nodes
         self.layout = ir.FixedLayout(
@@ -707,13 +707,17 @@ class TestTunableOpPretune(TestCase):
                     self.assertEqual(bypassed, expect_bypass)
 
 
-class TunableOpPretuneRealGpuTest(TestCase):
+class TunableOpPretuneRealGpuTest(InductorTestCase):
     """The ladder against a real compile, a real worker and a real results file.
 
     The tests above stop at what the ladder decides. This is the only one that
     sends a real ExternKernelGPUBenchmarkRequest through the pipe, so it is what
     proves the rebuilt metas describe shapes hipBLASLt accepts and that each one
-    reaches the file runtime reads.
+    reaches the file runtime reads. The fx graph cache is left on, so it also
+    covers the tune-mode bypass end to end.
+
+    InductorTestCase enters fresh_cache(), which isolates the cache directory
+    per test and clears _pretuned_gemms with it.
     """
 
     hw_classification = HardwareClassification.CUDA
@@ -751,11 +755,6 @@ class TunableOpPretuneRealGpuTest(TestCase):
                 {
                     "cuda.autotune_tunableop_mode": "tune",
                     "cuda.autotune_tunableop_ladder": True,
-                    # The ladder only runs while lowering, and a warm
-                    # FxGraphCache hit skips lowering entirely, so without
-                    # this the test records nothing whenever an earlier run
-                    # left a cache entry behind.
-                    "force_disable_caches": True,
                 }
             ):
                 a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
@@ -779,7 +778,29 @@ class TunableOpPretuneRealGpuTest(TestCase):
             tokens = parts[1].split("_")
             if len(tokens) > 3:
                 shapes.add(tuple(tokens[1:4]))
-        self.assertGreater(len(shapes), 1, f"one shape tuned, not a ladder: {shapes}")
+
+        # The ladder is fully determined here: the symbol walks {2, hint=64,
+        # ceiling=16384} plus the powers of two between, and _TUNABLEOP_MIN_DYN_DIM
+        # drops 2 and 4. M is the dynamic dim, so that is one row per value.
+        expected_dims = {1 << k for k in range(3, 15)}  # 8 .. 16384
+        self.assertEqual(
+            len(shapes),
+            len(expected_dims),
+            f"expected one row per ladder bucket, got {sorted(shapes)}",
+        )
+        # Whichever signature position varies is the dynamic dim; the other two
+        # are the static K and N. Asserting the set catches a bucket that ran
+        # but recorded the wrong size, which a bare count would not.
+        varying = {
+            frozenset(int(t[i]) for t in shapes)
+            for i in range(3)
+            if len({t[i] for t in shapes}) > 1
+        }
+        self.assertEqual(
+            varying,
+            {frozenset(expected_dims)},
+            f"recorded dims do not match the ladder: {sorted(shapes)}",
+        )
 
 
 if __name__ == "__main__":
