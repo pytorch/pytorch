@@ -332,6 +332,7 @@ class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
 
 class TestQuantizeEagerQAT(QuantizationTestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -766,6 +767,8 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
 
 class TestQuantizeEagerQATNumerics(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_activation_convert_numerics_impl(self, Act, data):
         class M(torch.nn.Module):
             def __init__(self) -> None:
