@@ -7643,6 +7643,69 @@ class TestCudaAllocator(TestCase):
         not EXPANDABLE_SEGMENTS,
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
     )
+    @skipIfRocm(msg="cuda.bindings does not expose the HIP VMM API")
+    @requires_cuda_python_bindings
+    def test_expandable_segment_map_failure_is_retryable(self):
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+        torch.cuda.empty_cache()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            probe = torch.empty(2 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+        probe_address = probe.data_ptr()
+        segment = next(
+            segment
+            for segment in torch.cuda.memory_snapshot()
+            if segment["is_expandable"]
+            and segment["address"]
+            <= probe_address
+            < segment["address"] + segment["total_size"]
+        )
+        segment_size = segment["expandable_segment_size"]
+        del probe
+        torch.cuda.empty_cache()
+
+        with torch.cuda.stream(stream):
+            blocks = [
+                torch.empty(segment_size, dtype=torch.uint8, device="cuda")
+                for _ in range(3)
+            ]
+        self.assertEqual(
+            [block.data_ptr() for block in blocks],
+            [blocks[0].data_ptr() + i * segment_size for i in range(3)],
+        )
+        hole = blocks.pop(1)
+        hole_address = hole.data_ptr()
+        del hole
+        torch.cuda.empty_cache()
+
+        prop = drv.CUmemAllocationProp()
+        prop.type = drv.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+        prop.location.type = drv.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+        prop.location.id = torch.cuda.current_device()
+        handle = _check_cuda_bindings(drv.cuMemCreate(segment_size, prop, 0))
+        mapped = False
+        try:
+            _check_cuda_bindings(drv.cuMemMap(hole_address, segment_size, 0, handle, 0))
+            mapped = True
+            with (
+                torch.cuda.stream(stream),
+                self.assertRaisesRegex(RuntimeError, "CUDA driver error"),
+            ):
+                torch.empty(segment_size, dtype=torch.uint8, device="cuda")
+        finally:
+            if mapped:
+                _check_cuda_bindings(drv.cuMemUnmap(hole_address, segment_size))
+            _check_cuda_bindings(drv.cuMemRelease(handle))
+
+        with torch.cuda.stream(stream):
+            replacement = torch.empty(segment_size, dtype=torch.uint8, device="cuda")
+        self.assertEqual(replacement.data_ptr(), hole_address)
+
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
     @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
     @unittest.skipIf(not SM70OrLater, "requires system-scope PTX loads")
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")

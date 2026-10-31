@@ -578,6 +578,9 @@ struct ExpandableSegment {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
+    TORCH_CHECK(
+        !mapping_rollback_failed_,
+        "cannot reuse an expandable segment after a failed mapping could not be rolled back");
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
@@ -585,6 +588,9 @@ struct ExpandableSegment {
     if (end > handles_.size()) {
       handles_.resize(end);
     }
+    size_t created_end = begin;
+    auto rollback = c10::make_scope_exit(
+        [&] { rollbackUnpublishedHandles(begin, created_end); });
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
       CUmemGenericAllocationHandle handle = 0;
@@ -634,25 +640,15 @@ struct ExpandableSegment {
                 << ", total: " << device_total << ").";
           }
 #ifdef USE_ROCM
-          // hipMemCreate above returned hipErrorOutOfMemory and treated it
-          // like a sticky runtime error. Which means we need to clear it.
-          // Unlike the corresponding CUDA Driver API.
+          // hipMemCreate failures are sticky runtime errors. Clear them before
+          // rollback calls another HIP API, unlike the CUDA Driver API.
           (void)hipGetLastError();
 #endif
-          for (auto j : c10::irange(begin, i)) {
-            auto& maybe_handle = handles_.at(j);
-            TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
-            auto h = *maybe_handle;
-            maybe_handle = std::nullopt;
-#ifdef USE_ROCM
-            C10_CUDA_CHECK(hipMemRelease(h.handle));
-#else
-            C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
-#endif
-          }
-          trimHandles();
           return rangeFromHandles(begin, begin);
         }
+#ifdef USE_ROCM
+        (void)hipGetLastError();
+#endif
 #ifdef USE_ROCM
         C10_CUDA_CHECK(status);
 #else
@@ -660,8 +656,10 @@ struct ExpandableSegment {
 #endif
       }
       handles_.at(i) = Handle{.handle = handle};
+      created_end = i + 1;
     }
     mapAndSetAccess(begin, end);
+    rollback.release();
     return rangeFromHandles(begin, end);
   }
 
@@ -991,12 +989,82 @@ struct ExpandableSegment {
 #endif
       maybe_handle->mapped = true;
     }
-    mapped_size_ += (end - begin) * segment_size_;
     setAccess(device_, begin, end);
     for (auto p : peers_) {
       setAccess(p, begin, end);
     }
+    mapped_size_ += (end - begin) * segment_size_;
   }
+
+  // map_block does not publish the Block until map() returns, so rollback does
+  // not need to synchronize its stream. Keep cleanup warning-only so the
+  // original mapping error reaches the caller.
+  void rollbackUnpublishedHandles(size_t begin, size_t end) noexcept {
+    bool rollback_failed = false;
+    for (auto i : c10::irange(begin, end)) {
+      auto& maybe_handle = handles_.at(i);
+      if (!maybe_handle) {
+        continue;
+      }
+      auto& handle = *maybe_handle;
+      if (handle.mapped) {
+#ifdef USE_ROCM
+        auto status = hipMemUnmap(ptr() + segment_size_ * i, segment_size_);
+        if (status != hipSuccess) {
+          warnRollbackError(status);
+          rollback_failed = true;
+          continue;
+        }
+#else
+        auto status = DriverAPI::get()->cuMemUnmap_(
+            ptr_ + segment_size_ * i, segment_size_);
+        if (status != CUDA_SUCCESS) {
+          warnRollbackError(
+              status, "Failed to roll back expandable segment mapping");
+          rollback_failed = true;
+          continue;
+        }
+#endif
+        handle.mapped = false;
+      }
+#ifdef USE_ROCM
+      auto status = hipMemRelease(handle.handle);
+      if (status != hipSuccess) {
+        warnRollbackError(status);
+        rollback_failed = true;
+        continue;
+      }
+#else
+      auto status = DriverAPI::get()->cuMemRelease_(handle.handle);
+      if (status != CUDA_SUCCESS) {
+        warnRollbackError(
+            status,
+            "Failed to release expandable segment handle during rollback");
+        rollback_failed = true;
+        continue;
+      }
+#endif
+      maybe_handle = std::nullopt;
+    }
+    trimHandles();
+    mapping_rollback_failed_ |= rollback_failed;
+  }
+
+#ifdef USE_ROCM
+  static void warnRollbackError(hipError_t status) noexcept {
+    try {
+      C10_CUDA_CHECK_WARN(status);
+    } catch (...) {
+    }
+  }
+#else
+  static void warnRollbackError(CUresult status, const char* message) noexcept {
+    try {
+      C10_CUDA_DRIVER_CHECK_WARN(status, message);
+    } catch (...) {
+    }
+  }
+#endif
 
   void unmapHandles(size_t begin, size_t end) {
     // note: unlike cudaFree, MemUnmap and MemRelease do
@@ -1080,6 +1148,10 @@ struct ExpandableSegment {
   size_t segment_size_;
   size_t mapped_size_;
   size_t max_handles_;
+  // A failed rollback retains its handles so their ownership is not lost. The
+  // segment then fails closed instead of attempting another mapping over state
+  // the driver may still own.
+  bool mapping_rollback_failed_ = false;
   struct Handle {
     CUmemGenericAllocationHandle handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
