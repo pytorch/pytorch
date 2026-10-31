@@ -121,6 +121,12 @@ TEST_PIN_MEMORY = torch.accelerator.is_available() and not (
 # `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
 # to avoid bugs.
 #
+# Python 3.14 makes forkserver the default start method on Linux. The forkserver
+# preloads __main__, whose torch.cuda.is_available() registers the at-fork
+# handler, so every worker it forks would be a bad fork for the accelerator.
+if "forkserver" in mp.get_all_start_methods():
+    mp.set_forkserver_preload([])
+
 # Get a multiprocessing context because some test / third party library will
 # set start_method when imported, and setting again triggers `RuntimeError`.
 mp = mp.get_context(method="spawn")

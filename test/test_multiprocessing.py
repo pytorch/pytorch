@@ -638,9 +638,10 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     def test_device_bad_call(self, device):
         # Initialize device
         t = torch.zeros(5, 5).to(device).cpu()
-        inq = mp.Queue()
-        outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception, args=(device, inq, outq))
+        ctx = mp.get_context("fork")
+        inq = ctx.Queue()
+        outq = ctx.Queue()
+        p = ctx.Process(target=queue_get_exception, args=(device, inq, outq))
         p.start()
         inq.put(t)
         p.join()
@@ -652,16 +653,17 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             f"""\
 import torch
-from torch.multiprocessing import Process
+from torch.multiprocessing import get_context
 def run(rank):
     torch.get_device_module("{device}").set_device(rank)
 if __name__ == "__main__":
     size = 2
     processes = []
+    ctx = get_context("fork")
     for rank in range(size):
         # it would work fine without the line below
         x = torch.rand(20, 2).to("{device}")
-        p = Process(target=run, args=(rank,))
+        p = ctx.Process(target=run, args=(rank,))
         p.start()
         processes.append(p)
     for p in processes:
