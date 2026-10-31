@@ -156,6 +156,126 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @parametrize("size,simdlen", [(1, 1), (32, None), (65, None)])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize(
+        "op,x_value,y_value",
+        [
+            ("minimum", -0.0, 0.0),
+            ("minimum", 0.0, -0.0),
+            ("maximum", -0.0, 0.0),
+            ("maximum", 0.0, -0.0),
+        ],
+    )
+    def test_minimum_maximum_signed_zero(
+        self, dtype, op, x_value, y_value, size, simdlen
+    ):
+        # Eager CPU keeps the first operand on zero ties in scalar and SIMD
+        # kernels. Check every lane, including the tail at size 65.
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        x = torch.full((size,), x_value, dtype=dtype)
+        y = torch.full((size,), y_value, dtype=dtype)
+        expected = fn(x, y)
+        with config.patch({"cpp.simdlen": simdlen}):
+            metrics.reset()
+            actual, code = run_and_get_cpp_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, y
+            )
+            prefix = "min" if op == "minimum" else "max"
+            if simdlen == 1:
+                self.assertIn(f"{prefix}_keep_first(", code)
+            else:
+                check_metrics_vec_kernel_count(1)
+                if _can_check_vec_metrics():
+                    self.assertIn(f"{prefix}_keep_first_vec(", code)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch.signbit(actual), torch.signbit(expected))
+
+    @parametrize("size,simdlen", [(1, 1), (65, None)])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("nan_position", ["first", "second"])
+    @parametrize("op", ["minimum", "maximum"])
+    def test_minimum_maximum_nan_propagation(
+        self, dtype, op, nan_position, size, simdlen
+    ):
+        nan = float("nan")
+
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        x = torch.full((size,), nan if nan_position == "first" else 1.0, dtype=dtype)
+        y = torch.full((size,), 1.0 if nan_position == "first" else nan, dtype=dtype)
+        with config.patch({"cpp.simdlen": simdlen}):
+            metrics.reset()
+            actual, code = run_and_get_cpp_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, y
+            )
+            prefix = "min" if op == "minimum" else "max"
+            if simdlen == 1:
+                self.assertIn(f"{prefix}_keep_first(", code)
+            else:
+                check_metrics_vec_kernel_count(1)
+                if _can_check_vec_metrics():
+                    self.assertIn(f"{prefix}_keep_first_vec(", code)
+
+        self.assertTrue(torch.isnan(actual).all())
+        self.assertEqual(actual, fn(x, y))
+
+    @parametrize("size,simdlen", [(3, 1), (65, None)])
+    @parametrize("dtype", [torch.bool, torch.int32, torch.int64])
+    @parametrize("op", ["minimum", "maximum"])
+    def test_minimum_maximum_integral(self, op, dtype, size, simdlen):
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        if dtype is torch.bool:
+            x = torch.tensor([True, False, True])
+            y = torch.tensor([False, True, True])
+        else:
+            x = torch.tensor([1, 5, -3], dtype=dtype)
+            y = torch.tensor([2, 5, -7], dtype=dtype)
+        x = x.repeat(22)[:size]
+        y = y.repeat(22)[:size]
+        with config.patch({"cpp.simdlen": simdlen}):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertEqual(actual, fn(x, y))
+
+    @parametrize("size,simdlen", [(5, 1), (65, None)])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("op", ["clamp", "clamp_min", "clamp_max"])
+    @parametrize("bound", [-0.0, 0.0])
+    def test_clamp_signed_zero(self, op, bound, dtype, size, simdlen):
+        def fn(x):
+            if op == "clamp":
+                return torch.clamp(x, bound, bound)
+            return getattr(torch, op)(x, bound)
+
+        x = torch.tensor([-2.0, -0.0, 0.0, 0.5, 2.0], dtype=dtype).repeat(13)[:size]
+        expected = fn(x)
+        with config.patch({"cpp.simdlen": simdlen}):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch.signbit(actual), torch.signbit(expected))
+
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize(
+        "lower,upper", [(1.0, -1.0), (float("nan"), 1.0), (-1.0, float("nan"))]
+    )
+    def test_clamp_tensor_bounds(self, dtype, lower, upper):
+        def fn(x, lo, hi):
+            return torch.clamp(x, lo, hi)
+
+        x = torch.tensor([-2.0, -0.0, 0.0, 0.5, 2.0], dtype=dtype).repeat(13)
+        lo = torch.full_like(x, lower)
+        hi = torch.full_like(x, upper)
+        expected = fn(x, lo, hi)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, lo, hi)
+        self.assertEqual(actual, expected)
+
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
     def test_prefer_deferred_runtime_asserts_backed_symint_compile(self):
         def fn(x):
