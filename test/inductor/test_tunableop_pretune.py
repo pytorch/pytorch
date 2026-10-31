@@ -140,7 +140,10 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
         # torch._C._cuda_tunableop_get_filename only exists in a CUDA build.
         # Patched so these stay runnable on CPU-only inductor shards.
         stack.enter_context(
-            mock.patch("torch.cuda.tunable.get_filename", return_value="pretune.csv")
+            mock.patch(
+                "torch._inductor.tunableop._resolve_and_pin_filename_locked",
+                return_value="pretune.csv",
+            )
         )
         stack.enter_context(config.patch({"cuda.autotune_tunableop_ladder": ladder}))
         yield submitted
@@ -376,10 +379,9 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(winner2, sym=s2), [])
 
     def test_memo_distinguishes_output_stride(self):
-        # The bucket key carries the rebuilt output meta, so two GEMMs that
-        # differ only in output layout must not share it. Regression: the key
-        # was once built by probing winner.layout for a get_stride it does not
-        # have, so every output stride read as () and the second was skipped.
+        # The key carries the rebuilt output meta, so two GEMMs differing only
+        # in output layout get different keys. winner.layout is a Layout, which
+        # has no get_stride, so the stride has to come through _as_buffer.
         s = sympy.Symbol("s_outstride", positive=True, integer=True)
         m, k, n = s, 256, 512
         inputs = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
@@ -415,8 +417,8 @@ class TestTunableOpPretune(TestCase):
         self.assertTrue(submitted, "an explicit hint must re-enable the ladder")
 
     def test_a_persistently_faulting_bucket_stops_being_retried(self):
-        # A hanging rung never reaches `seen`, so unbounded retries would cost
-        # one fresh budget per identical layer, spent before the rungs that work.
+        # A rung that keeps faulting is attempted a bounded number of times
+        # across the process, not once per identical layer.
         s = sympy.Symbol("s_stuck", positive=True, integer=True)
         attempts = []
 
@@ -441,6 +443,22 @@ class TestTunableOpPretune(TestCase):
             per_pass * tunableop._TUNABLEOP_MAX_BUCKET_ATTEMPTS,
             "a faulting bucket must stop after a bounded number of attempts",
         )
+
+    def test_memo_does_not_depend_on_an_unpinned_filename(self):
+        # get_filename() reads "" until something pins it, so keying on it
+        # directly files the first GEMM's buckets under a different scope from
+        # every later one and re-runs the whole ladder.
+        s = sympy.Symbol("s_pin", positive=True, integer=True)
+        with _ladder(s) as submitted:
+            with mock.patch("torch.cuda.tunable.get_filename", return_value=""):
+                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+            first = len(submitted)
+            self.assertTrue(first)
+            with mock.patch(
+                "torch.cuda.tunable.get_filename", return_value="pinned.csv"
+            ):
+                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+            self.assertEqual(len(submitted), first, "pinning must not rekey")
 
     def test_memo_distinguishes_extern_kwargs(self):
         # use_fast_accum is in ScaledGemmParams::Signature() but not in the
@@ -601,8 +619,8 @@ class TestTunableOpPretune(TestCase):
             self.assertTrue(submitted, "a failed GEMM must stay retryable")
 
     def test_a_narrower_range_reuses_tuned_buckets(self):
-        # The narrow ladder's rungs are a subset of the wide one's, so a
-        # per-bucket memo leaves nothing to tune.
+        # The narrow ladder's rungs are a subset of the wide one's, so every
+        # one of them is already tuned.
         s = sympy.Symbol("s_range", positive=True, integer=True)
         wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
         self.assertTrue(wide)
@@ -618,8 +636,8 @@ class TestTunableOpPretune(TestCase):
         self.assertTrue(all(d > 4096 for d in dims), f"re-tuned old rungs: {dims}")
 
     def test_a_partial_run_retries_the_untuned_buckets(self):
-        # The budget is shared, so a run can tune a few rungs and stop. Keying
-        # the whole GEMM marked it done on the first "ok" and lost the rest.
+        # The budget is shared, so a run can tune a few rungs and stop. Only
+        # the rungs that returned ok are skipped next time.
         s = sympy.Symbol("s_partial", positive=True, integer=True)
         calls = []
 
