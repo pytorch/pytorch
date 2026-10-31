@@ -78,6 +78,12 @@ HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
 # disables the test in the parent too, silently.
 REENTRY_MARKER = "PR_REVIEW_ENTRY_POINT_CHILD"
 PR_REVIEW_SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
+# THE skills stage A installs and may read: pr-review, and the sibling skills
+# installed beside it, which an installed skill may refer to as `../<name>/`.
+# This is the one list a change widening the review's trusted skill surface has
+# to edit; the install step, the Read grants, the prompt hash and those links
+# are each checked against it.
+INSTALLED_SKILLS = ("pr-review", "cuda-streams")
 # The two claude-code-action steps: stage A reviews, stage B maps its review.
 MODEL_STEP_IDS = ("a", "claude")
 
@@ -1215,9 +1221,11 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         # Stage A: pr-review as an interactive session runs it, read-only.
         "a": (
             "Skill,"
-            # The trusted copy of pr-review, installed as a user skill.
-            "Read(~/.claude/skills/pr-review/**),"
-            "Read(/${{ github.workspace }}/pr/**),"
+            # The trusted copies of the installed skills, one grant each. A
+            # denied read reaches the model as an ordinary tool failure: it
+            # carries on and reviews without the skill.
+            + "".join(f"Read(~/.claude/skills/{s}/**)," for s in INSTALLED_SKILLS)
+            + "Read(/${{ github.workspace }}/pr/**),"
             "Grep(/${{ github.workspace }}/pr/**),"
             "Glob(/${{ github.workspace }}/pr/**),"
             "Read(//tmp/pr-diff.txt),"
@@ -1596,12 +1604,6 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             # Decides which comments the review is shown.
             "scripts/pr_review/fetch_pr_comments.py",
-            # Stage A's skill. It carries the review logic, so omitting it lets
-            # the whole checklist be rewritten under an unmoved hash.
-            ".agents/skills/pr-review/SKILL.md",
-            ".agents/skills/pr-review/review-checklist.md",
-            ".agents/skills/pr-review/bc-guidelines.md",
-            ".agents/skills/pr-review/ci-runner-naming.md",
         }
         # THE EXACT SET, both ways. A file MISSING means a change there moves
         # the review's behaviour without moving the hash that identifies it; an
@@ -1610,21 +1612,76 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         self.assertEqual(
             hashed,
             required,
-            f"the prompt hash covers {sorted(hashed)}, not {sorted(required)}",
+            f"the prompt hash names {sorted(hashed)}, not {sorted(required)}",
         )
         for path in sorted(required):
             self.assertTrue(
                 (REPO / path).is_file(), f"the hash names a missing file: {path}"
             )
-        # Stage A may read any file of its pr-review copy, named in SKILL.md or
-        # not, so each must move the hash; and that copy is the trusted one.
-        skill = REPO / ".agents" / "skills" / "pr-review"
-        readable = {str(p.relative_to(REPO)) for p in skill.rglob("*") if p.is_file()}
-        self.assertLessEqual(readable, hashed, "a pr-review file is not hashed")
-        self.assertIn(
-            "cp -rT trusted/.agents/skills/pr-review ~/.claude/skills/pr-review",
-            model_step(strip_comments(self.review), "aprompt"),
+        # The installed skills carry the review logic, and stage A may read any
+        # file of them, so each skill's whole directory is hashed: exactly the
+        # installed ones, which are exactly the ones stage A copies.
+        self.assertEqual(
+            set(hashed_skill_dirs(step)),
+            {f".agents/skills/{s}" for s in INSTALLED_SKILLS},
+            "the prompt hash does not cover exactly the installed skills",
         )
+        # Exactly these skills, copied from the trusted checkout, and nothing
+        # else: one copied but not listed would be in front of stage A's
+        # `Skill` tool with its files outside the hash. The whole step body is
+        # pinned, because any other spelling of a copy (`$HOME/...`, a glob)
+        # escapes a pattern search.
+        install = model_step(strip_comments(self.review), "aprompt")
+        body = [ln.strip() for ln in indented_block(install, "run:") if ln.strip()]
+        self.assertEqual(
+            body,
+            ["set -euo pipefail", "mkdir -p ~/.claude/skills"]
+            + [
+                f"cp -rT trusted/.agents/skills/{s} ~/.claude/skills/{s}"
+                for s in INSTALLED_SKILLS
+            ],
+            "stage A does not install exactly INSTALLED_SKILLS",
+        )
+        skills = REPO / ".agents" / "skills"
+        for name in INSTALLED_SKILLS:
+            self.assertTrue((skills / name / "SKILL.md").is_file())
+        self.assertEqual(skill_reference_problems(skills, INSTALLED_SKILLS), [])
+
+    def test_the_skill_reference_lint_fails_and_passes_where_it_should(self):
+        """The lint on a fake tree with skill `a` installed and `other` not."""
+        bad = [
+            ("x.md", "[s](../other/SKILL.md)"),  # @lint-ignore
+            ("x.md", "`../other/SKILL.md`"),
+            ("sub/x.md", "see `../../other/x`."),
+            ("x.md", "../a/../other/x"),
+            ("x.md", "../absent/SKILL.md"),
+            ("x.md", "the `other`\nskill"),
+            ("x.md", "the `absent` skill"),
+            ("x.md", "~/.claude/skills/other/SKILL.md"),
+            ("x.md", "the other skill"),
+            ("x.txt", ".agents/skills/./a/x"),
+            ("x.md", ".claude/skills/a/x"),
+        ]
+        good = [
+            ("x.md", "~/.claude/skills/a/SKILL.md and the `a` skill"),
+            ("x.md", "../a/SKILL.md"),
+            ("sub/x.md", "../other/x"),
+            ("x.md", "my-other skill; other skillset"),
+        ]
+        for (rel, text), fails in [(c, True) for c in bad] + [(c, False) for c in good]:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                skills = Path(tmp)
+                for d in ("a", "other"):
+                    (skills / d).mkdir()
+                    (skills / d / "SKILL.md").write_text("x")
+                (skills / "a" / rel).parent.mkdir(parents=True, exist_ok=True)
+                (skills / "a" / rel).write_text(text)
+                self.assertEqual(bool(skill_reference_problems(skills, ("a",))), fails)
+        with tempfile.TemporaryDirectory() as tmp:
+            skills = Path(tmp)
+            (skills / "real").mkdir()
+            (skills / "a").symlink_to(skills / "real")
+            self.assertTrue(skill_reference_problems(skills, ("a",)))
 
     def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
         """RUN the step: naming a file is not hashing it, and four text pins
@@ -1641,10 +1698,27 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         step = "\n".join(indented_block(self.review_prepare(), "run:"))
         # Order matters to the digest and is the workflow's to choose, so it is
-        # read from the step rather than pinned. WHICH files are named is
-        # pinned, exactly, by the test above.
+        # read from the step rather than pinned. WHICH files and skill
+        # directories are named is pinned, exactly, by the test above.
         named = re.findall(r"([\w./-]+\.(?:py|sh|md|yml))", step)
         self.assertEqual(len(named), len(set(named)), f"a file is named twice: {named}")
+        dirs = hashed_skill_dirs(step)
+        # A fake tree for each skill directory: the real skills' file lists
+        # are not this test's to know. Not only `*.md`, and names a
+        # newline-separated `find | xargs` would split, so a narrowed `find`
+        # or dropped NUL handling leaves a file out of the hash.
+        tree = {
+            f"{d}/{rel}"
+            for d in dirs
+            for rel in (
+                "SKILL.md",
+                "guide.md",
+                "sub/nested.md",
+                "scripts/tool",
+                ".hidden",
+                "sub/has space.txt",
+            )
+        }
 
         def run(bodies: dict) -> tuple:
             with tempfile.TemporaryDirectory() as td:
@@ -1658,7 +1732,16 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 return proc, out.read_text()
 
         def digest(bodies: dict) -> str:
-            return hashlib.sha256(b"".join(bodies[rel] for rel in named)).hexdigest()
+            # The named files' bytes in order, then one `sha256sum` line per
+            # skill file, sorted by path, so a skill file's path counts as well
+            # as its bytes.
+            lines = b"".join(
+                f"{hashlib.sha256(bodies[rel]).hexdigest()}  {rel}\n".encode()
+                for rel in sorted(r for r in bodies if r not in named)
+            )
+            return hashlib.sha256(
+                b"".join(bodies[rel] for rel in named) + lines
+            ).hexdigest()
 
         def check(bodies: dict, why: str) -> None:
             # SUCCESS AND THE RECOMPUTED VALUE, on every case. Asserting only
@@ -1674,15 +1757,37 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 f"files it names ({digest(bodies)[:16]}) as its one output",
             )
 
-        bodies = {rel: f"content of {rel}\n".encode() for rel in named}
+        bodies = {rel: f"content of {rel}\n".encode() for rel in [*named, *tree]}
         check(bodies, "unperturbed")
-        for rel in named:
+        for rel in bodies:
             with self.subTest(perturbed=rel):
                 # The digest is recomputed from the perturbed fixture, so this
                 # asserts the hash MOVED TO THE RIGHT VALUE rather than merely
                 # moved — and a file dropped from the `cat` leaves it unmoved
                 # while the expected value changes.
                 check(dict(bodies, **{rel: bodies[rel] + b"x"}), f"perturbed {rel}")
+        for rel in named:
+            with self.subTest(missing=rel):
+                # Fails closed: a hash of whatever was readable would label a
+                # run as something it was not.
+                proc, written = run({k: v for k, v in bodies.items() if k != rel})
+                self.assertNotEqual(proc.returncode, 0, f"{rel} missing")
+                self.assertNotIn("hash=", written, f"{rel} missing")
+        for d in dirs:
+            with self.subTest(missing=d):
+                proc, written = run(
+                    {k: v for k, v in bodies.items() if not k.startswith(f"{d}/")}
+                )
+                self.assertNotEqual(proc.returncode, 0, f"{d} missing")
+                self.assertNotIn("hash=", written, f"{d} missing")
+            with self.subTest(added_to=d):
+                # A file nobody listed is hashed too: that is the point of
+                # hashing the directory.
+                check(dict(bodies, **{f"{d}/sub/new file": b"new\n"}), f"added to {d}")
+            with self.subTest(renamed_in=d):
+                moved = dict(bodies)
+                moved[f"{d}/renamed.md"] = moved.pop(f"{d}/guide.md")
+                check(moved, f"renamed in {d}")
 
     def review_prepare(self) -> str:
         """The `Hash the trusted prompt surface` step, in `prepare`."""
@@ -1691,6 +1796,62 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         rest = prepare[i:]
         nxt = re.search(r"(?m)^      -(?: |$)", rest)
         return rest[: nxt.start()] if nxt else rest
+
+
+def skill_reference_problems(skills: Path, installed) -> list:
+    """Ways the installed skills under `skills` could send stage A to a skill
+    copy it does not install, whose only reachable copy is then the PR's."""
+    problems = []
+    root = skills.resolve()
+    uninstalled = [d.name for d in skills.iterdir() if d.name not in installed]
+    for name in installed:
+        # `find -type f` skips a symlink that `cp -rT` copies into stage A's
+        # reach, so one would be readable without moving the hash; that
+        # includes the skill directory itself.
+        tree = [skills / name, *(skills / name).rglob("*")]
+        if any(p.is_symlink() for p in tree):
+            problems.append(f"{name} is or contains a symlink")
+            continue
+        for path in sorted(p for p in tree if p.is_file()):
+            text = path.read_text(errors="replace")
+            where = path.relative_to(skills)
+            # A repo path to a skill resolves only in the PR checkout
+            # (`.claude/skills` links to it), installed or not.
+            if re.search(r"\.agents/skills\b|(?<!~/)\.claude/skills\b", text):
+                problems.append(
+                    f"{where} names a skill by its repo path; use ../<name>/"
+                )
+            # A home path or a backticked name must name an installed skill,
+            # whether or not the other one exists in the tree.
+            named = re.findall(r"~/\.claude/skills/([\w-]+)", text)
+            named += re.findall(r"(?<![\w-])`([\w-]+)`\s+skills?\b", text)
+            for other in sorted(set(named) - set(installed)):
+                problems.append(f"{where} names the uninstalled {other} skill")
+            # Named in plain prose, an uninstalled skill is one the `Skill`
+            # tool cannot load.
+            for other in uninstalled:
+                if re.search(rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text):
+                    problems.append(f"{where} names the uninstalled {other} skill")
+            # A relative reference, resolved whole from its file, that lands in
+            # another skill's directory, existing or not.
+            for rel in re.findall(r"(?<![\w./])\.\./[\w./-]*", text):
+                target = (path.parent / rel).resolve()
+                if target.is_relative_to(root) and target != root:
+                    other = target.relative_to(root).parts[0]
+                    if other not in installed:
+                        problems.append(
+                            f"{where} refers to the uninstalled {other} skill"
+                        )
+    return problems
+
+
+def hashed_skill_dirs(step: str) -> list:
+    """The skill directories the prompt-hash step hands to `find`, in order."""
+    # Joined across `\`-newline continuations, as the shell joins them.
+    step = step.replace("\\\n", " ")
+    found = re.findall(r"\bfind\s+((?:\.agents/skills/[\w-]+\s+)+)-type f", step)
+    assert len(found) == 1, f"expected one `find` over skill directories: {found}"
+    return found[0].split()
 
 
 class TestCredentialDuration(unittest.TestCase):
@@ -1766,10 +1927,12 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         "scripts/pr_review/**",
         ".github/workflows/hardened-pr-review.yml",
         ".github/workflows/hardened-pr-review-run.yml",
-        # The skill: an edit to it changes what the review reports and moves
-        # the prompt hash, and without this line it schedules no run of the
-        # suite that asserts either.
-        ".agents/skills/pr-review/**",
+        # Every skill, not just the installed ones: an edit to an installed
+        # skill changes what the review reports and moves the prompt hash,
+        # and without this line it schedules no run of the suite that asserts
+        # either. One broad entry costs a run of a few seconds and never goes
+        # stale when a skill is installed.
+        ".agents/skills/**",
         # This file's OWN path. Without it, an edit that rewires or weakens the
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
@@ -2264,8 +2427,8 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
 
         Whole entries, because substring membership is not the same test and
         the difference defeats exactly the coverage this filter provides: both
-        `"!.agents/skills/pr-review/**"` — an EXCLUSION — and
-        `".agents/skills/pr-review/**/*.py"` — a NARROWING that misses
+        `"!.agents/skills/**"` — an EXCLUSION — and
+        `".agents/skills/**/*.py"` — a NARROWING that misses
         `SKILL.md` — contain the required string while the filter no longer
         schedules the run.
         """
@@ -6470,7 +6633,7 @@ def stage_a_system_prompt() -> str:
 
 
 COMMENTS = "/tmp/pr-comments.json"
-# Every gh/git command the pr-review skill runs, and what stage A's system prompt
+# Every gh/git command the installed skills run, and what stage A's system prompt
 # names in its place (None: in a mode a bare `/pr-review <N>` never selects).
 SKILL_COMMANDS = {
     # Local CLI mode.
@@ -6503,14 +6666,21 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
 
     def test_every_skill_command_is_covered_offline(self):
         found = set()
-        for md in PR_REVIEW_SKILL.parent.glob("*.md"):
+        # Every skill stage A installs, subdirectories included.
+        skills = REPO / ".agents" / "skills"
+        mds = [
+            md
+            for name in INSTALLED_SKILLS
+            for md in sorted((skills / name).rglob("*.md"))
+        ]
+        for md in mds:
             for ln in md.read_text().splitlines():
                 if re.match(r"(gh|git) [a-z]", ln.strip()):
                     found.add(ln.strip())
         self.assertEqual(
             found,
             set(SKILL_COMMANDS),
-            "the pr-review skill's gh/git commands changed; stage A runs offline, "
+            "the installed skills' gh/git commands changed; stage A runs offline, "
             "so map each new one in its system prompt, then update SKILL_COMMANDS",
         )
         offline = stage_a_system_prompt()
