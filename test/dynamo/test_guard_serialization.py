@@ -5049,6 +5049,99 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
+    @parametrize("flag_name", ["with_kwargs", "always_call"])
+    @parametrize(
+        "guard_type", ["NN_MODULE_HOOKS_DICT_CONTAINS", "ORDERED_DICT_ORDER_MATCH"]
+    )
+    def test_nn_module_hook_membership(self, flag_name, guard_type):
+        def hook(module, args, *rest):
+            return rest[-1] + 1
+
+        def make_module(flags):
+            module = torch.nn.Identity()
+            for flag in flags:
+                module.register_forward_hook(hook, **{flag_name: flag})
+            return module
+
+        def fn(x, module):
+            flags = getattr(
+                module,
+                "_forward_hooks_with_kwargs"
+                if flag_name == "with_kwargs"
+                else "_forward_hooks_always_called",
+            )
+            return x + sum(
+                index + 1
+                for index, (key, _) in enumerate(module._forward_hooks.items())
+                if key in flags
+            )
+
+        x = torch.ones(2)
+        module = make_module((False, True))
+        ref, loaded = self._test_serialization(guard_type, fn, x, module)
+        if guard_type == "NN_MODULE_HOOKS_DICT_CONTAINS":
+            self.assertIn("== (False, True)", str(ref))
+            self.assertIn("== (False, True)", str(loaded))
+        for flags in ((False, True), (True, False)):
+            self._test_check_fn(
+                ref,
+                loaded,
+                {"x": x, "module": make_module(flags)},
+                flags == (False, True) or guard_type == "ORDERED_DICT_ORDER_MATCH",
+            )
+
+        first, second = module._forward_hooks
+        flags = getattr(
+            module,
+            "_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_forward_hooks_always_called",
+        )
+        flags[first] = flags.pop(second)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "module": module},
+            guard_type == "ORDERED_DICT_ORDER_MATCH",
+        )
+        flags[second] = flags.pop(first)
+        module._forward_hooks.move_to_end(first)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "module": module},
+            guard_type == "NN_MODULE_HOOKS_DICT_CONTAINS",
+        )
+
+    @parametrize("flag_name", ["with_kwargs", "always_call"])
+    def test_global_hook_membership(self, flag_name):
+        def hook(module, args, *rest):
+            return rest[-1]
+
+        handle = torch.nn.modules.module.register_module_forward_hook(
+            hook, **{flag_name: True}
+        )
+        self.addCleanup(handle.remove)
+        flags = getattr(
+            torch.nn.modules.module,
+            "_global_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_global_forward_hooks_always_called",
+        )
+
+        def fn(x, module):
+            return x + sum(key in flags for key in module._forward_hooks)
+
+        x = torch.ones(2)
+        module = torch.nn.Identity()
+        local_handle = module.register_forward_hook(hook)
+        ref, loaded = self._test_serialization(
+            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "module": module}, True)
+        module._forward_hooks[handle.id] = module._forward_hooks.pop(local_handle.id)
+        self._test_check_fn(ref, loaded, {"x": x, "module": module}, False)
+
     @parametrize("reordered", [False, True])
     @parametrize("mapping_type", [collections.OrderedDict, _ODictSubclass])
     def test_ordered_dict_iteration_order(self, reordered, mapping_type):
