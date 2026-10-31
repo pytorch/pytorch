@@ -1,4 +1,5 @@
 # Owner(s): ["module: mps"]
+import contextlib
 import importlib
 import os
 import subprocess
@@ -11,8 +12,13 @@ import numpy as np
 import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
+from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck, make_tensor
+from torch.testing._internal.common_device_type import (
+    largeMPSBufferTest,
+    largeTensorTest,
+)
 from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -31,6 +37,25 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     CommonTemplate,
     TestCase,
 )
+
+
+FORCED_GRID_STRIDE = 512
+
+
+@contextlib.contextmanager
+def force_grid_stride():
+    # Exercise grid-stride loops on small inputs: shrink the grid, and disable
+    # 32-bit indexing, whose guards would otherwise keep every range in the grid
+    with (
+        patch.object(MetalKernel, "max_grid_size", 1000),
+        patch.object(MetalKernel, "grid_stride", FORCED_GRID_STRIDE),
+        patch.object(
+            SIMDScheduling,
+            "can_use_32bit_indexing",
+            staticmethod(lambda numel, buffers: False),
+        ),
+    ):
+        yield
 
 
 # TODO: Remove this file.
@@ -238,6 +263,114 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @largeTensorTest("5GB", device="mps", inductor=True)
+    @largeMPSBufferTest(int(4.5 * 1024**3), device="mps")
+    def test_clone_over_uint32_threads(self):
+        # Metal grid axes are 32-bit, so a kernel over >= 2**32 elements must
+        # loop in-kernel rather than silently write numel mod 2**32 elements.
+        def fn(b):
+            return b.expand(-1, -1, 64, -1, -1).contiguous()
+
+        b = torch.randint(
+            0, 127, (65, 32, 1, 256, 129), dtype=torch.int8, device=self.device
+        )
+        out, codes = run_and_get_code(torch.compile(fn, fullgraph=True), b)
+        self.assertGreater(out.numel(), 2**32)
+        self.assertIn(f"+= {MetalKernel.grid_stride})", "\n".join(codes))
+        ref = b.expand(-1, -1, 64, -1, -1)
+        # Compare per batch row: a whole-tensor check over 2**32
+        # elements is itself rejected on MPS.
+        bad = sum(int((out[i] != ref[i]).sum()) for i in range(out.shape[0]))
+        self.assertEqual(bad, 0)
+
+    def check_grid_stride(self, fn, *args, dynamic=False, loops=1):
+        with force_grid_stride():
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=dynamic)
+            out, codes = run_and_get_code(compiled, *args)
+        self.assertEqual(out, fn(*args))
+        code = "\n".join(codes)
+        self.assertEqual(code.count(f"+= {FORCED_GRID_STRIDE})"), loops)
+        return compiled, code
+
+    @parametrize("dynamic", [False, True])
+    def test_grid_stride_pointwise(self, dynamic):
+        x = torch.arange(20011, dtype=torch.float32, device=self.device)
+        self.check_grid_stride(lambda t: t * 2 + 1, x, dynamic=dynamic)
+
+    def test_grid_stride_multi_axis(self):
+        z = torch.randn(1200, 1500, device=self.device)
+        self.check_grid_stride(lambda t: t.t().contiguous(), z, loops=2)
+
+    @parametrize("op", ["sum", "amax", "argmax", "any", "var"])
+    @parametrize("rnumel", [8, 64, 2048])
+    def test_grid_stride_reduction(self, op, rnumel):
+        # rnumel covers serial, single-threadgroup and looped reductions
+        x = torch.rand(1500, rnumel, device=self.device)
+        if op == "any":
+            x = x > 0.99
+        _, code = self.check_grid_stride(lambda t: getattr(t, op)(-1), x)
+        # Barriers must run uniformly across a threadgroup, which only parallel
+        # reductions guarantee under the loop; they also need one per iteration
+        # so the next row does not overwrite threadgroup memory still being read.
+        if rnumel < MetalKernel.simd_group_size:
+            self.assertNotIn("threadgroup_barrier", code)
+        else:
+            self.assertIn("threadgroup_barrier", code)
+
+    def test_grid_stride_dynamic_reduction(self):
+        x = torch.rand(1500, 64, device=self.device)
+        self.check_grid_stride(lambda t: t.sum(-1), x, dynamic=True)
+
+    def test_grid_stride_error_buffer(self):
+        # Indirect loads report out-of-bounds indices through an error buffer,
+        # including one that a thread only reaches on a later loop iteration
+        idx = torch.arange(0, 10007, 7, device=self.device)
+        src = torch.arange(10007, dtype=torch.float32, device=self.device)
+        compiled, _ = self.check_grid_stride(lambda s, i: s[i] * 3, src, idx)
+        idx[FORCED_GRID_STRIDE + 100] = 20000
+        with (
+            force_grid_stride(),
+            self.assertRaisesRegex(RuntimeError, "Index 20000 out of range"),
+        ):
+            compiled(src, idx)
+            torch.mps.synchronize()
+
+    @parametrize("dynamic,use_32bit", [(False, True), (False, False), (True, True)])
+    def test_no_grid_stride_when_grid_fits(self, dynamic, use_32bit):
+        # Ranges known to fit the grid keep one thread per element. 32-bit
+        # indexing guards dynamic sizes into the grid; dynamic int64-indexed
+        # kernels are the one case that loops without needing to.
+        x = torch.arange(10007, dtype=torch.float32, device=self.device)
+        with patch.object(
+            SIMDScheduling,
+            "can_use_32bit_indexing",
+            staticmethod(lambda numel, buffers: use_32bit),
+        ):
+            torch._dynamo.reset()
+            out, codes = run_and_get_code(
+                torch.compile(lambda t: t * 2 + 1, dynamic=dynamic), x
+            )
+        self.assertEqual(out, x * 2 + 1)
+        self.assertIn("uint xindex [[thread_position_in_grid]]", "\n".join(codes))
+
+    @parametrize("ndim", [1, 2, 3])
+    def test_dispatch_over_uint32_threads_raises(self, ndim):
+        # Oversized last axis, so every axis of the N-D dispatch must be checked
+        lib = torch.mps.compile_shader(
+            """
+            #include <metal_stdlib>
+            using namespace metal;
+            kernel void fill_kernel(device float* out [[buffer(0)]],
+                                    uint3 tid [[thread_position_in_grid]]) {
+                out[tid.x] = 1.0;
+            }
+            """
+        )
+        out = torch.zeros(4, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "dispatch of 4294967296 threads"):
+            lib.fill_kernel(out, threads=[1] * (ndim - 1) + [2**32])
+
     def test_argmax_bf16(self):
         def fn(x):
             return x.argmax(-1)
@@ -431,6 +564,23 @@ class MPSBasicTestsAOTI(TestCase):
             src_code = cpp.read()
             # Verify metal::precise::tanh is used (not clamped version)
             FileCheck().check("metal::precise::tanh").run(src_code)
+
+    def test_grid_stride(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x * 2 + 1
+
+        inp = (torch.arange(20011, dtype=torch.float32, device="mps"),)
+        dynamic = ({0: torch.export.Dim("n")},)
+        for dynamic_shapes, bound in [(None, "20011"), (dynamic, "xnumel")]:
+            with force_grid_stride():
+                self.check_model(Model(), inp, dynamic_shapes=dynamic_shapes)
+                package_path = torch._export.aot_compile(
+                    Model(), inp, dynamic_shapes=dynamic_shapes
+                )
+            with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+                loop = f"xindex < {bound}; xindex += {FORCED_GRID_STRIDE})"
+                self.assertEqual(cpp.read().count(loop), 1)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):
