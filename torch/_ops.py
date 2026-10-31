@@ -1415,16 +1415,6 @@ def _call_overload_packet_from_python(
     raise RuntimeError(err_msg)
 
 
-# Namespaces of ops that public APIs put into saved programs but that torch
-# defines in Python modules `import torch` skips, because importing them is
-# costly. A lookup that misses imports the module, so these programs load after
-# a plain `import torch`.
-_OP_NAMESPACE_MODULES = {
-    "quantized_decomposed": "torch.ao.quantization.fx._decomposed",
-    "torch_attn": "torch.nn.attention.varlen",
-}
-
-
 # Resolution of torch.fn is different from torch.ops.aten.fn
 # torch.fn uses the Python argparser, matches with the
 # appropriate schema, and calls into the unboxed version of the method
@@ -1485,13 +1475,6 @@ class _OpNamespace(types.ModuleType):
 
         try:
             op, overload_names = _get_packet(qualified_op_name, module_name)
-            if op is None and namespace_name in _OP_NAMESPACE_MODULES:
-                importlib.import_module(_OP_NAMESPACE_MODULES[namespace_name])
-                # Return the packet the module bound while it was imported,
-                # since registries such as the flop counter's key ops by packet.
-                if op_name in self.__dict__:
-                    return self.__dict__[op_name]
-                op, overload_names = _get_packet(qualified_op_name, module_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
