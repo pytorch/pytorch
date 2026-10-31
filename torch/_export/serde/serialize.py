@@ -767,8 +767,8 @@ def _find_flat_apply_func(
     name: str, in_spec: pytree.TreeSpec, flat_args: Sequence[Any]
 ) -> Any:
     """
-    Find the function of a flat_apply call and check that export could have
-    produced the call. Save and load both use this one rule. Only traceable
+    Find the function of a flat_apply call and check that it is a kind that
+    export produces. Save and load both use this one rule. Only traceable
     wrapper tensor subclasses and the helper that calls custom autograd
     functions are accepted. The helper gets its class by name, as its first
     argument, so that name must find a torch.autograd.Function. Both names
