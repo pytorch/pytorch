@@ -8,7 +8,6 @@
 #include <ATen/OpMathType.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

@@ -3787,6 +3787,12 @@ def meta__adaptive_avg_pool3d_backward(grad_output, self):
         lambda: f"adaptive_avg_pool3d_backward(): Expected dimensions {self.ndim} "
         f"for `grad_output` but got dimensions {grad_output.ndim}",
     )
+    for i in range(grad_output.ndim - 3):
+        torch._check_value(
+            self.size(i) == grad_output.size(i),
+            lambda: f"adaptive_avg_pool3d_backward(): input and grad_output must have the same size at dim {i}, "
+            f"but got {self.size(i)} and {grad_output.size(i)}",
+        )
     return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
 
 

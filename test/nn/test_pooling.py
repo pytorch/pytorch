@@ -205,6 +205,7 @@ class TestPoolingNN(NNTestCase):
             (backward2d, (1, 3, 7, 7), (1, 2, 3, 3), None, dim_msg),
             (backward2d, (1, 2, 7, 7), (1, 3, 3, 3), cl, dim_msg),
             (backward3d, (1, 2, 7, 7), (1, 2, 3, 3, 3), None, ndim_msg),
+            (backward3d, (1, 3, 7, 7, 7), (1, 2, 3, 3, 3), None, dim_msg),
         ]
         for op, grad_shape, input_shape, memory_format, msg in cases:
             grad_output = torch.empty(grad_shape, device="meta")
@@ -859,6 +860,11 @@ class TestPoolingNNDevice(NNTestCase):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 3, 3, 3, device=device)
         with self.assertRaisesRegex(ValueError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 7, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, 3, device=device)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
 
     def test_adaptive_max_pooling_backward_fails(self, device):
