@@ -218,14 +218,30 @@ def _view_as_real(
                 s[i] = torch.view_as_real(s[i])
 
 
+_FUSED_STEP_FLOAT64_SUPPORTED_DEVICES = ("cpu", "cuda")
+
+
 def _get_scalar_dtype(
     is_fused: bool | None = None, device: torch.device | None = None
 ) -> torch.dtype:
-    if is_fused and (device is None or device.type not in ("cpu", "cuda")):
+    if is_fused and (
+        device is None or device.type not in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
+    ):
         return torch.float32
     return (
         torch.float64 if torch.get_default_dtype() == torch.float64 else torch.float32
     )
+
+
+def _get_fused_step_dtypes(
+    state: dict[torch.Tensor, Any], params: list[torch.Tensor]
+) -> dict[torch.device, torch.dtype]:
+    step_dtypes: dict[torch.device, torch.dtype] = {}
+    for p in params:
+        step = state.get(p, {}).get("step")
+        if step is not None:
+            step_dtypes.setdefault(p.device, step.dtype)
+    return step_dtypes
 
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
@@ -835,7 +851,7 @@ class Optimizer:
                 dtype = (
                     value.dtype
                     if fused
-                    and param.device.type in ("cpu", "cuda")
+                    and param.device.type in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
                     and value.dtype in (torch.float32, torch.float64)
                     else torch.float32
                 )
@@ -1067,6 +1083,19 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)
         ]
         self.__setstate__({"state": state, "param_groups": param_groups})
+
+        for group in self.param_groups:
+            if not group.get("fused", False):
+                continue
+            step_states = [
+                self.state[p]
+                for p in group["params"]
+                if p.device.type in _FUSED_STEP_FLOAT64_SUPPORTED_DEVICES
+                and "step" in self.state.get(p, {})
+            ]
+            if any(s["step"].dtype == torch.float64 for s in step_states):
+                for s in step_states:
+                    s["step"] = s["step"].to(dtype=torch.float64)
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
             post_hook(self)

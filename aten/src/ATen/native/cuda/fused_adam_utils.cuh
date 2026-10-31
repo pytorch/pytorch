@@ -580,6 +580,7 @@ void _fused_adam_cuda_impl_common(
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
+  check_fused_optimizer_step_dtypes(state_steps);
   constexpr int depth = amsgrad ? 5 : 4;
   constexpr bool is_adamw = (mode == ADAM_MODE::ADAMW);
   constexpr const char* validate_msg =
@@ -621,7 +622,6 @@ void _fused_adam_cuda_impl_common(
         exp_avgs[0].scalar_type(),
         mp_name,
         AT_WRAP([&]() {
-          check_fused_optimizer_step_dtypes(state_steps);
           AT_DISPATCH_FUSED_OPTIMIZER_STEP_TYPES(
               state_steps[0].scalar_type(), "fused_adam_step_cuda", [&]() {
                 multi_tensor_apply_for_fused_optimizer<depth>(
@@ -653,7 +653,6 @@ void _fused_adam_cuda_impl_common(
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, params[0].scalar_type(), kernel_name, [&]() {
-          check_fused_optimizer_step_dtypes(state_steps);
           AT_DISPATCH_FUSED_OPTIMIZER_STEP_TYPES(
               state_steps[0].scalar_type(), "fused_adam_step_cuda", [&]() {
                 multi_tensor_apply_for_fused_optimizer<depth>(

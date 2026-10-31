@@ -10,6 +10,7 @@ from .optimizer import (
     _differentiable_doc,
     _foreach_doc,
     _functional_api_doc,
+    _get_fused_step_dtypes,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
@@ -134,6 +135,7 @@ class Adagrad(Optimizer):
 
     def _init_group(self, group, params_with_grad, grads, state_sums, state_steps):
         has_sparse_grad, has_complex = False, False
+        step_dtypes = None
         for p in group["params"]:
             if p.grad is not None:
                 if group["fused"] and getattr(
@@ -155,12 +157,12 @@ class Adagrad(Optimizer):
                     step_dtype = _get_scalar_dtype(
                         is_fused=group["fused"], device=p.device
                     )
-                    if group["fused"] and p.device.type in ("cpu", "cuda"):
-                        for other in group["params"]:
-                            other_state = self.state.get(other, {})
-                            if other.device == p.device and "step" in other_state:
-                                step_dtype = other_state["step"].dtype
-                                break
+                    if group["fused"]:
+                        if step_dtypes is None:
+                            step_dtypes = _get_fused_step_dtypes(
+                                self.state, group["params"]
+                            )
+                        step_dtype = step_dtypes.setdefault(p.device, step_dtype)
                     state["step"] = (
                         torch.zeros(
                             (),

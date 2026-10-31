@@ -1106,6 +1106,8 @@ class TestOptimRenewed(TestCase):
         with set_default_dtype(new_default):
             if resume:
                 saved_state = deepcopy(optimizer.state_dict())
+                unused_param = saved_state["param_groups"][0]["params"][1]
+                saved_state["state"].pop(unused_param, None)
                 optimizer = optim_info.optim_cls(params, fused=True, lr=0.01)
                 optimizer.load_state_dict(saved_state)
                 self.assertEqual(
@@ -1119,6 +1121,106 @@ class TestOptimRenewed(TestCase):
                 optimizer.state[params[0]]["step"].item(), initial_step + 1
             )
             self.assertEqual(optimizer.state[params[1]]["step"].item(), 1)
+
+    @parametrize("first_step_dtype", [torch.float32, torch.float64])
+    @parametrize("tensor_lr", [False, True])
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_load_mixed_step_dtypes(
+        self, device, dtype, optim_info, first_step_dtype, tensor_lr, amsgrad
+    ):
+        if torch.device(device).type not in ("cpu", "cuda"):
+            self.skipTest("Float64 fused steps are supported on CPU and CUDA")
+        kwargs = {"lr": 0.01}
+        if tensor_lr:
+            kwargs["lr"] = torch.tensor(0.01, device=device, dtype=torch.float32)
+        if optim_info.optim_cls is torch.optim.Adagrad:
+            if amsgrad:
+                self.skipTest("Adagrad does not support AMSGrad")
+            kwargs["lr_decay"] = 0.1
+        else:
+            kwargs["amsgrad"] = amsgrad
+        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
+        optimizer = optim_info.optim_cls(params, fused=False, **kwargs)
+        for p in params:
+            p.grad = torch.full_like(p, 0.25)
+        optimizer.step()
+        state = deepcopy(optimizer.state_dict())
+        step_dtypes = (
+            (torch.float32, torch.float64)
+            if first_step_dtype == torch.float32
+            else (torch.float64, torch.float32)
+        )
+        step_values = [5 if d == torch.float32 else 2**24 + 1 for d in step_dtypes]
+        for s, step_dtype, value in zip(
+            state["state"].values(), step_dtypes, step_values, strict=True
+        ):
+            s["step"] = torch.tensor(value, dtype=step_dtype)
+        optimizer.load_state_dict(deepcopy(state))
+        state["param_groups"][0]["fused"] = True
+        saved_state = deepcopy(state)
+        actual = [p.clone() for p in params]
+        fused_optimizer = optim_info.optim_cls(actual, fused=True, **kwargs)
+        fused_optimizer.load_state_dict(state)
+        self.assertEqual(state, saved_state)
+        for p, value in zip(actual, step_values, strict=True):
+            step = fused_optimizer.state[p]["step"]
+            self.assertEqual(step.dtype, torch.float64)
+            self.assertEqual(step.item(), value)
+            p.grad = torch.full_like(p, 0.25)
+        optimizer.step()
+        fused_optimizer.step()
+        self.assertEqual(actual, params)
+        for p, value in zip(actual, step_values, strict=True):
+            self.assertEqual(fused_optimizer.state[p]["step"].item(), value + 1)
+
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_float64_step_grad_scaler(self, device, dtype, optim_info, amsgrad):
+        device_type = torch.device(device).type
+        if device_type not in ("cpu", "cuda"):
+            self.skipTest("Float64 fused steps are supported on CPU and CUDA")
+        kwargs = {"lr": 0.01}
+        if optim_info.optim_cls is torch.optim.Adagrad:
+            if amsgrad:
+                self.skipTest("Adagrad does not support AMSGrad")
+        else:
+            kwargs["amsgrad"] = amsgrad
+        with set_default_dtype(torch.float64):
+            param = torch.ones(8, device=device, dtype=dtype, requires_grad=True)
+            optimizer = optim_info.optim_cls([param], fused=True, **kwargs)
+            scaler = torch.amp.GradScaler(device_type, init_scale=8.0)
+            for iteration, overflow in enumerate((False, True, False)):
+                optimizer.zero_grad(set_to_none=True)
+                scaler.scale((param * 0.25).sum()).backward()
+                if overflow:
+                    param.grad.fill_(float("inf"))
+                previous_param = param.detach().clone()
+                previous_state = deepcopy(optimizer.state[param])
+                scaler.step(optimizer)
+                scaler.update()
+                step = optimizer.state[param]["step"]
+                self.assertEqual(step.dtype, torch.float64)
+                self.assertEqual(step.item(), 1 if iteration < 2 else 2)
+                if overflow:
+                    self.assertEqual(param, previous_param)
+                    self.assertEqual(optimizer.state[param], previous_state)
+                else:
+                    self.assertTrue(torch.all(param < previous_param))
 
     @onlyCUDA
     @parametrize("amsgrad", [False, True])

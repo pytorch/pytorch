@@ -14,6 +14,7 @@ from .optimizer import (
     _functional_api_doc,
     _fused_doc,
     _get_capturable_supported_devices,
+    _get_fused_step_dtypes,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
@@ -148,6 +149,7 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        step_dtypes = None
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -166,12 +168,12 @@ class Adam(Optimizer):
                     step_dtype = _get_scalar_dtype(
                         is_fused=group["fused"], device=p.device
                     )
-                    if group["fused"] and p.device.type in ("cpu", "cuda"):
-                        for other in group["params"]:
-                            other_state = self.state.get(other, {})
-                            if other.device == p.device and "step" in other_state:
-                                step_dtype = other_state["step"].dtype
-                                break
+                    if group["fused"]:
+                        if step_dtypes is None:
+                            step_dtypes = _get_fused_step_dtypes(
+                                self.state, group["params"]
+                            )
+                        step_dtype = step_dtypes.setdefault(p.device, step_dtype)
                     # note(crcrpar): [special device hosting for step]
                     # Deliberately host `step` on CPU if both capturable and fused are off.
                     # This is because kernel launches are costly on CUDA and XLA.
