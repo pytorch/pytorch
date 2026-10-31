@@ -1172,7 +1172,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": True})
     def test_custom_autograd_function(self):
         class MyAutogradFunction(torch.autograd.Function):
             @staticmethod
