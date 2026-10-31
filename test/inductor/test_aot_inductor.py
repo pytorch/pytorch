@@ -10851,6 +10851,63 @@ class AOTInductorTestsTemplate:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
 
+    @unittest.skipIf(sys.platform != "linux", "PT_GNU_STACK is specific to ELF")
+    @common_utils.parametrize("use_consts_asm_build", [True, False])
+    @common_utils.parametrize("has_constants", [True, False])
+    def test_so_does_not_need_executable_stack(
+        self, use_consts_asm_build, has_constants
+    ):
+        # The constants (and, with embed_kernel_binary, the GPU kernels) are
+        # linked in from generated assembly. Without a .note.GNU-stack
+        # section, the linker may mark the .so as needing an executable stack,
+        # which glibc 2.41+ refuses to dlopen.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x) if has_constants else x.sin() + 1
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        model = Model().to(self.device)
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.use_consts_asm_build": use_consts_asm_build,
+                "aot_inductor.embed_kernel_binary": True,
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(package_path, "r") as zf:
+                zf.extractall(tmpdir)
+
+            so_files = list(pathlib.Path(tmpdir).rglob("*.so"))
+            self.assertTrue(len(so_files) > 0)
+
+            for so_file in so_files:
+                result = subprocess.run(
+                    ["readelf", "-lW", str(so_file)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                stack_headers = [
+                    line.split()
+                    for line in result.stdout.splitlines()
+                    if line.split()[:1] == ["GNU_STACK"]
+                ]
+                self.assertEqual(len(stack_headers), 1, result.stdout)
+                # Type, Offset, VirtAddr, PhysAddr, FileSiz, MemSiz, Flg, Align;
+                # Flg may contain spaces, e.g. "R E".
+                flags = "".join(stack_headers[0][6:-1])
+                self.assertNotIn("E", flags, f"{so_file}:\n{result.stdout}")
+
+        compiled = torch._inductor.aoti_load_package(package_path)
+        self.assertEqual(compiled(*example_inputs), model(*example_inputs))
+
     def test_unbounded_expr_substitutions(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
