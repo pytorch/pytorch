@@ -12,7 +12,18 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized_v2,
 )
 from torch._inductor import inductor_prims
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    _WAIT_TENSORS_OP,
+    _alias_sources,
+    _aliases_graph_input,
+    _generalized_scatter,
+    _multi_output_aliases,
+    _result_escapes_graph,
+    inplaceable_foreach_ops,
+    inplaceable_ops,
+    inplaceable_triton_ops,
+    reinplace_inplaceable_ops_core,
+)
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -163,6 +174,257 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         n = 256
         x = torch.arange(n - 2, -2, -1, device=device)
         self.assertEqual(f(x), torch.compile(f)(x))
+
+    def test_multi_output_alias_paths(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+
+        scatter = graph.call_function(_generalized_scatter, args=(x, y, []))
+        graph.call_function(aten.copy_.default, args=(x, scatter))
+        input_view = graph.call_function(aten.slice.Tensor, args=(x, 0, 0, 1))
+
+        functionalized_v1 = graph.call_function(
+            torch.ops.higher_order.auto_functionalized,
+            args=(sin_cos._opoverload,),
+            kwargs={"x": x, "out_sin": y, "out_cos": x},
+        )
+        functionalized_v1.meta["only_clone_these_tensors"] = ["out_sin"]
+        self.assertEqual(
+            _multi_output_aliases(functionalized_v1, {}),
+            {2: x},
+        )
+
+        functionalized_v2 = graph.call_function(
+            torch.ops.higher_order.auto_functionalized_v2,
+            args=(sin_cos._opoverload,),
+            kwargs={"_all_bases": [y, x]},
+        )
+        functionalized_v2.meta["only_clone_these_tensors"] = [0]
+        self.assertEqual(
+            _multi_output_aliases(functionalized_v2, {}),
+            {2: x},
+        )
+
+        foreach_op = next(iter(inplaceable_foreach_ops.values()))
+        foreach = graph.call_function(foreach_op.inplace_op, args=([x, y],))
+        self.assertEqual(
+            _multi_output_aliases(
+                foreach, {foreach_op.inplace_op: foreach_op.mutated_args}
+            ),
+            {0: x, 1: y},
+        )
+
+        if _WAIT_TENSORS_OP is not None:
+            waited = graph.call_function(_WAIT_TENSORS_OP, args=([x, y],))
+            self.assertEqual(_multi_output_aliases(waited, {}), {0: x, 1: y})
+            waited_y = graph.call_function(operator.getitem, (waited, 1))
+            self.assertEqual(_alias_sources(waited_y, {}), [y])
+
+        coalesced = next(
+            (
+                op for op in inplaceable_ops.values()
+                if "all_reduce_coalesced_" in str(op.inplace_op)
+            ),
+            None,
+        )
+        if coalesced is not None:
+            collective = graph.call_function(
+                coalesced.inplace_op, args=([x, y],)
+            )
+            self.assertEqual(
+                _multi_output_aliases(
+                    collective, {coalesced.inplace_op: coalesced.mutated_args}
+                ),
+                {0: x, 1: y},
+            )
+
+        triton_wrapper = next(iter(inplaceable_triton_ops))
+        wrapped = graph.call_function(
+            triton_wrapper,
+            args=(),
+            kwargs={
+                "kwargs": {"x": x, "y": y},
+                "tensors_to_clone": ["y"],
+            },
+        )
+        self.assertEqual(_multi_output_aliases(wrapped, {}), {"x": x})
+        wrapped_x = graph.call_function(operator.getitem, (wrapped, "x"))
+        self.assertEqual(_alias_sources(wrapped_x, {}), [x])
+
+        graph.output(input_view)
+        self.assertTrue(_aliases_graph_input(x, {}))
+        self.assertFalse(_result_escapes_graph(scatter, {}))
+
+        alias_graph = torch.fx.Graph()
+        alias_x = alias_graph.placeholder("x")
+        alias_src = alias_graph.placeholder("src")
+        alias_scatter = alias_graph.call_function(
+            _generalized_scatter, args=(alias_x, alias_src, [])
+        )
+        alias_view = alias_graph.call_function(
+            aten.slice.Tensor, args=(alias_scatter, 0, 0, 1)
+        )
+        alias_graph.output(alias_view)
+        self.assertTrue(_result_escapes_graph(alias_scatter, {}))
+        self.assertFalse(_result_escapes_graph(alias_scatter, {}, {0}))
+
+    def test_foreach_result_does_not_escape_graph_input_alias(self):
+        def f(x, y):
+            updated = aten._foreach_add.List([x], [y])
+            x.copy_(updated[0])
+            return updated[0]
+
+        x = torch.randn(8, device=device)
+        y = torch.randn(8, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add.List, targets)
+        self.assertNotIn(aten._foreach_add_.List, targets)
+        self.assertIn(aten.copy_.default, targets)
+
+    def test_scatter_result_does_not_alias_mutated_input(self):
+        def f(x, src):
+            out = aten.slice_scatter.default(x, src, 0, 1, 4)
+            x.copy_(out)
+            return out
+
+        x = torch.arange(6, device=device, dtype=torch.float)
+        src = torch.tensor([20.0, 30.0, 40.0], device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, src)
+        actual = torch.compile(f)(actual_x, src)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
+
+    def test_scatter_copy_back_with_input_view_output(self):
+        def f(x, src):
+            out = aten.slice_scatter.default(x, src, 1, 1, 3)
+            x.copy_(out)
+            return x[:, :3]
+
+        x = torch.arange(32, device=device, dtype=torch.float).reshape(4, 8)
+        src = torch.tensor(
+            [[20.0, 30.0], [40.0, 50.0], [60.0, 70.0], [80.0, 90.0]],
+            device=device,
+        )
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, src)
+        from torch._inductor import metrics
+
+        metrics.generated_kernel_count = 0
+        actual = torch.compile(f)(actual_x, src)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertEqual(
+            actual.untyped_storage().data_ptr(),
+            actual_x.untyped_storage().data_ptr(),
+        )
+
+    def test_scatter_chain_does_not_alias_mutated_input(self):
+        def f(x, src1, src2):
+            first = aten.slice_scatter.default(x, src1, 0, 1, 4)
+            out = aten.slice_scatter.default(first, src2, 0, 2, 5)
+            x.copy_(out)
+            return out
+
+        x = torch.arange(6, device=device, dtype=torch.float)
+        src1 = torch.tensor([20.0, 30.0, 40.0], device=device)
+        src2 = torch.tensor([50.0, 60.0, 70.0], device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, src1, src2)
+        actual = torch.compile(f)(actual_x, src1, src2)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
+
+    def test_scatter_chain_preserves_escaping_result(self):
+        def f(x, first_src, second_src):
+            first = aten.slice_scatter.default(x, first_src, 0, 1, 4)
+            x.copy_(first)
+            second = aten.slice_scatter.default(x, second_src, 0, 2, 5)
+            x.copy_(second)
+            return second, x[:5]
+
+        x = torch.arange(6, device=device, dtype=torch.float)
+        first_src = torch.tensor([20.0, 30.0, 40.0], device=device)
+        second_src = torch.tensor([50.0, 60.0, 70.0], device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, first_src, second_src)
+        actual = torch.compile(f)(actual_x, first_src, second_src)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual[0].untyped_storage().data_ptr(),
+            actual_x.untyped_storage().data_ptr(),
+        )
+
+    def test_index_put_copy_back_with_input_view_output(self):
+        def f(x, idx, values):
+            updated = aten.index_put.default(x, [idx], values, False)
+            x.copy_(updated)
+            return x.expand((2, x.shape[0]))
+
+        x = torch.randn(1024, device=device)
+        idx = torch.arange(10, device=device)
+        values = torch.ones(10, device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, idx, values)
+        from torch._inductor import metrics
+
+        metrics.generated_kernel_count = 0
+        actual = torch.compile(f)(actual_x, idx, values)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+
+    def test_registry_guard_sees_later_foreach_reinplace(self):
+        def f(x, idx, values, other):
+            updated = aten.index_put.default(x, [idx], values, False)
+            x.copy_(updated)
+            result = aten._foreach_add.List([updated], [other])
+            return result[0]
+
+        x = torch.randn(8, device=device)
+        idx = torch.tensor([1, 4], device=device)
+        values = torch.randn(2, device=device)
+        other = torch.randn(8, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, idx, values, other)
+        foreach = next(
+            node for node in gm.graph.nodes if node.target is aten._foreach_add.List
+        )
+        # Model a downstream rewrite that has already happened in the pass.
+        foreach.target = aten._foreach_add_.List
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+        self.assertIn(aten._foreach_add_.List, targets)
+
+    def test_index_put_result_does_not_alias_mutated_input(self):
+        def f(x, idx, val):
+            out = torch.index_put(x, (idx,), val)
+            x.copy_(out)
+            return out
+
+        x = torch.arange(8, device=device, dtype=torch.float)
+        idx = torch.tensor([1, 4], device=device)
+        val = torch.tensor([20.0, 40.0], device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, idx, val)
+        actual = torch.compile(f)(actual_x, idx, val)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
 
     @parametrize(
         "op",
@@ -350,6 +612,51 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         if not auto_functionalized_found:
             raise AssertionError
         return counter
+
+    @parametrize("enable_v2", [False, True])
+    def test_functionalized_result_aliases_graph_input(self, enable_v2):
+        def f(x):
+            if enable_v2:
+                result = auto_functionalized_v2(
+                    boo._opoverload,
+                    _x_base_index=0,
+                    _x_size=(3,),
+                    _x_stride=(1,),
+                    _x_storage_offset=0,
+                    _all_bases=[x],
+                )
+            else:
+                result = auto_functionalized(boo._opoverload, x=x)
+            x.copy_(result[1])
+            return result[1]
+
+        x = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+        functionalized = next(
+            node
+            for node in gm.graph.nodes
+            if node.target
+            in (
+                torch.ops.higher_order.auto_functionalized,
+                torch.ops.higher_order.auto_functionalized_v2,
+            )
+        )
+        result = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is operator.getitem and node.args[0] is functionalized
+        )
+        expected_clones = [0] if enable_v2 else ["x"]
+        self.assertEqual(
+            functionalized.meta["only_clone_these_tensors"], expected_clones
+        )
+        self.assertFalse(_aliases_graph_input(result, {}))
+        self.assertFalse(_result_escapes_graph(functionalized, {}))
+        self.assertIn(aten.copy_.default, [node.target for node in gm.graph.nodes])
+        functionalized.meta["only_clone_these_tensors"] = []
+        self.assertTrue(_result_escapes_graph(functionalized, {}))
+        functionalized.meta["only_clone_these_tensors"] = expected_clones
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
@@ -732,6 +1039,25 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 "getitem nodes extracting result should be cleaned up",
             )
 
+            def guarded(a, b):
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_add_functional._opoverload, a, b)
+                out = result[1]
+                a.copy_(out)
+                return out
+
+            guarded_gm = make_fx(guarded, tracing_mode="fake")(a, b)
+            reinplace_inplaceable_ops_core(guarded_gm.graph)
+            guarded_effect = next(
+                n
+                for n in guarded_gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            )
+            self.assertEqual(guarded_effect.args[1], my_add_functional._opoverload)
+            self.assertIn(
+                aten.copy_.default, [n.target for n in guarded_gm.graph.nodes]
+            )
+
         finally:
             if my_add_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_add_functional._opoverload]
@@ -803,6 +1129,31 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             # The inner op should be the functional version
             inner_op_before = with_effects_nodes_before[0].args[1]
             self.assertEqual(inner_op_before, my_swap_functional._opoverload)
+
+            # with_effects flattens the inner op's multiple results after the token.
+            alias_args = {
+                my_swap_functional._opoverload: (0, 1),
+            }
+            first_result = next(
+                n for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_before[0]
+                and n.args[1] == 1
+            )
+            second_result = next(
+                n for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_before[0]
+                and n.args[1] == 2
+            )
+            self.assertEqual(
+                _alias_sources(first_result, alias_args),
+                [with_effects_nodes_before[0].args[2]],
+            )
+            self.assertEqual(
+                _alias_sources(second_result, alias_args),
+                [with_effects_nodes_before[0].args[3]],
+            )
 
             # Run reinplace pass
             reinplace_inplaceable_ops_core(gm.graph)
