@@ -447,6 +447,17 @@ class TestDraftExport(TestCase):
                     unbacked_binding_symbols.update(bindings.keys())
             self.assertEqual(len(unbacked_binding_symbols), 1)
 
+    def test_vmap_over_empty_batch(self):
+        # Real tensor propagation checks views against their real storage, and
+        # a vmap over an empty batch leaves none.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(lambda row: row * 2 + 1)(x)
+
+        x = torch.randn(0, 3, 4)
+        ep = draft_export(M(), (x,))
+        self.assertEqual(ep.module()(x), M()(x))
+
     def test_offsets(self):
         class M(torch.nn.Module):
             def forward(self, x):
