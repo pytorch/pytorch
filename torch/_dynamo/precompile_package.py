@@ -158,7 +158,7 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
-def _cudagraph_inputs() -> dict[str, object]:
+def _cudagraph_inputs() -> dict[str, Any]:
     # The ambient settings a capture's CUDA graph record is derived from.
     import torch._inductor.config as c
 
@@ -1985,18 +1985,13 @@ class PrecompileSession(Generic[_P, _R]):
         self._cudagraph_config: dict[str, bool] = {}
         # The ambient settings the record was derived from, which the calls must
         # not change.
-        self._cudagraph_inputs: dict[str, object] = {}
+        self._cudagraph_inputs: dict[str, Any] = {}
         if self._backend_name == "inductor":
-            from torch._inductor import config as inductor_config
-
-            self._cudagraph_inputs = _cudagraph_inputs()
-            self._cudagraph_config = {
-                "triton.cudagraphs": inductor_config.triton.cudagraphs,
-                "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
-                "graph_partition": inductor_config.graph_partition,
+            inputs = self._cudagraph_inputs = _cudagraph_inputs()
+            config = self._cudagraph_config = {
+                k: v for k, v in inputs.items() if k != "cpp_wrapper"
             }
-            config = self._cudagraph_config
-            cpp_wrapper = inductor_config.cpp_wrapper
+            cpp_wrapper = inputs["cpp_wrapper"]
             if not isinstance(backend, str):
                 config.update((k, v) for k, v in backend.config.items() if k in config)
                 cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
@@ -2132,8 +2127,8 @@ class PrecompileSession(Generic[_P, _R]):
                 raise PackageError(
                     f"{changed} changed since capture() began: the artifact "
                     "records one CUDA graph config, read when capture() is called, "
-                    "for every captured call. Set it before capture(), or pass it "
-                    "in options."
+                    "for every captured call. Restore it for the captured calls; to "
+                    "capture under another value, set it before capture()."
                 )
         try:
             with (
