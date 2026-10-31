@@ -1461,7 +1461,22 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # StopIteration, so only convert when the body was still executing.
             was_executing = tracer.frame_state == FrameState.FRAME_EXECUTING
             tracer.frame_state = FrameState.FRAME_COMPLETED
-            if sys.version_info < (3, 12) and was_executing:
+            tracer.freeze_frame_variable()
+            if not was_executing:
+                # CPython raises the StopIteration for a return from gen_send_ex,
+                # so only the resuming frame is on its traceback.
+                stop = tracer.exn_vt_stack.get_raised_exception()
+                stop.call_method(
+                    tx,
+                    "__setattr__",
+                    [
+                        ConstantVariable.create("__traceback__"),
+                        ConstantVariable.create(None),
+                    ],
+                    {},
+                )
+                tx._attach_traceback_to_exception(stop)
+            elif sys.version_info < (3, 12):
                 # Match CPython's _PyErr_FormatFromCause: set __context__ and
                 # __cause__ directly rather than pushing onto the exception
                 # stack (which must stay balanced -- genobject.c pops the
@@ -1487,6 +1502,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # An exception propagating out of the generator frame finishes it,
             # mirroring CPython setting gi_frame_state = FRAME_CLEARED.
             tracer.frame_state = FrameState.FRAME_CLEARED
+            tracer.freeze_frame_variable()
+            # The frame that resumed the generator receives the exception, so
+            # it (not the generator's creator) adds the traceback entry.
+            tx._attach_traceback_to_exception(
+                tracer.exn_vt_stack.get_raised_exception()
+            )
             raise
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
@@ -1624,6 +1645,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 try:
                     yf.call_method(tx, "close", [], {})
                 except ObservedException:
+                    self._drop_resumer_traceback_entry(tx)
                     err = True
 
         if err is False:
@@ -1657,6 +1679,22 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 args=["generator ignored GeneratorExit"],
             )
         return ConstantVariable.create(None)
+
+    def _drop_resumer_traceback_entry(self, tx: "InstructionTranslatorBase") -> None:
+        # CPython's gen_throw/gen_close call yf from C, so the resuming frame adds
+        # no entry while the exception is on its way into this generator.
+        exc = self.inline_tracer.exn_vt_stack.get_raised_exception()
+        tb = exc.tp_getattro_impl(tx, "__traceback__")
+        if (
+            isinstance(tb, variables.TracebackVariable)
+            and tb.frame is tx.frame_variable
+        ):
+            exc.call_method(
+                tx,
+                "__setattr__",
+                [ConstantVariable.create("__traceback__"), tb.tb_next],
+                {},
+            )
 
     def throw_pending(self) -> None:
         tracer = self.inline_tracer
@@ -1702,6 +1740,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                     return yf.call_method(tx, "throw", [arg], {})
             except ObservedException:
+                self._drop_resumer_traceback_entry(tx)
                 return self.gen_send_ex(tx, ConstantVariable.create(None), True)
 
         return throw_here()

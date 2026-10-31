@@ -6,6 +6,8 @@ import gc
 import operator
 import sys
 import unittest
+import weakref
+from unittest import mock
 
 import torch
 import torch._dynamo.config
@@ -15,7 +17,11 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
-from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch._dynamo.symbolic_convert import (
+    InstructionTranslatorBase,
+    SpeculationLog,
+    SpeculationLogDivergence,
+)
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
@@ -1733,6 +1739,322 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_exception_traceback_missing_line_table(self):
+        def inner():
+            raise ValueError("oops")
+
+        inner.__code__ = inner.__code__.replace(co_linetable=b"")
+
+        def fn(x):
+            try:
+                inner()
+            except ValueError as e:
+                tb = e.__traceback__
+                while tb.tb_next:
+                    tb = tb.tb_next
+                return x + 1, tb.tb_frame.f_lineno, tb.tb_lineno
+
+        self.assertEqual(fn(1), (2, None, None))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(1), fn(1))
+
+    def test_exception_traceback_frame_lineno(self):
+        class ExitFails:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                raise ValueError
+
+        class Noop:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        def simple():
+            1 / 0
+
+        def in_finally():
+            try:
+                1 / 0
+            finally:
+                pass
+
+        def other_except():
+            try:
+                1 / 0
+            except TypeError:
+                pass
+
+        def reraise_named():
+            try:
+                1 / 0
+            except ZeroDivisionError as e:
+                raise ValueError from e
+
+        def with_noop():
+            with Noop():
+                1 / 0
+
+        def with_exit_fails():
+            with ExitFails():
+                1 / 0
+
+        def fn(x, f):
+            try:
+                f()
+            except Exception as ex:
+                t = ex.__traceback__
+            lines = []
+            while t:
+                frame = t.tb_frame
+                first = frame.f_code.co_firstlineno
+                lines.append((t.tb_lineno - first, frame.f_lineno - first))
+                t = t.tb_next
+            return x + 1, lines
+
+        x = torch.randn(4)
+        for f in (
+            simple,
+            in_finally,
+            other_except,
+            reraise_named,
+            with_noop,
+            with_exit_fails,
+        ):
+            with self.subTest(f=f.__name__):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x, f), opt_fn(x, f))
+
+    @torch._dynamo.config.patch(run_gc_after_compile=False)
+    def test_exception_traceback_frame_no_tx_cycle(self):
+        # The tb_frame VT must not keep its translator alive; otherwise every
+        # traced value of the frame waits for a full gc cycle.
+        # run_gc_after_compile would hide a young cycle, so it is disabled.
+        def callee():
+            raise ValueError
+
+        def fn(x):
+            try:
+                callee()
+            except ValueError as e:
+                lineno = e.__traceback__.tb_next.tb_frame.f_lineno
+            return x + 1, lineno
+
+        callee_txs = []
+        orig_init = InstructionTranslatorBase.__init__
+
+        def init(tx, *args, **kwargs):
+            orig_init(tx, *args, **kwargs)
+            if tx.f_code is callee.__code__:
+                callee_txs.append(weakref.ref(tx))
+
+        gc.collect()
+        with disable_gc():
+            with mock.patch.object(InstructionTranslatorBase, "__init__", init):
+                result = torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.ones(2)
+                )
+            alive = sum(ref() is not None for ref in callee_txs)
+        self.assertEqual(result[1], fn(torch.ones(2))[1])
+        self.assertGreater(len(callee_txs), 0)
+        self.assertEqual(alive, 0)
+
+    def test_exception_traceback_finished_frame_lineno(self):
+        # A finished frame keeps its lasti, so f_lineno must not depend on
+        # when the garbage collector frees its translator.
+        def inner():
+            raise ValueError("boom")
+
+        def raised_then_more_work(x):
+            try:
+                inner()
+            except ValueError as e:
+                tb = e.__traceback__
+            for i in range(20):
+                x = x + i
+            return x, tb.tb_next.tb_frame.f_lineno
+
+        def helper():
+            try:
+                1 / 0
+            except ZeroDivisionError as e:
+                return e
+
+        def returned_exception(x):
+            e = helper()
+            return x + 1, e.__traceback__.tb_frame.f_lineno
+
+        for fn in (raised_then_more_work, returned_exception):
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                x = torch.ones(2)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+
+    def test_exception_traceback_generator_consumed_by_caller(self):
+        # The frame that resumes a generator receives its exception, not the
+        # frame that created it.
+        def gen():
+            yield 1
+            raise ValueError
+
+        def make_gen():
+            return gen()
+
+        def gen_one():
+            yield 1
+
+        def gen_empty():
+            return
+            yield
+
+        def names(tb):
+            out = []
+            while tb:
+                out.append((tb.tb_frame.f_code.co_name, tb.tb_lineno))
+                tb = tb.tb_next
+            return out
+
+        def fn(x):
+            g = make_gen()
+            next(g)
+            try:
+                next(g)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        # A generator's return raises StopIteration in the resuming frame only.
+        def fn_exhausted(x):
+            g = gen_one()
+            next(g)
+            try:
+                next(g)
+            except StopIteration as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def fn_empty(x):
+            try:
+                next(gen_empty())
+            except StopIteration as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        @contextlib.contextmanager
+        def cm():
+            try:
+                yield
+            except KeyError:
+                raise ValueError from None
+
+        def fn_cm(x):
+            try:
+                with cm():
+                    raise KeyError
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def inner():
+            yield 1
+
+        def middle():
+            yield from inner()
+
+        def outer():
+            yield from middle()
+
+        def inner_close():
+            try:
+                yield 1
+            finally:
+                raise KeyError
+
+        def outer_close():
+            yield from inner_close()
+
+        class ThrowingIter:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return 1
+
+            def throw(self, *args):
+                raise ValueError
+
+        def outer_user_iter():
+            yield from ThrowingIter()
+
+        def fn_throw_yield_from(x):
+            g = outer()
+            next(g)
+            try:
+                g.throw(ValueError)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def fn_throw_user_iter(x):
+            g = outer_user_iter()
+            next(g)
+            try:
+                g.throw(ValueError)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        def fn_close_yield_from(x):
+            g = outer_close()
+            next(g)
+            try:
+                g.close()
+            except KeyError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        for f in (
+            fn,
+            fn_exhausted,
+            fn_empty,
+            fn_cm,
+            fn_throw_yield_from,
+            fn_throw_user_iter,
+            fn_close_yield_from,
+        ):
+            with self.subTest(fn=f.__name__):
+                torch._dynamo.reset()
+                x = torch.ones(2)
+                opt_f = torch.compile(f, backend="eager", fullgraph=True)
+                self.assertEqual(f(x), opt_f(x))
+
+    def test_exception_traceback_chain_lineno(self):
+        # Each entry is the line where its frame called the next one.
+        def inner():
+            raise ValueError
+
+        def outer():
+            inner()
+
+        def fn(x):
+            try:
+                outer()
+            except ValueError as e:
+                t = e.__traceback__
+            lines = []
+            while t:
+                lines.append(t.tb_lineno - fn.__code__.co_firstlineno)
+                t = t.tb_next
+            return x + 1, lines
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_exception_with_traceback_method(self):
         # Test the with_traceback() method
