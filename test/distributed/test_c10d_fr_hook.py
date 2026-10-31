@@ -1498,6 +1498,7 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         _, name = self._init_nccl("1")
         self.assertEqual(name, "nccl2")
         sub = dist.new_group([1], backend="nccl-legacy")
+        both = dist.new_group([0, 1], backend="nccl-legacy")
         if self.rank != 1:
             return
         dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"), group=sub)
@@ -1505,6 +1506,9 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         # A stateless group has no global rank list, so its group-local rank 0
         # must not replace the subgroup's global one.
         stateless = dist.ProcessGroupNCCL(dist.HashStore(), 0, 1)
+        # A merged group gets rank 0 but keeps both's list, where 0 is global
+        # rank 0.
+        merged = both.merge_remote_group(dist.HashStore(), 1)
 
         server = _WorkerServer("", 0)
         self.addCleanup(server.shutdown)
@@ -1519,6 +1523,7 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         self.assertIn("nccl:all_reduce", [e["profiling_name"] for e in dump["entries"]])
         self.assertFalse(os.path.exists(prefix + "0"))
         stateless.shutdown()
+        merged.shutdown()
 
     def test_stock_nccl_recording_off(self):
         import requests
