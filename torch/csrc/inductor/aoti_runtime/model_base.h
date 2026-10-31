@@ -316,6 +316,9 @@ int munmap(void* addr, size_t length) {
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef USE_CUDA
+#include <torch/csrc/inductor/aoti_runtime/cudagraph_manager.h>
+#endif // USE_CUDA
 #ifdef USE_MPS
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #endif // USE_MPS
@@ -1454,6 +1457,87 @@ class AOTInductorModelBase {
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
   }
 
+#ifdef USE_CUDA
+  // Like run(), but runs the model as CUDA graphs through this instance's
+  // CudaGraphManager. max_graphs only applies when the manager is created, on
+  // the first call. Static-linkage callers get none of the container's
+  // checks: the graphs keep reading the constants they were captured with, so
+  // don't change or free them after a capture.
+  void run_with_lazy_cuda_graphs(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      std::optional<int64_t> max_graphs) {
+    AOTI_RUNTIME_CHECK(
+        cudagraphs_,
+        "Running as CUDA graphs requires compiling the model with "
+        "aot_inductor.cudagraphs=True");
+    if (!run_finished_) {
+      cudaEvent_t run_finished = nullptr;
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
+      run_finished_.emplace(run_finished);
+    }
+    if (!cudagraph_manager_) {
+      CudaGraphOptions options;
+      if (max_graphs) {
+        options.max_graphs = *max_graphs;
+      }
+      cudagraph_manager_ =
+          std::make_unique<CudaGraphManager>(device_idx_, options);
+    }
+
+    auto inputs =
+        steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
+    std::vector<AtenTensorHandle> borrowed_inputs;
+    borrowed_inputs.reserve(inputs.size());
+    for (const auto& input : inputs) {
+      borrowed_inputs.push_back(input.get());
+    }
+    auto* model = static_cast<Model*>(this);
+    // run_impl steals the inputs the manager only lends, so it gets new
+    // handles; it nulls each one it steals, so the rest are freed on error.
+    auto region = [&](AtenTensorHandle* region_inputs,
+                      AtenTensorHandle* region_outputs,
+                      cudaStream_t region_stream) {
+      std::vector<AtenTensorHandle> raw_inputs(borrowed_inputs.size(), nullptr);
+      try {
+        for (size_t i = 0; i < raw_inputs.size(); ++i) {
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_new_tensor_handle(region_inputs[i], &raw_inputs[i]));
+        }
+        model->run_impl(
+            raw_inputs.data(), region_outputs, region_stream, proxy_executor);
+      } catch (...) {
+        for (auto handle : raw_inputs) {
+          if (handle != nullptr) {
+            aoti_torch_delete_tensor_object(handle);
+          }
+        }
+        throw;
+      }
+    };
+    cudagraph_manager_->run(
+        region,
+        borrowed_inputs.data(),
+        borrowed_inputs.size(),
+        output_handles,
+        num_outputs(),
+        stream);
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
+  }
+
+  bool has_cuda_graphs() {
+    return cudagraph_manager_ && cudagraph_manager_->num_graphs() > 0;
+  }
+
+#endif // USE_CUDA
+
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
@@ -2125,6 +2209,12 @@ class AOTInductorModelBase {
   // Generated model uses this device index to create CUDA guards.
   int32_t device_type_{};
   int32_t device_idx_{};
+
+  // Set by generated code compiled with aot_inductor.cudagraphs=True.
+  bool cudagraphs_{false};
+#ifdef USE_CUDA
+  std::unique_ptr<CudaGraphManager> cudagraph_manager_;
+#endif // USE_CUDA
 };
 
 // Codegen-ed classes can derive from this to keep pointers to loaded kernels.
