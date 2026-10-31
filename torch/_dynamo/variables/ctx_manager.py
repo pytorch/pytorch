@@ -1149,12 +1149,10 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 # Built-in legacy device-specific autocast entry points (torch.cuda/cpu.amp.
 # autocast) omit device_type from their signature; the registry itself lives in
 # torch.amp.autocast_mode so that torch.utils.register_device_autocast_entry can
-# extend it without importing torch._dynamo. Seed the aliases here (Dynamo load
-# time) instead of in autocast_mode.py: importing the deprecated per-device
-# autocast modules is fine once Dynamo is loaded, but should not happen during
-# ``import torch``.
-_autocast_entries.setdefault(torch.cuda.amp.autocast, "cuda")
-_autocast_entries.setdefault(torch.cpu.amp.autocast, "cpu")
+# extend it without importing torch._dynamo. The cuda/cpu aliases register
+# themselves next to their class definitions (torch/cuda/cpu/amp/autocast_mode.py),
+# which ``import torch`` loads eagerly before any out-of-tree backend autoloads,
+# so a backend import hook cannot silently remap them.
 
 
 class AutocastModeVariable(ContextWrappingVariable):

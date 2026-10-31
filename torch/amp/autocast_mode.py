@@ -386,9 +386,10 @@ class autocast:
 # Third-party backends (e.g. PrivateUse1 devices) extend this through
 # torch.utils.register_device_autocast_entry at import time. This lives here
 # rather than in torch._dynamo so that the registration hook does not import
-# Dynamo during ``import torch``. Dynamo seeds the built-in cuda/cpu aliases
-# when it loads (torch/_dynamo/variables/ctx_manager.py) so that this module
-# does not eagerly import the deprecated per-device autocast modules.
+# Dynamo during ``import torch``. The built-in cuda/cpu aliases register
+# themselves next to their class definitions (torch/cuda/cpu/amp/autocast_mode.py),
+# which ``import torch`` loads eagerly before any out-of-tree backend autoloads,
+# so the aliases are always present before a backend hook can register.
 _autocast_entries: dict[Any, str | None] = {
     autocast: None,
 }

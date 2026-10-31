@@ -595,6 +595,28 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 torch.amp.autocast_mode.autocast, "npu"
             )
 
+    def test_autocast_builtin_aliases_registered_at_import(self):
+        # The cuda/cpu aliases register themselves next to their class
+        # definitions, which torch/__init__.py imports eagerly before any
+        # out-of-tree backend autoloads. A backend import hook that tries to
+        # remap torch.cuda.amp.autocast therefore raises consistently (the
+        # registry already owns the alias) instead of silently retargeting
+        # every compiled torch.cuda.amp.autocast(...) to its device_type.
+        import torch.utils
+
+        self.assertEqual(
+            torch.amp.autocast_mode._autocast_entries[torch.cuda.amp.autocast],
+            "cuda",
+        )
+        self.assertEqual(
+            torch.amp.autocast_mode._autocast_entries[torch.cpu.amp.autocast],
+            "cpu",
+        )
+        with self.assertRaises(ValueError):
+            torch.utils.register_device_autocast_entry(torch.cuda.amp.autocast, "npu")
+        with self.assertRaises(ValueError):
+            torch.utils.register_device_autocast_entry(torch.cpu.amp.autocast, "npu")
+
     def test_autocast_cpu_graph_break_2(self):
         # Regression for: https://github.com/pytorch/pytorch/issues/93890
         def fn(x):
