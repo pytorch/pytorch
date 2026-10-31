@@ -6248,6 +6248,16 @@
       ]
     }
   ],
+  "GB3741": [
+    {
+      "Gb_type": "Unsupported exception __str__",
+      "Context": "str() of {self.python_type_name()}",
+      "Explanation": "Dynamo does not model {self.python_type_name()}.__str__, which formats differently from BaseException.__str__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0341": [
     {
       "Gb_type": "torch.associative_scan: improper args",

@@ -242,6 +242,16 @@ class ExceptionVariable(VariableTracker):
             return AttributeErrorVariable(exc_type, args, kwargs)
         elif exc_type is NameError:
             return NameErrorVariable(exc_type, args, kwargs)
+        elif exc_type is KeyError:
+            return KeyErrorVariable(exc_type, args, kwargs)
+        # AttributeError and NameError set tp_str to BaseException_str
+        # explicitly, so they have their own wrappers.
+        elif exc_type.__str__ not in (
+            BaseException.__str__,
+            AttributeError.__str__,
+            NameError.__str__,
+        ):
+            return UnmodeledStrExceptionVariable(exc_type, args, kwargs)
         return ExceptionVariable(exc_type, args, kwargs)
 
     def set_context(self, context: VariableTracker) -> None:
@@ -475,9 +485,6 @@ class ExceptionVariable(VariableTracker):
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
-            # KeyError.__str__ uses repr for a single key, unlike BaseException.
-            if self.exc_type is KeyError:
-                return generic_repr(tx, self.args[0])
             return generic_str(tx, self.args[0])
         else:
             from . import TupleVariable
@@ -512,6 +519,27 @@ class ExceptionVariable(VariableTracker):
             )
         return VariableTracker.build(
             tx, name + tracked_repr(tx, TupleVariable(list(self.args)))
+        )
+
+
+class KeyErrorVariable(ExceptionVariable):
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: KeyError_str in CPython Objects/exceptions.c
+        if len(self.args) == 1:
+            return generic_repr(tx, self.args[0])
+        return super().tp_str_impl(tx)
+
+
+class UnmodeledStrExceptionVariable(ExceptionVariable):
+    """A builtin exception whose C __str__ formats state Dynamo does not track."""
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="Unsupported exception __str__",
+            context=f"str() of {self.python_type_name()}",
+            explanation=f"Dynamo does not model {self.python_type_name()}.__str__, "
+            "which formats differently from BaseException.__str__.",
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
 
 
