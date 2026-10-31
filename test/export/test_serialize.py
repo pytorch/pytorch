@@ -3054,10 +3054,15 @@ class TestPredispatchSerialization(TestCase):
             for n in program["graph_module"]["graph"]["nodes"]
             if n["target"] == "torch.ops.higher_order.flat_apply"
         ]
-        spec = pytree.tree_flatten(((0, 0), {"function_cls_name": 0}))[1]
-        node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
-        with self.assertRaisesRegex(SerializeError, "name as the first input"):
-            load(json.dumps(program).encode())
+        for args_and_kwargs in [
+            ((0, 0), {"function_cls_name": 0}),
+            # For a dict, *args would pass its keys, not args[0].
+            ({0: 0, 1: 0, 2: [0]}, {}),
+        ]:
+            spec = pytree.tree_flatten(args_and_kwargs)[1]
+            node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
+            with self.assertRaisesRegex(SerializeError, "name as the first input"):
+                load(json.dumps(program).encode())
         node["inputs"][1]["arg"]["as_string"] = "not a treespec"
         with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
             load(json.dumps(program).encode())

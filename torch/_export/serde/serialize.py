@@ -775,7 +775,15 @@ def _find_flat_apply_func(
         args, kwargs = pytree.tree_unflatten(list(flat_args), in_spec)
     except Exception as e:
         raise SerializeError("flat_apply inputs do not match its input spec") from e
-    if not args or "function_cls_name" in kwargs or not isinstance(args[0], str):
+    # flat_apply calls the helper with *args and **kwargs, so args[0] is the
+    # name it gets only when args is a tuple, as export saves it.
+    if (
+        type(args) is not tuple
+        or type(kwargs) is not dict
+        or not args
+        or "function_cls_name" in kwargs
+        or not isinstance(args[0], str)
+    ):
         raise SerializeError("Expected an autograd function name as the first input")
     function_cls = _find_imported(args[0])
     if not (
