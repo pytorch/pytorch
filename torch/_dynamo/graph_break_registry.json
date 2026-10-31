@@ -142,6 +142,16 @@
       "Hints": []
     }
   ],
+  "GB0592": [
+    {
+      "Gb_type": "invalid device index to current_stream",
+      "Context": "requested={device}",
+      "Explanation": "Expected a valid device index for current_stream",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0008": [
     {
       "Gb_type": "Attempted to inline function marked as skipped",
@@ -3398,6 +3408,19 @@
       ]
     }
   ],
+  "GB6671": [
+    {
+      "Gb_type": "torch.Stream escaped from compiled region",
+      "Context": "stream={self.value}, user_object_index={self.user_object_index}",
+      "Explanation": "Dynamo cannot keep a torch.Stream object alive across a graph break; the whole function falls back to eager.",
+      "Hints": [
+        "Move stream ops into one compiled region, or re-acquire the stream after the break.",
+        "Example: call current_stream(device) again after the graph break.",
+        "Avoid graph breaks inside a with-stream block: the block cannot be resumed.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1042": [
     {
       "Gb_type": "backward() with in-graph created tensor",
@@ -4587,6 +4610,27 @@
       "Hints": [
         "Use a simpler sequence type that Dynamo can convert to a list ",
         "(e.g. list, tuple, list iterator, etc.)",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB6636": [
+    {
+      "Gb_type": "torch stream context escaped from compiled region",
+      "Context": "with-stream context for {self.get_stream().value}",
+      "Explanation": "Dynamo cannot resume a stream context across a graph break; the whole function falls back to eager.",
+      "Hints": [
+        "Avoid graph breaks inside a with-stream block: the block cannot be resumed.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6170": [
+    {
+      "Gb_type": "no tracked accelerator stream",
+      "Context": "cur_stream called with an empty stream stack",
+      "Explanation": "Dynamo has no tracked current stream on this machine; an accelerator with stream support is required",
+      "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }

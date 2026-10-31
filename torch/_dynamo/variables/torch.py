@@ -3052,9 +3052,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # of a different device. The check compares against the top
                 # of the tracked stack only: a cross-device call breaks even
                 # when an explicit device argument could still be resolved
-                # deeper in the stack (cur_stream searches all entries);
-                # erroring on the type mismatch is the chosen, conservative
-                # trade-off.
+                # deeper in the stack (cur_stream_or_mint searches all
+                # entries); erroring on the type mismatch is the chosen,
+                # conservative trade-off.
                 if isinstance(arg, (str, torch.device)):
                     requested_type = torch.device(arg).type
                 elif self.value is torch.accelerator.current_stream:
@@ -3081,19 +3081,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                stream_var = tx.symbolic_stream_state.cur_stream(device)
-                stream_variable_cls = _get_stream_variable_cls(self.value)
-                if stream_variable_cls is not None and not isinstance(
-                    stream_var, stream_variable_cls
-                ):
-                    stream_var = stream_variable_cls(
-                        stream_var.proxy,
-                        stream_var.value,
-                        stream_var.user_object_index,
-                        current_device=stream_var.current_device,
-                        source=stream_var.source,
-                    )
-                return stream_var
             except Unsupported:
                 raise
             except Exception as e:
@@ -3104,6 +3091,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[*graph_break_hints.USER_ERROR],
                     from_exc=e,
                 )
+
+            # Outside the try: only the device query is a user error;
+            # construction failures must escape as internal errors.
+            if device is not None and device.index is not None:
+                stream_var = tx.symbolic_stream_state.cur_stream_or_mint(device, tx)
+            else:
+                stream_var = tx.symbolic_stream_state.cur_stream()
+            stream_variable_cls = _get_stream_variable_cls(self.value)
+            if stream_variable_cls is not None and not isinstance(
+                stream_var, stream_variable_cls
+            ):
+                stream_var = stream_variable_cls(
+                    stream_var.proxy,
+                    stream_var.value,
+                    stream_var.user_object_index,
+                    current_device=stream_var.current_device,
+                    source=stream_var.source,
+                )
+            return stream_var
 
         _synchronize_fn_to_device_type = {
             torch.cuda.synchronize: "cuda",
