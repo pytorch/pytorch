@@ -1885,6 +1885,45 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
+    @override_qengines
+    def test_lstm_gru_packed_args_check(self):
+        r"""With unsorted packed input, an oversized hidden state must raise
+        instead of being silently truncated by the permuting index_select."""
+        seq_len, batch, input_size, hidden_size = 4, 3, 4, 3
+        x = torch.randn(seq_len, batch, input_size)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(
+            x, [3, 4, 2], enforce_sorted=False
+        )
+        hx_pair = (
+            torch.randn(1, batch, hidden_size),
+            torch.randn(1, batch, hidden_size),
+        )
+        hx_pair_big = (
+            torch.randn(1, batch + 1, hidden_size),
+            torch.randn(1, batch + 1, hidden_size),
+        )
+        hx = torch.randn(1, batch, hidden_size)
+        hx_big = torch.randn(1, batch + 1, hidden_size)
+        for mod, valid_hx, big_hx in [
+            (
+                nnqd.LSTM(input_size=input_size, hidden_size=hidden_size),
+                hx_pair,
+                hx_pair_big,
+            ),
+            (nnqd.GRU(input_size=input_size, hidden_size=hidden_size), hx, hx_big),
+        ]:
+            # eager
+            with self.assertRaisesRegex(RuntimeError, "Expected hidden"):
+                mod(packed, big_hx)
+            mod(packed, valid_hx)
+
+            # scripted (forward_packed is exported to TorchScript); exceptions
+            # raised inside TorchScript surface as torch.jit.Error
+            scripted = torch.jit.script(mod)
+            with self.assertRaisesRegex((RuntimeError, torch.jit.Error), "Expected hidden"):
+                scripted.forward_packed(packed, big_hx)
+            scripted.forward_packed(packed, valid_hx)
+
 class TestReferenceQuantizedModule(QuantizationTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2026,6 +2065,34 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
             fp32_res = fp32_rnn(x, (h, c))
             ref_res = ref_rnn(x, (h, c))
             self.assertEqual(fp32_res, ref_res)
+
+    def test_lstm_gru_packed_args_check(self):
+        r"""With unsorted packed input, an oversized hidden state must raise
+        instead of being silently truncated by the permuting index_select."""
+        seq_len, batch, input_size, hidden_size = 4, 3, 4, 3
+        x = torch.randn(seq_len, batch, input_size)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(
+            x, [3, 4, 2], enforce_sorted=False
+        )
+        hx_pair = (
+            torch.randn(1, batch, hidden_size),
+            torch.randn(1, batch, hidden_size),
+        )
+        hx_pair_big = (
+            torch.randn(1, batch + 1, hidden_size),
+            torch.randn(1, batch + 1, hidden_size),
+        )
+        lstm = nnqr.LSTM(input_size=input_size, hidden_size=hidden_size)
+        with self.assertRaisesRegex(RuntimeError, "Expected hidden"):
+            lstm(packed, hx_pair_big)
+        lstm(packed, hx_pair)
+
+        hx = torch.randn(1, batch, hidden_size)
+        hx_big = torch.randn(1, batch + 1, hidden_size)
+        gru = nnqr.GRU(input_size=input_size, hidden_size=hidden_size)
+        with self.assertRaisesRegex(RuntimeError, "Expected hidden"):
+            gru(packed, hx_big)
+        gru(packed, hx)
 
     def test_sparse(self):
         """ Embedding and EmbeddingBag
