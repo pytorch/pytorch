@@ -1830,7 +1830,6 @@ class TestHasTriton(TestCase):
         *,
         has_package=True,
         detection_disabled=False,
-        not_registered=False,
     ):
         with (
             mock.patch.object(
@@ -1839,7 +1838,6 @@ class TestHasTriton(TestCase):
             inductor_config.patch(triton_disable_device_detection=detection_disabled),
             mock.patch(
                 "torch._dynamo.device_interface.get_interface_for_device",
-                side_effect=NotImplementedError if not_registered else None,
                 return_value=iface,
             ),
         ):
@@ -1851,20 +1849,36 @@ class TestHasTriton(TestCase):
         self.assertFalse(self._run_for_device("cuda", detection_disabled=True))
 
     def test_for_device_unregistered_interface_returns_false(self):
-        self.assertFalse(self._run_for_device("fakeaccel", not_registered=True))
+        # hpu parses as a known device type but registers no interface in
+        # this environment, exercising the NotImplementedError branch.
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            inductor_config.patch(triton_disable_device_detection=False),
+            mock.patch(
+                "torch._dynamo.device_interface.get_interface_for_device",
+                side_effect=NotImplementedError,
+            ) as get_iface,
+        ):
+            triton_utils.has_triton_for_device.cache_clear()
+            self.assertFalse(triton_utils.has_triton_for_device("hpu"))
+            get_iface.assert_called_once_with("hpu")
 
     def test_for_device_invalid_string_returns_false(self):
         self.assertFalse(self._run_for_device("not a device"))
 
     def test_for_device_indexed_string_normalizes_type(self):
         iface = _make_triton_interface()
-        with mock.patch(
-            "torch._dynamo.device_interface.get_interface_for_device"
-        ) as get_iface:
-            get_iface.return_value = iface
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            inductor_config.patch(triton_disable_device_detection=False),
+            mock.patch(
+                "torch._dynamo.device_interface.get_interface_for_device",
+                return_value=iface,
+            ) as get_iface,
+        ):
             triton_utils.has_triton_for_device.cache_clear()
             self.assertTrue(triton_utils.has_triton_for_device("cuda:0"))
-            get_iface.assert_called_with("cuda")
+            get_iface.assert_called_once_with("cuda")
 
     def test_for_device_backend_missing_is_swallowed(self):
         iface = _make_triton_interface(raise_exc=TritonUnavailableError("no backend"))
