@@ -77,6 +77,7 @@ from ..utils import (
     use_triton_tdm_template,
     use_triton_template,
     use_triton_tma_template,
+    use_triton_xpu_template,
 )
 from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
@@ -143,6 +144,20 @@ persistent_mm_template = TritonTemplate(
     name="mm_persistent",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_mm"),
+)
+
+# Intel XPU: the persistent descriptor template above with Xe2-tuned configs from
+# its own heuristics; mm_xpu_non_persistent runs it with one tile per work-group.
+xpu_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
+)
+
+xpu_non_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_non_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
 
@@ -685,6 +700,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         )
         if keep_triton_mm:
             templates_to_use.append(mm_template)
+
+            if use_triton_xpu_template(mat1, mat2, layout=layout):
+                templates_to_use.append(xpu_persistent_mm_template)
+                templates_to_use.append(xpu_non_persistent_mm_template)
 
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True

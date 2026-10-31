@@ -224,6 +224,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     Max,
+    Mod,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -2972,6 +2973,62 @@ def _tma_descriptor_max_offset_fits_in_int32(
         if add_guards
         else V.graph.sizevars.statically_known_true(condition)
     )
+
+
+def _xpu_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
+    """Whether each 2D operand can be loaded through a tensor descriptor with a
+    literal unit inner stride, in either orientation.
+
+    Decided guard-free on hints; only on acceptance are the facts the descriptor
+    relies on (unit inner stride, 16-byte aligned outer stride and offset, int32
+    sizes) installed as guards, so a rejection leaves the graph unconstrained.
+    """
+    from .virtualized import V
+
+    sizevars = V.graph.sizevars
+    conditions = []
+    for mat in matrices:
+        strides = mat.get_stride()
+        if len(strides) != 2 or mat.get_name() in V.graph.unaligned_buffers:
+            return False
+        row_major = tdm_descriptor_row_major(mat)
+        if row_major is None:
+            return False
+        inner, outer = (strides[1], strides[0]) if row_major else strides
+        conditions.append(sympy.Eq(inner, 1))
+        itemsize = mat.get_dtype().itemsize
+        for nbytes in (outer * itemsize, mat.get_layout().offset * itemsize):
+            if not _bytes_aligned(sizevars.replace_backed_symbols_with_hints(nbytes)):
+                return False
+            conditions.append(sympy.Eq(Mod(nbytes, TMA_ALIGNMENT), 0))
+
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=True
+    ):
+        return False
+    condition = sympy.And(*conditions)
+    return sizevars.statically_known_true(condition) or sizevars.guard_or_false(
+        condition
+    )
+
+
+def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
+    """Whether the XPU mm templates may take this BF16/FP16 mm.
+    Configs are tuned on Xe2, so earlier archs keep the default templates."""
+    if not matrices or not config.triton.enable_xpu_mm_templates:
+        return False
+    if layout.device.type != "xpu" or layout.dtype not in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        return False
+    from torch.testing._internal.common_xpu import get_xpu_arch, XPUArch
+    from torch.utils._triton import has_triton_stable_tma_api
+
+    arch = get_xpu_arch()
+    if not has_triton_stable_tma_api() or arch is None or arch < XPUArch.Xe2:
+        return False
+    return _xpu_descriptor_operands_compatible(matrices)
 
 
 def use_triton_tma_template(

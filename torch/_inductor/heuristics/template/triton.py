@@ -31,6 +31,8 @@ from ...kernel.mm import (
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
+    xpu_non_persistent_mm_template,
+    xpu_persistent_mm_template,
 )
 from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
@@ -51,6 +53,7 @@ from ...utils import (
     TMA_DESCRIPTOR_SIZE,
     tma_inner_dim,
     triton_type,
+    use_triton_xpu_template,
     using_b200,
     using_rocm_rdna3,
 )
@@ -152,10 +155,11 @@ def _tdm_descriptor_blocks_aligned(
     *,
     a_row_major: bool,
     b_row_major: bool,
+    block_ok: Callable[[int, int], bool] = _tdm_block_aligned,
 ) -> bool:
     a_contiguous_block = block_k if a_row_major else block_m
     b_contiguous_block = block_n if b_row_major else block_k
-    return _tdm_block_aligned(a_contiguous_block, dtype_size) and _tdm_block_aligned(
+    return block_ok(a_contiguous_block, dtype_size) and block_ok(
         b_contiguous_block, dtype_size
     )
 
@@ -4093,6 +4097,20 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 # XPU template-specific classes
 
 
+def _xpu_descriptor_row_major(kernel_inputs: KernelInputs) -> dict[str, bool] | None:
+    """A_ROW_MAJOR / B_ROW_MAJOR for the XPU mm templates, or None when they do
+    not take this mm."""
+    if not isinstance(kernel_inputs, MMKernelInputs):
+        return None
+    mat1, mat2 = kernel_inputs.mat1mat2()
+    if not use_triton_xpu_template(mat1, mat2, layout=kernel_inputs.output_layout()):
+        return None
+    return {
+        "A_ROW_MAJOR": bool(tdm_descriptor_row_major(mat1)),
+        "B_ROW_MAJOR": bool(tdm_descriptor_row_major(mat2)),
+    }
+
+
 @register_template_heuristic(mm_template.uid, "xpu")
 @register_template_heuristic(bmm_template.uid, "xpu")
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
@@ -4102,11 +4120,72 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     # (also used by baddbmm via XPUAddmmTemplateConfigHeuristic).
     ascending_k = True
 
+    # The only mm_configs that still win on Xe2 once the XPU mm templates run.
+    xpu_template_companion_configs = [
+        GemmConfig(64, 32, 32, 5, 8),
+        GemmConfig(64, 64, 16, 2, 4),
+        GemmConfig(64, 64, 32, 2, 4),
+        GemmConfig(64, 64, 32, 2, 8),
+        GemmConfig(64, 128, 32, 4, 8),
+        GemmConfig(128, 64, 32, 3, 4),
+        GemmConfig(128, 128, 32, 2, 8),
+    ]
+
     def __init__(self) -> None:
         super().__init__()
 
         # TODO(etaf): Design proper exhaustive search space for XPU.
         self.exhaustive_configs = self.mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        keep = None
+        if (
+            op_name == "mm"
+            and isinstance(kernel_inputs, MMKernelInputs)
+            and config.max_autotune_gemm_search_space != "EXHAUSTIVE"
+            and _xpu_descriptor_row_major(kernel_inputs) is not None
+        ):
+            m, n, k = kernel_inputs.mnk_symbolic()
+            keep = OrderedSet(
+                [
+                    (
+                        c.kwargs["BLOCK_M"],
+                        c.kwargs["BLOCK_N"],
+                        c.kwargs["BLOCK_K"],
+                        c.num_stages,
+                        c.num_warps,
+                    )
+                    for c in self.preprocess_mm_configs(
+                        m,
+                        n,
+                        k,
+                        configs=self.xpu_template_companion_configs,
+                        dtype_size=kernel_inputs.dtype().itemsize,
+                        op_name=op_name,
+                        **kwargs,
+                    )
+                ]
+            )
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            if (
+                keep is None
+                or (
+                    template_kwargs["BLOCK_M"],
+                    template_kwargs["BLOCK_N"],
+                    template_kwargs["BLOCK_K"],
+                    template_kwargs["num_stages"],
+                    template_kwargs["num_warps"],
+                )
+                in keep
+            ):
+                yield template_kwargs
 
 
 @register_template_heuristic(mm_template.uid, "xpu", op_name="addmm")
@@ -4128,6 +4207,17 @@ class XPUPersistentTMATemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use persistent_mm_configs
         self.mm_configs = self.persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {**template_kwargs, "K_LOOP_OVER_TILES": True}
 
 
 @register_template_heuristic(persistent_tma_mm_template.uid, "xpu", op_name="addmm")
@@ -4165,6 +4255,121 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.int8_mm_configs
+
+
+class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
+    """Shared logic for the XPU mm templates, which drive the persistent descriptor
+    template (stable descriptor API, no workspace) with their own Xe2-tuned pools."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Configs were tuned as exact tiles; do not rescale them per shape.
+        self.should_scale_configs = False
+
+    def _num_sms(self) -> int:
+        return get_num_sms()
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        flags = _xpu_descriptor_row_major(kernel_inputs)
+        if flags is None:
+            return
+        dtype_size = kernel_inputs.dtype().itemsize
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            if not _tdm_descriptor_blocks_aligned(
+                template_kwargs["BLOCK_M"],
+                template_kwargs["BLOCK_N"],
+                template_kwargs["BLOCK_K"],
+                dtype_size,
+                a_row_major=flags["A_ROW_MAJOR"],
+                b_row_major=flags["B_ROW_MAJOR"],
+                block_ok=_tdm_block_legal,
+            ):
+                continue
+            yield {
+                **template_kwargs,
+                **flags,
+                "NUM_SMS": self._num_sms(),
+                "TMA_EXPERIMENTAL_API": False,
+                "K_LOOP_OVER_TILES": True,
+            }
+
+
+@register_template_heuristic(xpu_persistent_mm_template.uid, "xpu")
+class XPUPersistentMMTemplateConfigHeuristic(
+    XPUDescriptorMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """Persistent MM template heuristic for XPU; configs are tuned on Xe2 (BMG)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = [
+            GemmConfig(16, 512, 64, 2, 8),
+            GemmConfig(32, 256, 32, 2, 16),
+            GemmConfig(32, 256, 128, 3, 32),
+            GemmConfig(128, 128, 64, 2, 16),
+            GemmConfig(128, 128, 64, 3, 16),
+            GemmConfig(128, 128, 64, 3, 32),
+            GemmConfig(128, 128, 128, 2, 16),
+            GemmConfig(128, 256, 16, 4, 32),
+            GemmConfig(128, 256, 32, 3, 32),
+            GemmConfig(128, 256, 64, 2, 32),
+            GemmConfig(128, 512, 32, 2, 32),
+            GemmConfig(128, 512, 32, 3, 32),
+            GemmConfig(128, 512, 32, 4, 32),
+            GemmConfig(256, 128, 64, 2, 32),
+            GemmConfig(256, 256, 32, 5, 32),
+            GemmConfig(512, 128, 32, 1, 32),
+        ]
+        self.exhaustive_configs = self.mm_configs
+
+    # A work-group walking at least this many K steps gets a barrier after each tile.
+    TILE_BARRIER_MIN_K_STEPS = 1024
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {
+                **template_kwargs,
+                "TILE_BARRIER_MIN_K_STEPS": self.TILE_BARRIER_MIN_K_STEPS,
+            }
+
+
+@register_template_heuristic(xpu_non_persistent_mm_template.uid, "xpu")
+class XPUNonPersistentMMTemplateConfigHeuristic(
+    XPUDescriptorMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """Non-persistent MM template heuristic for XPU (small M); configs are tuned on Xe2 (BMG)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = [
+            GemmConfig(4, 512, 256, 1, 8),
+            GemmConfig(8, 128, 32, 2, 4),
+            GemmConfig(8, 256, 128, 3, 8),
+            GemmConfig(16, 64, 64, 4, 4),
+            GemmConfig(16, 128, 64, 4, 8),
+            GemmConfig(32, 128, 64, 3, 16),
+            GemmConfig(32, 256, 64, 1, 8),
+            GemmConfig(32, 512, 128, 1, 16),
+        ]
+        self.exhaustive_configs = self.mm_configs
+
+    def _num_sms(self) -> int:
+        # Above any reachable tile count, so the grid has one work-group per tile.
+        return 2**30
 
 
 @register_template_heuristic(mm_plus_mm_template.uid, "xpu")
