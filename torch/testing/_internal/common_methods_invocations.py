@@ -164,6 +164,14 @@ if TEST_SCIPY:
     import scipy.special
 
 
+# Keep in sync with c10::DeviceType in torch/headeronly/core/DeviceType.h.
+ALL_DEVICE_TYPES = [
+    'cpu', 'cuda', 'mkldnn', 'opengl', 'opencl', 'ideep', 'hip', 'fpga',
+    'maia', 'xla', 'vulkan', 'metal', 'xpu', 'mps', 'meta', 'hpu', 've',
+    'lazy', 'ipu', 'mtia', 'privateuse1',
+]
+
+
 def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
@@ -18132,7 +18140,8 @@ op_db: list[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning',
+                            device_type=[device for device in ALL_DEVICE_TYPES if device != 'xpu']),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
                             device_type='cuda'),
