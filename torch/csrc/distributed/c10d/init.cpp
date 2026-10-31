@@ -12,6 +12,7 @@
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/WorkStatusHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -5521,6 +5522,47 @@ be removed again via remove().)")
           "remove",
           &::c10d::NanCheckHook::remove,
           "Detach the hook from its process group.");
+
+  py::class_<::c10d::WorkStatusHook, std::shared_ptr<::c10d::WorkStatusHook>>(
+      module,
+      "WorkStatusHook",
+      R"(
+Logs a process group's last enqueued and completed work to the registered
+C10dLogger every ``TORCH_DIST_WORK_STATUS_PERIOD_MS`` (default 30000), with
+nccl-legacy's keys. Attached to new process groups unless the period is 0 or
+the group uses nccl-legacy, which logs natively.)")
+      .def_static(
+          "attach",
+          &::c10d::WorkStatusHook::attach,
+          py::arg("pg"),
+          py::arg("global_ranks") = std::vector<uint64_t>{},
+          R"(
+Attach a hook, or return None if the group reports natively or reporting is
+disabled. Detaches on remove() or when the handle is garbage collected.
+global_ranks maps group ranks to world ranks.)")
+      .def(
+          "remove",
+          &::c10d::WorkStatusHook::remove,
+          "Detach the hook from its process group.")
+      .def(
+          "status",
+          [](::c10d::WorkStatusHook& self) {
+            auto data = self.status();
+            py::dict result;
+            for (const auto& [key, value] : data.integers) {
+              result[py::str(key)] = value;
+            }
+            for (const auto& [key, value] : data.strings) {
+              result[py::str(key)] = value;
+            }
+            return result;
+          },
+          "The record the hook reports for its group, as a dict.")
+      .def_static(
+          "_log_all",
+          &::c10d::WorkStatusHook::logAll,
+          py::call_guard<py::gil_scoped_release>(),
+          "Report every attached group now, on the calling thread. For tests.");
 
   py::class_<::c10d::HealthCheckHook>(
       module,

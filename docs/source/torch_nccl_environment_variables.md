@@ -12,6 +12,8 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
   - **Description**
 * - ``TORCH_DIST_NAN_CHECK``
   - **All backends.** If set to ``1``, attach a backend-agnostic NaN check to every new process group; input buffers of collectives are checked for NaNs. Use this with ``nccl``, which ignores ``TORCH_NCCL_NAN_CHECK``. Default: ``0``.
+* - ``TORCH_DIST_WORK_STATUS_PERIOD_MS``
+  - **All backends except nccl-legacy.** Period, in milliseconds, at which every process group's last enqueued and completed operation (collective or point-to-point) is logged while a C10dLogger is registered, as ``nccl-legacy`` does natively. Groups with an ``nccl-legacy`` backend are skipped. Read once per process. ``0`` disables it. Default: ``30000``.
 * - ``TORCH_NCCL_ASYNC_ERROR_HANDLING``
   - **All NCCL backends.** Control how we perform Async Error Handling with NCCL when an exception is observed in watchdog. If set to 0, no handling of asynchronous NCCL errors. If set to 1, aborting NCCL communicator and tearing down process upon error. If set to 2, only abort NCCL communicator and if set to 3, tearing down process without aborting NCCL communicator. By default, it is set to 3; ``torchrun`` sets it to 1 for its workers if it is unset.
 * - ``TORCH_NCCL_HIGH_PRIORITY``
