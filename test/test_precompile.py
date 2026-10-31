@@ -4970,6 +4970,18 @@ class TestPrecompileDynamoCapture(TestCase):
                     cap(self.model, self.x2)
             cap(self.model, self.x2)
 
+    @parametrize("key", ["cpp_wrapper", "graph_partition"])
+    def test_a_capture_without_cudagraphs_compiles_under_an_inner_patch(self, key):
+        from torch._dynamo.precompile_package import _cudagraph_inputs
+
+        single = self.mod.single
+        with self._capture(single) as cap:
+            with torch._inductor.config.patch({key: not _cudagraph_inputs()[key]}):
+                y = cap(self.model, self.x2)
+        # Under crossref the guards hold only inside the harness's mode.
+        if not TEST_WITH_CROSSREF:
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
+
     def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
         single = self.mod.single
         # cpp_wrapper compiles no CUDA graphs under graph_partition.

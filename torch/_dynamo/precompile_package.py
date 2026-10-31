@@ -1986,6 +1986,8 @@ class PrecompileSession(Generic[_P, _R]):
         # The ambient settings the record was derived from, which the calls must
         # not change.
         self._cudagraph_inputs: dict[str, Any] = {}
+        # Whether the capture asked for CUDA graphs, before a cpp_wrapper downgrade.
+        self._requests_cudagraphs = False
         if self._backend_name == "inductor":
             inputs = self._cudagraph_inputs = _cudagraph_inputs()
             config = self._cudagraph_config = {
@@ -1995,6 +1997,7 @@ class PrecompileSession(Generic[_P, _R]):
             if not isinstance(backend, str):
                 config.update((k, v) for k, v in backend.config.items() if k in config)
                 cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
+            self._requests_cudagraphs = config["triton.cudagraphs"]
             from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
             # Record what compile_fx compiles (get_cpp_wrapper_config).
@@ -2121,8 +2124,14 @@ class PrecompileSession(Generic[_P, _R]):
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
         if self._cudagraph_inputs:
+            # The other keys matter only to a CUDA graph capture.
             ambient = _cudagraph_inputs()
-            changed = [k for k, v in self._cudagraph_inputs.items() if ambient[k] != v]
+            cudagraphs = self._requests_cudagraphs or ambient["triton.cudagraphs"]
+            changed = [
+                k
+                for k, v in self._cudagraph_inputs.items()
+                if ambient[k] != v and (cudagraphs or k == "triton.cudagraphs")
+            ]
             if changed:
                 raise PackageError(
                     f"{changed} changed since capture() began: the artifact "
