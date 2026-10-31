@@ -1360,6 +1360,31 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
+    def test_pickle_preserves_inplace_ops(self):
+        # In-place operator nodes must survive a pickle / torch.save round trip
+        # instead of being re-traced as their out-of-place counterparts.
+        for target in (operator.iadd, operator.isub, operator.imul):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.output(graph.call_function(target, (x, 2)))
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+            loaded = pickle.loads(pickle.dumps(gm))
+            self.assertEqual(
+                [n.target for n in loaded.graph.nodes if n.op == "call_function"],
+                [target],
+            )
+
+            inp = torch.ones(3)
+            expected_in = inp.clone()
+            expected_out = gm(expected_in)
+            actual_in = inp.clone()
+            actual_out = loaded(actual_in)
+            self.assertEqual(actual_out, expected_out)
+            # the input is mutated in place by both modules
+            self.assertEqual(actual_in, expected_in)
+            self.assertNotEqual(actual_in, inp)
+
     def test_pickle_custom_import(self):
         graph = torch.fx.Graph()
         a = graph.placeholder("x")
