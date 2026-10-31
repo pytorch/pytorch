@@ -353,13 +353,14 @@ Tensor& add_out_sparse_compressed_cuda(
 TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
   const Tensor& input, const int64_t size, const bool out_int32, const Tensor& result
 ) {
+  const auto input_ = input.expect_contiguous();
   if (out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
-      convert_indices_from_coo_to_csr_cuda<scalar_t, int>(result, input, size);
+    AT_DISPATCH_INTEGRAL_TYPES(input_->scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
+      convert_indices_from_coo_to_csr_cuda<scalar_t, int>(result, *input_, size);
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
-      convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
+    AT_DISPATCH_INTEGRAL_TYPES(input_->scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
+      convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, *input_, size);
     });
   }
 }
