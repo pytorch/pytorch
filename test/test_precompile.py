@@ -6436,6 +6436,7 @@ class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(8, 8)
+        self.register_buffer("calls", torch.zeros(8))
 
     def forward(self, x):
         return torch.relu(self.lin(x))
@@ -6470,6 +6471,11 @@ def turns_cudagraphs_on(model, x):
         return step(model, x)
 
 
+def bumps_a_buffer(model, x):
+    model.calls.add_(1)
+    return model(x).sin()
+
+
 def kernelless_backward(model, x):
     return x.sin().sum() + model.lin.weight.sum()
 """
@@ -6500,7 +6506,11 @@ torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 allow = saved["allow_serve_time_compiles"]
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 training = saved["expected_grad"] is not None
-with contextlib.nullcontext() if training else torch.no_grad():
+calls = model.calls.clone()
+with (
+    contextlib.nullcontext() if training else torch.no_grad(),
+    torch._inductor.config.patch(saved["config"]),
+):
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
@@ -6509,6 +6519,7 @@ with contextlib.nullcontext() if training else torch.no_grad():
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
+bumps = int((model.calls - calls).max())
 manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
 nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
 for node in nodes:
@@ -6516,7 +6527,7 @@ for node in nodes:
 recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
 compiles = torch._dynamo.utils.counters["frames"]["ok"]
-print("skips", skips, "compiles", compiles, end=" ")
+print("bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
 print("recorded", recorded, "captured", captured)
 """
 
@@ -6562,16 +6573,21 @@ class TestPrecompileCudagraphs(TestCase):
         expected_grad=None,
         x=None,
         serve_time=False,
+        config=None,
         skips=None,
+        bumps=0,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
-        # by the loading process while serving the artifact, under its env.
+        # by the loading process while serving the artifact, under its env and
+        # the inductor config patch. bumps: how much the three calls raise
+        # model.calls.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "x": self.x if x is None else x,
             "expected": expected,
             "expected_grad": expected_grad,
             "allow_serve_time_compiles": serve_time,
+            "config": config or {},
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6587,6 +6603,7 @@ class TestPrecompileCudagraphs(TestCase):
         served = dict(zip(served[::2], map(int, served[1::2])))
         # The calls compile in the loading process only when they may.
         self.assertEqual(served["compiles"] > 0, serve_time)
+        self.assertEqual(served["bumps"], bumps)
         if skips is not None:
             self.assertEqual(served["skips"], skips)
         return served["recorded"], served["captured"]
@@ -6698,6 +6715,15 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, captured = self._serve_in_fresh_process(y)
         self.assertEqual(recorded, 0)
         self.assertGreater(captured, 0)
+
+    def test_a_tree_artifact_mutating_a_buffer_serves_cudagraphs_without_trees(self):
+        # A buffer is a static input, whose mutation CUDA graph trees allow; the
+        # tree manager the artifact is served by must not re-read cudagraph_trees.
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
+        no_trees = {"triton.cudagraph_trees": False}
+        served = self._serve_in_fresh_process(y, config=no_trees, bumps=3, skips=0)
+        self.assertGreater(served[0], 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
         # Post-compile would take the partitioned wrapper in a loading process
