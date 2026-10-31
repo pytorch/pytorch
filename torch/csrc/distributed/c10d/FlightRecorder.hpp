@@ -445,8 +445,9 @@ TORCH_API void dump_fr_trace_file(
 
 // Global rank of the backend's recorder, or -1 if none: set at hook attach,
 // or for nccl by ProcessGroupNCCL at construction and reported by its dumper.
-// The dump-to-file paths pass it to DebugInfoWriter, whose file name is fixed
-// by the first dump in the process.
+// try_dump_fr_trace_file and fr_dump_file name their file with it, as does
+// ProcessGroupNCCL's timeout dump for nccl, unless an earlier dump already
+// created the file.
 TORCH_API int fr_trace_rank(const std::string& backend = kDefaultFRBackend);
 
 // dump_fr_trace_file for fr_trace_rank(backend).
