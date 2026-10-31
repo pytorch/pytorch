@@ -3544,7 +3544,7 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S), (S, 2 * L))
 
     for shape, sorted, return_inverse, return_counts, dim in \
             product(sizes, [False, True], [False, True], [False, True], [None, -2, -1, 0, 1, 2]):
@@ -3658,6 +3658,8 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(input_shape), args=(output_size,))
         # Unbatched
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
+
+    yield SampleInput(make_arg((2, 3, 8, 8, 6), memory_format=torch.channels_last_3d), args=((5, 7, 4),))
 
 
 def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
@@ -12146,20 +12148,12 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.cfloat, torch.cdouble]),
                        # ValueError: Expected 2D tensor but got tensor with dimension: 1.
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type='cpu', dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
+                           dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type='cpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
+                           dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
@@ -12785,7 +12779,6 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            error_inputs_func=error_inputs_dot_vdot,
@@ -12803,7 +12796,6 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_dot_vdot,
            error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
@@ -14721,9 +14713,6 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
                # Exception: RuntimeError not raised : inplace variant either incorrectly allowed resizing
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               # Exception: "masked_scatter_ only supports boolean masks" does not match
-               # "masked_scatter: expected BoolTensor or ByteTensor for mask"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -15259,13 +15248,6 @@ op_db: list[OpInfo] = [
            assert_autodiffed=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
-           ),
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
@@ -15787,14 +15769,6 @@ op_db: list[OpInfo] = [
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                #
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           skips=(
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -16692,10 +16666,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            ),
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
@@ -21296,10 +21266,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # Allowed exception: sparse tensors don't have strides
-               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
-               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
-                            'TestSparseCSR', 'test_sparse_csr_consistency'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
