@@ -15918,6 +15918,31 @@ class TestMetalLibrary(TestCaseMPS):
             correct += inp
         self.assertEqual(correct, output)
 
+    def test_argument_buffers_track_hazards(self):
+        # The kernel reaches the inputs only through their addresses, so unless they are
+        # declared to the encoder, it can run before the writes that fill them complete
+        lib = torch.mps.compile_shader("""
+        struct Inputs {
+          metal::array<device float *, 32> args;
+        };
+
+        kernel void sum_all(device float* output, constant Inputs& inputs, uint idx [[thread_position_in_grid]]) {
+          float rc = 0;
+          for(auto i = 0; i < 32; ++i) {
+            rc += inputs.args[i][idx];
+          }
+          output[idx] = rc;
+        }
+        """)
+        for _ in range(20):
+            # Leave garbage in the memory that the inputs get allocated from
+            garbage = [torch.full((1 << 20,), -1000.0, device="mps") for _ in range(32)]
+            del garbage
+            inputs = [torch.full((1 << 20,), float(i), device="mps") for i in range(32)]
+            output = torch.empty_like(inputs[0])
+            lib.sum_all(output, inputs)
+            self.assertEqual(output, torch.full_like(output, sum(range(32))))
+
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
         lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")

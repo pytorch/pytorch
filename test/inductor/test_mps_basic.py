@@ -370,6 +370,52 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @parametrize("dynamic", [False, True])
+    def test_many_buffer_args(self, dynamic):
+        # https://github.com/pytorch/pytorch/issues/201864
+        # Each graph fuses into one kernel with more than 31 buffer arguments.
+        # With dynamic shapes, the transposed inputs and the ints add more.
+        def horizontal(x, *ws):
+            return [x * w for w in ws]
+
+        def vertical(x, *ws):
+            for w in ws:
+                x = x * w + 1
+            return x
+
+        def scalars(x, *args):
+            ws, ns = args[:24], args[24:]
+            for i, w in enumerate(ws):
+                x = x * w + ns[i % len(ns)]
+            return x
+
+        def add_many(x, *values):
+            for v in values:
+                x = x + v
+            return x
+
+        x = torch.rand(33, 65, device=self.device)
+        v = torch.rand(65, device=self.device)
+        ws = [torch.rand(65, 33, device=self.device).t() for _ in range(31)]
+        ns = list(range(2, 12))
+        cpu_scalars = [torch.tensor(i / 7, dtype=torch.float64) for i in range(32)]
+        mps_scalars = [torch.tensor(float(i), device=self.device) for i in range(10)]
+        cases = (
+            (horizontal, x, ws),
+            (vertical, x, ws),
+            (scalars, x, ws[:24] + ns),
+            (add_many, v, cpu_scalars),
+            (add_many, v, list(range(2, 34))),
+            (add_many, v, cpu_scalars[:12] + mps_scalars + ns),
+        )
+        for fn, x0, args in cases:
+            torch._dynamo.reset()
+            result, (code,) = run_and_get_code(
+                torch.compile(fn, dynamic=dynamic), x0, *args
+            )
+            self.assertEqual(result, fn(x0, *args))
+            self.assertEqual(code.count("kernel void "), 1)
+
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 

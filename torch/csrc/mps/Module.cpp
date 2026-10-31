@@ -458,11 +458,7 @@ struct OptionalArgCaster {
         /* List of tensors, most often to overcome the limits of 32-args per
          * kernel */
         auto tensorlist = py::cast<std::vector<at::Tensor>>(arg);
-        std::vector<void*> tl_ptrs;
-        for (auto& t : tensorlist) {
-          tl_ptrs.push_back(at::native::mps::get_tensor_gpu_address(t));
-        }
-        f.setArg(idx, tl_ptrs);
+        f.setTensorListArg(idx, tensorlist);
       } else {
         TORCH_CHECK(false, "Unexpected argument types");
       }
