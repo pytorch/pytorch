@@ -146,7 +146,6 @@ enforceInputOrder(
   // 4. tensor_constant
   // 5. custom_obj
   // 6. user_input/constant_input
-  // Both lists come from the archive as independent JSON arrays.
   TORCH_CHECK(
       inputSpecs.size() == graphInputs.size(),
       "Graph signature declares ",

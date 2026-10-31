@@ -395,7 +395,6 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 ::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
-  // The loop below is bounded by src, so a shorter self reads past its end.
   check_foreach_api_restrictions(self, src);
   std::vector<at::Tensor> outs;
   outs.reserve(self.size());

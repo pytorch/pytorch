@@ -1742,12 +1742,20 @@ class TestForeachDevice(TestCase):
                     self.assertTrue(torch.equal(t, ref_t))
 
     def test_foreach_copy_mismatched_list_lengths(self, device):
-        # The functional variant's loop is bounded by src, so a shorter self
-        # used to be read past its end.
-        self_tensors = [torch.ones(2, device=device)]
-        src_tensors = [torch.zeros(2, device=device) for _ in range(3)]
-        with self.assertRaisesRegex(RuntimeError, "same number of tensors"):
-            torch.ops.aten._foreach_copy(self_tensors, src_tensors, False)
+        one = [torch.ones(2, device=device)]
+        three = [torch.zeros(2, device=device) for _ in range(3)]
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 3"
+        ):
+            torch.ops.aten._foreach_copy(one, three, False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor lists must have the same number of tensors, got 3 and 1"
+        ):
+            torch.ops.aten._foreach_copy(three, one, False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor list must have at least one tensor."
+        ):
+            torch.ops.aten._foreach_copy([], [], False)
 
     @onlyAccelerator
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
