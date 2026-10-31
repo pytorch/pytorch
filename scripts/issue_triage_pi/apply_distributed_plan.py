@@ -66,6 +66,7 @@ def plan_effects(
         effects.notes.append(f"issue is not labeled {DISTRIBUTED!r}; skipping")
         return effects
 
+    # Status comes from the decision; model-suggested labels cannot override it.
     derived_labels = {BOT_TRIAGED, PTD_TRIAGED, *DECISION_STATUS.values()}
     requested = [
         label for label in plan.get("labels", []) if label not in derived_labels
@@ -93,7 +94,6 @@ def plan_effects(
             TRIAGE_REVIEW
         ]
 
-    # Status comes from the decision; model-suggested labels cannot override it.
     required_status = DECISION_STATUS[decision]
     if required_status not in labels:
         labels.append(required_status)

@@ -65,11 +65,11 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
+    CDNA5OrLater,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    RDNA3OrLater,
     requires_triton_ptxas_compat,
     SM80OrLater,
     SM90OrLater,
@@ -177,6 +177,7 @@ if HAS_GPU:
     import triton  # @manual
     from triton import language as tl
 
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
@@ -193,6 +194,7 @@ if HAS_GPU:
         add_kernel_with_tma_2d_new_api,
         add_kernel_with_tma_2d_old_api,
         create_tensor_descriptor_shim,
+        double_strided_kernel,
         masked_add_kernel_with_bool_tensor,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
@@ -2697,6 +2699,24 @@ class AOTInductorTestsTemplate:
                 "y": (Dim.DYNAMIC, Dim.STATIC),
             }
             self.check_model(model, example_inputs, dynamic_shapes=spec)
+
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                output = torch.zeros_like(x, dtype=torch.int32)
+                output[1:] = x[:-1]
+                return output
+
+        inputs = [
+            (torch.arange(size, dtype=torch.int64, device=self.device),)
+            for size in (2, 0, 1, 7, 35)
+        ]
+        self.check_model_with_multiple_inputs(
+            Model(),
+            inputs,
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        )
 
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
@@ -9455,9 +9475,10 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         # Attribute naming has changed in the new export API, so still use the legacy API here.
-        compile_config = {"always_keep_tensor_constants": True}
-        if self.device == "cuda":
-            compile_config["aot_inductor.weight_use_caching_allocator"] = True
+        compile_config = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.weight_use_caching_allocator": True,
+        }
 
         with torch.no_grad(), config.patch(compile_config):
             so_path = AOTIRunnerUtil.legacy_compile(
@@ -9468,10 +9489,7 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def constant_buffer_memory_used():
-            if self.device == "cuda":
-                return torch.cuda.memory_allocated(self.device)
-            free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-            return -free_memory
+            return torch.accelerator.memory_allocated(self.device)
 
         def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
@@ -9911,8 +9929,10 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires GPU")
 
         if TEST_WITH_ROCM:
-            if not (CDNA2OrLater() or RDNA3OrLater()):
-                self.skipTest("_int4_mm needs CDNA2 or later, or RDNA3 or later")
+            if CDNA5OrLater():
+                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
+            if not CDNA2OrLater():
+                self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
         class Model(torch.nn.Module):
             def __init__(self, weight, scale_and_zeros) -> None:
@@ -9948,8 +9968,10 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires Intel GPU")
 
         if TEST_WITH_ROCM:
-            if not (CDNA2OrLater() or RDNA3OrLater()):
-                self.skipTest("_int4_mm needs CDNA2 or later, or RDNA3 or later")
+            if CDNA5OrLater():
+                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
+            if not CDNA2OrLater():
+                self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
         class Model(torch.nn.Module):
             def __init__(self, weight, scale, zeros) -> None:
@@ -10199,6 +10221,49 @@ class AOTInductorTestsTemplate:
                 expected_grids,
                 lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
+
+    @requires_gpu
+    @requires_autotune_at_compile_time
+    @common_utils.parametrize("offset", [0, 128])
+    def test_triton_mutated_strided_autotuning(self, offset):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                base = torch.empty((64, 256), device=x.device, dtype=x.dtype)
+                out = base[:, offset : offset + 128]
+                double_strided_kernel[(4, 4)](
+                    x,
+                    out,
+                    x.stride(0),
+                    out.stride(0),
+                    X_BLOCK_SIZE=32,
+                    Y_BLOCK_SIZE=16,
+                )
+                return out
+
+        x = torch.randn(64, 128, device=self.device)
+        original_run = CachingAutotuner.run
+        observed_calls = 0
+
+        def check_strides(autotuner, *args, **kwargs):
+            """Check the actual autotune tensors before launching the strided kernel."""
+            nonlocal observed_calls
+            if autotuner.fn.__name__ == double_strided_kernel.__name__:
+                observed_calls += 1
+                # Random fallback inputs must not satisfy this regression test.
+                self.assertEqual(args[0], x)
+                self.assertEqual(args[0].stride(0), args[2])
+                self.assertEqual(args[1].stride(0), args[3])
+            return original_run(autotuner, *args, **kwargs)
+
+        with (
+            config.patch("triton.autotune_with_sample_inputs", True),
+            patch.object(CachingAutotuner, "run", new=check_strides),
+        ):
+            self.check_model(Model(), (x,))
+        self.assertGreater(observed_calls, 0)
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     @requires_autotune_at_compile_time
