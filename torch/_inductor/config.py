@@ -3012,9 +3012,11 @@ class cuda(cutlass):
     # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
     # autotuning and records the solutions; with autotune_tunableop_ladder it also
-    # tunes a range of sizes of each GEMM's dynamic dim. Inductor submits nothing
-    # for the traced shape itself: TunableOp covers that on its own, but only when
-    # PYTORCH_TUNABLEOP_ENABLED is set in the compiling process. "reuse" instead
+    # tunes a range of sizes of each GEMM's dynamic dim, the traced shape among
+    # them. A GEMM the ladder skips -- ladder off, static shape, more than one
+    # dynamic symbol, dynamic K, a non-dense operand, an unsupported choice --
+    # gets nothing from Inductor, and is covered only by TunableOp's own
+    # in-process path when PYTORCH_TUNABLEOP_ENABLED is set. "reuse" instead
     # borrows the nearest recorded shape, benchmarks it against the default
     # kernel, and records the winner. Run as separate passes: "tune" builds the
     # results file, "reuse" consumes it.
