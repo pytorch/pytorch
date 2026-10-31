@@ -12,11 +12,13 @@ import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_WINDOWS,
-    parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
 )
@@ -125,16 +127,14 @@ class TestCppExtensionAOT(common.TestCase):
 class TestCppExtensionAOTDevice(common.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @parametrize("device_type", list(_SIGMOID_ADD_BACKENDS))
-    def test_sigmoid_add_extension(self, device_type):
-        module_name = _SIGMOID_ADD_BACKENDS[device_type]
-        if not torch.get_device_module(device_type).is_available():
-            raise unittest.SkipTest(f"{device_type} not available")
-        if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
-            raise unittest.SkipTest("sycl extension requires ninja to build")
-        ext = importlib.import_module(module_name)
-        x = torch.zeros(100, device=device_type, dtype=torch.float32)
-        y = torch.zeros(100, device=device_type, dtype=torch.float32)
+    @skipXPUIf(
+        os.getenv("USE_NINJA", "0") == "0",
+        "sycl extension requires ninja to build",
+    )
+    def test_sigmoid_add_extension(self, device):
+        ext = importlib.import_module(_SIGMOID_ADD_BACKENDS[self.device_type])
+        x = torch.zeros(100, device=device, dtype=torch.float32)
+        y = torch.zeros(100, device=device, dtype=torch.float32)
         z = ext.sigmoid_add(x, y).cpu()
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
@@ -459,7 +459,13 @@ class TestTorchLibrary(common.TestCase):
         self.assertIn("torch_library::logical_and", str(s.graph))
 
 
-instantiate_parametrized_tests(TestCppExtensionAOTDevice)
+instantiate_device_type_tests(
+    TestCppExtensionAOTDevice,
+    globals(),
+    only_for=list(_SIGMOID_ADD_BACKENDS),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     common.run_tests()
