@@ -702,6 +702,19 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         next(it)  # start is now 2, not 3 (consumed 40; remaining: 30, 20, 10)
         self.assertEqual(opt_fn(it, torch.tensor(0)), torch.tensor(60))
 
+    def test_list_reverseiterator_iter_keeps_position(self):
+        """Issue #196211: iter() on a partially consumed reversed iterator."""
+
+        def fn(x):
+            it = reversed([x, x + 2, x + 5])
+            last = next(it)
+            middle = next(iter(it))
+            return last - middle
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor([3.0, 7.0])
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_list_reverseiterator_mutation_side_effects(self):
         """Caller-side iterator advancement via _codegen_list_iterator_mutation."""
 
