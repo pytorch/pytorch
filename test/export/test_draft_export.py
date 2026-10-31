@@ -11,6 +11,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_real_tensor
 from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -446,6 +447,43 @@ class TestDraftExport(TestCase):
                 if bindings := node.meta.get("unbacked_bindings"):
                     unbacked_binding_symbols.update(bindings.keys())
             self.assertEqual(len(unbacked_binding_symbols), 1)
+
+    def test_vmap_over_empty_batch(self):
+        # Real tensor propagation runs ops on the real tensors too, and a vmap
+        # over an empty batch leaves no real storage for a view of one row,
+        # also when the batch size is only known at run time.
+        class M(torch.nn.Module):
+            def forward(self, x, empty):
+                rows = [x[x[:, 0, 0] > bound] for bound in (100, -100)]
+                return [
+                    torch.vmap(lambda row: row * 2 + 1)(t) for t in (x, empty, *rows)
+                ]
+
+        inputs = (torch.randn(5, 3, 4), torch.randn(0, 3, 4))
+        ep = draft_export(M(), inputs)
+        self.assertEqual(len(ep._report.failures), 0)
+        self.assertEqual(ep.module()(*inputs), M()(*inputs))
+        # With or without real tensors, every batched value is a view of the
+        # tensor it wraps.
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        for graph in (export(M(), inputs).graph, ep.graph):
+            batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+            self.assertEqual(len(batched), 4)
+            for node in batched:
+                self.assertEqual(
+                    StorageWeakRef(node.meta["val"].untyped_storage()),
+                    StorageWeakRef(node.args[0].meta["val"].untyped_storage()),
+                )
+        # Like other ops, the ones inside vmap keep no real tensors.
+        predispatch = torch._functorch.predispatch
+        inside = False
+        for node in ep.graph.nodes:
+            if node.target is predispatch._vmap_increment_nesting:
+                inside = True
+            elif node.target is predispatch._vmap_decrement_nesting:
+                inside = False
+            elif inside and isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertIsNone(node.meta["val"].real_tensor, node.name)
 
     def test_offsets(self):
         class M(torch.nn.Module):

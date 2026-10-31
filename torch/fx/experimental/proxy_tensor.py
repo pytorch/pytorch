@@ -42,7 +42,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._dispatch.python import enable_python_dispatcher
+from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
@@ -58,6 +58,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
+    in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
@@ -699,8 +700,37 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # (snapshot_fake is called a lot)
     if is_fake_tensor(val):
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
-    else:
-        return val.detach()
+    # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
+    # have no storage and outlive their level. Record a view of the fake tensor
+    # they wrap, with the sizes, strides and storage offset the wrapper reports,
+    # so passes still see which storage it aliases. Functorch is disabled so
+    # that an outer jvp does not wrap the view again. A wrapped tensor subclass,
+    # such as DTensor, may not support that view, so it keeps its wrapper.
+    functorch = torch._C._functorch
+    inner = val
+    while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(inner):
+        inner = functorch.get_unwrapped(inner)
+    fake_mode = maybe_get_fake_mode(inner) if is_fake_tensor(inner) else None
+    # A value whose real tensor is kept, such as a placeholder of a cond branch
+    # inside vmap under real tensor propagation, keeps its wrapper as before,
+    # which carries the real tensor. Its real view would need the real layout
+    # at each functorch level, while the view below uses the fake one.
+    if fake_mode is not None and not (include_real and inner.real_tensor is not None):
+        # The view is made on the meta tensor inside the fake tensor, as
+        # fast_detach does, so real tensor propagation does not also run it on
+        # the real tensor, which has no storage for it when the batch is empty.
+        with torch._C._DisableFuncTorch():
+            with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+                view = torch.ops.aten.as_strided.default(
+                    torch.ops.aten.detach.default(inner),
+                    val.shape,
+                    val.stride(),
+                    val.storage_offset(),
+                )
+            return FakeTensor(
+                fake_mode, view, inner.device, dispatch_keys=inner.dispatch_keys
+            )
+    return val.detach()
 
 
 _ExtractValType: TypeAlias = (
@@ -2129,20 +2159,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
-        if func in [
-            torch._functorch.predispatch._add_batch_dim,
-            torch._functorch.predispatch._remove_batch_dim,
-            torch._functorch.predispatch._vmap_increment_nesting,
-            torch._functorch.predispatch._vmap_decrement_nesting,
-            torch._functorch.vmap.lazy_load_decompositions,
-            torch._functorch.predispatch._make_dual,
-            torch._functorch.predispatch._unpack_dual,
-            torch._functorch.predispatch._jvp_increment_nesting,
-            torch._functorch.predispatch._jvp_decrement_nesting,
-            torch._functorch.predispatch._unwrap_for_grad,
-            torch._functorch.predispatch._enter_dual_level,
-            torch._functorch.predispatch._exit_dual_level,
-        ]:
+        if func in _functorch_predispatch_functions:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
@@ -2151,11 +2168,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 kwargs,
             )
             res = func(*args, **kwargs)
-            # When JVP transforms are active, snapshot_fake calls detach
-            # which goes through C++ functorch dispatch keys, potentially
-            # re-wrapping the result as a grad tracking tensor.
-            # Temporarily disable functorch transforms during tracking to
-            # prevent this corruption of meta["val"].
+            # Inside jvp, the detach that snapshot_fake calls on a wrapped
+            # tensor subclass goes through C++ functorch dispatch keys, which
+            # could wrap the result as a grad tracking tensor again, so the jvp
+            # calls track their results with functorch disabled. The vmap calls
+            # do not need that, and nested vmap over a wrapped subclass fails
+            # with it.
             if func in _jvp_predispatch_functions:
                 with torch._C._DisableFuncTorch():
                     track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
@@ -2184,21 +2202,26 @@ _jvp_predispatch_functions = frozenset(
     }
 )
 
-# These JVP predispatch wrappers manage transform nesting/level state
-# and must survive FX dead code elimination even with zero output users.
+# The functorch wrappers that pre-dispatch tracing keeps in the graph. They
+# change global state (functorch levels, forward-mode AD levels, the registered
+# vmap decompositions), or take as an argument a level that an earlier call
+# entered. So they must stay where they are: dead code elimination must keep
+# them even with no users, and passes that check Node.is_impure() must not fold,
+# reorder or run one on its own.
 # Registered here rather than in predispatch.py to avoid circular imports
 # (predispatch.py loads before torch.fx during torch.autograd init).
+_functorch_predispatch_functions = _jvp_predispatch_functions | {
+    torch._functorch.predispatch.lazy_load_decompositions,
+    torch._functorch.predispatch._vmap_increment_nesting,
+    torch._functorch.predispatch._vmap_decrement_nesting,
+    torch._functorch.predispatch._add_batch_dim,
+    torch._functorch.predispatch._remove_batch_dim,
+}
+
 from torch.fx.node import _side_effectful_functions
 
 
-_side_effectful_functions.update(
-    {
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
-)
+_side_effectful_functions.update(_functorch_predispatch_functions)
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):

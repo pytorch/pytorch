@@ -14,10 +14,11 @@ import unittest
 import warnings
 import operator
 from collections.abc import Iterable
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
 from torch.testing._internal.common_methods_invocations import op_db
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
@@ -35,6 +36,7 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     ProxyTorchDispatchMode,
     PythonKeyTracer,
+    snapshot_fake,
 )
 
 
@@ -908,6 +910,32 @@ class TestFakeProxyTensor(TestCase):
 
         x = A(torch.randn(3, 3))
         self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_snapshot_fake_of_batched_tensor(self):
+        # A vmap wrapper is recorded as a view of the fake tensor it wraps. A
+        # value whose real tensor is kept keeps its wrapper, which carries it.
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        real = torch.randn(4, 3, 5)[1:]
+        fake = mode.from_tensor(real)
+        level = functorch._vmap_increment_nesting(3, "error")
+        try:
+            with mode:
+                batched = functorch._add_batch_dim(fake, 1, level)
+            val = snapshot_fake(batched)
+            kept = snapshot_fake(batched, include_real=True)
+        finally:
+            functorch._vmap_decrement_nesting()
+        self.assertTrue(is_fake_tensor(val))
+        self.assertEqual(
+            StorageWeakRef(val.untyped_storage()),
+            StorageWeakRef(fake.untyped_storage()),
+        )
+        self.assertEqual(
+            (val.shape, val.stride(), val.storage_offset()), ((3, 5), (15, 1), 15)
+        )
+        self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
 
     def test_use_fake_and_tensor(self):
         def f(x, y):

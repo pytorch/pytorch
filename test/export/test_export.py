@@ -73,6 +73,7 @@ from torch.export.graph_signature import (
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -947,6 +948,95 @@ class TestExport(TestCase):
         # Check tangents
         self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
         self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_in_vmap_export(self) -> None:
+        class JvpInVmap(torch.nn.Module):
+            def forward(self, x, t):
+                def sin_jvp(x, t):
+                    return torch.func.jvp(torch.sin, (x,), (t,))
+
+                return torch.vmap(sin_jvp, in_dims=(0, 1))(x, t)
+
+        # x starts at a storage offset, and t is batched along its second dim.
+        inp = (torch.randn(3, 5)[:, 1:], torch.randn(4, 3))
+        # Values recorded inside vmap and jvp are fake views of the tensors the
+        # functorch wrappers wrap, as in eager. Saving and loading rebuild the
+        # values without aliasing, so these checks export directly.
+        graph = torch.export.export(JvpInVmap(), inp).graph
+        for node in graph.nodes:
+            if isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+        self.assertEqual(len(batched), 2)
+        for node in batched:
+            val, wrapped, dim = node.meta["val"], node.args[0].meta["val"], node.args[1]
+            self.assertEqual(
+                StorageWeakRef(val.untyped_storage()),
+                StorageWeakRef(wrapped.untyped_storage()),
+            )
+            self.assertEqual(val.storage_offset(), wrapped.storage_offset())
+            self.assertEqual(
+                val.stride(), wrapped.stride()[:dim] + wrapped.stride()[dim + 1 :]
+            )
+        # Passes must not remove, fold or run the vmap and jvp calls on their
+        # own, and some of them have no users.
+        predispatch = torch._functorch.predispatch.__name__
+        calls = [
+            node
+            for node in graph.nodes
+            if getattr(node.target, "__module__", None) == predispatch
+        ]
+        self.assertTrue(calls)
+        for node in calls:
+            self.assertTrue(node.is_impure(), node.name)
+        gm = export(JvpInVmap(), inp).module()
+        self.assertEqual(gm(*inp), JvpInVmap()(*inp))
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(*inp), JvpInVmap()(*inp))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_vmap_dead_code_elimination(self) -> None:
+        # The calls that enter and leave the vmap level have no users.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(lambda row: row * 2 + 1)(x)
+
+        x = torch.randn(3, 4)
+        gm = export(M(), (x,)).module()
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(x), M()(x))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_vmap_over_tensor_subclass(self) -> None:
+        # A wrapped tensor subclass may not support the view that is recorded
+        # for a plain fake tensor, so its values keep their functorch wrapper,
+        # also in nested vmap and inside jvp. This exports directly:
+        # run_decompositions fails on a TwoTensor input with or without vmap,
+        # so the decomposition variants would fail.
+        class Vmap(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(lambda row: row * 2 + 1)(x)
+
+        class NestedVmap(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(torch.vmap(lambda v: v * 2 + 1))(x)
+
+        class VmapInJvp(torch.nn.Module):
+            def forward(self, x):
+                return torch.func.jvp(torch.vmap(torch.sin), (x,), (x,))
+
+        x = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+        for m in (Vmap(), NestedVmap(), VmapInJvp()):
+            with self.subTest(type(m).__name__):
+                ep = torch.export.export(m, (x,))
+                self.assertEqual(ep.module()(x), m(x))
 
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
