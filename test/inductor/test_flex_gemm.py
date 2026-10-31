@@ -2720,7 +2720,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.bmm, (a, b), epilogue, kernel_options={"backend": "QUACK"}
             )
 
-        with self.assertRaisesRegex(InductorError, "preserve batch, row, and column"):
+        fix = (
+            "return GEMM-derived views directly"
+            if case == "flattened_acc"
+            else "reshape or reinterpret captures"
+        )
+        with self.assertRaisesRegex(
+            InductorError, f"preserve batch, row, and column.*{fix}"
+        ):
             torch.compile(fn, fullgraph=True)(a, b, torch.randn(shape))
 
     @skipIfNoCuteDSL
@@ -10313,7 +10320,9 @@ class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_grouped_reduce_matches_reference(self, case):
+    # amax is idempotent, so it hides a lane combined with itself or twice; sum does not.
+    @parametrize("op", ("amax", "sum"))
+    def test_grouped_reduce_matches_reference(self, case, op):
         _, axis, group, feeds_main, stores, tile_m, tile_n, pingpong = case
         config = {"tile_m": tile_m, "tile_n": tile_n, "pingpong": pingpong}
         m, k, n = 512, 256, 1024
@@ -10322,7 +10331,7 @@ class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
         def epilogue_fn(acc):
             shape = (m // group, group, n) if axis == 0 else (m, n // group, group)
             x = acc.float().view(shape)
-            r = x.amax(axis + 1, keepdim=True)
+            r = getattr(x, op)(axis + 1, keepdim=True)
             main = (x - r).view(m, n).to(acc.dtype) if feeds_main else acc
             return (main, r.squeeze(axis + 1)) if stores else main
 
