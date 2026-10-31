@@ -3173,8 +3173,12 @@ def _register_privateuse1_backend() -> None:
     # rule map in place and clear the handler cache so the backend's handlers
     # are probed on the next compile. Called from torch._register_device_module;
     # when the backend registered before the first map build, the build itself
-    # picks it up.
-    _probe_privateuse1_rule_map(get_torch_obj_rule_map())
+    # picks it up. Probe only when the map already exists: building it from
+    # scratch here would resolve every torch_name_rule_map entry through
+    # load_object/importlib, a cost that should stay on processes that actually
+    # compile, not on every import torch_npu-style registration.
+    if get_torch_obj_rule_map.cache_info().currsize:
+        _probe_privateuse1_rule_map(get_torch_obj_rule_map())
     TorchInGraphFunctionVariable._get_handlers.cache_clear()
 
 

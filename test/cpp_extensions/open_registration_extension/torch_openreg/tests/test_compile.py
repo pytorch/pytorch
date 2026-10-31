@@ -256,21 +256,41 @@ class TestPrivateUse1Routing(TestCase):
         # functions. The exchange leaves the runtime device switched (matching
         # eager semantics), so the current_device guard forces a recompile when
         # the next call starts on another device.
-        cnt = CompileCounterWithBackend("eager")
         prev_device = torch.openreg.current_device()
+        torch.openreg.set_device(0)
         try:
+            cnt = CompileCounterWithBackend("eager")
+            # The exchange cleanup hook restores the pre-trace device at the
+            # end of tracing, before the backend runs; record the device the
+            # backend sees to assert the hook actually restored it.
+            devices_at_compile: list[int] = []
+            inner_backend = cnt.__call__
 
-            @torch.compile(backend=cnt, fullgraph=True)
+            def recording_backend(gm, example_inputs):
+                devices_at_compile.append(torch.openreg.current_device())
+                return inner_backend(gm, example_inputs)
+
+            @torch.compile(backend=recording_backend, fullgraph=True)
             def compiled_fn():
-                torch.openreg.current_stream()
+                stream = torch.openreg.current_stream()
                 torch.openreg.synchronize()
                 torch.openreg._exchange_device(1)
                 torch.openreg._maybe_exchange_device(1)
+                return stream
 
-            compiled_fn()
+            traced_stream = compiled_fn()
+            # The cleanup hook ran at the end of tracing, restoring device 0
+            # before the backend was invoked (without it the backend would have
+            # seen the switched device 1). The second call starts on device 1
+            # (the runtime switch), so its compile records 1.
+            self.assertEqual(devices_at_compile, [0, 1])
+            # The traced stream was captured for device 0 (the device at trace
+            # time); it reconstructs to the eager current stream of device 0.
+            self.assertEqual(traced_stream, torch.openreg.current_stream(0))
             # The eager backend executes the emitted graph as-is; the exchange
             # leaves the runtime device switched, matching eager semantics. The
-            # cleanup hook ran once at the end of tracing, not after each call.
+            # cleanup hook restored the device at the end of tracing (see
+            # devices_at_compile above), not after each call.
             self.assertEqual(torch.openreg.current_device(), 1)
             # The current_device guard was installed for device 0 at compile
             # time, so starting this call from device 1 recompiles.
@@ -403,22 +423,51 @@ class TestPrivateUse1Routing(TestCase):
     def test_aliased_exchange_device_functions(self):
         # A backend may define _maybe_exchange_device = _exchange_device (or
         # vice versa); handler registration deduplicates the alias instead of
-        # raising "Handler already registered".
+        # raising "Handler already registered", and compiling through the
+        # aliased name emits the shared exchange target.
         from torch._dynamo import trace_rules
         from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 
         exchange = torch.openreg._exchange_device
         maybe = torch.openreg._maybe_exchange_device
         self.assertIsNot(exchange, maybe)
+        prev_device = torch.openreg.current_device()
         try:
             torch.openreg._maybe_exchange_device = exchange
             trace_rules._register_privateuse1_backend()
             self.assertIn(exchange, TorchInGraphFunctionVariable._get_handlers())
+
+            torch.openreg.set_device(0)
+            cnt = CompileCounterWithBackend("eager")
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def compiled_fn():
+                torch.openreg._maybe_exchange_device(1)
+
+            compiled_fn()
+            graph = cnt.graphs[0]
+            exchange_nodes = [
+                node
+                for node in graph.graph.nodes
+                if node.op == "call_function"
+                and node.target is torch.openreg._exchange_device
+            ]
+            # The aliased call routes to the shared exchange handler, which
+            # emits the canonical _exchange_device target (self.value).
+            self.assertEqual(len(exchange_nodes), 1)
+            self.assertEqual(exchange_nodes[0].args, (1,))
+            # The exchange leaves the runtime device switched, so the
+            # current_device guard (captured for device 0) recompiles the next
+            # call, which starts on device 1.
+            self.assertEqual(torch.openreg.current_device(), 1)
+            compiled_fn()
+            self.assertEqual(cnt.frame_count, 2)
         finally:
             torch.openreg._maybe_exchange_device = maybe
             # Re-probe the restored (non-aliased) module so the rule map and
             # handler cache are left as they were found.
             trace_rules._register_privateuse1_backend()
+            torch.openreg.set_device(prev_device)
 
 
 if __name__ == "__main__":

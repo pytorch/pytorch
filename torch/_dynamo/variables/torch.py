@@ -3455,6 +3455,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if privateuse1_exchange_fns:
             # exchange_device_helper additionally requires the backend to
             # provide current_device / set_device (guard source + cleanup hook).
+            device_mod = torch.get_device_module(privateuse1_backend_name)
+
             @register(*privateuse1_exchange_fns)
             def handle_backend_exchange_device(
                 self,
@@ -3462,6 +3464,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 *args: VariableTracker,
                 **kwargs: VariableTracker,
             ) -> VariableTracker:
+                # Check the contract before tracing: a missing method would
+                # otherwise surface as an AttributeError from the cleanup hook
+                # (set_device) or at guard-build time (current_device), leaving
+                # the process on the switched device.
+                for required in ("current_device", "set_device"):
+                    if not hasattr(device_mod, required):
+                        unimplemented(
+                            gb_type="privateuse1_exchange_missing_contract_methods",
+                            context=(
+                                f"torch.{privateuse1_backend_name}.{required}() is "
+                                f"missing; {self.value.__name__} requires it"
+                            ),
+                            explanation=(
+                                f"torch.{privateuse1_backend_name} defines "
+                                f"{self.value.__name__} but not {required}(). "
+                                "The Dynamo exchange contract (see the "
+                                "Note(Dynamo) section of "
+                                "torch.utils.rename_privateuse1_backend's "
+                                "docstring) requires both current_device() and "
+                                "set_device()"
+                            ),
+                            hints=[*graph_break_hints.USER_ERROR],
+                        )
                 return exchange_device_helper(
                     tx, list(args), kwargs, self.value, privateuse1_backend_name
                 )
