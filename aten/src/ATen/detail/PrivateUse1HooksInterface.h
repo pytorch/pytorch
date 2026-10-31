@@ -1,12 +1,16 @@
 #pragma once
 
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
+#include <c10/util/OptionalArrayRef.h>
 
 
 namespace at {
@@ -64,6 +68,28 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   virtual void resizePrivateUse1Bytes(
       const c10::Storage& /*storage*/,
       size_t /*newsize*/) const {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Opt-in hook allowing a PrivateUse1 backend to take over Tensor/Storage
+  // construction inside `at::from_blob(...)`, e.g. to produce a backend
+  // subclass of TensorImpl/StorageImpl instead of the generic ones. Backends
+  // that don't need this (the common case) should leave both methods at
+  // their defaults below, which preserves the exact pre-existing behavior.
+  virtual bool hasCustomFromBlob() const {
+    return false;
+  }
+
+  virtual at::TensorBase fromBlobPrivateUse1(
+      // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+      c10::DataPtr&& data_ptr,
+      std::size_t size_bytes,
+      at::IntArrayRef sizes,
+      at::OptionalIntArrayRef strides,
+      std::optional<int64_t> storage_offset,
+      const at::TensorOptions& options,
+      bool resizeable,
+      c10::Allocator* allocator) const {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
