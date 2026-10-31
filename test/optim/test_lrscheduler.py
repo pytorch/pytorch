@@ -895,11 +895,14 @@ class TestLRScheduler(TestCase):
         one_level_scheduler = make_scheduler(one_level_optimizer)
 
         two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        two_level_scheduler = SequentialLR(
-            two_level_optimizer,
-            [make_scheduler(two_level_optimizer)],
-            milestones=[],
-        )
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            two_level_scheduler = SequentialLR(
+                two_level_optimizer,
+                [make_scheduler(two_level_optimizer)],
+                milestones=[],
+            )
+        self.assertEqual([str(w.message) for w in ws], [])
 
         one_level_lrs = self._get_lrs(one_level_scheduler)
         two_level_lrs = self._get_lrs(two_level_scheduler)
@@ -920,11 +923,14 @@ class TestLRScheduler(TestCase):
         one_level_scheduler = make_scheduler(one_level_optimizer)
 
         two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        two_level_scheduler = SequentialLR(
-            two_level_optimizer,
-            [make_scheduler(two_level_optimizer)],
-            milestones=[],
-        )
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            two_level_scheduler = SequentialLR(
+                two_level_optimizer,
+                [make_scheduler(two_level_optimizer)],
+                milestones=[],
+            )
+        self.assertEqual([str(w.message) for w in ws], [])
 
         one_level_lrs = self._get_lrs(one_level_scheduler)
         two_level_lrs = self._get_lrs(two_level_scheduler)
