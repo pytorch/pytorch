@@ -2033,9 +2033,10 @@ class TestBinaryUfuncsDevice(TestCase):
         p = complex(-0.53125, -0.53125) if dtype.is_complex else -0.53125
         alpha = 0.1
 
-        # Tensor sizes cover scalar-only (< vector size), vector boundary, scalar tail, and large tail paths:
-        # e.g., 1 (scalar), 31 (scalar tail), 32 (exact vector size), 33 (vector body + scalar tail), 4096 + 67.
-        for n in [1, 31, 32, 33, 4096 + 67]:
+        # Tensor sizes cover scalar-only (< vector size), vector boundary, scalar tail, and large tail paths
+        # across vector widths (e.g. AVX2 width 32 and AVX512 width 64 for 16-bit types):
+        # 1, 31, 32, 33, 63, 64, 65, and 4096 + 67.
+        for n in [1, 31, 32, 33, 63, 64, 65, 4096 + 67]:
             x = torch.full((n,), g, device=device, dtype=dtype)
             y = torch.full((n,), p, device=device, dtype=dtype)
 
@@ -2059,6 +2060,16 @@ class TestBinaryUfuncsDevice(TestCase):
 
             self.assertEqual(out_add_nc, ref_add, atol=0, rtol=0, exact_dtype=True)
             self.assertEqual(out_sub_nc, ref_sub, atol=0, rtol=0, exact_dtype=True)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_add_alpha_overflow_reduced_precision(self, device, dtype):
+        # Passing an alpha exceeding the reduced-precision range (e.g. 1e5 for float16)
+        # used to raise an overflow error during Scalar conversion. Now alpha is converted
+        # to opmath_t (float), computing in float and returning inf, matching CUDA behavior.
+        a = torch.tensor([1.0], device=device, dtype=dtype)
+        b = torch.tensor([1.0], device=device, dtype=dtype)
+        res = torch.add(a, b, alpha=1e5)
+        self.assertTrue(torch.isinf(res).all())
 
     # Tests that device tensors on different devices cannot be used in the same
     # binary operation, and that device "scalars" cannot be used in the same
