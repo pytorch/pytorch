@@ -385,25 +385,6 @@ def register_module_full_backward_hook(
     return handle
 
 
-# Trick mypy into not applying contravariance rules to inputs by defining
-# forward as a value, rather than a function.  See also
-# https://github.com/python/mypy/issues/8795
-def _forward_unimplemented(self, *input: Any) -> None:
-    r"""Define the computation performed at every call.
-
-    Should be overridden by all subclasses.
-
-    .. note::
-        Although the recipe for forward pass needs to be defined within
-        this function, one should call the :class:`Module` instance afterwards
-        instead of this since the former takes care of running the
-        registered hooks while the latter silently ignores them.
-    """
-    raise NotImplementedError(
-        f'Module [{type(self).__name__}] is missing the required "forward" function'
-    )
-
-
 class Module:
     r"""Base class for all neural network modules.
 
@@ -523,7 +504,20 @@ class Module:
         if self.call_super_init:
             super().__init__(*args, **kwargs)
 
-    forward: Callable[..., Any] = _forward_unimplemented
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
+        r"""Define the computation performed at every call.
+
+        Should be overridden by all subclasses.
+
+        .. note::
+            Although the recipe for forward pass needs to be defined within
+            this function, one should call the :class:`Module` instance afterwards
+            instead of this since the former takes care of running the
+            registered hooks while the latter silently ignores them.
+        """
+        raise NotImplementedError(
+            f'Module [{type(self).__name__}] is missing the required "forward" function'
+        )
 
     def register_buffer(
         self, name: str, tensor: Tensor | None, persistent: bool = True
