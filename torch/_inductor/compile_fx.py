@@ -22,7 +22,6 @@ from itertools import count
 from operator import attrgetter
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
-from unittest import mock
 
 import torch._inductor.async_compile
 import torch.fx
@@ -103,6 +102,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -1020,7 +1020,7 @@ def fake_tensor_prop(
             ctx = (
                 contextlib.nullcontext()
                 if not force_allow_non_fake_inputs
-                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+                else allow_non_fake_inputs_temporarily(fake_mode)
             )
             with ctx:  # type: ignore[attr-defined]
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -1079,16 +1079,11 @@ class _CompileFxKwargs(TypedDict, total=False):
 
 
 def _cudagraph_compile_kwargs(
-    *,
-    region_aware: bool,
-    forced_region_partition: bool,
-    top_level: bool,
+    *, region_aware: bool, top_level: bool
 ) -> _CompileFxKwargs:
     kwargs: _CompileFxKwargs = {"cudagraphs_top_level": top_level}
     if region_aware:
         kwargs["cudagraphs_region_aware"] = True
-    if forced_region_partition:
-        kwargs["cudagraph_region_forced_partition"] = True
     return kwargs
 
 
@@ -1246,19 +1241,21 @@ def _compile_fx_inner(
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     # Graph partition does not support cpp_wrapper/aot_mode, so a region-local
-    # cudagraph request cannot be isolated there.
-    if (graph_kwargs.get("cpp_wrapper", False) or aot_mode) and graph_kwargs.get(
-        "cudagraphs_region_aware", False
-    ):
-        graph_kwargs["cudagraph_region_forced_partition"] = False
+    # cudagraph request cannot be isolated there. The forced-partition decision is
+    # made here, under the compile's full config: a lazily compiled backward runs
+    # outside torch.compile(options=...) until inner_compile re-applies them.
+    region_aware = graph_kwargs.get("cudagraphs_region_aware", False)
+    if region_aware and (graph_kwargs.get("cpp_wrapper", False) or aot_mode):
         if graph_kwargs.get("cudagraphs_top_level", config.triton.cudagraphs):
             # The region asked to be left out of an enclosing capture. We cannot
             # split it off, but dropping every CUDA graph in the model is further
             # from the request than leaving the enclosing capture alone.
-            log_cudagraph_skip_and_bump_counter(
+            cudagraphs_log.warning(
                 "cannot exclude a nested compile region from cudagraphs: "
                 "graph partition is unsupported under cpp_wrapper/aot_mode"
             )
+    elif region_aware and not config.graph_partition:
+        graph_kwargs["cudagraph_region_forced_partition"] = True
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -1688,7 +1685,7 @@ class _InProcessFxCompile(FxCompile):
 
             # lift the maximum depth of the Python interpreter stack
             # to adapt large/deep models
-            sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), 3000))
 
             _step_logger()(
                 logging.INFO,
@@ -1905,6 +1902,12 @@ class _InProcessFxCompile(FxCompile):
                     "cudagraph_region_forced_partition", False
                 )
                 graph_partition = config.graph_partition or region_forced_partition
+                cudagraphs_top_level = graph_kwargs.get(
+                    "cudagraphs_top_level", config.triton.cudagraphs
+                )
+                region_requests_cudagraphs = graph_kwargs.get(
+                    "cudagraphs_region_aware", False
+                ) and bool(cudagraphs)
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -1930,19 +1933,13 @@ class _InProcessFxCompile(FxCompile):
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
                     graph_partition=graph_partition,
-                    use_cudagraph_partition=(
-                        (
-                            bool(cudagraphs)
-                            or _unstable_customized_partition_wrapper.wrapper
-                            is not None
-                        )
-                        and graph_partition
-                        if "cudagraphs_top_level" in graph_kwargs
-                        else None
+                    use_cudagraph_partition=graph_partition
+                    and (
+                        cudagraphs_top_level
+                        or region_requests_cudagraphs
+                        or _unstable_customized_partition_wrapper.wrapper is not None
                     ),
-                    cudagraphs_top_level=graph_kwargs.get(
-                        "cudagraphs_top_level", config.triton.cudagraphs
-                    ),
+                    cudagraphs_top_level=cudagraphs_top_level,
                     cudagraph_region_forced_partition=region_forced_partition,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
@@ -2711,7 +2708,7 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with allow_non_fake_inputs_temporarily(fake_mode):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -2723,7 +2720,6 @@ def fw_compiler_freezing(
             layout_opt=layout_opt,
             **_cudagraph_compile_kwargs(
                 region_aware=compiler_config_extra.forward_has_regional_cudagraphs,
-                forced_region_partition=compiler_config_extra.enable_forward_region_graph_partition,
                 top_level=compiler_config_extra.top_level_cudagraphs,
             ),
         )
@@ -2883,7 +2879,6 @@ class CompilerConfigExtra:
     top_level_cudagraphs: bool
     backward_top_level_cudagraphs: bool
     forward_has_regional_cudagraphs: bool
-    enable_forward_region_graph_partition: bool
     graph_id: int
     forward_device_index: BoxedDeviceIndex
     forward_is_cudagraph_partitioned: BoxedBool
@@ -2895,7 +2890,7 @@ def create_compiler_config_extra(
 ) -> CompilerConfigExtra:
     """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
-    pre_aot_graph = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
+    pre_aot_graph = gm if isinstance(gm, GraphModule) else gm.gm
     cudagraph_annotation = (
         dynamo_graph_metadata.get("cudagraph_annotation")
         if dynamo_graph_metadata is not None
@@ -2953,10 +2948,6 @@ def create_compiler_config_extra(
 
     cudagraphs = BoxedBool(top_level_cudagraphs)
 
-    enable_forward_region_graph_partition = (
-        not config.graph_partition and forward_has_regional_cudagraphs
-    )
-
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
     # uniquely identify multiple Inductor compilations that arise from
@@ -2976,7 +2967,6 @@ def create_compiler_config_extra(
         top_level_cudagraphs=top_level_cudagraphs,
         backward_top_level_cudagraphs=backward_top_level_cudagraphs,
         forward_has_regional_cudagraphs=forward_has_regional_cudagraphs,
-        enable_forward_region_graph_partition=enable_forward_region_graph_partition,
         graph_id=graph_id,
         forward_device_index=forward_device_index,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
@@ -3126,7 +3116,6 @@ def compile_fx_forward(
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
             **_cudagraph_compile_kwargs(
                 region_aware=compiler_config_extra.forward_has_regional_cudagraphs,
-                forced_region_partition=compiler_config_extra.enable_forward_region_graph_partition,
                 top_level=compiler_config_extra.top_level_cudagraphs,
             ),
         )
@@ -3186,10 +3175,6 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
-        enable_backward_region_graph_partition = (
-            not config.graph_partition and backward_region_preference_differs
-        )
-
         # Static backward inputs (see Note: [static_input_idxs semantics])
         # are the saved tensors, minus two over-approximations of the
         # name-based classification:
@@ -3237,7 +3222,6 @@ def compile_fx_backward(
                 boxed_forward_device_index=compiler_config_extra.forward_device_index,
                 **_cudagraph_compile_kwargs(
                     region_aware=backward_region_preference_differs,
-                    forced_region_partition=enable_backward_region_graph_partition,
                     top_level=backward_top_level_cudagraphs,
                 ),
             )

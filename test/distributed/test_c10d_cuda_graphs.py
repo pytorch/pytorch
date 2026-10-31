@@ -210,6 +210,30 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
                 async_op,
             )
 
+    def test_coalescing_window(self):
+        if not self.supports_coalescing:
+            self.skipTest(f"{self.backend_name} does not support coalescing")
+        self._init_pg()
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        pg = dist.distributed_c10d._get_default_group()
+        reduced = self._tensor(torch.float32)
+        n = 4 * self.world_size
+        a2a_in = torch.full((n,), float(self.rank), device=self.device)
+        a2a_out = torch.empty_like(a2a_in)
+
+        def window():
+            pg._start_coalescing(self.device)
+            dist.all_reduce(reduced, async_op=True)
+            dist.all_to_all_single(a2a_out, a2a_in, async_op=True)
+            return pg._end_coalescing(self.device)
+
+        self._capture_and_replay(window, async_op=True)
+        expected = torch.full_like(reduced, sum(range(1, self.world_size + 1)))
+        self.assertEqual(reduced, expected)
+        ranks = torch.arange(self.world_size, device=self.device)
+        self.assertEqual(a2a_out, ranks.repeat_interleave(4).float())
+
     def test_complex_collectives(self):
         self._init_pg()
         dist.all_reduce(torch.ones(1, device=self.device))

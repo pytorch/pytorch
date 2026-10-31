@@ -609,14 +609,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.kernel_free_cudagraph: bool = False
         # Whether codegen splits this graph into partition functions. A nested
         # region asking for its own CUDA Graph forces this on for one compile,
-        # so it can differ from config.graph_partition. Everything that reasons
-        # about partitioning must read this rather than the ambient config,
-        # which stays at what the user asked for.
+        # so it can differ from config.graph_partition, which stays at what the
+        # user asked for.
         self.graph_partition = (
             config.graph_partition if graph_partition is None else graph_partition
         )
-        # Partitioning decision this graph was lowered with. The ambient config
-        # can differ by the time post-compile inspects the result.
+        # Whether the partitions are for CUDA Graphs (or a customized partition
+        # wrapper).
         self.use_cudagraph_partition = (
             is_using_cudagraph_partition()
             if use_cudagraph_partition is None
@@ -1046,15 +1045,8 @@ class GraphLowering(torch.fx.Interpreter):
         Whether an op that cannot be CUDA Graph captured gets split into its own
         partition rather than disabling capture for the whole graph. False when
         partitioning was forced on only to isolate a nested region while the
-        enclosing code is still captured as one graph: there the enclosing
-        capture keeps following the user's graph_partition=False rules.
-
-        Only consult this from a site that is already gated on cudagraphs being
-        requested. It folds in use_cudagraph_partition, which is False whenever
-        capture was not asked for, so from an ungated site it reads as "no
-        partitioning" for a graph that is in fact partitioned. Every current
-        caller either sits under `if cudagraphs:` or only writes
-        disable_cudagraphs_reason, which nothing reads unless capture is on.
+        enclosing code is still captured: the enclosing capture keeps following
+        the user's graph_partition=False rules.
         """
         return self.use_cudagraph_partition and not (
             self.cudagraph_region_forced_partition and self.cudagraphs_top_level
@@ -2624,6 +2616,8 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> None:
         import copy
 
+        from .compile_fx import clone_preserve_strides
+
         cloned_gm = copy.deepcopy(self.orig_gm)
         example_inputs = copy.deepcopy(example_inputs)
         triton_nodes = []
@@ -2668,7 +2662,10 @@ class GraphLowering(torch.fx.Interpreter):
             with cloned_gm.graph.inserting_before(node):
                 for k, v in kwargs.items():
                     if k in mutated:
-                        new_node = cloned_gm.graph.call_function(torch.clone, args=(v,))
+                        # Kernels keep the original stride arguments when autotuned.
+                        new_node = cloned_gm.graph.call_function(
+                            clone_preserve_strides, args=(v,)
+                        )
                         new_kwargs[k] = len(kwargs_inputs)
                         kwargs_inputs.append(new_node)
                         continue
@@ -3229,7 +3226,12 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        if config.triton.autotune_at_compile_time:
+        # Under compile-time autotuning the C++ wrapper's main code embeds no Triton
+        # source, so this block is the only place its module shows the kernels. The
+        # python wrapper defines them as code; for it the block is only the
+        # inductor_autotune_at_compile_time_code artifact and, with output_code at
+        # DEBUG, the file whose path generate_and_run_autotune_block logs.
+        if config.triton.autotune_at_compile_time and self.cpp_wrapper:
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')

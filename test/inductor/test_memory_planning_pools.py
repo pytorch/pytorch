@@ -2,10 +2,20 @@
 
 from types import SimpleNamespace
 
+import sympy
+
 import torch
-from torch._inductor import config
-from torch._inductor.codegen.memory_planning import Allocation, LiveRange, MemoryPlanner
+from torch._inductor import config, ir
+from torch._inductor.codegen.memory_planning import (
+    Allocation,
+    AllocationPool,
+    LiveRange,
+    MemoryPlanner,
+    TemporalSplit,
+)
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import align
+from torch.utils._sympy.functions import Max
 
 
 class MemoryPlanningPoolsTest(TestCase):
@@ -69,6 +79,40 @@ class MemoryPlanningPoolsTest(TestCase):
                     for group in groups
                 )
                 self.assertEqual(expected_pool_pattern, actual_pool_pattern)
+
+
+class PoolAlignmentTest(TestCase):
+    @staticmethod
+    def make_allocation(name, nbytes, live_range):
+        node = ir.Buffer(
+            name=name,
+            layout=ir.FixedLayout(torch.device("cpu"), torch.uint8, [nbytes], [1]),
+        )
+        return Allocation(node, live_range, size_hint=64, symbolic_size=nbytes)
+
+    def test_symbolic_pool_alignment(self):
+        a, b, c, d = sympy.symbols("a b c d", integer=True)
+        first = self.make_allocation("first", a, LiveRange(0, 1))
+        second = self.make_allocation("second", b, LiveRange(1, 2))
+        tail = self.make_allocation("tail", c, LiveRange(0, 3))
+        anchor = self.make_allocation("anchor", sympy.Integer(1), LiveRange(0, 3))
+        first.mark_allocated()
+        second.mark_allocated()
+        pool = AllocationPool(torch.device("cpu"), TemporalSplit([first, second]))
+        pool.allocate_at_end(tail)
+        pool.allocate_at_end(anchor)
+        prefix = Max(align(a), align(b))
+        self.assertEqual(pool.root.get_symbolic_size(), prefix + align(c) + 1)
+
+        replacement = self.make_allocation("replacement", d, LiveRange(2, 3))
+        self.assertTrue(pool.allocate(replacement, is_last=False))
+        prefix = Max(align(a), align(b), align(d))
+        self.assertEqual(pool.root.get_symbolic_size(), prefix + align(c) + 1)
+        pool.finalize("pool0")
+        self.assertEqual(
+            [block.offset for block in (first, second, tail, anchor, replacement)],
+            [0, 0, prefix, prefix + align(c), 0],
+        )
 
 
 if __name__ == "__main__":
