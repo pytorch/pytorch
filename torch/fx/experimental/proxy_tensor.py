@@ -724,6 +724,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
         offset = val.storage_offset()
         with disable_proxy_modes_tracing(), fake_mode, torch._C._DisableFuncTorch():
             storage = torch.empty(
+                # pyrefly: ignore [bad-argument-type]
                 compute_required_storage_length(val.shape, val.stride(), offset),
                 dtype=val.dtype,
                 device=val.device,
