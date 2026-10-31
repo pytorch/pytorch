@@ -3193,6 +3193,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            if (
+                isinstance(method, types.MethodDescriptorType)
+                and method.__objclass__ is not object
+                and not is_torch_class(method.__objclass__)
+                and name not in self._slotdefs
+                and not trace_rules.is_polyfilled_callable(method)
+            ):
+                # Dispatch C descriptors such as `copy = dict.copy` through their defining type.
+                return variables.MethodDescriptorVariable(
+                    method, owner=VariableTracker.build(tx, method.__objclass__)
+                ).call_function(tx, [self, *args], kwargs)
+
+            # Keep specialized slot/Torch/polyfill dispatch and Python overrides below.
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -3202,10 +3215,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Non-overridden base-class methods dispatch to the base VT via super()
-            # (self is-a base VT under multiple inheritance).  Skip comparison ops:
-            # they go through tp_richcompare_impl on the UserDefined*Variable
-            # subclass, which avoids tracing tensor elements via list_cmp.
+            # Other non-slot methods use the base VT; slots preserve subclass semantics.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -3984,6 +3994,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         return VariableTracker.build(tx, resolved, source)
 
+    def method_load_qualname(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        descriptor: object,
+    ) -> str | None:
+        from ..side_effects import _MUTABLE_GETATTRIBUTES
+
+        # _PyObject_GetMethod skips binding for an unshadowed class descriptor
+        # with generic getattr, e.g. D().popitem(1) reports dict.popitem().
+        if (
+            isinstance(descriptor, types.MethodDescriptorType)
+            and self.lookup_class_mro_attr("__getattribute__") in _MUTABLE_GETATTRIBUTES
+            and self.lookup_class_mro_attr("__getattr__") is NO_SUCH_SUBOBJ
+            and self.lookup_class_mro_attr(name) is descriptor
+            and self.lookup_instance_dict(tx, name) is None
+        ):
+            return descriptor.__qualname__
+        return None
+
+    def install_method_load_guards(self) -> None:
+        if self.cls_source:
+            for attr in ("__getattribute__", "__getattr__"):
+                if self.lookup_class_mro_attr(attr) is NO_SUCH_SUBOBJ:
+                    guard = self.cls_source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=attr)
+                    )
+                else:
+                    guard = AttrSource(self.cls_source, attr).make_guard(
+                        GuardBuilder.FUNCTION_MATCH
+                    )
+                install_guard(guard)
+
     def resolve_type_attr(
         self,
         tx: "InstructionTranslatorBase",
@@ -4013,6 +4056,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
+            if (
+                isinstance(type_attr, types.MethodDescriptorType)
+                and self.lookup_method_descriptor(type_attr) is not None
+            ):
+                if self.cls_source:
+                    # TYPE_MATCH cannot detect class edits such as
+                    # Mapping.__getattribute__ = custom_getattribute.
+                    install_guard(
+                        AttrSource(self.cls_source, "__getattribute__").make_guard(
+                            GuardBuilder.FUNCTION_MATCH
+                        )
+                    )
+                    install_guard(
+                        self.get_source_by_walking_mro(tx, name).make_guard(
+                            GuardBuilder.FUNCTION_MATCH
+                        )
+                    )
+                return variables.BoundBuiltinMethodVariable(
+                    type_attr, self, source=source
+                )
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):
@@ -5972,6 +6035,8 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
+
+    _cpython_type = types.SimpleNamespace
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:
