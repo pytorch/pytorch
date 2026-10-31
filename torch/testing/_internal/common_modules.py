@@ -1030,6 +1030,55 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, tra
     ]
 
 
+def module_error_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
+    N = kwargs['N']
+    transposed = kwargs.get('transposed', False)
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # test_errors does not move the module to the input's device and dtype.
+    make_constructor = partial(FunctionInput, device=device, dtype=dtype)
+
+    for in_channels, out_channels, groups, error_regex in (
+        (4, 6, 0, 'groups must be a positive integer'),
+        (4, 6, -1, 'groups must be a positive integer'),
+        (3, 6, 2, 'in_channels must be divisible by groups'),
+        (4, 5, 2, 'out_channels must be divisible by groups'),
+    ):
+        yield ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_constructor(in_channels, out_channels, 3, groups=groups),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=error_regex,
+        )
+
+    conv_name = f"conv{'_transpose' if transposed else ''}{N}d"
+    for ndim in (N, N + 3):
+        yield ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_constructor(4, 6, 3),
+                forward_input=FunctionInput(make_input((4,) * ndim)),
+                desc=f'wrong_input_dim_{ndim}',
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_regex=rf'Expected {N + 1}D \(unbatched\) or {N + 2}D \(batched\) input to {conv_name}',
+        )
+
+    for with_batch, groups in itertools.product((True, False), (1, 2)):
+        input_shape = ((2,) if with_batch else ()) + (3,) + (4,) * N
+        error_prefix = 'Given transposed=1' if transposed else f'Given groups={groups}'
+        yield ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_constructor(4, 6, 3, groups=groups),
+                forward_input=FunctionInput(make_input(input_shape)),
+                desc=f'wrong_channels_groups_{groups}_with_batch_{with_batch}',
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_regex=(f'{error_prefix}, weight of size .*expected input.*'
+                         'to have 4 channels, but got 3 channels instead'),
+        )
+
+
 def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -4273,6 +4322,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Conv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=1),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                decorators=(
@@ -4280,6 +4330,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=2),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
@@ -4293,6 +4344,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=3),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
@@ -4307,6 +4359,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.ConvTranspose1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False, transposed=True),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=1, transposed=True),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                dtypes=floating_and_complex_types_and(torch.chalf),
@@ -4323,6 +4376,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.ConvTranspose2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False, transposed=True),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=2, transposed=True),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                dtypes=floating_and_complex_types_and(torch.chalf),
@@ -4346,6 +4400,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.ConvTranspose3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False, transposed=True),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=3, transposed=True),
                dtypes=floating_and_complex_types_and(torch.chalf),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
