@@ -179,6 +179,28 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x = graph.placeholder("x")
         y = graph.placeholder("y")
 
+        functionalized_v1 = graph.call_function(
+            torch.ops.higher_order.auto_functionalized,
+            args=(sin_cos._opoverload,),
+            kwargs={"x": x, "out_sin": y, "out_cos": x},
+        )
+        functionalized_v1.meta["only_clone_these_tensors"] = ["out_sin"]
+        self.assertEqual(
+            _multi_output_aliases(functionalized_v1, {}),
+            {2: x},
+        )
+
+        functionalized_v2 = graph.call_function(
+            torch.ops.higher_order.auto_functionalized_v2,
+            args=(sin_cos._opoverload,),
+            kwargs={"_all_bases": [y, x]},
+        )
+        functionalized_v2.meta["only_clone_these_tensors"] = [0]
+        self.assertEqual(
+            _multi_output_aliases(functionalized_v2, {}),
+            {2: x},
+        )
+
         foreach_op = next(iter(inplaceable_foreach_ops.values()))
         foreach = graph.call_function(foreach_op.inplace_op, args=([x, y],))
         self.assertEqual(
