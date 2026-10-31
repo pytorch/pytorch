@@ -3,6 +3,7 @@
 # Owner(s): ["module: numpy"]
 
 import sys
+import warnings
 from itertools import product
 from unittest import skipIf
 
@@ -17,7 +18,12 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # For testing handling NumPy objects and sending tensors to / accepting
@@ -484,6 +490,131 @@ class TestNumPyInterop(TestCase):
             self.assertIsInstance(geq2_x, torch.ByteTensor)
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
+
+    @onlyCPU
+    @parametrize("layout", ["contiguous", "transposed", "strided", "scalar", "empty"])
+    @parametrize("copy", [None, False, True])
+    @parametrize("different_dtype", [False, True])
+    def test_numpy_array_copy(self, device, layout, copy, different_dtype):
+        x = torch.arange(12, dtype=torch.float64).reshape(3, 4)
+        if layout == "transposed":
+            x = x.t()
+        elif layout == "strided":
+            x = x[:, 1::2]
+        elif layout == "scalar":
+            x = x[0, 0]
+        elif layout == "empty":
+            x = x[:0]
+        dtype = np.float32 if different_dtype else np.float64
+        kwargs = {"dtype": dtype}
+        if copy is not None:
+            kwargs["copy"] = copy
+        convert = np.asarray if copy is None else np.array
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "error", category=DeprecationWarning, message="__array__"
+            )
+            if (
+                copy is False
+                and different_dtype
+                and np.lib.NumpyVersion(np.__version__) >= "2.0.0"
+            ):
+                with self.assertRaises(ValueError):
+                    convert(x, **kwargs)
+                return
+            y = convert(x, **kwargs)
+        self.assertEqual(y, x.numpy().astype(dtype))
+        self.assertEqual(y.dtype, dtype)
+        if x.numel():
+            self.assertEqual(
+                np.shares_memory(y, x.numpy()),
+                copy is not True and not different_dtype,
+            )
+
+    @onlyCPU
+    @parametrize("copy", [False, True])
+    def test_numpy_array_copy_without_dtype(self, device, copy):
+        x = torch.arange(12).reshape(3, 4).t()
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "error", category=DeprecationWarning, message="__array__"
+            )
+            y = np.array(x, copy=copy)
+        self.assertEqual(y, x.numpy())
+        self.assertEqual(y.dtype, np.int64)
+        self.assertEqual(np.shares_memory(y, x.numpy()), not copy)
+        self.assertTrue(y.flags.f_contiguous)
+
+    @onlyCPU
+    @parametrize("scalar", [False, True])
+    def test_numpy_array_wrap_arguments(self, device, scalar):
+        x = torch.tensor([-2, 3])
+        if scalar:
+            x = x[0]
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "error", category=DeprecationWarning, message="__array_wrap__"
+            )
+            absolute = np.abs(x)
+            positive = np.greater(x, 0)
+            reduced = np.add.reduce(x)
+        self.assertIsInstance(absolute, torch.Tensor)
+        self.assertIsInstance(positive, torch.Tensor)
+        self.assertIsInstance(reduced, torch.Tensor)
+        self.assertEqual(absolute, x.abs())
+        self.assertEqual(positive, (x > 0).to(torch.uint8))
+        self.assertEqual(reduced, x.sum())
+
+    @onlyCPU
+    def test_numpy_array_copy_dtype_metadata(self, device):
+        x = torch.arange(3, dtype=torch.float64)
+        dtype = np.dtype("float64", metadata={"unit": "m"})
+        y = np.array(x, dtype=dtype, copy=True)
+        self.assertEqual(y, x.numpy())
+        self.assertEqual(y.dtype.metadata, dtype.metadata)
+        self.assertFalse(np.shares_memory(y, x.numpy()))
+
+    @onlyCPU
+    def test_numpy_array_subclass_arguments(self, device):
+        calls = []
+
+        class SubTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func in (torch.Tensor.__array__, torch.Tensor.__array_wrap__):
+                    calls.append((func, dict(kwargs or {})))
+                return super().__torch_function__(func, types, args, kwargs)
+
+        x = torch.tensor([-2, 3]).as_subclass(SubTensor)
+        for copy in (None, False, True):
+            calls.clear()
+            y = x.__array__(copy=copy)
+            copy_kwargs = next(
+                kwargs for func, kwargs in calls if func is torch.Tensor.__array__
+            )
+            self.assertIs(copy_kwargs["copy"], copy)
+            self.assertEqual(np.shares_memory(y, x.numpy()), copy is not True)
+            self.assertEqual(y, x.numpy())
+
+        # NumPy may make the copy itself instead of forwarding copy=True.
+        y = np.array(x, copy=True)
+        self.assertFalse(np.shares_memory(y, x.numpy()))
+        self.assertEqual(y, x.numpy())
+        numpy2 = np.lib.NumpyVersion(np.__version__) >= "2.0.0"
+        calls.clear()
+        absolute = np.abs(x)
+        reduced = np.add.reduce(x)
+        wrap_kwargs = [
+            kwargs for func, kwargs in calls if func is torch.Tensor.__array_wrap__
+        ]
+        self.assertEqual(len(wrap_kwargs), 2)
+        self.assertIs(wrap_kwargs[0]["context"][0], np.absolute)
+        self.assertIs(wrap_kwargs[0]["return_scalar"], False)
+        self.assertIs(wrap_kwargs[1]["return_scalar"], numpy2)
+        self.assertIsInstance(absolute, SubTensor)
+        self.assertIsInstance(reduced, SubTensor)
+        self.assertEqual(absolute, x.abs())
+        self.assertEqual(reduced, x.sum())
 
     @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
