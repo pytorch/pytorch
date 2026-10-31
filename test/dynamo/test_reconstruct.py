@@ -148,6 +148,22 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             self.assertIsNot(contents, previous)
             previous = contents
 
+    @parametrize("graph_break", [False, True])
+    def test_dynamic_slice_reconstruct(self, graph_break):
+        def fn(x):
+            result = x + 1
+            value = slice(0, x.shape[0] - 1)
+            if graph_break:
+                torch._dynamo.graph_break()
+            return result, value
+
+        compiled = torch.compile(
+            fn, backend="eager", dynamic=True, fullgraph=not graph_break
+        )
+        for size in (4, 6):
+            x = torch.randn(size)
+            self.assertEqual(compiled(x), fn(x))
+
     @unittest.skipIf(sys.version_info < (3, 12), "Enum value containment added in 3.12")
     def test_enum_membership_creates_combined_flag(self):
         class Flags(enum.Flag):
