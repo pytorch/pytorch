@@ -701,6 +701,47 @@ class TestTransformersAccelerator(NNTestCase):
             # of NaNs for fully masked rows
             self.assertEqual(out, out_fp.nan_to_num())
 
+    def test_multiheadattention_need_weights_fully_masked_row_no_nan_grad(self, device):
+        # gh-41508: need_weights=True must match need_weights=False for fully masked rows, NaN-free.
+        torch.manual_seed(0)
+        embed_dim, num_heads, tgt_len, bsz = 4, 2, 4, 2
+        mha = nn.MultiheadAttention(embed_dim, num_heads, device=device)
+
+        x = torch.rand(tgt_len, bsz, embed_dim, device=device)
+        key_padding_mask = torch.tensor(
+            [[False, False, False, False], [False, False, True, True]],
+            dtype=torch.bool, device=device,
+        )
+        # Sliding window + padding: only batch 1's last query has no valid key.
+        neg_inf = float("-inf")
+        attn_mask = torch.tensor(
+            [
+                [0., neg_inf, neg_inf, neg_inf],
+                [0., 0., neg_inf, neg_inf],
+                [neg_inf, 0., 0., neg_inf],
+                [neg_inf, neg_inf, 0., 0.],
+            ],
+            device=device,
+        )
+
+        def run(need_weights):
+            mha.zero_grad()
+            out, _ = mha(
+                x, x, x,
+                key_padding_mask=key_padding_mask,
+                attn_mask=attn_mask,
+                need_weights=need_weights,
+            )
+            out[:2].sum().backward()
+            return out.detach(), [p.grad.clone() for p in mha.parameters()]
+
+        out_weights, grads_weights = run(need_weights=True)
+        out_fast, grads_fast = run(need_weights=False)
+
+        self.assertEqual(out_weights, out_fast, atol=1e-5, rtol=1e-4)
+        for g_weights, g_fast in zip(grads_weights, grads_fast):
+            self.assertEqual(g_weights, g_fast, atol=1e-5, rtol=1e-4)
+
     @onlyAccelerator
     def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
         previous_fastpath = torch.backends.mha.get_fastpath_enabled()
