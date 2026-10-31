@@ -4957,7 +4957,15 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served", out.stdout)
         return out.stdout
 
-    @parametrize("key", ["cpp_wrapper", "graph_partition", "triton.cudagraphs"])
+    @parametrize(
+        "key",
+        [
+            "cpp_wrapper",
+            "graph_partition",
+            "triton.cudagraphs",
+            "triton.cudagraph_trees",
+        ],
+    )
     def test_a_cudagraph_input_changed_after_capture_began_refuses(self, key):
         from torch._dynamo.precompile_package import _cudagraph_inputs
 
@@ -4970,14 +4978,26 @@ class TestPrecompileDynamoCapture(TestCase):
                     cap(self.model, self.x2)
             cap(self.model, self.x2)
 
-    @parametrize("key", ["cpp_wrapper", "graph_partition"])
+    @parametrize("key", ["cpp_wrapper", "graph_partition", "triton.cudagraph_trees"])
     def test_a_capture_without_cudagraphs_compiles_under_an_inner_patch(self, key):
+        from torch._dynamo import callback
         from torch._dynamo.precompile_package import _cudagraph_inputs
 
+        # What each Dynamo compile of the capture saw.
+        seen = []
+
+        def record(args):
+            if args.callback_trigger == callback.CallbackTrigger.DYNAMO:
+                seen.append(_cudagraph_inputs()[key])
+
+        callback.on_compile_start(record)
+        self.addCleanup(callback.callback_handler.remove_start_callback, record)
         single = self.mod.single
+        inner = not _cudagraph_inputs()[key]
         with self._capture(single) as cap:
-            with torch._inductor.config.patch({key: not _cudagraph_inputs()[key]}):
+            with torch._inductor.config.patch({key: inner}):
                 y = cap(self.model, self.x2)
+        self.assertEqual(set(seen), {inner})
         # Under crossref the guards hold only inside the harness's mode.
         if not TEST_WITH_CROSSREF:
             self._serve_in_fresh_process([((self.x2,), {}, y)])
@@ -6830,10 +6850,11 @@ class TestPrecompileCudagraphs(TestCase):
             todo.extend(c for cs in todo.pop().children.values() for c in cs)
         self.assertEqual(recorded, baseline)
 
-    def test_a_cudagraph_policy_set_in_the_loading_process_wraps_the_graphs(self):
+    def test_a_cudagraph_policy_set_in_the_loading_process_decides_wrapping(self):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.step, options=options)
-        served = self._serve_in_fresh_process(y, policy="WrapsNoGraph")
+        # The policy declines the one graph, which counts as a skip.
+        served = self._serve_in_fresh_process(y, policy="WrapsNoGraph", skips=1)
         self.assertEqual(served, (0, 0))
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):

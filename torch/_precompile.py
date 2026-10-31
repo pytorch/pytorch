@@ -4116,8 +4116,9 @@ def capture(
     capture compiles without CUDA graphs, as :func:`torch.compile` does, and
     records that. ``triton.cudagraphs``, ``triton.cudagraph_trees``,
     ``graph_partition`` and ``cpp_wrapper`` are read when ``capture()`` is
-    called; a captured call made after ``triton.cudagraphs`` changed raises,
-    and so does one after another of them changed while CUDA graphs are on. As under ``torch.compile``, a
+    called. A capture with CUDA graphs on compiles every call under them and
+    raises on a call made after one of them changed; one without compiles
+    every call with CUDA graphs off and the rest as configured. As under ``torch.compile``, a
     graph's outputs are overwritten by its next replay, so clone what you keep
     across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated
@@ -4323,9 +4324,10 @@ def load(
     ``cudagraph_policy``, which wraps them again. Whether each graph can run as
     a CUDA graph at all (``triton.cudagraph_skip_dynamic_graphs``,
     ``triton.cudagraph_support_input_mutation``, ...) was decided when it
-    compiled and ships with it. Only the settings CUDA graph trees read while
-    the graphs run (``triton.cudagraph_capture_sizes``, the rerecord limits,
-    ``triton.cudagraph_or_error``) are the loading process's. A serve-time
+    compiled and ships with it. The settings read while the graphs are wrapped
+    and run (``triton.cudagraph_capture_sizes``, the rerecord limits,
+    ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
+    loading process's. A serve-time
     compile (``allow_serve_time_compiles``) is lowered by Inductor under the
     capture's ``mode`` or ``options`` and ``CUDAGRAPH_CONFIG`` over the loading
     process's config, but Dynamo traces it under the loading process's own
