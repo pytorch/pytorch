@@ -1990,6 +1990,10 @@ class PlateauLR(LRScheduler):
 class ReduceLROnPlateau(LRScheduler):
     """Reduce learning rate when a metric has stopped improving.
 
+    .. deprecated:: 2.16
+        Use :class:`PlateauLR` instead, and replace ``scheduler.step(metric)``
+        with ``scheduler.step(metrics=metric)``.
+
     Models often benefit from reducing the learning rate by a factor
     of 2-10 once learning stagnates. This scheduler reads a metrics
     quantity and if no improvement is seen for a 'patience' number
