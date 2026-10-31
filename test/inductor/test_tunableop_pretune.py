@@ -640,38 +640,46 @@ class TunableOpPretuneRealGpuTest(TestCase):
         def fn(a, b):
             return a @ b
 
-        was_enabled = torch.cuda.tunable.is_enabled()
-        previous = torch.cuda.tunable.get_filename()
+        tunable = torch.cuda.tunable
+        # Every setting below is process-global, so leaving one behind makes a
+        # later test in this process tune at a single iteration, and leaves the
+        # worker holding a CUDA context. Cleanups run LIFO: worker down first.
+        self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
+        for getter, setter in (
+            (tunable.is_enabled, tunable.enable),
+            (tunable.get_max_tuning_duration, tunable.set_max_tuning_duration),
+            (tunable.get_max_tuning_iterations, tunable.set_max_tuning_iterations),
+            (tunable.get_rotating_buffer_size, tunable.set_rotating_buffer_size),
+        ):
+            self.addCleanup(setter, getter())
+        self.addCleanup(tunableop.shutdown_worker)
+
         with tempfile.TemporaryDirectory(prefix="tunableop_pretune_gpu_") as d:
             results = os.path.join(d, "results.csv")
-            try:
-                torch.cuda.tunable.enable(False)
-                torch.cuda.tunable.set_filename(results, False)
-                # Tuning cost is per candidate solution, so the caps -- not the
-                # operand size -- are what keep this to a few seconds a bucket.
-                torch.cuda.tunable.set_max_tuning_duration(1)
-                torch.cuda.tunable.set_max_tuning_iterations(1)
-                torch.cuda.tunable.set_rotating_buffer_size(0)
-                with config.patch(
-                    {
-                        "cuda.autotune_tunableop_mode": "tune",
-                        "cuda.autotune_tunableop_ladder": True,
-                        # The ladder only runs while lowering, and a warm
-                        # FxGraphCache hit skips lowering entirely, so without
-                        # this the test records nothing whenever an earlier run
-                        # left a cache entry behind.
-                        "force_disable_caches": True,
-                    }
-                ):
-                    a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-                    b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-                    # One dynamic dim only: dynamic=True would mark every dim
-                    # and the ladder requires exactly one free symbol.
-                    torch._dynamo.mark_dynamic(a, 0)
-                    torch.compile(fn)(a, b)
-            finally:
-                torch.cuda.tunable.enable(was_enabled)
-                torch.cuda.tunable.set_filename(previous, False)
+            tunable.enable(False)
+            tunable.set_filename(results, False)
+            # Tuning cost is per candidate solution, so the caps -- not the
+            # operand size -- are what keep this to a few seconds a bucket.
+            tunable.set_max_tuning_duration(1)
+            tunable.set_max_tuning_iterations(1)
+            tunable.set_rotating_buffer_size(0)
+            with config.patch(
+                {
+                    "cuda.autotune_tunableop_mode": "tune",
+                    "cuda.autotune_tunableop_ladder": True,
+                    # The ladder only runs while lowering, and a warm
+                    # FxGraphCache hit skips lowering entirely, so without
+                    # this the test records nothing whenever an earlier run
+                    # left a cache entry behind.
+                    "force_disable_caches": True,
+                }
+            ):
+                a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+                b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+                # One dynamic dim only: dynamic=True would mark every dim
+                # and the ladder requires exactly one free symbol.
+                torch._dynamo.mark_dynamic(a, 0)
+                torch.compile(fn)(a, b)
             with open(results) as f:
                 content = f.read()
 
