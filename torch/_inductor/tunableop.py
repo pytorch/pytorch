@@ -24,7 +24,6 @@ from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
@@ -541,12 +540,23 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
+        # Buckets that faulted, and how often. A rung that hangs or crashes is
+        # never added to `seen`, so without this every identical layer would
+        # retry it with a fresh budget -- and, since the order is fixed, would
+        # spend that budget before reaching the rungs that still work.
+        self.failed: dict[Any, int] = {}
 
     def cache_clear(self) -> None:
         self.seen.clear()
+        self.failed.clear()
 
 
 _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
+
+# Attempts a faulting bucket gets across the whole process before it is left
+# alone. One retry covers a transient fault; more would let a reproducible hang
+# charge the per-GEMM budget once per layer.
+_TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
 
 # ExternKernelChoice names (winner.choice.name) the ladder covers. Matched by
 # string so a double import of the kernel modules cannot break the match.
@@ -722,8 +732,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     entries are always recorded concrete -- the mask is deliberately not carried
     into the jobs.
     """
-    import torch._inductor.select_algorithm as sa
-
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
@@ -732,13 +740,10 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         # PYTORCH_TUNABLEOP_ENABLED set, because TunableOp then tunes the aten
         # GEMM autotune runs in-process -- not something Inductor asks for.
         return
-    if not isinstance(winner, sa.ExternKernelCaller):
-        return
     # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
     # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
     # worker would spend the whole per-GEMM budget on and record nothing for.
-    layout_device = getattr(winner.layout, "device", None)
-    if layout_device is None or layout_device.type != "cuda":
+    if winner.layout.device.type != "cuda":
         return
     choice_name = winner.choice.name
     if choice_name not in _TUNABLEOP_GEMM_CHOICES:
@@ -759,9 +764,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # size runtime is known to ask for -- it leads the shared budget and sets
     # both ceilings -- so a data-dependent dim would spend the budget on a size
     # nothing asked for. Honour an explicit hint if the user set one.
-    if free_unbacked_symbols(s) and s not in getattr(
-        V.graph.sizevars.shape_env, "var_to_hint_override", {}
-    ):
+    if not V.graph.sizevars.all_unbacked_explicitly_hinted(s):
         return
 
     # Never bucket the reduction dim K: a solution is only valid for the exact K
@@ -936,14 +939,11 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     kept: list[Any] = []
     kept_dims: list[int] = []
     for bmreq, dim_val in zip(bmreqs, dim_vals):
-        try:
-            metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
-            # Summed: the worker allocates every operand and the output at once.
-            footprint = sum(_meta_bytes(m) for m in metas)
-        except (AttributeError, TypeError):
-            footprint = float("inf")
+        # Summed: the worker allocates every operand and the output at once.
+        metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
+        footprint = sum(_meta_bytes(m) for m in metas)
         if footprint > _TUNABLEOP_MAX_LADDER_BYTES:
-            log.warning(
+            log.info(
                 "TunableOp range pre-tune for %s skipping dim %d: operands "
                 "and output total %.1f GiB, over the %.1f GiB cap.",
                 winner.name,
@@ -963,21 +963,30 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # keying the whole GEMM meant one successful bucket marked the rest done,
     # and a recompile at a new hint resubmitted rungs that had not changed.
     # Scoped by (device, resolved filename) so a compile targeting another
-    # device or results file does not skip.
+    # device or results file does not skip. kwargs are in the key because they
+    # can reach the TunableOp signature -- _scaled_mm's use_fast_accum is part
+    # of ScaledGemmParams::Signature().
     scope = (
-        (layout_device.type, layout_device.index),
+        (winner.layout.device.type, winner.layout.device.index),
         torch.cuda.tunable.get_filename(),
     )
+    kwargs_sig = tuple(sorted((k, repr(v)) for k, v in winner.kwargs.items()))
     keys = [
         (
             winner.name,
             scope,
+            kwargs_sig,
             tuple(_meta_sig(m) for m in b.input_tensor_meta),
             _meta_sig(b.output_tensor_meta),
         )
         for b in bmreqs
     ]
-    fresh = [i for i, k in enumerate(keys) if k not in _pretuned_gemms.seen]
+    fresh = [
+        i
+        for i, k in enumerate(keys)
+        if k not in _pretuned_gemms.seen
+        and _pretuned_gemms.failed.get(k, 0) < _TUNABLEOP_MAX_BUCKET_ATTEMPTS
+    ]
     if not fresh:
         return
     bmreqs = [bmreqs[i] for i in fresh]
@@ -1023,7 +1032,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         else:
             # Solutions found before the fault are already flushed to the
             # results file, and the worker restarts on the next submission.
-            log.warning(
+            # submit() has already warned once per fault kind, so this is debug.
+            _pretuned_gemms.failed[keys[i]] = _pretuned_gemms.failed.get(keys[i], 0) + 1
+            log.debug(
                 "TunableOp range pre-tune for %s hit %s on size %d/%d; continuing.",
                 winner.name,
                 outcome.status,

@@ -16,6 +16,7 @@ import contextlib
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import sympy
@@ -24,12 +25,14 @@ import torch
 from torch._inductor import config, ir, select_algorithm as sa, tunableop
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     skipIfWindows,
     TestCase,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -51,6 +54,10 @@ class _FakeSizevars:
         self.shape_env = mock.Mock()
         self.shape_env.bound_sympy = lambda expr: ValueRanges(*declared)
         self.shape_env.var_to_hint_override = {}
+        self.hint_overrides: dict = {}
+
+    def all_unbacked_explicitly_hinted(self, exprs) -> bool:
+        return not free_unbacked_symbols(exprs) - OrderedSet(self.hint_overrides)
 
     def optimization_hint(self, expr):
         return int(sympy.sympify(expr).subs(self._sym, self._hint))
@@ -86,14 +93,21 @@ class _FakeWinner(sa.ExternKernelCaller):
     """
 
     def __init__(
-        self, name, input_nodes, out_sizes, choice_name=None, out_strides=None
+        self,
+        name,
+        input_nodes,
+        out_sizes,
+        choice_name=None,
+        out_strides=None,
+        kwargs=None,
     ):
-        from types import SimpleNamespace
-
         self.name = name
         # Production always has choice.name == name; pass choice_name to
         # drive a variant without building a real ExternKernelChoice.
         self.choice = SimpleNamespace(name=choice_name or name)
+        # Set by the base __init__ in production; part of the memo key because
+        # _scaled_mm's use_fast_accum reaches the TunableOp signature.
+        self.kwargs = kwargs or {}
         self.input_nodes = input_nodes
         self.layout = ir.FixedLayout(
             DEVICE, DTYPE, out_sizes, out_strides or _contiguous_strides(out_sizes)
@@ -326,10 +340,9 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(padded, sym=s), [])
 
     def test_expanded_bias_still_produces_buckets(self):
-        # mm_args expands a broadcast bias to the output shape, so addmm and
-        # baddbmm normally arrive with a stride-0 bias. No TunableOp Signature()
-        # carries the bias, so density there is irrelevant -- requiring it would
-        # drop almost every addmm/baddbmm. mat1/mat2/output are still checked.
+        # mm_args expands a broadcast bias, so addmm/baddbmm arrive stride-0.
+        # No Signature() carries the bias, so requiring density there would
+        # drop almost all of them. mat1/mat2/output are still checked.
         s = sympy.Symbol("s_expbias", positive=True, integer=True)
         b, m, k, n = s, 32, 256, 512
         mat1 = _buffer("mat1", [b, m, k], _contiguous_strides([b, m, k]))
@@ -385,10 +398,9 @@ class TestTunableOpPretune(TestCase):
             )
 
     def test_unbacked_symbol_is_skipped(self):
-        # optimization_hint() does not raise for an unbacked symbol, it returns
-        # config.unbacked_symint_fallback. Tuning around that invented size
-        # would spend the budget -- hint rung first -- on a size nothing asked
-        # for. Unbacked ints are the "u" prefix (torch/utils/_sympy/symbol.py).
+        # optimization_hint() returns config.unbacked_symint_fallback rather
+        # than raising, so the ladder would tune around an invented size.
+        # Unbacked ints are the "u" prefix (torch/utils/_sympy/symbol.py).
         u = sympy.Symbol("u0", positive=True, integer=True)
         self.assertEqual(_run(self._mm_winner("mm", u), sym=u), [])
 
@@ -398,25 +410,66 @@ class TestTunableOpPretune(TestCase):
         u = sympy.Symbol("u1", positive=True, integer=True)
         winner = self._mm_winner("mm", u)
         with _ladder(u) as submitted:
-            V.graph.sizevars.shape_env.var_to_hint_override = {u: 512}
+            V.graph.sizevars.hint_overrides = {u: 512}
             tunableop.maybe_range_pretune(winner)
         self.assertTrue(submitted, "an explicit hint must re-enable the ladder")
+
+    def test_a_persistently_faulting_bucket_stops_being_retried(self):
+        # A hanging rung never reaches `seen`, so unbounded retries would cost
+        # one fresh budget per identical layer, spent before the rungs that work.
+        s = sympy.Symbol("s_stuck", positive=True, integer=True)
+        attempts = []
+
+        def _always_timeout(job, timeout=None):
+            attempts.append(job.bmreq)
+            return mock.Mock(status="timeout", time=None)
+
+        def _one_pass():
+            with _ladder(s):
+                with mock.patch(
+                    "torch._inductor.tunableop.submit", side_effect=_always_timeout
+                ):
+                    tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+
+        _one_pass()
+        per_pass = len(attempts)
+        self.assertTrue(per_pass, "the first pass must try every bucket")
+        for _ in range(4):
+            _one_pass()
+        self.assertEqual(
+            len(attempts),
+            per_pass * tunableop._TUNABLEOP_MAX_BUCKET_ATTEMPTS,
+            "a faulting bucket must stop after a bounded number of attempts",
+        )
+
+    def test_memo_distinguishes_extern_kwargs(self):
+        # use_fast_accum is in ScaledGemmParams::Signature() but not in the
+        # metas, so the key must carry kwargs or the second variant is skipped.
+        s = sympy.Symbol("s_kwargs", positive=True, integer=True)
+        m, k, n = s, 256, 512
+        nodes = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
+        slow = _FakeWinner(
+            "_scaled_mm", nodes, [m, n], kwargs={"use_fast_accum": False}
+        )
+        fast = _FakeWinner("_scaled_mm", nodes, [m, n], kwargs={"use_fast_accum": True})
+        with _ladder(s) as submitted:
+            tunableop.maybe_range_pretune(slow)
+            first = len(submitted)
+            self.assertTrue(first)
+            tunableop.maybe_range_pretune(fast)
+            self.assertGreater(
+                len(submitted), first, "use_fast_accum must not share a memo key"
+            )
 
     def test_choice_variants_produce_buckets(self):
         # Matching runs on winner.choice.name, which covers the _dtype
         # out-variants and _scaled_mm_v2.
-        from types import SimpleNamespace
-
         # addmm_dtype is in the set on ROCm only (it hard-errors under
         # TunableOp on CUDA), so drive it only where the ladder accepts it.
         variants = ["mm_dtype", "bmm_dtype", "_scaled_mm_v2"]
         if torch.version.hip is not None:
             variants.append("addmm_dtype")
         for choice_name in variants:
-            # Clear the cross-GEMM memo: every variant below reuses the same
-            # traced shapes by design (the point is the choice gate, not the
-            # sizes), so without this only the first variant would submit.
-            tunableop._pretuned_gemms.cache_clear()
             s = sympy.Symbol(f"s_{choice_name}", positive=True, integer=True)
             m, k, n = s, 256, 512
             if choice_name == "addmm_dtype":
@@ -432,8 +485,7 @@ class TestTunableOpPretune(TestCase):
                     choice_name=choice_name,
                 )
             else:
-                winner = self._mm_winner("mm", s)
-                winner.choice = SimpleNamespace(name=choice_name)
+                winner = self._mm_winner(choice_name, s)
             submitted = _run(winner, sym=s)
             self.assertTrue(submitted, f"{choice_name} produced no buckets")
 
@@ -516,15 +568,11 @@ class TestTunableOpPretune(TestCase):
         self.assertGreater(len(submitted), 1)
 
     def test_repeat_gemm_is_skipped(self):
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_memo", positive=True, integer=True)
-            first = _run(self._mm_winner("mm", s), sym=s)
-            self.assertTrue(first)
-            second = _run(self._mm_winner("mm", s), sym=s)
-            self.assertEqual(second, [])
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+        s = sympy.Symbol("s_memo", positive=True, integer=True)
+        first = _run(self._mm_winner("mm", s), sym=s)
+        self.assertTrue(first)
+        second = _run(self._mm_winner("mm", s), sym=s)
+        self.assertEqual(second, [])
 
     def test_cpu_winner_is_skipped(self):
         # The worker is a CUDA process: a CPU winner's bmreq would spend the
@@ -539,116 +587,88 @@ class TestTunableOpPretune(TestCase):
     def test_a_failed_run_is_retried(self):
         # The memo key is recorded only once something was tuned, so a GEMM
         # whose buckets all faulted is retried rather than skipped for good.
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_retry", positive=True, integer=True)
-            with _ladder(s) as submitted:
-                with mock.patch(
-                    "torch._inductor.tunableop.submit",
-                    side_effect=lambda job, timeout=None: mock.Mock(
-                        status="error", time=None
-                    ),
-                ):
-                    tunableop.maybe_range_pretune(self._mm_winner("mm", s))
-                self.assertEqual(submitted, [])
+        s = sympy.Symbol("s_retry", positive=True, integer=True)
+        with _ladder(s) as submitted:
+            with mock.patch(
+                "torch._inductor.tunableop.submit",
+                side_effect=lambda job, timeout=None: mock.Mock(
+                    status="error", time=None
+                ),
+            ):
                 tunableop.maybe_range_pretune(self._mm_winner("mm", s))
-                self.assertTrue(submitted, "a failed GEMM must stay retryable")
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+            self.assertEqual(submitted, [])
+            tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+            self.assertTrue(submitted, "a failed GEMM must stay retryable")
 
     def test_a_narrower_range_reuses_tuned_buckets(self):
-        # The narrow ladder's rungs are a subset of the wide one's, and the
-        # memo is per bucket, so there is nothing left to tune. Keying the
-        # whole GEMM re-ran all of them because the range was part of the key.
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_range", positive=True, integer=True)
-            wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
-            self.assertTrue(wide)
-            narrow = _run(self._mm_winner("mm", s), sym=s, declared=(2, 4096))
-            self.assertEqual(narrow, [], "already-tuned rungs must not re-run")
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+        # The narrow ladder's rungs are a subset of the wide one's, so a
+        # per-bucket memo leaves nothing to tune.
+        s = sympy.Symbol("s_range", positive=True, integer=True)
+        wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
+        self.assertTrue(wide)
+        narrow = _run(self._mm_winner("mm", s), sym=s, declared=(2, 4096))
+        self.assertEqual(narrow, [], "already-tuned rungs must not re-run")
 
     def test_a_wider_range_tunes_only_the_new_buckets(self):
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_widen", positive=True, integer=True)
-            self.assertTrue(_run(self._mm_winner("mm", s), sym=s, declared=(2, 4096)))
-            wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
-            dims = {b.input_tensor_meta[0].sizes[0] for b in wide}
-            self.assertTrue(dims, "the rungs above the old ceiling are new")
-            self.assertTrue(all(d > 4096 for d in dims), f"re-tuned old rungs: {dims}")
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+        s = sympy.Symbol("s_widen", positive=True, integer=True)
+        self.assertTrue(_run(self._mm_winner("mm", s), sym=s, declared=(2, 4096)))
+        wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
+        dims = {b.input_tensor_meta[0].sizes[0] for b in wide}
+        self.assertTrue(dims, "the rungs above the old ceiling are new")
+        self.assertTrue(all(d > 4096 for d in dims), f"re-tuned old rungs: {dims}")
 
     def test_a_partial_run_retries_the_untuned_buckets(self):
-        # The budget is shared across buckets, so a run can tune a few rungs
-        # and stop. Keying the whole GEMM marked it done after the first "ok",
-        # and every identical later layer skipped the rungs that never ran.
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_partial", positive=True, integer=True)
-            calls = []
+        # The budget is shared, so a run can tune a few rungs and stop. Keying
+        # the whole GEMM marked it done on the first "ok" and lost the rest.
+        s = sympy.Symbol("s_partial", positive=True, integer=True)
+        calls = []
 
-            def _one_then_fail(job, timeout=None):
-                calls.append(job.bmreq)
-                return mock.Mock(
-                    status="ok" if len(calls) == 1 else "timeout", time=1.0
-                )
+        def _one_then_fail(job, timeout=None):
+            calls.append(job.bmreq)
+            return mock.Mock(status="ok" if len(calls) == 1 else "timeout", time=1.0)
 
-            with _ladder(s):
-                with mock.patch(
-                    "torch._inductor.tunableop.submit", side_effect=_one_then_fail
-                ):
-                    tunableop.maybe_range_pretune(self._mm_winner("mm", s))
-            tuned_dim = calls[0].input_tensor_meta[0].sizes[0]
+        with _ladder(s):
+            with mock.patch(
+                "torch._inductor.tunableop.submit", side_effect=_one_then_fail
+            ):
+                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+        tuned_dim = calls[0].input_tensor_meta[0].sizes[0]
 
-            second = _run(self._mm_winner("mm", s), sym=s)
-            self.assertTrue(second, "the untuned rungs must be retried")
-            retried = {b.input_tensor_meta[0].sizes[0] for b in second}
-            self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+        second = _run(self._mm_winner("mm", s), sym=s)
+        self.assertTrue(second, "the untuned rungs must be retried")
+        retried = {b.input_tensor_meta[0].sizes[0] for b in second}
+        self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
     def test_memo_distinguishes_stride_order(self):
         # Same sizes, different stride order (plain vs transposed B): the
         # TunableOp signatures differ (NN vs NT), so the second GEMM must
         # still ladder. Guards the memo key carrying strides.
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_stride", positive=True, integer=True)
-            first = _run(self._mm_winner("mm", s), sym=s)
-            self.assertTrue(first)
-            mat1 = _buffer("mat1", [s, 256], [256, 1])
-            mat2 = _buffer("mat2", [256, 512], [1, 256])  # .t() view
-            winner = _FakeWinner("mm", [mat1, mat2], [s, 512])
-            second = _run(winner, sym=s)
-            self.assertTrue(second)
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+        s = sympy.Symbol("s_stride", positive=True, integer=True)
+        first = _run(self._mm_winner("mm", s), sym=s)
+        self.assertTrue(first)
+        mat1 = _buffer("mat1", [s, 256], [256, 1])
+        mat2 = _buffer("mat2", [256, 512], [1, 256])  # .t() view
+        winner = _FakeWinner("mm", [mat1, mat2], [s, 512])
+        second = _run(winner, sym=s)
+        self.assertTrue(second)
 
     def test_memo_distinguishes_dynamic_axis(self):
         # Same hinted sizes but a different dynamic axis (M vs N): the ladders
         # cover different dims, so the second GEMM must still run. Guards the
         # memo key carrying the symbolic expressions, not just hints.
-        tunableop._pretuned_gemms.cache_clear()
-        try:
-            s = sympy.Symbol("s_axis", positive=True, integer=True)
-            first = _run(self._mm_winner("mm", s), sym=s)
-            self.assertTrue(first)
-            # Same hint 512 on N instead of M.
-            mat1 = _buffer("mat1", [512, 256], [256, 1])
-            mat2 = _buffer("mat2", [256, s], [s, 1])
-            winner = _FakeWinner("mm", [mat1, mat2], [512, s])
-            # _contiguous_strides cannot build the N-dynamic output (it would
-            # yield [1, 1]): give it the real dense strides like the
-            # symbol-spanning test does.
-            winner.layout = ir.FixedLayout(DEVICE, DTYPE, [512, s], [s, 1])
-            second = _run(winner, sym=s)
-            self.assertTrue(second)
-        finally:
-            tunableop._pretuned_gemms.cache_clear()
+        s = sympy.Symbol("s_axis", positive=True, integer=True)
+        first = _run(self._mm_winner("mm", s), sym=s)
+        self.assertTrue(first)
+        # Same hint 512 on N instead of M.
+        mat1 = _buffer("mat1", [512, 256], [256, 1])
+        mat2 = _buffer("mat2", [256, s], [s, 1])
+        winner = _FakeWinner("mm", [mat1, mat2], [512, s])
+        # _contiguous_strides cannot build the N-dynamic output (it would
+        # yield [1, 1]): give it the real dense strides like the
+        # symbol-spanning test does.
+        winner.layout = ir.FixedLayout(DEVICE, DTYPE, [512, s], [s, 1])
+        second = _run(winner, sym=s)
+        self.assertTrue(second)
 
     def test_bias_addmm_is_skipped(self):
         # bias_addmm rewrites its own bias (inp[0]) before dispatching, so the
@@ -745,9 +765,9 @@ class TestTunableOpPretune(TestCase):
         winner.output_node.assert_called_once()
 
     def test_tune_mode_bypasses_the_fx_graph_cache(self):
-        # Tuning happens while lowering, so a cache hit would record nothing and
-        # a second tune pass would write an empty results file. AOTAutogradCache
-        # routes through the same validator, so one bypass covers both.
+        # Tuning happens while lowering, so a cache hit records nothing and a
+        # rerun writes an empty results file. AOTAutogradCache routes through
+        # the same validator, so one bypass covers both caches.
         from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 
         gm = torch.fx.symbolic_trace(torch.nn.Linear(4, 4))
@@ -779,7 +799,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     InductorTestCase enters fresh_cache(), which isolates the cache directory
     per test and clears _pretuned_gemms with it. That also means the compile
     always starts cold, so this does not exercise the tune-mode cache bypass;
-    test_enabled_modes_bypass_the_fx_graph_cache covers that directly.
+    test_tune_mode_bypasses_the_fx_graph_cache covers that directly.
     """
 
     hw_classification = HardwareClassification.CUDA
