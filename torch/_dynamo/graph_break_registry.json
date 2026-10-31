@@ -7140,6 +7140,16 @@
       ]
     }
   ],
+  "GB9291": [
+    {
+      "Gb_type": "Preexisting frozendict with user-defined hashes",
+      "Context": "self.python_type_name()",
+      "Explanation": "The builtin may have cached a hash before user-defined keys or values changed. Dynamo cannot inspect that cache.",
+      "Hints": [
+        "Construct the frozendict inside the compiled function."
+      ]
+    }
+  ],
   "GB7038": [
     {
       "Gb_type": "Preexisting frozendict key with user-defined hash",
