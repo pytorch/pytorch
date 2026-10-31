@@ -12,6 +12,7 @@ import logging
 import math
 import operator
 import re
+import sys
 import traceback
 import types
 import typing
@@ -711,33 +712,49 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-def _import_by_name(name: str) -> Any:
+def _find_imported(name: str) -> Any:
     """
-    Import an object that a saved flat_apply node names, the same way the
-    program looks it up when it runs. ``__main__`` modules are refused: the
-    module differs between processes, and importing one runs a script.
+    Find the object that a saved flat_apply node names, without importing
+    anything. Importing a module runs its code, so a saved program must not
+    decide what gets imported: as with ``torch.load(weights_only=True)``, the
+    module that defines the object has to be imported before loading. The
+    object must report the same qualified name, so aliases such as
+    ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
+    ``__main__`` modules are refused too, because they differ between
+    processes.
     """
-    if "__main__" in name.split(".")[:-1]:
+    module_name, _, attr = name.rpartition(".")
+    if "__main__" in module_name.split("."):
         raise SerializeError(f"{name} is in a __main__ module")
-    try:
-        return torch.export.custom_ops._import_object(name)
-    except Exception as e:
-        raise SerializeError(f"Could not import {name}") from e
+    module = sys.modules.get(module_name)
+    if module is None:
+        raise SerializeError(
+            f"{name} is not in an imported module. Import the module that "
+            "defines it first: load does not import modules named in a saved "
+            "program, because importing runs their code."
+        )
+    # getattr would call a module __getattr__, which can import submodules.
+    obj = inspect.getattr_static(module, attr, None)
+    if (getattr(obj, "__module__", None), getattr(obj, "__qualname__", None)) != (
+        module_name,
+        attr,
+    ):
+        raise SerializeError(f"{name} is not defined under that name")
+    return obj
 
 
-def _import_flat_apply_func(
+def _find_flat_apply_func(
     name: str, in_spec: pytree.TreeSpec, flat_args: Sequence[Any]
 ) -> Any:
     """
-    Import the function of a flat_apply call and check that export could have
+    Find the function of a flat_apply call and check that export could have
     produced the call. Save and load both use this one rule. Only traceable
     wrapper tensor subclasses and the helper that calls custom autograd
-    functions are accepted. The helper gets its class by name, as its first argument, and
-    imports it when the program runs, so that name must import a
-    torch.autograd.Function. Note that this imports the modules the names
-    point to.
+    functions are accepted. The helper gets its class by name, as its first
+    argument, so that name must find a torch.autograd.Function. Both names
+    are found with ``_find_imported``, which imports nothing.
     """
-    func = _import_by_name(name)
+    func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
         return func
     if (
@@ -755,7 +772,7 @@ def _import_flat_apply_func(
         raise SerializeError("flat_apply inputs do not match its input spec") from e
     if not args or "function_cls_name" in kwargs or not isinstance(args[0], str):
         raise SerializeError("Expected an autograd function name as the first input")
-    function_cls = _import_by_name(args[0])
+    function_cls = _find_imported(args[0])
     if not (
         isinstance(function_cls, type)
         and issubclass(function_cls, torch.autograd.Function)
@@ -1357,10 +1374,10 @@ class GraphModuleSerializer(metaclass=Final):
         func_name = ".".join(
             getattr(constant_func, attr, "") for attr in ("__module__", "__qualname__")
         )
-        imported = _import_flat_apply_func(func_name, in_spec_value, flat_args)
-        if imported is not constant_func:
+        found = _find_flat_apply_func(func_name, in_spec_value, flat_args)
+        if found is not constant_func:
             raise SerializeError(
-                f"Cannot serialize flat_apply node {node.name}: {func_name} imports "
+                f"Cannot serialize flat_apply node {node.name}: {func_name} names "
                 "a different object, so it could not be loaded back"
             )
         return [
@@ -3255,7 +3272,7 @@ class GraphModuleDeserializer(metaclass=Final):
 
     def deserialize_flat_apply_inputs(self, serialized_node: Node):
         """
-        Reverse of ``serialize_flat_apply_inputs``: import the function, load
+        Reverse of ``serialize_flat_apply_inputs``: find the function, load
         the input spec, and add both back to the graph as TreeSpec attributes.
         """
         func_input, in_spec_input, *flat_inputs = serialized_node.inputs
@@ -3267,7 +3284,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
             ) from e
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
-        func = _import_flat_apply_func(func_name, in_spec, args)
+        func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []
         for suffix, spec in specs.items():

@@ -2843,11 +2843,12 @@ class TestPredispatchSerialization(TestCase):
             self.assertEqual(expected, loaded_ep.module()(*inp))
             torch.export.save(loaded_ep, io.BytesIO())
 
-            # Load and run in a new process, where only torch is imported.
+            # Load and run in a new process. Load does not import modules, so
+            # the process imports the module that defines TwoTensor first.
             # Packaged fbcode test binaries cannot start a plain Python with torch.
             if not IS_FBCODE:
                 script = (
-                    "import torch;"
+                    "import torch, torch.testing._internal.two_tensor;"
                     f"ep = torch.export.load(r'{path}');"
                     "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
                     "print([t.tolist() for t in out])"
@@ -2920,9 +2921,11 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return ScaleBy.apply(x, Config(3))
 
-        # A class defined inside a function cannot be imported by name.
+        # A class defined inside a function cannot be found by name.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        reason = "__main__ module" if __name__ == "__main__" else "Could not import"
+        reason = (
+            "__main__ module" if __name__ == "__main__" else "not in an imported module"
+        )
         with self.assertRaisesRegex(SerializeError, reason):
             torch.export.save(ep, io.BytesIO())
 
@@ -2941,8 +2944,8 @@ class TestPredispatchSerialization(TestCase):
             with self.assertRaisesRegex(SerializeError, "__main__ module"):
                 torch.export.save(ep, io.BytesIO())
 
-        # An autograd function that can be imported by name saves, loads and
-        # runs. A subclass whose name imports a different class cannot be saved.
+        # An autograd function from an imported module saves, loads and runs.
+        # A subclass whose name finds a different class cannot be saved.
         module = types.ModuleType("flat_apply_test_module")
         Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
         LocalTwoTensor.__module__, LocalTwoTensor.__qualname__ = module.__name__, "Sub"
@@ -2959,7 +2962,7 @@ class TestPredispatchSerialization(TestCase):
             buffer.seek(0)
             self.assertEqual(torch.export.load(buffer).module()(x), x * 2 + 1)
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-            with self.assertRaisesRegex(SerializeError, "imports a different object"):
+            with self.assertRaisesRegex(SerializeError, "names a different object"):
                 torch.export.save(ep, io.BytesIO())
 
     def test_predispatch_flat_apply_load_rejects_other_functions(self):
@@ -2999,16 +3002,35 @@ class TestPredispatchSerialization(TestCase):
                 b'"torch.nn.parameter.Parameter"',
                 "cannot be used as a flat_apply function",
             ),
-            (func_name, b'"os.system"', "Could not import"),
-            (func_name, b'"torch.os.system"', "Could not import"),
-            (func_name, b'"torch.builtins.exec"', "Could not import"),
-            (func_name, b'"torch.does_not_exist.f"', "Could not import"),
+            (func_name, b'"os.system"', "not defined under that name"),
+            (func_name, b'"torch.os.system"', "not in an imported module"),
+            (func_name, b'"torch.builtins.exec"', "not in an imported module"),
+            (func_name, b'"torch.does_not_exist.f"', "not in an imported module"),
             (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
             (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
-            (cls_name, b'"torch.os.system"', "Could not import"),
+            (cls_name, b'"torch.autograd.Function"', "not defined under that name"),
+            (cls_name, b'"torch.os.system"', "not in an imported module"),
         ]:
             with self.assertRaisesRegex(SerializeError, reason, msg=new):
                 load(artifact.exported_program.replace(old, new))
+
+        # Importing a module runs its code, so load refuses a name from a
+        # module that is not imported yet, and the module's code never runs.
+        with tempfile.TemporaryDirectory() as tmp:
+            ran = os.path.join(tmp, "ran")
+            with open(os.path.join(tmp, "flat_apply_side_effect.py"), "w") as f:
+                f.write(f"open({ran!r}, 'w').close()\n")
+            with patch.object(sys, "path", [tmp, *sys.path]), patch.dict(sys.modules):
+                for old in (func_name, cls_name):
+                    with self.assertRaisesRegex(
+                        SerializeError, "not in an imported module"
+                    ):
+                        load(
+                            artifact.exported_program.replace(
+                                old, b'"flat_apply_side_effect.F"'
+                            )
+                        )
+                    self.assertFalse(os.path.exists(ran))
 
         # The input spec decides which input the helper gets as the class name.
         program = json.loads(artifact.exported_program)
