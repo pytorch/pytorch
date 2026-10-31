@@ -598,12 +598,15 @@ namespace {
 
         if constexpr (std::is_same_v<VT, float>) {
             // Near and below ln(FLT_MIN), results must not flush to zero, and
-            // NaN must propagate. Mix the inputs in one vector so lanes take
-            // different paths.
+            // NaN must propagate. Also cover both ends of the exponent range
+            // (2^-125 and 2^128 scaling). Mix the inputs in one vector so
+            // lanes take different paths.
             const VT inputs[] = {
-                VT(-87.0), VT(-87.2), VT(-87.5), VT(-90.0), VT(-100.0),
-                VT(-103.9), VT(-110.0), -std::numeric_limits<VT>::infinity(),
-                std::numeric_limits<VT>::quiet_NaN(), VT(-1.0), VT(0.5), VT(10.0)};
+                VT(-86.64), VT(-86.8), VT(-86.99), VT(-87.0), VT(-87.2),
+                VT(-87.5), VT(-88.0), VT(-90.0), VT(-100.0), VT(-103.9),
+                VT(-110.0), -std::numeric_limits<VT>::infinity(),
+                std::numeric_limits<VT>::quiet_NaN(), VT(-1.0), VT(0.5),
+                VT(10.0), VT(88.0), VT(88.37), VT(88.5), VT(88.72)};
             constexpr size_t num_inputs = std::size(inputs);
             CACHE_ALIGN VT in[vec::size()];
             CACHE_ALIGN VT out[vec::size()];
@@ -624,6 +627,8 @@ namespace {
                         std::nextafter(rounded, std::numeric_limits<VT>::infinity()) - rounded,
                         std::numeric_limits<VT>::denorm_min());
                     EXPECT_LE(std::abs(out[i] - expected), 2 * ulp) << "x=" << in[i];
+                    // The tolerance alone would accept a flush to zero.
+                    EXPECT_EQ(out[i] == 0, rounded == 0) << "x=" << in[i];
                 }
             }
         }
