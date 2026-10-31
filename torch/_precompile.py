@@ -4313,11 +4313,15 @@ def load(
     by its capture's ``triton.cudagraphs``, ``triton.cudagraph_trees`` and
     ``graph_partition`` (``CUDAGRAPH_CONFIG``), whatever the loading process's
     ``torch._inductor.config`` says, unless the loading process sets
-    ``cudagraph_policy``, which wraps them again; the rest of the CUDA graph
-    config is the loading process's. A serve-time compile
-    (``allow_serve_time_compiles``) is lowered by Inductor under the capture's
-    ``mode`` or ``options`` and ``CUDAGRAPH_CONFIG`` over the loading process's
-    config, but Dynamo traces it under the loading process's own
+    ``cudagraph_policy``, which wraps them again. Whether each graph can run as
+    a CUDA graph at all (``triton.cudagraph_skip_dynamic_graphs``,
+    ``triton.cudagraph_support_input_mutation``, ...) was decided when it
+    compiled and ships with it. Only the settings CUDA graph trees read while
+    the graphs run (``triton.cudagraph_capture_sizes``, the rerecord limits,
+    ``triton.cudagraph_or_error``) are the loading process's. A serve-time
+    compile (``allow_serve_time_compiles``) is lowered by Inductor under the
+    capture's ``mode`` or ``options`` and ``CUDAGRAPH_CONFIG`` over the loading
+    process's config, but Dynamo traces it under the loading process's own
     ``triton.cudagraphs``, which decides whether a Python float that changed
     since capture is specialized; set it as the capture did to trace alike.
 
