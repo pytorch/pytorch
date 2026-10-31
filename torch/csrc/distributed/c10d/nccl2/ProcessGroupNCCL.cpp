@@ -1187,8 +1187,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
       "all_gather",
       rank_,
       sequence_number_,
-      tensor_list,
-      {tensor});
+      {tensor},
+      tensor_list);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
