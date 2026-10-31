@@ -6930,9 +6930,14 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(shape), args=(make_arg((S, 1, S)),))
     yield SampleInput(make_arg(shape), args=(None, make_arg(shape)))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), None))
-    # test type promotion
-    yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
-    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
+    # test type promotion; skipped for bool since the int result can't be written back in-place
+    if dtype is not torch.bool:
+        yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
+        yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
+    # scalar min/max; .item() keeps the input's kind (e.g. Python bool for torch.bool)
+    yield SampleInput(make_arg(shape), args=(make_arg(()).item(), make_arg(()).item()))
+    yield SampleInput(make_arg(shape), args=(make_arg(()).item(), None))
+    yield SampleInput(make_arg(shape), args=(None, make_arg(()).item()))
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
@@ -13377,7 +13382,8 @@ op_db: list[OpInfo] = [
     OpInfo('clamp',
            aliases=('clip',),
            ref=_clamp_numpy,
-           dtypes=all_types_and(torch.bfloat16, torch.half),
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfXPU=all_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
            sample_inputs_func=sample_inputs_clamp,
            reference_inputs_func=partial(reference_inputs_elementwise_ternary, sample_inputs_func=sample_inputs_clamp),
@@ -13395,8 +13401,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure,
                             'TestCommon',
                             'test_numpy_ref_mps'),
-               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     UnaryUfuncInfo('positive',
                    ref=np.positive,
