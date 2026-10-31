@@ -105,7 +105,7 @@ class TestCompilerBisector(TestCase):
 
         from torch._inductor import config
 
-        # similar setup to test_joint_graph (see below)
+        # similar setup to test_joint_graph
         class CustomPrePass(CustomGraphPass):
             def __call__(self, graph: torch.fx.Graph):
                 nodes = graph.find_nodes(op="call_function", target=operator.add)
