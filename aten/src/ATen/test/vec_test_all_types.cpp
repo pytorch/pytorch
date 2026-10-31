@@ -595,6 +595,38 @@ namespace {
             [](const vec& v) { return v.exp_u20(); },
             test_case
         );
+
+        if constexpr (std::is_same_v<VT, float>) {
+            // Near and below ln(FLT_MIN), results must not flush to zero, and
+            // NaN must propagate. Mix the inputs in one vector so lanes take
+            // different paths.
+            const VT inputs[] = {
+                VT(-87.0), VT(-87.2), VT(-87.5), VT(-90.0), VT(-100.0),
+                VT(-103.9), VT(-110.0), -std::numeric_limits<VT>::infinity(),
+                std::numeric_limits<VT>::quiet_NaN(), VT(-1.0), VT(0.5), VT(10.0)};
+            constexpr size_t num_inputs = std::size(inputs);
+            CACHE_ALIGN VT in[vec::size()];
+            CACHE_ALIGN VT out[vec::size()];
+            for (size_t base = 0; base < num_inputs; base += vec::size()) {
+                for (const auto i : c10::irange(vec::size())) {
+                    in[i] = inputs[(base + i) % num_inputs];
+                }
+                vec::loadu(in).exp_u20().store(out);
+                for (const auto i : c10::irange(vec::size())) {
+                    if (std::isnan(in[i])) {
+                        EXPECT_TRUE(std::isnan(out[i])) << "x=" << in[i];
+                        continue;
+                    }
+                    // Within 2 ulp; subnormals are 2^-149 apart.
+                    const double expected = std::exp(static_cast<double>(in[i]));
+                    const VT rounded = static_cast<VT>(expected);
+                    const double ulp = std::max<double>(
+                        std::nextafter(rounded, std::numeric_limits<VT>::infinity()) - rounded,
+                        std::numeric_limits<VT>::denorm_min());
+                    EXPECT_LE(std::abs(out[i] - expected), 2 * ulp) << "x=" << in[i];
+                }
+            }
+        }
     }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;

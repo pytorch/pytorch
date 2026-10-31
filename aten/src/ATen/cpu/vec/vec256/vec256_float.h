@@ -343,7 +343,7 @@ class Vectorized<float> {
   }
 
   Vectorized<float> exp_u20() const {
-    // A faster version of exp with ULP=20
+    // A faster version of exp, within 2 ULP
     const __m256 vec_factorial_1 =
         _mm256_set1_ps(0.999999701f); // 1/factorial(1)
     const __m256 vec_factorial_2 =
@@ -358,12 +358,13 @@ class Vectorized<float> {
         _mm256_castsi256_ps(_mm256_set1_epi32(0x3fb8aa3b)); // log2(e)
     const __m256 vec_half = _mm256_set1_ps(0.5f);
     const __m256 vec_one = _mm256_set1_ps(1.f);
-    const __m256 vec_zero = _mm256_set1_ps(0.f);
-    const __m256 vec_two = _mm256_set1_ps(2.f);
-    const __m256 vec_ln2f =
+    // Cody-Waite split of ln(2).
+    const __m256 vec_ln2f_hi =
         _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
-    const __m256 vec_ln_flt_min =
-        _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    const __m256 vec_ln2f_lo =
+        _mm256_set1_ps(-0x1.05c61p-29f); // ln(2) - ln2f_hi
+    // exp(x) rounds to zero below this.
+    const __m256 vec_exp_min = _mm256_set1_ps(-104.f);
     const __m256 vec_ln_flt_max =
         _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
     const __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
@@ -373,17 +374,20 @@ class Vectorized<float> {
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
     // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
 
-    auto less_ln_flt_min_mask =
-        _mm256_cmp_ps(values, vec_ln_flt_min, 1 /*_CMP_LT_OS*/);
-    auto vec_src = _mm256_min_ps(values, vec_ln_flt_max);
-    vec_src = _mm256_max_ps(vec_src, vec_ln_flt_min);
+    // Below vec_exp_min exp rounds to 0. Those lanes, -inf included, are
+    // computed from 0 and zeroed at the end, which avoids slow subnormal
+    // arithmetic. NaN compares false and propagates.
+    const auto zero_mask = _mm256_cmp_ps(values, vec_exp_min, _CMP_LT_OQ);
+    auto vec_src =
+        _mm256_andnot_ps(zero_mask, _mm256_min_ps(vec_ln_flt_max, values));
 
     // fx = floorf(x * log2ef + 0.5)
     auto vec_fx = _mm256_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
     vec_fx = _mm256_floor_ps(vec_fx);
 
     // x = x - fx * ln2
-    auto vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f, vec_src);
+    auto vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f_hi, vec_src);
+    vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f_lo, vec_exp_poly);
 
     // compute polynomial
     auto vec_res =
@@ -393,19 +397,27 @@ class Vectorized<float> {
     vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
     vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_one);
 
-    // compute 2^(n-1)
-    auto vec_exp_number = _mm256_sub_ps(vec_fx, vec_one);
-    auto vec_exp_number_i = _mm256_cvtps_epi32(vec_exp_number);
-    auto vec_two_pow_n_i = _mm256_add_epi32(vec_exp_number_i, vec_127);
-    vec_two_pow_n_i = _mm256_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
-    auto vec_two_pow_n = _mm256_castsi256_ps(vec_two_pow_n_i);
-    vec_two_pow_n =
-        _mm256_blendv_ps(vec_two_pow_n, vec_zero, less_ln_flt_min_mask);
-
-    // y = y * 2^n
-    vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n);
-    vec_res = _mm256_mul_ps(vec_res, vec_two);
-    return vec_res;
+    // y = y * 2^n: add n to the exponent bits. For n outside [-125, 127]
+    // (subnormal results, or 2^128), scale by two normal factors instead so
+    // the result rounds once and does not overflow.
+    auto vec_n = _mm256_cvtps_epi32(vec_fx);
+    auto vec_scaled = _mm256_castsi256_ps(_mm256_add_epi32(
+        _mm256_castps_si256(vec_res), _mm256_slli_epi32(vec_n, n_mantissa_bits)));
+    const auto rare = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
+        _mm256_add_epi32(vec_n, _mm256_set1_epi32(INT32_MIN + 125)),
+        _mm256_set1_epi32(INT32_MIN + 252)));
+    if (_mm256_movemask_ps(rare)) {
+      auto vec_n1 = _mm256_srai_epi32(vec_n, 1);
+      auto vec_n2 = _mm256_sub_epi32(vec_n, vec_n1);
+      auto vec_two_pow_n1 = _mm256_castsi256_ps(_mm256_slli_epi32(
+          _mm256_add_epi32(vec_n1, vec_127), n_mantissa_bits));
+      auto vec_two_pow_n2 = _mm256_castsi256_ps(_mm256_slli_epi32(
+          _mm256_add_epi32(vec_n2, vec_127), n_mantissa_bits));
+      auto vec_two_factor = _mm256_mul_ps(
+          _mm256_mul_ps(vec_res, vec_two_pow_n1), vec_two_pow_n2);
+      vec_scaled = _mm256_blendv_ps(vec_scaled, vec_two_factor, rare);
+    }
+    return _mm256_andnot_ps(zero_mask, vec_scaled);
   }
 #ifdef AT_VEC_CUSTOM_MATH
   Vectorized<float> fmod(const Vectorized<float>& q) const;
