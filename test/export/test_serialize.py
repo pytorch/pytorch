@@ -2780,9 +2780,13 @@ class TestPredispatchSerialization(TestCase):
                     ),
                     in_dims=(0, None),
                 )
-                with TransformGetItemToIndex():
+                # Also inside autocast and no_grad regions, which export
+                # moves into submodules.
+                with torch.autocast("cpu", torch.bfloat16), TransformGetItemToIndex():
                     mask = rows(q, q)
-                return mask, (x + TwoTensor(x, x * 2) + self.buffer).b
+                with torch.no_grad():
+                    y = TwoTensor(x, x * 2)
+                return mask, (x + y + self.buffer).b
 
         m = M()
         inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
@@ -2790,7 +2794,11 @@ class TestPredispatchSerialization(TestCase):
         ep = export(m, inp, strict=False)
         # Two indexing calls that share one function spec, and one constructor.
         flat_apply_nodes = [
-            n for n in ep.graph.nodes if n.target is torch.ops.higher_order.flat_apply
+            n
+            for gm in ep.graph_module.modules()
+            if isinstance(gm, torch.fx.GraphModule)
+            for n in gm.graph.nodes
+            if n.target is torch.ops.higher_order.flat_apply
         ]
         self.assertEqual(len(flat_apply_nodes), 3)
 

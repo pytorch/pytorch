@@ -34,7 +34,7 @@ def _is_set_grad_enabled_sub_mod(
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
         first_non_ph = nodes_first(
-            subgm.graph.nodes, lambda node: node.op != "placeholder"
+            subgm.graph.nodes, lambda node: node.op not in ("placeholder", "get_attr")
         )
         if (
             first_non_ph
