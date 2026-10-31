@@ -36,6 +36,7 @@ if not dist.is_available():
 from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -72,6 +73,8 @@ BACKEND = os.environ["BACKEND"]
 if BACKEND in _allowed_backends:
 
     class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self._spawn_processes()
@@ -79,7 +82,6 @@ if BACKEND in _allowed_backends:
 
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
-
 
 if __name__ == "__main__":
     run_tests()
