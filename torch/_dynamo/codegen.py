@@ -49,12 +49,13 @@ from .source import (
 )
 from .utils import is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.constant import FakeIdVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
 from .variables.lazy import ComputedLazyConstantVariable
-from .variables.lists import SliceVariable, TupleVariable
+from .variables.lists import BaseListVariable, SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
 from .variables.sets import FrozensetVariable
@@ -143,6 +144,9 @@ class PyCodegen:
             items = value.items
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
+        elif isinstance(value, FakeIdVariable):
+            # Aggregate constant conversion already accepts compile-time fake hashes.
+            return False
         else:
             # `is_safe_constant` accepts slices without checking their members.
             # Symbolic and mutable members must be reconstructed.
@@ -363,8 +367,12 @@ class PyCodegen:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
         elif (
-            value.is_python_constant()
-            and is_safe_constant(value.as_python_constant())
+            # Mutable sequences cannot use LOAD_CONST. Probing their constness
+            # would unnecessarily specialize lazy elements such as hook IDs.
+            not (
+                isinstance(value, BaseListVariable)
+                and not isinstance(value, TupleVariable)
+            )
             # LOAD_CONST lets CPython intern aggregate elements. Reconstruct
             # sourced children and mutable members to preserve identity, except
             # during export, which deliberately disables reconstruction by source.
@@ -373,6 +381,8 @@ class PyCodegen:
                 and isinstance(value, (TupleVariable, FrozensetVariable, SliceVariable))
                 and self._constant_requires_reconstruction(value)
             )
+            and value.is_python_constant()
+            and is_safe_constant(value.as_python_constant())
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
