@@ -1351,7 +1351,7 @@ class GraphModuleSerializer(metaclass=Final):
         except Exception as e:
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
-                "cannot be saved, for example because an input is a pytree constant"
+                f"cannot be saved: {e}"
             ) from e
         constant_func = pytree._retrieve_constant(func_spec).func
         func_name = ".".join(
@@ -3247,7 +3247,12 @@ class GraphModuleDeserializer(metaclass=Final):
         """
         func_input, in_spec_input, *flat_inputs = serialized_node.inputs
         func_name = func_input.arg.as_operator
-        in_spec = treespec_loads(in_spec_input.arg.as_string)
+        try:
+            in_spec = treespec_loads(in_spec_input.arg.as_string)
+        except Exception as e:
+            raise SerializeError(
+                f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
+            ) from e
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
         func = _import_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}

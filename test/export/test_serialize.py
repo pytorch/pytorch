@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import zipfile
 from collections import namedtuple
@@ -2893,7 +2894,7 @@ class TestPredispatchSerialization(TestCase):
 
         # A pytree constant input cannot be stored in a treespec string.
         ep = export(Baz(), (torch.randn(4),), strict=False)
-        with self.assertRaisesRegex(SerializeError, "pytree constant"):
+        with self.assertRaisesRegex(SerializeError, "input spec cannot be saved"):
             torch.export.save(ep, io.BytesIO())
 
         # An autograd function defined in the main script runs in memory, but
@@ -2904,6 +2905,27 @@ class TestPredispatchSerialization(TestCase):
             ep = export(Bar(), (x,), strict=False)
             self.assertEqual(ep.module()(x), x * 2 + 1)
             with self.assertRaisesRegex(SerializeError, "__main__ module"):
+                torch.export.save(ep, io.BytesIO())
+
+        # An autograd function that can be imported by name saves, loads and
+        # runs. A subclass whose name imports a different class cannot be saved.
+        module = types.ModuleType("flat_apply_test_module")
+        Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
+        LocalTwoTensor.__module__, LocalTwoTensor.__qualname__ = module.__name__, "Sub"
+
+        class Other(TwoTensor):
+            pass
+
+        Other.__module__, Other.__qualname__ = module.__name__, "Sub"
+        module.Scale, module.Sub = Scale, Other
+        with patch.dict(sys.modules, {module.__name__: module}):
+            x = torch.randn(4)
+            buffer = io.BytesIO()
+            torch.export.save(export(Bar(), (x,), strict=False), buffer)
+            buffer.seek(0)
+            self.assertEqual(torch.export.load(buffer).module()(x), x * 2 + 1)
+            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+            with self.assertRaisesRegex(SerializeError, "imports a different object"):
                 torch.export.save(ep, io.BytesIO())
 
     def test_predispatch_flat_apply_load_rejects_other_functions(self):
@@ -2964,6 +2986,9 @@ class TestPredispatchSerialization(TestCase):
         spec = pytree.tree_flatten(((0, 0), {"function_cls_name": 0}))[1]
         node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
         with self.assertRaisesRegex(SerializeError, "name as the first input"):
+            load(json.dumps(program).encode())
+        node["inputs"][1]["arg"]["as_string"] = "not a treespec"
+        with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
             load(json.dumps(program).encode())
 
 
