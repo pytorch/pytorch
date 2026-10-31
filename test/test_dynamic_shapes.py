@@ -1549,6 +1549,107 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
                 tracer.graph.output(out_proxy.node)
                 gm = fx.GraphModule(tracer.root, tracer.graph)
                 self.assertEqual(gm(2, 3, 4), expected)
+                # Every rebuilt node must target sym_op itself: Inductor only
+                # lowers the real sym operators, so a helper wrapper as a node
+                # target fails with "is not an OpOverload".
+                targets = {n.target for n in gm.graph.nodes if n.op == "call_function"}
+                self.assertEqual(targets, {sym_op})
+
+    def test_build_proxy_untracked_symint_no_cycle(self):
+        """
+        A SymInt computed with proxy tracing disabled (as DTensor sharding
+        propagation does) is untracked, so make_fx resolves it through its
+        sympy symbol. A traced op computed from it that simplifies to that same
+        symbol, directly (sym_max(y, 1)) or through another such op
+        (sym_max(y, 1) // 1), becomes the symbol's provider, so forcing its lazy
+        proxy (thunkified, as under AOTAutograd) must not resolve y back to
+        itself and recurse forever.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def make_f(size_fn):
+            def f(x):
+                with maybe_enable_thunkify():
+                    with disable_proxy_modes_tracing():
+                        y = x.shape[0] * 2 // 2
+                    return x.new_zeros(size_fn(y))
+
+            return f
+
+        for name, size_fn in [
+            ("direct", lambda y: torch.sym_max(y, 1)),
+            ("indirect", lambda y: torch.sym_max(y, 1) // 1),
+        ]:
+            with self.subTest(name):
+                gm = make_fx(make_f(size_fn), tracing_mode="symbolic")(torch.randn(4))
+                self.assertEqual(gm(torch.randn(5)).shape, (5,))
+
+    def test_build_proxy_untracked_symint_no_cross_symbol_cycle(self):
+        """
+        p == s1 is computed from an untracked a == s0 and q == s0 from an
+        untracked b == s1, so each becomes the provider of the symbol the other
+        resolves. Forcing q (through the untracked m == s0) forces p, whose
+        lookup of s0 must skip q and use x's size instead of recursing.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def f(x, y):
+            with maybe_enable_thunkify():
+                with disable_proxy_modes_tracing():
+                    a = x.shape[0] * 5 // 5
+                    b = y.shape[0] * 5 // 5
+                    m = x.shape[0] * 9 // 9
+                p = y.shape[0] * a // a
+                q = x.shape[0] * b // b
+                return x.new_zeros(m) + y.sum()
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(4), torch.randn(3))
+        self.assertEqual(gm(torch.randn(6), torch.randn(2)).shape, (6,))
+
+    def test_build_proxy_untracked_symint_no_tangent_dependency(self):
+        """
+        AOTAutograd tracks the tangent placeholders before the forward runs, so
+        a tangent's size can become the sympy_expr_tracker entry for s0. A later
+        traced op that simplifies to s0 (n below) must still replace that entry,
+        so the untracked m resolves to a forward value rather than the tangent.
+        That holds when n is computed from tracked sizes, and when one of its
+        inputs is untracked but resolves a different symbol (s1).
+        This uses aot_function because under torch.compile the SymInt graph
+        input for s0 hides the tangent's size.
+        """
+        from functorch.compile import aot_function, nop
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
+        def make_f(make_n):
+            def f(x, w):
+                with disable_proxy_modes_tracing():
+                    a = w.shape[0] * 5 // 5
+                    m = x.shape[0] * 5 // 5
+                n = make_n(x.shape[0], a)
+                z = x.new_zeros(m) + n
+                y = x.reshape(x.shape[0] * 2 // 2) * w.sum()
+                return z, y
+
+            return f
+
+        for name, make_n in [
+            ("tracked_inputs", lambda s0, s1: s0 * 3 // 3),
+            ("untracked_input", lambda s0, s1: s0 * s1 // s1),
+        ]:
+            with self.subTest(name):
+                f = make_f(make_n)
+                x = torch.randn(4, requires_grad=True)
+                w = torch.randn(5, requires_grad=True)
+                compiled = aot_function(
+                    f, fw_compiler=nop, bw_compiler=nop, dynamic=True
+                )
+                self.assertEqual(compiled(x, w), f(x, w))
 
     def test_build_proxy_for_pow(self):
         """
