@@ -239,9 +239,17 @@ Welford<T> welford_combine(
     // Guard against division by zero
     wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
   }
+  auto m2_delta = delta * delta * a_weight * wb_over_w;
+  if constexpr (IsVecType<T>::value) {
+    // A zero-weight side (e.g. an unused lane of a masked tail reduction)
+    // contributes nothing, but delta * delta can overflow to inf for
+    // large-magnitude inputs and inf * 0 = NaN.
+    m2_delta = T::blendv(m2_delta, T(0), a_weight == T(0));
+    m2_delta = T::blendv(m2_delta, T(0), b_weight == T(0));
+  }
   auto result = Welford<T>{
       a.mean + delta * wb_over_w,
-      a.m2 + b.m2 + delta * delta * a_weight * wb_over_w,
+      a.m2 + b.m2 + m2_delta,
       new_weight,
       new_index};
   return result;
