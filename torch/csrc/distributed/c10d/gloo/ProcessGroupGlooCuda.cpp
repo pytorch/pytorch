@@ -7,7 +7,7 @@
 
 namespace c10d {
 
-class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
+class AsyncAllreduceCUDADeviceWork : public ProcessGroupGlooAsyncWork {
  public:
   AsyncAllreduceCUDADeviceWork(
       std::shared_ptr<gloo::Context> context,
@@ -16,7 +16,7 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
       uint32_t /*tag*/,
       uint64_t seq,
       std::chrono::milliseconds timeout)
-      : ProcessGroupGloo::AsyncWork(
+      : ProcessGroupGlooAsyncWork(
             std::move(context),
             {inputs},
             OpType::ALLREDUCE,
@@ -185,7 +185,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
   std::vector<c10::Event> events;
 };
 
-static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCUDAWork(
+static c10::intrusive_ptr<ProcessGroupGlooAsyncWork> makeAllreduceCUDAWork(
     std::shared_ptr<gloo::Context> context,
     std::vector<at::Tensor>& inputs,
     ReduceOp reduceOp,

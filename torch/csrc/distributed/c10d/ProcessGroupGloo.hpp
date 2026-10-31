@@ -21,9 +21,8 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/gloo/ProcessGroupGlooAsyncWork.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
-
-#include <ATen/ThreadLocalState.h>
 
 namespace c10d {
 
@@ -46,77 +45,7 @@ bool TORCH_API getDefaultGlooLazyInit();
 //
 class TORCH_API ProcessGroupGloo : public Backend {
  public:
-  // AsyncWork is the Gloo specific superclass for asynchronous work items.
-  // We can split asynchronous work into 3 phases:
-  // 1) Sanity checks and prepare input (e.g. memcpy)
-  // 2) Run operation on background thread
-  // 3) Synchronize with completion on foreground thread
-  //
-  // There is state to be shared between these 3 phases and all of this state
-  // is captured in the AsyncWork class and its derivatives.
-  //
-  // Note: while we are porting operations to use new style collectives, there
-  // is a split between operations using the existing caching approach and
-  // operations using the new AsyncWork base class. Over time we will port
-  // all operations and perform needed cleanup.
-  //
-  // FIXME: This probably should be called WorkGloo since the work is executed
-  // in sync mode by a background thread.
-  class TORCH_API AsyncWork : public Work {
-   public:
-    explicit AsyncWork(
-        std::shared_ptr<gloo::Context> context,
-        std::vector<std::vector<at::Tensor>> outputTensors,
-        OpType opType,
-        uint64_t seq,
-        std::chrono::milliseconds timeout,
-        const char* profilingTitle = nullptr,
-        const std::optional<std::vector<at::Tensor>>& inputTensors =
-            std::nullopt);
-
-    ~AsyncWork() override = default;
-
-    static void execute(const c10::intrusive_ptr<AsyncWork>& work);
-
-    virtual void run() = 0;
-
-    std::vector<at::Tensor> result() override;
-
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-    uint64_t getSequencenumber() const override;
-    std::chrono::milliseconds getTimeout() const override;
-    virtual const std::vector<at::Tensor> getInputTensors() = 0;
-    virtual const std::vector<at::Tensor> getOutputTensors() = 0;
-    inline std::string getProfilerTitle() const {
-      return profilingTitle_;
-    }
-    inline at::ThreadLocalState getTLS() const {
-      return tls_;
-    }
-
-   protected:
-    friend class ProcessGroupGloo;
-    // unique id used to tell the trace buffer that this
-    // work has completed
-    std::optional<uint64_t> trace_id_;
-    std::optional<uint64_t> trace_reset_epoch_;
-    std::shared_ptr<gloo::Context> context_;
-    const std::chrono::milliseconds timeout_;
-
-   private:
-    void finishWorkGloo();
-    void finishWorkGlooError(const std::exception_ptr& eptr);
-    inline void recordAsyncWorkProfilingInfo(
-        const char* profilingTitle,
-        const std::optional<std::vector<at::Tensor>>& inputTensors);
-
-    const std::vector<std::vector<at::Tensor>> outputTensors_;
-    c10::intrusive_ptr<at::ivalue::Future> future_;
-    std::function<void()> recordFunctionBeforeCallback_;
-    const uint64_t seq_;
-    std::string profilingTitle_;
-    at::ThreadLocalState tls_;
-  };
+  using AsyncWork = ProcessGroupGlooAsyncWork;
 
   // Wrap c10d store as Gloo store
   class TORCH_API GlooStore : public ::gloo::rendezvous::Store {
