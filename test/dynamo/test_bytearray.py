@@ -301,6 +301,26 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
+        with self.assertRaises(TypeError):
+            b.count("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.count(256)
+        # CPython 3.13 reformatted arity TypeErrors ("expected ... got ...");
+        # 3.11 and 3.12 say "() takes ... (N given)". make_dynamo_test runs the
+        # body eagerly before compiling, so accept either form, matching the
+        # pattern used in test/cpython/v3_13/test_call.py.
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at least 1 argument \(0 given\)"
+            r"|count expected at least 1 argument, got 0",
+        ):
+            b.count()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at most 3 arguments \(4 given\)"
+            r"|count expected at most 3 arguments, got 4",
+        ):
+            b.count(b"i", None, None, None)
 
     @make_dynamo_test
     def test_rindex(self):
@@ -497,6 +517,63 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    def test_find(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.find(b"i"), 1)
+        self.assertEqual(b.find(b"i", 5), 7)
+        self.assertEqual(b.find(b"i", 5, 8), 7)
+        self.assertEqual(b.find(b"is"), 1)
+        self.assertEqual(b.find(b"pi"), 9)
+        self.assertEqual(b.find(b"z"), -1)
+        self.assertEqual(b.find(self.type2test(b"ss")), 2)
+        self.assertEqual(b.find(b"i", -3), 10)
+        with self.assertRaises(TypeError):
+            b.find("i")
+        with self.assertRaises(TypeError):
+            b.find(b"i", "1")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(-1)
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(256)
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at least 1 argument \(0 given\)"
+            r"|find expected at least 1 argument, got 0",
+        ):
+            b.find()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at most 3 arguments \(4 given\)"
+            r"|find expected at most 3 arguments, got 4",
+        ):
+            b.find(b"i", None, None, None)
+
+    def test_rfind(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.rfind(b"i"), 10)
+        self.assertEqual(b.rfind(b"i", 0, 6), 4)
+        self.assertEqual(b.rfind(b"i", 0, 4), 1)
+        self.assertEqual(b.rfind(b"is"), 4)
+        self.assertEqual(b.rfind(b"z"), -1)
+        self.assertEqual(b.rfind(b"i", 0, 9), 7)
+        with self.assertRaises(TypeError):
+            b.rfind("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.rfind(256)
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at least 1 argument \(0 given\)"
+            r"|rfind expected at least 1 argument, got 0",
+        ):
+            b.rfind()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at most 3 arguments \(4 given\)"
+            r"|rfind expected at most 3 arguments, got 4",
+        ):
+            b.rfind(b"i", None, None, None)
+
+
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -510,6 +587,38 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"\xff\x00")),
             ("ff00", "\xff\x00"),
         )
+
+    def test_input_bytearray_find_rfind(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.find(b"b"), ba.find(b"z"), ba.rfind(b"b")
+
+        self.assertEqual(fn(bytearray(b"abcabc")), (1, -1, 4))
+        self.assertEqual(fn(bytearray(b"xyz")), (-1, 2, -1))
+
+    def test_input_bytearray_find_rfind_dynamic_start(self):
+        # Non-constant start (SymInt) must take the non-const fallback: Dynamo
+        # declines tracing bytearray.find/rfind and graph-breaks cleanly instead
+        # of inlining the C method descriptor (internal AttributeError).
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(ba, n):
+            return ba.find(b"i", n), ba.rfind(b"i", n)
+
+        self.assertEqual(fn(bytearray(b"mississippi"), 5), (7, 10))
+        self.assertEqual(fn(bytearray(b"mississippi"), -3), (10, 10))
+
+        # The values above would also hold if n were specialized to a constant,
+        # so pin the fallback down: under fullgraph the non-constant start must
+        # raise Unsupported instead of tracing. Check each method separately,
+        # since tracing stops at the first graph break.
+        for name in ("find", "rfind", "count"):
+
+            @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+            def fn_fullgraph(ba, n, name=name):
+                return getattr(ba, name)(b"i", n)
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                fn_fullgraph(bytearray(b"mississippi"), 5)
 
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
