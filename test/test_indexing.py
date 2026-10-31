@@ -1965,6 +1965,19 @@ class TestIndexingDevice(TestCase):
                         kwargs = {"atol": 0.02, "rtol": 0.1}
                     self.assertEqual(dest, expected, **kwargs)
 
+    @parametrize("reduce", ["amin", "amax"])
+    @dtypes(torch.half, torch.bfloat16, torch.float32)
+    def test_index_reduce_nan(self, device, dtype, reduce):
+        # Slot 0 has NaN in self, slot 1 gets NaN from src, slot 2 gets NaN then a finite value
+        nan = float("nan")
+        src = torch.tensor([1.0, nan, nan, 5.0], device=device, dtype=dtype)
+        idx = torch.tensor([0, 1, 2, 2], device=device)
+        for include_self in (True, False):
+            dest = torch.tensor([nan, 1.0, 1.0], device=device, dtype=dtype)
+            dest.index_reduce_(0, idx, src, reduce, include_self=include_self)
+            expected = [nan if include_self else 1.0, nan, nan]
+            self.assertEqual(dest, torch.tensor(expected, dtype=dtype), equal_nan=True)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
