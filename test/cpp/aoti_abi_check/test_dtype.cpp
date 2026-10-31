@@ -3,6 +3,7 @@
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
+#include <torch/headeronly/util/Float6_e2m3fn_x4.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
 #include <torch/headeronly/util/Float8_e4m3fnuz.h>
 #include <torch/headeronly/util/Float8_e5m2.h>
@@ -103,6 +104,12 @@ TEST(TestDtype, TestFloat8_e5m3fnu) {
 TEST(TestDtype, TestFloat4) {
   // not much you can do with this type, just make sure it compiles
   torch::headeronly::Float4_e2m1fn_x2 a(5);
+}
+
+TEST(TestDtype, TestFloat6) {
+  static_assert(sizeof(torch::headeronly::Float6_e2m3fn_x4) == 3);
+  torch::headeronly::Float6_e2m3fn_x4 a(0x81, 0x30, 0x10);
+  ASSERT_EQ(a, torch::headeronly::Float6_e2m3fn_x4(0x81, 0x30, 0x10));
 }
 
 TEST(TestDtype, TestHalf) {
@@ -243,6 +250,7 @@ TEST(TestDtype, TestScalarType) {
       ScalarType::Float4_e2m1fn_x2,
       ScalarType::BComplex32,
       ScalarType::Float8_e5m3fnu,
+      ScalarType::Float6_e2m3fn_x4,
       ScalarType::Undefined,
   };
   for (int8_t i = 0; i < static_cast<int8_t>(torch::headeronly::NumScalarTypes);

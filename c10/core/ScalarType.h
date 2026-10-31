@@ -3,6 +3,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Float4_e2m1fn_x2.h>
+#include <c10/util/Float6_e2m3fn_x4.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
@@ -99,7 +100,8 @@ inline bool isFloat8Type(ScalarType t) {
 
 inline bool isReducedFloatingType(ScalarType t) {
   return t == ScalarType::Half || t == ScalarType::BFloat16 ||
-      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2;
+      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2 ||
+      t == ScalarType::Float6_e2m3fn_x4;
 }
 
 inline bool isFloatingType(ScalarType t) {
@@ -130,11 +132,20 @@ constexpr bool isSubByteIntType(ScalarType t) {
       t == ScalarType::Int5 || t == ScalarType::Int6 || t == ScalarType::Int7;
 }
 
-// Shell dtypes: Float4_e2m1fn_x2, Bits*, and the sub-byte ints. They have no
-// defined value conversion to or from any other dtype.
+// Shell dtypes: Float4_e2m1fn_x2, Float6_e2m3fn_x4, Bits*, and the sub-byte
+// ints. They have no defined value conversion to or from any other dtype.
 inline bool isShellType(ScalarType t) {
-  return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
+  return t == ScalarType::Float4_e2m1fn_x2 ||
+      t == ScalarType::Float6_e2m3fn_x4 || isBitsType(t) ||
       isSubByteIntType(t);
+}
+
+// Dtypes whose element size is not a power of two (Float6_e2m3fn_x4 is 3
+// bytes). Typed kernels cannot be instantiated for them (vectorized loads need
+// power-of-two alignment), so byte-level ops such as copy_, zero_ and cat run
+// on a uint8 view with a trailing dim of the element size instead.
+inline bool hasNonPowerOfTwoElementSize(ScalarType t) {
+  return t == ScalarType::Float6_e2m3fn_x4;
 }
 
 constexpr bool isBarebonesUnsignedType(ScalarType t) {
@@ -212,6 +223,7 @@ inline bool isSignedType(ScalarType t) {
     case ScalarType::Int6:
     case ScalarType::Int7:
     case ScalarType::Float4_e2m1fn_x2:
+    case ScalarType::Float6_e2m3fn_x4:
       return true;
     case ScalarType::UInt1:
     case ScalarType::UInt2:
