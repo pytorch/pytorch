@@ -12,12 +12,13 @@ import traceback
 import types
 import unittest
 import warnings
-from concurrent.futures import Future
+from concurrent.futures import Future, TimeoutError as FuturesTimeoutError
 from unittest.mock import Mock, patch
 
 import torch
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.codecache import LambdaFuture
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_compat import Config
@@ -613,6 +614,15 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         finally:
             release.set()
             pool.shutdown(wait=True)
+
+    def test_lambda_future_timeout_defers_completed_failure_to_result_fn(self):
+        future: Future[None] = Future()
+        future.set_exception(FuturesTimeoutError("worker timed out"))
+        expected = object()
+
+        result = LambdaFuture(lambda: expected, future).result(timeout=1)
+
+        self.assertIs(result, expected)
 
     def test_triton_worker_receives_static_launch_config(self):
         from torch._inductor.async_compile import CompiledTritonKernels

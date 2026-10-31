@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unittest
 from unittest import mock
 
 import torch
@@ -31,6 +32,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch.nn.attention.flex_attention import flex_attention
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -41,6 +43,7 @@ from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
 )
+from torch.utils._triton import has_triton_stable_tma_api
 
 
 def _code_for(fn, *args, **config_kwargs):
@@ -259,6 +262,29 @@ class TestModuleLevelKernels(TestCase):
         self.assertTrue(kernels, code)
         self.assertEqual(len(kernels), len(set(kernels)), kernels)
         self.assertIn("# kernel path:", code)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(
+        not (SM90OrLater and has_triton_stable_tma_api()) or torch.version.hip,
+        "requires NVIDIA sm90+ with Triton tensor descriptors",
+    )
+    def test_optional_kernel_stays_async(self):
+        x = torch.randn(1024, 1024, device="cuda", dtype=torch.bfloat16)
+        result, code = _code_for(
+            torch.nn.functional.silu,
+            x,
+            assume_aligned_inputs=True,
+            max_autotune_pointwise=True,
+            **{
+                "triton.autotune_tensor_descriptor": "auto",
+                "triton.use_tensor_descriptor": True,
+            },
+        )
+        self.assertEqual(result, torch.nn.functional.silu(x))
+        # The baseline is defined at module level, and only the optional TMA variant stays a string for AsyncCompile.
+        self.assertTrue(re.search(r"^def triton_\w+\(", code, re.MULTILINE))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+        self.assertIn("optional=True", code)
 
     @requires_gpu_and_triton
     @parametrize("autotune_at_compile_time", [None, True])

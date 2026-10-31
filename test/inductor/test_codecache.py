@@ -137,6 +137,10 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 
+def _restore_pickled_test_autotuner(*, old_values: Any) -> None:
+    return None
+
+
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
     @parametrize("backend_precision", ("bfx9", "tf32"))
@@ -1642,7 +1646,10 @@ class TestFxGraphCache(TestCase):
                 StaticallyLaunchedAutotuner(
                     CompiledTritonKernels.key(kernel_src),
                     "concurrent_kernel",
-                    types.SimpleNamespace(compile_results=[]),
+                    types.SimpleNamespace(
+                        compile_results=[],
+                        restore_after_unpickle=_restore_pickled_test_autotuner,
+                    ),
                 )
             ],
         )

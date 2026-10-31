@@ -4593,6 +4593,7 @@ class PythonWrapperCodegen(CodeGen):
         device_type: str,
         metadata: str | None = None,
         pin_config: bool = False,
+        optional: bool = False,
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
@@ -4600,12 +4601,15 @@ class PythonWrapperCodegen(CodeGen):
         ``async_compile.triton(...)`` source themselves get that string form instead.
         With ``pin_config``, set for an inductor-generated kernel, the module run on its
         own launches the kernel with the config compile-time autotuning chose
-        (KERNEL_CONFIGS).
+        (KERNEL_CONFIGS). An ``optional`` kernel keeps the string form, so AsyncCompile
+        returns its compile failure for MultiKernelCall to drop instead of raising it.
         """
-        if not self.defines_triton_kernels_as_code():
+        if optional or not self.defines_triton_kernels_as_code():
             self.define_kernel(
                 kernel_name,
-                self.async_compile_triton_body(subs_name, src_code, device_type),
+                self.async_compile_triton_body(
+                    subs_name, src_code, device_type, optional=optional
+                ),
                 metadata,
             )
             return
@@ -4687,12 +4691,16 @@ class PythonWrapperCodegen(CodeGen):
 
     @staticmethod
     def async_compile_triton_body(
-        subs_name: str, src_code: str, device_type: str
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        optional: bool = False,
     ) -> str:
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(src_code, strip=True)
-        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        optional_arg = ", optional=True" if optional else ""
+        compile_wrapper.writeline(f"''', device_str='{device_type}'{optional_arg})")
         return compile_wrapper.getvalue()
 
     @cache_on_self

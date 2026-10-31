@@ -2490,6 +2490,23 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
+    # Benchmarks TMA against pointer loads per kernel, instead of taking TMA wherever
+    # use_tensor_descriptor allows it. With "auto", each pointwise and reduction kernel is
+    # compiled as a pointer-load baseline and as a TMA variant that prefers host descriptors
+    # and falls back to device ones per access; "all" adds a device-side TMA variant. A
+    # MultiKernel benchmarks them on the kernel's first call, keeps the fastest and caches the
+    # pick. Only the baseline gets max-autotune's configs and coordinate descent, so the cost
+    # is one compile on default configs per TMA variant plus that one-time benchmark. A TMA
+    # variant that fails codegen or compilation, or repeats the baseline, is dropped, and
+    # dynamic-shape kernels use pointer loads only.
+    # Applies only on NVIDIA CUDA sm90+ with use_tensor_descriptor, assume_aligned_inputs and
+    # max_autotune(_pointwise), and not under deterministic, batch_invariant, multi_kernel 2/3,
+    # cpp_wrapper or fx_wrapper; the default "off" keeps existing behavior.
+    # pyrefly: ignore [bad-assignment]
+    autotune_tensor_descriptor: Literal["off", "auto", "all"] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR", "off"
+    )  # type: ignore[assignment]
+
     # Whether FlexAttention forward/decode may select AMD TDM descriptors on
     # gfx1250. Defaults on: selection is capability-driven, so this is a kill
     # switch for callers that do not own the flex_attention() call site and
