@@ -3673,6 +3673,14 @@
       ]
     }
   ],
+  "GB2214": [
+    {
+      "Gb_type": "Unsupported OrderedDict instance dictionary",
+      "Context": "OrderedDict.__dict__",
+      "Explanation": "A dictionary subclass used as instance state could also be a linked key, so Dynamo cannot inspect the order without invoking user hashes.",
+      "Hints": []
+    }
+  ],
   "GB8395": [
     {
       "Gb_type": "mapping proxy of class with pending attribute mutation",
@@ -4224,6 +4232,14 @@
         "Change `requires_grad` to be a bool.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
+    }
+  ],
+  "GB8811": [
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+      "Hints": []
     }
   ],
   "GB0238": [
