@@ -407,6 +407,14 @@ def _carries_alias(
     mutated_args_by_op: dict[Callable[..., Any], tuple[int, ...]],
 ) -> bool:
     """Whether node's result is, or contains, an alias of a node in known."""
+    if node.target is operator.getitem and node.args:
+        parent = node.args[0]
+        if isinstance(parent, torch.fx.Node) and parent in known:
+            parent_aliases = _multi_output_aliases(parent, mutated_args_by_op)
+            if parent_aliases is _UNRESOLVED_ALIASES:
+                return True
+            if isinstance(parent_aliases, dict) and node.args[1] in parent_aliases:
+                return True
     if any(source in known for source in _alias_sources(node, mutated_args_by_op)):
         return True
     aliases = _multi_output_aliases(node, mutated_args_by_op)
