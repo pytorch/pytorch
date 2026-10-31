@@ -400,7 +400,7 @@ class Vectorized<float> {
     return _mm512_castsi512_ps(casted_integer);
   }
   Vectorized<float> exp_u20() const {
-    // A faster version of exp with ULP=20
+    // A faster version of exp, within 2 ULP
     const __m512 vec_factorial_1 =
         _mm512_set1_ps(0.999999701f); // 1/factorial(1)
     const __m512 vec_factorial_2 =
@@ -415,12 +415,13 @@ class Vectorized<float> {
         _mm512_castsi512_ps(_mm512_set1_epi32(0x3fb8aa3b)); // log2(e)
     const __m512 vec_half = _mm512_set1_ps(0.5f);
     const __m512 vec_one = _mm512_set1_ps(1.f);
-    const __m512 vec_zero = _mm512_set1_ps(0.f);
-    const __m512 vec_two = _mm512_set1_ps(2.f);
-    const __m512 vec_ln2f =
+    // Cody-Waite split of ln(2).
+    const __m512 vec_ln2f_hi =
         _mm512_castsi512_ps(_mm512_set1_epi32(0x3f317218)); // ln(2)
-    const __m512 vec_ln_flt_min =
-        _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
+    const __m512 vec_ln2f_lo =
+        _mm512_set1_ps(-0x1.05c61p-29f); // ln(2) - ln2f_hi
+    // exp(x) rounds to zero below this.
+    const __m512 vec_exp_min = _mm512_set1_ps(-104.f);
     const __m512 vec_ln_flt_max =
         _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
     const __m512i vec_127 = _mm512_set1_epi32(0x0000007f);
@@ -430,10 +431,9 @@ class Vectorized<float> {
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
     // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
 
-    auto less_ln_flt_min_mask =
-        _mm512_cmp_ps_mask(values, vec_ln_flt_min, 1 /*_CMP_LT_OS*/);
-    auto vec_src = _mm512_min_ps(values, vec_ln_flt_max);
-    vec_src = _mm512_max_ps(vec_src, vec_ln_flt_min);
+    // Constants first: on NaN, min/max return the second operand.
+    auto vec_src = _mm512_min_ps(vec_ln_flt_max, values);
+    vec_src = _mm512_max_ps(vec_exp_min, vec_src);
 
     // fx = floorf(x * log2ef + 0.5)
     auto vec_fx = _mm512_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
@@ -442,7 +442,8 @@ class Vectorized<float> {
     vec_fx = _mm512_cvtepi32_ps(vec_fx_i);
 
     // x = x - fx * ln2
-    auto vec_exp_poly = _mm512_fnmadd_ps(vec_fx, vec_ln2f, vec_src);
+    auto vec_exp_poly = _mm512_fnmadd_ps(vec_fx, vec_ln2f_hi, vec_src);
+    vec_exp_poly = _mm512_fnmadd_ps(vec_fx, vec_ln2f_lo, vec_exp_poly);
 
     // compute polynomial
     auto vec_res =
@@ -452,21 +453,17 @@ class Vectorized<float> {
     vec_res = _mm512_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
     vec_res = _mm512_fmadd_ps(vec_exp_poly, vec_res, vec_one);
 
-    // compute 2^(n-1)
-    auto vec_exp_number = _mm512_sub_ps(vec_fx, vec_one);
-    auto vec_exp_number_i = _mm512_cvtps_epi32(vec_exp_number);
-    auto vec_two_pow_n_i = _mm512_add_epi32(vec_exp_number_i, vec_127);
-    vec_two_pow_n_i = _mm512_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
-    auto vec_two_pow_n = _mm512_castsi512_ps(vec_two_pow_n_i);
-    vec_two_pow_n =
-        _mm512_mask_blend_ps(less_ln_flt_min_mask, vec_two_pow_n, vec_zero);
-
-    // y = y * 2^n
-    vec_res = _mm512_mul_ps(vec_res, vec_two_pow_n);
-    vec_res = _mm512_mul_ps(vec_res, vec_two);
-    if (less_ln_flt_min_mask) {
-      vec_res = _mm512_mask_blend_ps(less_ln_flt_min_mask, vec_res, exp());
-    }
+    // y = y * 2^n, as two normal factors so subnormal results round once and
+    // 2^128 does not overflow.
+    auto vec_n = _mm512_cvtps_epi32(vec_fx);
+    auto vec_n1 = _mm512_srai_epi32(vec_n, 1);
+    auto vec_n2 = _mm512_sub_epi32(vec_n, vec_n1);
+    auto vec_two_pow_n1 = _mm512_castsi512_ps(
+        _mm512_slli_epi32(_mm512_add_epi32(vec_n1, vec_127), n_mantissa_bits));
+    auto vec_two_pow_n2 = _mm512_castsi512_ps(
+        _mm512_slli_epi32(_mm512_add_epi32(vec_n2, vec_127), n_mantissa_bits));
+    vec_res = _mm512_mul_ps(vec_res, vec_two_pow_n1);
+    vec_res = _mm512_mul_ps(vec_res, vec_two_pow_n2);
     return vec_res;
   }
 #ifdef AT_VEC_CUSTOM_MATH
