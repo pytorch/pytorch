@@ -977,6 +977,22 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 "getitem nodes extracting result should be cleaned up",
             )
 
+            def guarded(a, b):
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_add_functional._opoverload, a, b)
+                out = result[1]
+                a.copy_(out)
+                return out
+
+            guarded_gm = make_fx(guarded, tracing_mode="fake")(a, b)
+            reinplace_inplaceable_ops_core(guarded_gm.graph)
+            guarded_effect = next(
+                n for n in guarded_gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            )
+            self.assertEqual(guarded_effect.args[1], my_add_functional._opoverload)
+            self.assertIn(aten.copy_.default, [n.target for n in guarded_gm.graph.nodes])
+
         finally:
             if my_add_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_add_functional._opoverload]
