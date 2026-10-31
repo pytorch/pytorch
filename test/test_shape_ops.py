@@ -621,6 +621,18 @@ class TestShapeOps(TestCase):
         self.compare_with_numpy(torch_fn, np_fn, t_in)
         del t_in
 
+    @onlyAccelerator
+    @largeTensorTest("6GB")
+    def test_flip_expanded_32bit_offsets(self, device):
+        # The output's last row starts 2**31 bytes in, but flip negates the
+        # flipped dim's stride and the signed sum in can_use_32bit_indexing
+        # cancelled to < INT32_MAX, so the int32 offset path wrapped and wrote
+        # out of bounds (illegal memory access).
+        x = torch.tensor([[1.0, 2.0]], device=device).expand(2**28 + 1, 2)
+        out = torch.flip(x, (1,))
+        expected = torch.tensor([[2.0, 1.0]], device=device).expand_as(out)
+        self.assertTrue(torch.equal(out, expected))
+
     def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
             shape = self._rand_shape(dim, 5, 10)
