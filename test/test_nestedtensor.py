@@ -8632,6 +8632,15 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="unsupported_select_on_non_batch_dim_with_noncontig_holes",
     ),
+    XFailRule(
+        error_type=ValueError,
+        error_msg="not supported on dim=0 for nested tensors with holes",
+        op_match_fn=lambda device, op: op.full_name == "chunk",
+        sample_match_fn=lambda device, sample: (
+            "batch_dim" in sample.name and sample.input._lengths is not None
+        ),
+        name="chunk_batch_dim_with_holes",
+    ),
     # these don't work on non-contiguous NJTs yet
     XFailRule(
         error_type=ValueError,
@@ -8639,11 +8648,7 @@ FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name
             in {
-                "chunk",
                 "masked_select",
-                "narrow",
-                "split",
-                "split_with_sizes",
                 "squeeze",
             }
         ),
