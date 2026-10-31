@@ -617,11 +617,7 @@ def is_compiling() -> bool:
 
     The flag is per session: it is True in the thread running a
     ``torch.compile`` / ``torch.export`` tracing session, and in backward
-    started from inside that session (the autograd engine propagates the
-    session to its worker threads; a CPU-only backward runs on the calling
-    thread and sees it directly). Threads spawned by the caller (the
-    DataLoader pin-memory thread, ThreadPoolExecutor, DataParallel
-    replicas) read False.
+    started from inside that session read False.
 
     Note that there are 2 other related flags that should deprecated eventually:
       * torch._dynamo.external_utils.is_compiling()
