@@ -911,6 +911,41 @@ def virtualize_exception_table(
         pass
 
 
+def restore_conditional_jump_exception_entries(
+    instructions: list[Instruction],
+) -> None:
+    # Python 3.14 can leave non-raising jumps uncovered inside a protected
+    # region. Restore their scope before None-test lowering introduces loads.
+    jumps = {
+        "POP_JUMP_IF_TRUE",
+        "POP_JUMP_IF_FALSE",
+        "POP_JUMP_IF_NONE",
+        "POP_JUMP_IF_NOT_NONE",
+    }
+    transparent = jumps | {"NOP", "NOT_TAKEN", "JUMP_BACKWARD"}
+    previous: InstructionExnTabEntry | None = None
+    gap: list[Instruction] = []
+    for inst in instructions:
+        entry = inst.exn_tab_entry
+        if entry is None:
+            gap.append(inst)
+            continue
+        if (
+            previous is not None
+            and previous.target is entry.target
+            and previous.depth == entry.depth
+            and previous.lasti == entry.lasti
+            and all(item.opname in transparent for item in gap)
+        ):
+            for item in gap:
+                if item.opname in jumps:
+                    item.exn_tab_entry = InstructionExnTabEntry(
+                        item, item, entry.target, entry.depth, entry.lasti
+                    )
+        previous = entry
+        gap.clear()
+
+
 def compute_exception_table(
     instructions: list[Instruction],
 ) -> list[ExceptionTableEntry]:
@@ -1736,6 +1771,8 @@ def _cached_cleaned_instructions(
     if not safe:
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
+        if sys.version_info >= (3, 14):
+            restore_conditional_jump_exception_entries(instructions)
         remove_jump_if_none(instructions)
         if sys.version_info >= (3, 12):
             remove_binary_store_slice(instructions)

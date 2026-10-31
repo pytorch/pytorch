@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import inspect
+import operator
 import sys
 import unittest
 from collections import defaultdict
@@ -140,6 +141,108 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.testing.standard_test(
                 self, fn=fn4, nargs=2, expected_ops=3
             )  # coalesced noop
+
+    def _assert_captured_add_in_function(self, backend, fn):
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target is operator.add
+                and fn.__code__.co_filename in node.meta.get("stack_trace", "")
+                and "resume_in_fn" in node.meta.get("stack_trace", "")
+                for graph in backend.graphs
+                for node in graph.graph.nodes
+            )
+        )
+
+    @parametrize("profiling", (False, True))
+    @parametrize("none_filter", (False, True))
+    def test_filtered_comprehension_context_graph_break(self, profiling, none_filter):
+        def gb(x):
+            torch._dynamo.graph_break()
+            return x
+
+        def fn(x, xs, flags):
+            ctx = (
+                torch.profiler.record_function("filtered_comprehension")
+                if profiling
+                else torch.no_grad()
+            )
+            with ctx:
+                if none_filter:
+                    idx = [i for i in range(len(xs)) if flags[i] is not None]
+                else:
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                ys = [xs[i] for i in idx]
+                x = gb(x) + sum(ys)
+            return x
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        flags = [None, True, None]
+        expected = fn(x, xs, flags)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_grad_enabled()
+        for _ in range(2):
+            actual = compiled(x, xs, flags)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.requires_grad, profiling)
+            self.assertEqual(torch.is_grad_enabled(), before)
+        self._assert_captured_add_in_function(backend, fn)
+
+    def test_filtered_comprehension_nested_context_graph_break(self):
+        def gb(x):
+            torch._dynamo.graph_break()
+            return x
+
+        def fn(x, xs):
+            with torch.no_grad():
+                with torch.enable_grad():
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                    ys = [xs[i] for i in idx]
+                    return gb(x) + sum(ys)
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        expected = fn(x, xs)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_grad_enabled()
+        for _ in range(2):
+            actual = compiled(x, xs)
+            self.assertEqual(actual, expected)
+            self.assertTrue(actual.requires_grad)
+            self.assertEqual(torch.is_grad_enabled(), before)
+        self._assert_captured_add_in_function(backend, fn)
+
+    def test_filtered_comprehension_context_exception(self):
+        class Predicate:
+            def __bool__(self):
+                raise ValueError("filter failed")
+
+        def fn(x, flags):
+            i = 7
+            with torch.no_grad():
+                try:
+                    idx = [i for i in range(len(flags)) if flags[i]]
+                except ValueError:
+                    idx = [0]
+                ys = [x for i in idx]
+                torch._dynamo.graph_break()
+                x = x + sum(ys)
+            return x, i
+
+        x = torch.randn(4, requires_grad=True)
+        flags = [Predicate()]
+        expected = fn(x, flags)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_grad_enabled()
+        actual = compiled(x, flags)
+        self.assertEqual(actual, expected)
+        self.assertFalse(actual[0].requires_grad)
+        self.assertEqual(torch.is_grad_enabled(), before)
+        self._assert_captured_add_in_function(backend, fn)
 
     def test_grad_mode_guard(self):
         def fn(a, b):
