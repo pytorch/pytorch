@@ -1090,59 +1090,51 @@ namespace {
         auto actual2 = vec::loadu(actual_vals2);
         AssertVectorized<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
     }
-    TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-
+    template <typename vec, typename Ref, typename Op>
+    void test_fused(const char* name, Ref ref, Op op) {
+        using VT = ValueType<vec>;
         auto test_case = TestingCase<vec>::getBuilder()
           .addDomain(CheckWithinDomains<VT>{
               {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
               true, getDefaultTolerance<VT>()})
           .setTestSeed(TestSeed());
-
-        test_ternary<vec>(
-            NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
-            [](const vec& v0, const vec& v1, const vec& v2) {
-                return at::vec::fmadd(v0, v1, v2);
-            },
-            test_case,
-            RESOLVE_OVERLOAD(filter_fmadd));
+        test_ternary<vec>(name, ref, op, test_case, RESOLVE_OVERLOAD(filter_fmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
+        test_fused<TypeParam>(NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
+                              RESOLVE_OVERLOAD(at::vec::fmadd));
     }
     TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-
-        auto test_case = TestingCase<vec>::getBuilder()
-          .addDomain(CheckWithinDomains<VT>{
-              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
-              true, getDefaultTolerance<VT>()})
-          .setTestSeed(TestSeed());
-
-        test_ternary<vec>(
-            NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
-            [](const vec& v0, const vec& v1, const vec& v2) {
-                return at::vec::fmsub(v0, v1, v2);
-            },
-            test_case,
-            RESOLVE_OVERLOAD(filter_fmadd));
+        test_fused<TypeParam>(NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
+                              RESOLVE_OVERLOAD(at::vec::fmsub));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fnmadd) {
+        test_fused<TypeParam>(NAME_INFO(fnmadd), RESOLVE_OVERLOAD(local_fnmadd),
+                              RESOLVE_OVERLOAD(at::vec::fnmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fnmsub) {
+        test_fused<TypeParam>(NAME_INFO(fnmsub), RESOLVE_OVERLOAD(local_fnmsub),
+                              RESOLVE_OVERLOAD(at::vec::fnmsub));
     }
     TYPED_TEST(BitwiseFloatsAdditional, FmaddVecN) {
-        using VT = ValueType<TypeParam>;
-        using vec = at::vec::VectorizedN<VT, 1>;
-
-        auto test_case = TestingCase<vec>::getBuilder()
-          .addDomain(CheckWithinDomains<VT>{
-              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
-              true, getDefaultTolerance<VT>()})
-          .setTestSeed(TestSeed());
-
-        test_ternary<vec>(
-            NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
-            [](const vec& v0, const vec& v1, const vec& v2) {
-                return at::vec::fmadd(v0, v1, v2);
-            },
-            test_case,
-            RESOLVE_OVERLOAD(filter_fmadd));
+        using vec = at::vec::VectorizedN<ValueType<TypeParam>, 1>;
+        test_fused<vec>(NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
+                        RESOLVE_OVERLOAD(at::vec::fmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, FmsubVecN) {
+        using vec = at::vec::VectorizedN<ValueType<TypeParam>, 1>;
+        test_fused<vec>(NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
+                        RESOLVE_OVERLOAD(at::vec::fmsub));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, FnmaddVecN) {
+        using vec = at::vec::VectorizedN<ValueType<TypeParam>, 1>;
+        test_fused<vec>(NAME_INFO(fnmadd), RESOLVE_OVERLOAD(local_fnmadd),
+                        RESOLVE_OVERLOAD(at::vec::fnmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, FnmsubVecN) {
+        using vec = at::vec::VectorizedN<ValueType<TypeParam>, 1>;
+        test_fused<vec>(NAME_INFO(fnmsub), RESOLVE_OVERLOAD(local_fnmsub),
+                        RESOLVE_OVERLOAD(at::vec::fnmsub));
     }
 #if defined(CPU_CAPABILITY_NEON)
     TEST(BitwiseFloatsAdditional, HalfToFloatFmadd) {
