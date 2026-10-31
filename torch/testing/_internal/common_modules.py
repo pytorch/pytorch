@@ -2026,6 +2026,29 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
         yield from prob_target_samples(bias=False)
         yield from prob_target_samples(bias=True)
 
+        # Zero input makes every logit 0 and every row's loss
+        # sum(target) * log(num_classes), whatever the linear weight: a running
+        # loss sum held below acc_dtype (pytorch#201659) then drifts by 5 ULPs
+        # over these 32 one-row chunks, for index and one-hot targets alike.
+        if acc_dtype is not None:
+            for reduction, target_dtype in product(
+                ["mean", "sum"], [torch.int64, dtype]
+            ):
+                module_kwargs = dict(
+                    out_features=(), device=device, dtype=dtype, reduction=reduction,
+                    weight=None, ignore_index=None, label_smoothing=0.0,
+                    options=torch.nn.LinearCrossEntropyOptions(
+                        allow_retain_graph=allow_retain_graph,
+                        acc_dtype=acc_dtype, batch_chunk_size=1),
+                )
+                input = torch.zeros(
+                    (32, 5), device=device, dtype=dtype, requires_grad=requires_grad
+                )
+                target = torch.zeros((32,), device=device, dtype=torch.int64)
+                if target_dtype.is_floating_point:
+                    target = torch.nn.functional.one_hot(target, 5).to(dtype)
+                yield (5, 5), module_kwargs, (input, target)
+
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
         module_inputs.append(
