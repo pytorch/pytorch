@@ -4,7 +4,7 @@
 import contextlib
 import itertools
 import math
-from typing import cast
+from typing import cast, ClassVar
 
 import torch
 import torch.distributed as dist
@@ -44,6 +44,24 @@ from torch.utils import _pytree as pytree
 
 class TestViewOps(DTensorContinuousTestBase):
     world_size = 6
+
+    # The workers are reused for every test in this class, and each new mesh adds
+    # NCCL communicators that hold /dev/shm until the workers exit, so build each
+    # distinct mesh once and share it across tests. The LocalTensor variant
+    # recreates its process group for every test, so it builds a fresh mesh.
+    _meshes: ClassVar[dict[tuple, DeviceMesh]] = {}
+
+    def _get_mesh(self, mesh_shape, mesh_dim_names=None) -> DeviceMesh:
+        if self.is_local_tensor_enabled:
+            return init_device_mesh(
+                self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+            )
+        key = (tuple(mesh_shape), mesh_dim_names)
+        if key not in self._meshes:
+            self._meshes[key] = init_device_mesh(
+                self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+            )
+        return self._meshes[key]
 
     @staticmethod
     def _get_all_factorizations(n):
@@ -322,9 +340,7 @@ class TestViewOps(DTensorContinuousTestBase):
 
     def test_view_ops(self):
         mesh_shape = (dist.get_world_size() // 2, 2)
-        self.device_mesh = init_device_mesh(
-            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=("outer", "inner")
-        )
+        self.device_mesh = self._get_mesh(mesh_shape, ("outer", "inner"))
         self.dimmap_test(torch.atleast_1d, (randn(()),), (Singleton(),))
         self.dimmap_test(torch.atleast_1d, (randn(24),), (InputDim(0),))
         self.dimmap_test(torch.atleast_1d, (randn(24, 36),), (InputDim(0), InputDim(1)))
@@ -618,9 +634,7 @@ class TestViewOps(DTensorContinuousTestBase):
     # )
 
     def test_complex_view_ops(self):
-        self.device_mesh = DeviceMesh(
-            self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
-        )
+        self.device_mesh = self._get_mesh((self.world_size // 2, 2))
         inp = randn(24, 13, 2)
         intermediate = torch.view_as_complex(inp)
         out = torch.view_as_real(intermediate)
@@ -823,7 +837,7 @@ class TestViewOps(DTensorContinuousTestBase):
         for mesh_shape in [(self.world_size,), (3, 2)]:
             if self.world_size < math.prod(mesh_shape):
                 continue
-            mesh = init_device_mesh(self.device_type, mesh_shape)
+            mesh = self._get_mesh(mesh_shape)
             for shard_mesh_dim in range(mesh.ndim):
                 M = mesh.size(shard_mesh_dim)
                 dim_vals = [2 * M - 1, 2 * M, 2 * M + 1]
@@ -874,7 +888,7 @@ class TestViewOps(DTensorContinuousTestBase):
         for mesh_shape, patterns in cases:
             if self.world_size < math.prod(mesh_shape):
                 continue
-            mesh = init_device_mesh(self.device_type, mesh_shape)
+            mesh = self._get_mesh(mesh_shape)
             mesh_ndim = len(mesh_shape)
             for pattern in patterns:
                 shard_mesh_dims = [i for i, p in enumerate(pattern) if p == "S"]
@@ -1226,7 +1240,7 @@ class TestViewOps(DTensorContinuousTestBase):
                 self.assertEqual(comm_mode.get_total_counts(), 0)
 
         # 2D mesh: test shard outside range with (Shard, Replicate) and (Replicate, Shard)
-        mesh_2d = init_device_mesh(self.device_type, (3, self.world_size // 3))
+        mesh_2d = self._get_mesh((3, self.world_size // 3))
         dim_size_2d = mesh_2d.size(0) * mesh_2d.size(1) * 2
         test_cases_2d = [
             # (tensor_dims, flatten_start, flatten_end, shard_dim)
@@ -1617,7 +1631,7 @@ class TestViewOps(DTensorContinuousTestBase):
         for mesh_shape, num_rep in cases:
             if self.world_size < math.prod(mesh_shape):
                 continue
-            mesh = init_device_mesh(self.device_type, mesh_shape)
+            mesh = self._get_mesh(mesh_shape)
             mesh_ndim = len(mesh_shape)
             num_shard = mesh_ndim - num_rep
             flattened_size = math.prod(mesh_shape) * 12
@@ -1774,7 +1788,7 @@ class TestViewOps(DTensorContinuousTestBase):
     def test_dtensor_flatten_unflatten_2d_reversed_mesh(self):
         """Test flatten/unflatten with reversed mesh shape (2, 3) to catch ordering bugs."""
         self.assertEqual(self.world_size, 6)
-        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh = self._get_mesh((2, self.world_size // 2))
         dim_size = mesh.size(0) * mesh.size(1) * 2  # divisible by both mesh dims
 
         # Flatten with (S, S) pattern
@@ -1829,7 +1843,7 @@ class TestViewOps(DTensorContinuousTestBase):
 
     def test_dtensor_unflatten_ss_and_s_same_dim(self):
         """Test unflatten when _StridedShard and Shard both shard the same tensor dim."""
-        mesh = init_device_mesh(self.device_type, (3, self.world_size // 3))
+        mesh = self._get_mesh((3, self.world_size // 3))
 
         global_tensor = torch.arange(4 * 6 * 3).view(4, 6, 3)
         inps = distribute_tensor(global_tensor, mesh, [Shard(1), Shard(0)])
@@ -2517,7 +2531,7 @@ class TestViewOps(DTensorContinuousTestBase):
             dtensor_x.view(-1, 8)
 
     def test_squeeze_(self):
-        mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
+        mesh_2d = self._get_mesh((3, 2), ("a", "b"))
         self.init_manual_seed_for_rank()
         x = torch.randn((1, 4), device=self.device_type)
         dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
@@ -2725,9 +2739,7 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertEqual(result2.full_tensor(), x2.squeeze(0))
 
         # 2D mesh: both shard dims reindex
-        mesh_2d = init_device_mesh(
-            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
-        )
+        mesh_2d = self._get_mesh((2, self.world_size // 2), ("dp", "tp"))
         x3 = torch.randn(1, 2, self.world_size // 2, device=self.device_type)
         dt3 = distribute_tensor(x3, mesh_2d, [Shard(1), Shard(2)])
         with CommDebugMode() as comm_mode:
@@ -3134,7 +3146,7 @@ class TestViewOps(DTensorContinuousTestBase):
 
     def test_strided_shard_propagates_2d_mesh(self):
         """Verify use_strided_shard_as_shard_order=False propagates on a 2D mesh."""
-        mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        mesh = self._get_mesh((self.world_size // 2, 2))
         torch.manual_seed(42)
         # shape: (3, 4, 8), shard dim 0 on mesh dim 0, replicate on mesh dim 1
         full = torch.randn(3, 4, 8, device=self.device_type)
