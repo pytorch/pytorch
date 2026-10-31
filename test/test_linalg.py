@@ -11833,6 +11833,92 @@ class TestLinalgCudaOnly(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"positive"):
                 torch.cuda.tunable.set_numerical_check_tolerances(True, -1e-5, -1e5)
 
+    @dtypes(torch.float16)
+    def test_reuse_pass_flags_python_binding_tunableop(self, device, dtype):
+        # The nearest-match and record-borrowed helpers are private and driven
+        # from Inductor, so this is the only coverage the bindings get. Both
+        # must default to off: an ordinary run never borrows a neighbour's
+        # solution, and never writes results outside a tuning pass.
+        with self._tunableop_ctx():
+            self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
+            self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
+
+            # Both are process-global, so a failure between enabling and
+            # disabling them would leave them on for every later test in this
+            # process. The restore has to survive a failed assertion.
+            try:
+                torch.cuda.tunable._nearest_match_enable(True)
+                torch.cuda.tunable._record_borrowed_enable(True)
+                self.assertTrue(torch.cuda.tunable._nearest_match_is_enabled())
+                self.assertTrue(torch.cuda.tunable._record_borrowed_is_enabled())
+            finally:
+                torch.cuda.tunable._nearest_match_enable(False)
+                torch.cuda.tunable._record_borrowed_enable(False)
+
+            self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
+            self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
+
+            with self.assertRaisesRegex(RuntimeError, r"bool"):
+                torch.cuda.tunable._nearest_match_enable("yes")
+            with self.assertRaisesRegex(RuntimeError, r"bool"):
+                torch.cuda.tunable._record_borrowed_enable("yes")
+
+    @dtypes(torch.float16)
+    def test_reuse_pass_kill_switch_tunableop(self, device, dtype):
+        # Setting either var to 0 forces borrowing off for the process. Both are
+        # read into a function-local static, so a fresh process is the only way
+        # to exercise them.
+        #
+        # Covers the query accessors. The same kill switch inside LookupNearest
+        # and RecordBorrowed is covered by the EnvKillSwitch case in
+        # cuda_tunable_nearest_test.cpp, which needs no Python binding.
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "import torch\n"
+            "torch.cuda.tunable._nearest_match_enable(True)\n"
+            "torch.cuda.tunable._record_borrowed_enable(True)\n"
+            "print(torch.cuda.tunable._nearest_match_is_enabled(),\n"
+            "      torch.cuda.tunable._record_borrowed_is_enabled())\n"
+        )
+
+        def run(env_overrides):
+            env = os.environ.copy()
+            # Clear both first: inheriting one already set in the ambient
+            # environment would silently invalidate the control case below.
+            env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
+            env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
+            env.update(env_overrides)
+            out = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            ).stdout.split()
+            return out[-2], out[-1]
+
+        # Control: without the env vars the enable calls take effect, so a
+        # False below is the kill switch and not some unrelated failure.
+        self.assertEqual(run({}), ("True", "True"))
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "0"}), ("False", "True")
+        )
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"}), ("True", "False")
+        )
+        # Only "0" vetoes. 1 means "leave it to the pass", which is what the
+        # script then enables, and an unparsable value warns and does the same.
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "1"}), ("True", "True")
+        )
+        self.assertEqual(
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "no"}), ("True", "True")
+        )
+
     @dtypes(torch.float16, torch.float32)
     def test_numerical_check_accuracy_tunableop(self, device, dtype):
         shapes = [(127, 193, 61), (251, 317, 73), (89, 149, 41)]
