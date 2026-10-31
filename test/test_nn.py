@@ -12132,6 +12132,59 @@ class TestNNDeviceType(NNTestCase):
         torch.accelerator.synchronize()
         self.assertEqual(grad_input[-1, 0, 0, 0], -1)
 
+    # Ref: https://github.com/pytorch/pytorch/issues/201120
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_nll_loss2d_half_large_spatial_mean(self, device, dtype):
+        # Spatial mean used to atomicAdd the sum and total_weight in fp16.
+        # Past 65504 the sum becomes inf and the count becomes inf, so the
+        # mean is NaN and backward divides by inf (all-zero grads).
+        torch.manual_seed(0)
+        num_classes = 21
+        reduction = F._Reduction.get_enum("mean")
+        for height in (181, 256):
+            logits = torch.randn(
+                1,
+                num_classes,
+                height,
+                height,
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            target = torch.randint(0, num_classes, (1, height, height), device=device)
+            log_probs = logits.detach().log_softmax(dim=1).requires_grad_(True)
+
+            loss = F.nll_loss(log_probs, target)
+            loss.backward()
+            log_probs_ref = log_probs.detach().float().requires_grad_(True)
+            loss_ref = F.nll_loss(log_probs_ref, target)
+            loss_ref.backward()
+
+            self.assertTrue(torch.isfinite(loss).item())
+            self.assertTrue(torch.isfinite(log_probs.grad).all().item())
+            self.assertFalse(bool((log_probs.grad == 0).all().item()))
+            self.assertEqual(loss, loss_ref.to(dtype))
+            self.assertEqual(log_probs.grad, log_probs_ref.grad.to(dtype))
+
+            output, total_weight = torch.ops.aten.nll_loss2d_forward(
+                log_probs, target, None, reduction, -100)
+            self.assertTrue(torch.isfinite(output).item())
+            self.assertTrue(torch.isfinite(total_weight).item())
+            self.assertEqual(total_weight.item(), height * height)
+            self.assertEqual(output, loss_ref.to(dtype))
+
+            ce = F.cross_entropy(logits, target)
+            ce.backward()
+            logits_ref = logits.detach().float().requires_grad_(True)
+            ce_ref = F.cross_entropy(logits_ref, target)
+            ce_ref.backward()
+            self.assertTrue(torch.isfinite(ce).item())
+            self.assertTrue(torch.isfinite(logits.grad).all().item())
+            self.assertFalse(bool((logits.grad == 0).all().item()))
+            self.assertEqual(ce, ce_ref.to(dtype))
+            self.assertEqual(logits.grad, logits_ref.grad.to(dtype))
+
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
         num_channels = input_size[1]
