@@ -24,7 +24,11 @@ from torch._inductor.utils import (
     needs_fallback_due_to_atomic_add_limitations,
     run_and_get_code,
 )
-from torch.testing._internal.common_utils import DeterministicGuard, skipIfXpu
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    runOnRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -1436,6 +1440,9 @@ class TestPartitionedScatterOpt(TestCase):
                 f"output {i} mismatch: expected[:5]={e[:5]}\nactual[:5]={a[:5]}",
             )
 
+    # The pass is on by default only on ROCm, and the floor below was calibrated
+    # on MI300X. Speedups on other GPUs vary (some NVIDIA CI hosts see ~1.35x).
+    @runOnRocm
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_perf_atomic_contention(self):
         """
