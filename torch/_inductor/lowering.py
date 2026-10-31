@@ -673,8 +673,8 @@ def promote_constants(
     return out
 
 
-def _add_sub_with_alpha_fma(a, b, alpha, operation):
-    """Match eager's fused add/sub-with-alpha on CUDA floating-point inputs."""
+def _add_with_alpha_fma(a, b, alpha):
+    """Compute a + alpha * b using FMA for CUDA floating-point precision."""
     dtype = get_promoted_dtype(
         a,
         b,
@@ -690,8 +690,6 @@ def _add_sub_with_alpha_fma(a, b, alpha, operation):
             alpha_expr = ops.index_expr(alpha, dtype)
         else:
             alpha_expr = ops.constant(alpha, dtype)
-        if operation == "sub":
-            alpha_expr = ops.neg(alpha_expr)
         return ops.fma(b_val, alpha_expr, a_val)
 
     return Pointwise.create(
@@ -814,9 +812,8 @@ def make_pointwise(
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
-                        return _add_sub_with_alpha_fma(
-                            inputs[0], inputs[1], alpha, use_fma_for_alpha
-                        )
+                        fma_alpha = -alpha if use_fma_for_alpha == "sub" else alpha
+                        return _add_with_alpha_fma(inputs[0], inputs[1], fma_alpha)
 
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
