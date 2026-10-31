@@ -3310,8 +3310,6 @@ def use_decompose_k_choice(
                 sympy.Ge(k, decompose_k_threshold * n),
             )
         )
-        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
-        and not V.graph.cpp_wrapper
         and config.triton.num_decompose_k_splits > 0
         # Callers rely on False to retain the regular MM fallback.
         and bool(get_k_splits(m, n, k))

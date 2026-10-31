@@ -1858,9 +1858,6 @@ class TestMaxAutotune(TestCase):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
     @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
@@ -1981,9 +1978,6 @@ class TestMaxAutotune(TestCase):
         )
 
     @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
@@ -2033,9 +2027,6 @@ class TestMaxAutotune(TestCase):
             self.assertFalse(plain_mm, f"mm_template should be skipped: {names}")
 
     @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
@@ -2084,9 +2075,6 @@ class TestMaxAutotune(TestCase):
                 rtol=1e-4,
             )
 
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
@@ -2149,9 +2137,6 @@ class TestMaxAutotune(TestCase):
                 code[1]
             )
 
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
@@ -2924,9 +2909,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(distinct, torch.bmm(a, b), atol=0.1, rtol=0.05)
 
     @fresh_cache()
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
     @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
