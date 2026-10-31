@@ -35,6 +35,7 @@ from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
 from torch.utils import _pytree as pytree
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
@@ -729,23 +730,24 @@ def _import_flat_apply_func(
 ) -> Any:
     """
     Import the function of a flat_apply call and check that export could have
-    produced the call. Save and load both use this one rule. Only tensor
-    subclasses and the helper that calls custom autograd functions are
-    accepted. The helper gets its class by name, as its first argument, and
+    produced the call. Save and load both use this one rule. Only traceable
+    wrapper tensor subclasses and the helper that calls custom autograd
+    functions are accepted. The helper gets its class by name, as its first argument, and
     imports it when the program runs, so that name must import a
     torch.autograd.Function. Note that this imports the modules the names
     point to.
     """
     func = _import_by_name(name)
-    if isinstance(func, type) and issubclass(func, torch.Tensor):
+    if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
         return func
     if (
         func
         is not torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
     ):
         raise SerializeError(
-            f"{name} cannot be used as a flat_apply function: only tensor subclasses "
-            "and custom autograd functions can be saved and loaded"
+            f"{name} cannot be used as a flat_apply function: only traceable "
+            "wrapper tensor subclasses and custom autograd functions can be saved "
+            "and loaded"
         )
     try:
         args, kwargs = pytree.tree_unflatten(list(flat_args), in_spec)

@@ -2930,6 +2930,11 @@ class TestPredispatchSerialization(TestCase):
 
         for old, new, reason in [
             (func_name, b'"builtins.exec"', "cannot be used as a flat_apply function"),
+            (
+                func_name,
+                b'"torch.nn.parameter.Parameter"',
+                "cannot be used as a flat_apply function",
+            ),
             (func_name, b'"os.system"', "Could not import"),
             (func_name, b'"torch.os.system"', "Could not import"),
             (func_name, b'"torch.builtins.exec"', "Could not import"),
