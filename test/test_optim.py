@@ -452,20 +452,51 @@ class TestOptimRenewed(TestCase):
     def test_tensor_betas(self, device, dtype, optim_info, num_dim):
         # foreach needs capturable for Tensor betas, so the default must fall
         # back to the for-loop implementation instead of raising (#110205).
+        # optim_inputs_func leaves foreach and fused unset, which is what makes
+        # this exercise the default rather than an explicitly requested impl.
         optim_cls = optim_info.optim_cls
-        weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
-        weight_c = weight.detach().clone().requires_grad_(True)
-        inpt = torch.randn(5, device=device, dtype=dtype)
-        betas = (0.9, 0.99)
-        tensor_betas = tuple(torch.tensor(b).reshape([1] * num_dim) for b in betas)
-        optimizer_r = optim_cls([weight], betas=betas)
-        optimizer = optim_cls([weight_c], betas=tensor_betas)
-        for _ in range(5):
-            for optim, w in ((optimizer_r, weight), (optimizer, weight_c)):
-                optim.zero_grad()
-                w.mv(inpt).pow(2).sum().backward()
-                optim.step()
-            self.assertEqual(weight, weight_c)
+
+        betas_devices = [device]
+        if _get_device_type(device) != "cpu":
+            betas_devices.append("cpu")
+
+        for optim_input, betas_device in product(
+            optim_info.optim_inputs_func(device), betas_devices
+        ):
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            weight_c = weight.detach().clone().requires_grad_(True)
+            bias = Parameter(torch.randn(10, device=device, dtype=dtype))
+            bias_c = bias.detach().clone().requires_grad_(True)
+            inpt = torch.randn(5, device=device, dtype=dtype)
+
+            # Some configs already pass Tensor betas; compare against the floats.
+            kwargs = {k: v for k, v in optim_input.kwargs.items() if k != "betas"}
+            betas = tuple(
+                float(b) for b in optim_input.kwargs.get("betas", (0.9, 0.999))
+            )
+            tensor_betas = tuple(
+                torch.tensor(b).reshape([1] * num_dim).to(betas_device) for b in betas
+            )
+
+            optimizer_r = optim_cls([weight, bias], betas=betas, **kwargs)
+            optimizer = optim_cls([weight_c, bias_c], betas=tensor_betas, **kwargs)
+            for _ in range(5):
+                for optim, w, b in (
+                    (optimizer_r, weight, bias),
+                    (optimizer, weight_c, bias_c),
+                ):
+                    optim.zero_grad()
+                    (w.mv(inpt) + b).pow(2).sum().backward()
+                    optim.step()
+                self.assertEqual(weight, weight_c)
+                self.assertEqual(bias, bias_c)
+
+            # Asking for foreach explicitly is still unsupported.
+            if not kwargs.get("capturable", False):
+                with self.assertRaisesRegex(
+                    ValueError, r"betas\[0\] as a Tensor is not supported"
+                ):
+                    optim_cls([weight_c], betas=tensor_betas, foreach=True, **kwargs)
 
     @parametrize("with_lrsched", [True, False])
     @optims(
