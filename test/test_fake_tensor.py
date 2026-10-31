@@ -2332,6 +2332,40 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                     )
 
     @onlyAccelerator
+    def test_fill_tensor_mixed_device(self, device):
+        device_pairs = [("cpu", device), (device, "cpu")]
+        if torch.accelerator.device_count() >= 2:
+            device_pairs.append((device, f"{self.device_type}:1"))
+
+        for op in (aten.fill.Tensor, aten.fill_.Tensor):
+            for destination_device, value_device in device_pairs:
+                with (
+                    self.subTest(
+                        op=op,
+                        destination_device=destination_device,
+                        value_device=value_device,
+                    ),
+                    FakeTensorMode(),
+                ):
+                    destination = torch.empty(2, device=destination_device)
+                    value = torch.tensor(1.0, device=value_device)
+                    result = op(destination, value)
+                    self.assertEqual(result.device, destination.device)
+                    self.assertTrue(is_fake_tensor(result))
+
+    @onlyAccelerator
+    def test_fill_tensor_mixed_device_rejects_non_scalar(self, device):
+        for op in (aten.fill.Tensor, aten.fill_.Tensor):
+            with self.subTest(op=op), FakeTensorMode():
+                destination = torch.empty(2)
+                value = torch.ones(1, device=device)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "fill_ only supports 0-dimension value tensor",
+                ):
+                    op(destination, value)
+
+    @onlyAccelerator
     def test_zero_dim(self, device):
         with FakeTensorMode() as mode:
             x = torch.tensor(0.0)
