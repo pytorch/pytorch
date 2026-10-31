@@ -293,7 +293,8 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    return (in + Vec(static_cast<scalar_t>(1))) * Vec(scaling_factor) - Vec(static_cast<scalar_t>(0.5));
+    // explicit FMA so the result does not depend on compiler FP contraction
+    return vec::fmadd(in + Vec(static_cast<scalar_t>(1)), Vec(scaling_factor), Vec(static_cast<scalar_t>(-0.5)));
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
