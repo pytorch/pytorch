@@ -1712,9 +1712,9 @@ class _CapturePackage(CompilePackage):
         self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
-        # The (fwd, bwd) of each torch._dynamo.override_cudagraphs a graph compiled
-        # under.
-        self.cudagraph_overrides: set[tuple[bool | None, bool | None]] = set()
+        # The (fwd, bwd) of the torch._dynamo.override_cudagraphs each backend graph
+        # compiled under, by backend id.
+        self.cudagraph_overrides: dict[str, tuple[bool | None, bool | None]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1733,7 +1733,7 @@ class _CapturePackage(CompilePackage):
         self.device_types[backend_id] = _graph_device_types(gm.graph)
         context = torch._guards.TracingContext.try_get()
         if context is not None and (a := context.cudagraph_annotation) is not None:
-            self.cudagraph_overrides.add((a.fwd, a.bwd))
+            self.cudagraph_overrides[backend_id] = (a.fwd, a.bwd)
 
     def add_graph_break_op(
         self,
@@ -2351,7 +2351,8 @@ class PrecompileSession(Generic[_P, _R]):
         # applies one: fwd decides the forward, and bwd=False alone keeps a CUDA
         # graphed forward's backward out.
         flag = self._cudagraph_config.get("triton.cudagraphs", False)
-        for fwd, bwd in sorted(package.cudagraph_overrides, key=repr):
+        overrides = package.cudagraph_overrides
+        for fwd, bwd in (overrides[b] for b in backends if b in overrides):
             forward = flag if fwd is None else fwd
             if self._backend_name == "inductor" and (
                 forward != flag or (forward and bwd is False)

@@ -4110,10 +4110,13 @@ def capture(
     across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated
     inputs, ...) runs without one and logs a cudagraph skip; and a frame served
-    eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. A
-    capture whose graphs compile under :func:`torch._dynamo.override_cudagraphs`
-    is refused: the artifact records the capture's CUDA graph config, not each
-    graph's. A :class:`DynamoTracer` capture refuses ``freezing`` and
+    eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. With
+    ``backend="inductor"``, a capture is refused when a
+    :func:`torch._dynamo.override_cudagraphs` changes whether a graph runs as a
+    CUDA graph from what the capture's ``triton.cudagraphs`` decides (``fwd``
+    differing from it, or ``bwd=False`` under a CUDA-graphed forward): the
+    artifact records the capture's CUDA graph config, not each graph's. A
+    :class:`DynamoTracer` capture refuses ``freezing`` and
     ``force_disable_caches``, whose compiles file no AOTAutograd cache entry
     for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does not
     cache, and ``bundled_autotune_remote_cache`` on, which the capture turns
