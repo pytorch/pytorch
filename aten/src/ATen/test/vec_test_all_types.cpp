@@ -645,6 +645,48 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)
+    TYPED_TEST(Nan, OrNanIf) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT select_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT actual_vals[vec::size()];
+        const VT specials[] = {
+            (VT)1.5,
+            -(VT)0.0,
+            std::numeric_limits<VT>::infinity(),
+            -std::numeric_limits<VT>::infinity(),
+            std::numeric_limits<VT>::quiet_NaN(),
+            std::numeric_limits<VT>::denorm_min(),
+            -std::numeric_limits<VT>::max(),
+        };
+        constexpr int num_specials = sizeof(specials) / sizeof(specials[0]);
+        // The mask comes from a comparison so that on SVE it is a predicate.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          for (int i = 0; i < vec::size(); ++i) {
+            test_vals[i] = specials[(i + val) % num_specials];
+            select_vals[i] = (val & (1 << i)) ? (VT)1 : (VT)0;
+          }
+          const auto mask = vec::loadu(select_vals) != vec((VT)0);
+          vec::loadu(test_vals).or_nan_if(mask).store(actual_vals);
+          for (int i = 0; i < vec::size(); ++i) {
+            CACHE_ALIGN VT expected_val = test_vals[i];
+            if (val & (1 << i)) {
+              std::memset(static_cast<void*>(&expected_val), 0xFF, sizeof(VT));
+            }
+            ASSERT_EQ(
+                0, std::memcmp(&expected_val, &actual_vals[i], sizeof(VT)))
+                << "or_nan_if, mask: " << val << ", lane: " << i
+                << ", input: " << test_vals[i] << ", got: " << actual_vals[i];
+          }
+        }
+    }
+#endif
 #if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
     !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
     TYPED_TEST(Nan, ReduceMax) {
@@ -697,7 +739,9 @@ namespace {
         c10::BFloat16 val(ii, c10::BFloat16::from_bits());
         bool expected = std::isnan(val);
         CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size()];
-        at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
+        at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(
+            at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(val).isnan())
+            .store(actual_vals);
         for (int jj = 0; jj < at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size(); ++jj) {
           EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "bf16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }

@@ -14,6 +14,10 @@ from torch._functorch.einops import rearrange
 from torch._functorch.functional_call import functional_call, stack_module_state
 
 
+# Experimental stateless (JAX-style, key-based) PRNG API: torch.func._random.
+# Intentionally not re-exported here or listed in __all__ while it is unstable.
+
+
 __all__ = [
     "grad",
     "grad_and_value",

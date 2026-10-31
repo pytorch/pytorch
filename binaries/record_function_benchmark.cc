@@ -7,6 +7,7 @@
 #include <chrono>
 #include <iostream>
 #include <ctime>
+#include <c10/util/irange.h>
 
 C10_DEFINE_int(iter, 10000, "Number of iterations");
 C10_DEFINE_int(sampled_iter, 10e6,
@@ -37,7 +38,7 @@ float runTensorGEMMBench(int tensor_size, int iter) {
   typedef std::chrono::microseconds us;
   std::chrono::time_point<clock> start_time = clock::now();
   auto inp = torch::randn({tensor_size, tensor_size});
-  for (auto idx = 0; idx < iter; ++idx) {
+  for ([[maybe_unused]] const auto _ : c10::irange(iter)) {
     torch::mm(inp, inp);
   }
   auto duration = static_cast<float>(
@@ -49,7 +50,7 @@ float runPureRecordFunctionBench(int iter) {
   typedef std::chrono::high_resolution_clock clock;
   typedef std::chrono::microseconds us;
   std::chrono::time_point<clock> start_time = clock::now();
-  for (auto idx = 0; idx < iter; ++idx) {
+  for ([[maybe_unused]] const auto _ : c10::irange(iter)) {
     auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::USER_SCOPE);
     if (step_callbacks.has_value()) {
       at::RecordFunction guard(std::move(*step_callbacks));

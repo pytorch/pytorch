@@ -6,6 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
+#include <c10/util/irange.h>
 
 namespace at::functorch {
 
@@ -110,7 +111,7 @@ convolution_batch_rule(const Tensor& lhs, std::optional<int64_t> lhs_bdim, const
     auto B_batch_dim = bias_bdim;
     A = moveBatchDimToFront(A, A_batch_dim);
     B = moveBatchDimToFront(B, B_batch_dim);
-    for (size_t i = 0; i < out_spec.size() - 2; i++) {
+    for ([[maybe_unused]] const auto _ : c10::irange(out_spec.size() - 2)) {
       B = B.unsqueeze(-1);
     }
     B = maybePadToLogicalRank(B, B_batch_dim, rankWithoutBatchDim(A, A_batch_dim));

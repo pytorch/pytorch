@@ -27,6 +27,7 @@
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <c10/util/irange.h>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -248,7 +249,7 @@ static void pyobject_dispatch_collect_keys(PyObject* obj, uint64_t& key_set) {
   }
   if (PyList_CheckExact(obj)) {
     Py_ssize_t size = PyList_GET_SIZE(obj);
-    for (Py_ssize_t i = 0; i < size; ++i) {
+    for (const auto i : c10::irange(size)) {
       pyobject_dispatch_collect_keys(PyList_GET_ITEM(obj, i), key_set);
     }
     return;
@@ -342,7 +343,7 @@ static bool pyobject_dispatch_arg_has_torch_function(PyObject* arg) {
   if (PyList_CheckExact(arg) || PyTuple_CheckExact(arg)) {
     const Py_ssize_t len = PySequence_Fast_GET_SIZE(arg);
     PyObject** items = PySequence_Fast_ITEMS(arg);
-    for (Py_ssize_t i = 0; i < len; ++i) {
+    for (const auto i : c10::irange(len)) {
       if (pyobject_dispatch_arg_has_torch_function(items[i])) {
         return true;
       }
@@ -368,7 +369,7 @@ static bool pyobject_dispatch_has_torch_function(
   if (at::impl::torch_function_mode_enabled()) {
     return true;
   }
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     if (pyobject_dispatch_arg_has_torch_function(args[i])) {
       return true;
     }
@@ -388,7 +389,7 @@ static PyObject* pyobject_dispatch_call_redispatch_cpp(
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     call_args.push_back(args[i]);
   }
   return PyObject_Vectorcall(
@@ -423,7 +424,7 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     call_args.push_back(args[i]);
   }
   return PyObject_Vectorcall(

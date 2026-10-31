@@ -14193,10 +14193,6 @@ Arguments:
     blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
     interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
 
-.. warning::
-
-    The ``interprocess`` argument is not honored right now and is a noop.
-
 Returns:
     Event: An torch.Event object.
 
@@ -14317,6 +14313,56 @@ Example::
 
 
 add_docstr(
+    torch.Event.ipc_handle,
+    r"""
+Event.ipc_handle() -> bytes
+
+Return an IPC handle of this event.
+
+The event must have been constructed with ``interprocess=True``.
+If not yet recorded, the event is eagerly initialized on the current device.
+.. note:: The event reconstructed with :meth:`from_ipc_handle` cannot be re-exported via :meth:`ipc_handle`.
+
+Returns:
+    bytes: an opaque byte string that can be passed to :meth:`from_ipc_handle`
+        in another process to reconstruct this event.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda', interprocess=True)
+    >>> ipc_handle = e_cuda.ipc_handle()
+""",
+)
+
+
+add_docstr(
+    torch.Event.from_ipc_handle,
+    r"""
+Event.from_ipc_handle(device, ipc_handle) -> Event
+
+Class method. Reconstruct an event from an IPC handle on the given device.
+
+Arguments:
+    device (:class:`torch.device`): the device on which to open the handle.
+    ipc_handle (bytes): the IPC handle returned by :meth:`ipc_handle`.
+
+Returns:
+    Event: an event reconstructed from the IPC handle.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda', interprocess=True)
+    >>> e_cuda.record()
+    >>> ipc_handle = e_cuda.ipc_handle()
+    >>> # pass ipc handle to another process and reconstruct the event with it there
+    >>> ipc_event = torch.Event.from_ipc_handle(torch.device('cuda'), ipc_handle)
+""",
+)
+
+
+add_docstr(
     torch.Generator,
     r"""
 Generator(device='cpu') -> Generator
@@ -14330,6 +14376,11 @@ Arguments:
 
 Returns:
     Generator: An torch.Generator object.
+
+.. seealso::
+    :class:`torch.Generator` is stateful. For a stateless, key-based PRNG API
+    (``key``, ``split``, ``fold_in``, ``uniform``, ``normal``, ``randint``,
+    ``bits``), see the experimental :mod:`torch.func._random` module.
 
 Example::
 

@@ -7,6 +7,7 @@
 #include <fmt/ranges.h>
 #include <pybind11/stl.h>
 
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace torch {
@@ -282,7 +283,7 @@ void initTensorIteratorBindings(PyObject* module) {
             auto byte_strides = it.strides(i);
             int64_t element_size = it.element_size(i);
             py::tuple out(byte_strides.size());
-            for (size_t k = 0; k < byte_strides.size(); ++k) {
+            for (const auto k : c10::irange(byte_strides.size())) {
               TORCH_CHECK(
                   byte_strides[k] % element_size == 0,
                   "byte stride ",

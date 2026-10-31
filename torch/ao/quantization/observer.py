@@ -996,6 +996,12 @@ class HistogramObserver(UniformQuantizationObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        consider_full_range: Whether the min/max search may return the full observed
+            range. If ``True``, the chosen range never has a higher estimated L2
+            quantization error than the full observed ``[min_val, max_val]`` range.
+            If ``False`` (default), the search always trims at least one histogram
+            bin from one end of the range, even when that increases the estimated
+            error, matching historical behavior.
 
     The scale and zero point are computed as follows:
 
@@ -1012,6 +1018,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
     histogram: torch.Tensor
     min_val: torch.Tensor
     max_val: torch.Tensor
+    consider_full_range: bool
 
     def __init__(
         self,
@@ -1024,6 +1031,8 @@ class HistogramObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
         is_dynamic=False,
+        *,
+        consider_full_range: bool = False,
         **kwargs,
     ) -> None:
         if not is_per_tensor(qscheme):
@@ -1056,6 +1065,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self.upsample_rate = (
             16  # used to reduce quantization errors when upscaling histogram
         )
+        self.consider_full_range = consider_full_range
 
     def _get_norm(
         self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor
@@ -1186,6 +1196,13 @@ class HistogramObserver(UniformQuantizationObserverBase):
             norm_min = norm
             start_bin = next_start_bin
             end_bin = next_end_bin
+
+        # The greedy search never scores the untrimmed range.
+        if self.consider_full_range:
+            full_range_norm = self._compute_quantization_error(0, self.bins - 1)
+            if full_range_norm < norm_min:
+                start_bin = 0
+                end_bin = self.bins - 1
 
         new_min = self.min_val + bin_width * start_bin
         new_max = self.min_val + bin_width * (end_bin + 1)
@@ -1414,6 +1431,12 @@ class HistogramObserver(UniformQuantizationObserverBase):
             unexpected_keys,
             error_msgs,
         )
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        # Observers pickled before consider_full_range existed keep the old search.
+        if "consider_full_range" not in state:
+            self.consider_full_range = False
 
     def extra_repr(self):
         return f"min_val={self.min_val}, max_val={self.max_val}"

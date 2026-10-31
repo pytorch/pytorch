@@ -27,6 +27,11 @@ template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
 
 template <>
+struct VecBoolType<BFloat16> {
+  using type = SveVecBool<BFloat16>;
+};
+
+template <>
 class Vectorized<BFloat16> {
  private:
   vls_bfloat16_t values;
@@ -43,6 +48,9 @@ class Vectorized<BFloat16> {
   Vectorized(svbfloat16_t v) : values(v) {}
   Vectorized(int val);
   Vectorized(BFloat16 val);
+  // A comparison result as a mask: all bits set in a true lane.
+  Vectorized(VecBool<BFloat16> p)
+      : values(svsel_bf16(p, ALL_BF16_TRUE_MASK, ALL_BF16_FALSE_MASK)) {}
 
   template <
       typename... Args,
@@ -61,6 +69,12 @@ class Vectorized<BFloat16> {
       const Vectorized<BFloat16>& mask_) {
     svbool_t mask =
         svcmpeq_s16(ptrue, svreinterpret_s16_bf16(mask_), ALL_S16_TRUE_MASK);
+    return svsel_bf16(mask, b, a);
+  }
+  static Vectorized<BFloat16> blendv(
+      const Vectorized<BFloat16>& a,
+      const Vectorized<BFloat16>& b,
+      VecBool<BFloat16> mask) {
     return svsel_bf16(mask, b, a);
   }
   template <typename step_t>
@@ -124,7 +138,7 @@ class Vectorized<BFloat16> {
     }
     return mask;
   }
-  Vectorized<BFloat16> isnan() const;
+  VecBool<BFloat16> isnan() const;
   bool has_inf_nan() const;
   Vectorized<BFloat16> map(BFloat16 (*f)(BFloat16)) const {
     __at_align__ BFloat16 tmp[size()];
@@ -206,17 +220,17 @@ class Vectorized<BFloat16> {
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vectorized<BFloat16> operator==(const Vectorized<BFloat16>& other) const;
+  VecBool<BFloat16> operator==(const Vectorized<BFloat16>& other) const;
 
-  Vectorized<BFloat16> operator!=(const Vectorized<BFloat16>& other) const;
+  VecBool<BFloat16> operator!=(const Vectorized<BFloat16>& other) const;
 
-  Vectorized<BFloat16> operator<(const Vectorized<BFloat16>& other) const;
+  VecBool<BFloat16> operator<(const Vectorized<BFloat16>& other) const;
 
-  Vectorized<BFloat16> operator<=(const Vectorized<BFloat16>& other) const;
+  VecBool<BFloat16> operator<=(const Vectorized<BFloat16>& other) const;
 
-  Vectorized<BFloat16> operator>(const Vectorized<BFloat16>& other) const;
+  VecBool<BFloat16> operator>(const Vectorized<BFloat16>& other) const;
 
-  Vectorized<BFloat16> operator>=(const Vectorized<BFloat16>& other) const;
+  VecBool<BFloat16> operator>=(const Vectorized<BFloat16>& other) const;
 
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
   Vectorized<BFloat16> ne(const Vectorized<BFloat16>& other) const;
@@ -360,7 +374,6 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
     return convert_float_bfloat16(v1, v2);                     \
   }
 
-DEFINE_BF16_FUNC_VIA_FLOAT(isnan)
 DEFINE_BF16_FUNC_VIA_FLOAT(angle)
 DEFINE_BF16_FUNC_VIA_FLOAT(acos)
 DEFINE_BF16_FUNC_VIA_FLOAT(acosh)
@@ -402,55 +415,47 @@ DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal)
 DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt)
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow)
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(
-    const Vectorized<BFloat16>& other) const {
-  auto [f1, f2] = convert_bfloat16_float(values);
-  auto [f3, f4] = convert_bfloat16_float(other);
-  svbool_t mask1 = svcmpeq_f32(ptrue, f1, f3);
-  svbool_t mask2 = svcmpeq_f32(ptrue, f2, f4);
-  auto res1 = svsel_f32(mask1, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
-  auto res2 = svsel_f32(mask2, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
-
-  auto bf16_1 = svreinterpret_bf16_f32(res1);
-  auto bf16_2 = svreinterpret_bf16_f32(res2);
-  return svuzp1_bf16(bf16_1, bf16_2);
+// A float compare sets the low b16 element of each 32-bit lane, so the even
+// b16 elements of the two float predicates are the BFloat16 predicate.
+VecBool<BFloat16> inline Vectorized<BFloat16>::isnan() const {
+  auto [v1, v2] = convert_bfloat16_float(*this);
+  return svuzp1_b16(v1.isnan(), v2.isnan());
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(
-    const Vectorized<BFloat16>& other) const {
-  auto [f1, f2] = convert_bfloat16_float(values);
-  auto [f3, f4] = convert_bfloat16_float(other);
-  svbool_t mask1 = svcmpne_f32(ptrue, f1, f3);
-  svbool_t mask2 = svcmpne_f32(ptrue, f2, f4);
-  auto res1 = svsel_f32(mask1, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
-  auto res2 = svsel_f32(mask2, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
-
-  auto bf16_1 = svreinterpret_bf16_f32(res1);
-  auto bf16_2 = svreinterpret_bf16_f32(res2);
-  return svuzp1_bf16(bf16_1, bf16_2);
-}
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(
+VecBool<BFloat16> inline Vectorized<BFloat16>::operator==(
     const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
-  return convert_float_bfloat16(v1 > v3, v2 > v4);
+  return svuzp1_b16(v1 == v3, v2 == v4);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(
+VecBool<BFloat16> inline Vectorized<BFloat16>::operator!=(
     const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
-  return convert_float_bfloat16(v1 >= v3, v2 >= v4);
+  return svuzp1_b16(v1 != v3, v2 != v4);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(
+VecBool<BFloat16> inline Vectorized<BFloat16>::operator>(
     const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
-  return convert_float_bfloat16(v1 < v3, v2 < v4);
+  return svuzp1_b16(v1 > v3, v2 > v4);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(
+VecBool<BFloat16> inline Vectorized<BFloat16>::operator>=(
     const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
-  return convert_float_bfloat16(v1 <= v3, v2 <= v4);
+  return svuzp1_b16(v1 >= v3, v2 >= v4);
+}
+VecBool<BFloat16> inline Vectorized<BFloat16>::operator<(
+    const Vectorized<BFloat16>& other) const {
+  auto [v1, v2] = convert_bfloat16_float(*this);
+  auto [v3, v4] = convert_bfloat16_float(other);
+  return svuzp1_b16(v1 < v3, v2 < v4);
+}
+VecBool<BFloat16> inline Vectorized<BFloat16>::operator<=(
+    const Vectorized<BFloat16>& other) const {
+  auto [v1, v2] = convert_bfloat16_float(*this);
+  auto [v3, v4] = convert_bfloat16_float(other);
+  return svuzp1_b16(v1 <= v3, v2 <= v4);
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
@@ -535,32 +540,38 @@ Vectorized<BFloat16> inline operator^(
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::eq(
     const Vectorized<BFloat16>& other) const {
-  return (*this == other) & Vectorized<BFloat16>(1.0f);
+  return svsel_bf16(
+      *this == other, Vectorized<BFloat16>(1.0f), ALL_BF16_FALSE_MASK);
 }
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::ne(
     const Vectorized<BFloat16>& other) const {
-  return (*this != other) & Vectorized<BFloat16>(1.0f);
+  return svsel_bf16(
+      *this != other, Vectorized<BFloat16>(1.0f), ALL_BF16_FALSE_MASK);
 }
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::gt(
     const Vectorized<BFloat16>& other) const {
-  return (*this > other) & Vectorized<BFloat16>(1.0f);
+  return svsel_bf16(
+      *this > other, Vectorized<BFloat16>(1.0f), ALL_BF16_FALSE_MASK);
 }
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::ge(
     const Vectorized<BFloat16>& other) const {
-  return (*this >= other) & Vectorized<BFloat16>(1.0f);
+  return svsel_bf16(
+      *this >= other, Vectorized<BFloat16>(1.0f), ALL_BF16_FALSE_MASK);
 }
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::lt(
     const Vectorized<BFloat16>& other) const {
-  return (*this < other) & Vectorized<BFloat16>(1.0f);
+  return svsel_bf16(
+      *this < other, Vectorized<BFloat16>(1.0f), ALL_BF16_FALSE_MASK);
 }
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::le(
     const Vectorized<BFloat16>& other) const {
-  return (*this <= other) & Vectorized<BFloat16>(1.0f);
+  return svsel_bf16(
+      *this <= other, Vectorized<BFloat16>(1.0f), ALL_BF16_FALSE_MASK);
 }
 
 template <>

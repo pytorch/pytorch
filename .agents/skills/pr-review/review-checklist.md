@@ -76,7 +76,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **C10_CUDA_KERNEL_LAUNCH_CHECK** — PR launches CUDA kernels with `<<<>>>` syntax but doesn't follow with `C10_CUDA_KERNEL_LAUNCH_CHECK()` immediately after to detect launch errors early
 - [ ] **CUDAStreamGuard** — PR manually manages CUDA streams (`cudaStreamCreate`/`cudaStreamDestroy`) instead of using `CUDAStreamGuard` or getting streams from `at::cuda::getCurrentCUDAStream()` / `getStreamFromPool()`
 - [ ] **CUDAEvent synchronization** — PR uses `cudaDeviceSynchronize()` or `cudaStreamSynchronize()` for cross-stream ordering instead of `CUDAEvent::record()` + `CUDAEvent::block()` which avoids unnecessary full synchronization
-- [ ] **recordStream for allocator** — PR uses tensors on non-default CUDA streams without calling `c10::cuda::CUDACachingAllocator::recordStream()` to prevent premature memory reuse
+- [ ] **Cross-stream tensor lifetime / recordStream** — PR uses a tensor on a stream other than the one it was allocated on. Check that either the side-stream use is synced back to the creation stream before the last reference is dropped, or `record_stream()` / `recordStream()` is called; with neither, the allocator may reuse the memory while the side stream is still using it. If the PR adds `record_stream`, don't flag it automatically: decide whether it is avoidable, using the `cuda-streams` skill (`.agents/skills/cuda-streams/SKILL.md`), and say which case you think applies and why
 - [ ] **CUDA graph compatibility** — PR adds host-GPU synchronization, unpinned memory transfers, or other graph-unsafe operations without checking `currentStreamCaptureStatusMayInitCtx()` to detect CUDA graph capture mode
 - [ ] **AcceleratorHooksInterface** — PR adds device-specific `#ifdef USE_CUDA` blocks in generic code instead of using `AcceleratorHooksInterface` from `aten/src/ATen/detail/AcceleratorHooksInterface.h` for device-agnostic behavior
 - [ ] **DeviceGuardImplInterface** — PR implements custom device management without going through `DeviceGuardImplInterface` from `c10/core/impl/DeviceGuardImplInterface.h`, bypassing the standard device abstraction layer
@@ -177,17 +177,15 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 
 ## Testing
 
-### Test Existence
-
-- [ ] **Tests exist** - New functionality has corresponding tests
-- [ ] **Regression tests for bug fixes** - Bug fixes must include a test that reproduces the bug before the fix
-- [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
-- [ ] **New test file is rare** - New test file should only be added when new major features are added
-
 ### Test Patterns
 
+- [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
+- [ ] **New test file is rare** - New test file should only be added when new major features are added
 - [ ] **Proper module ownership** - Test files must have a real `# Owner(s): ["module: ..."]` label, not `"module: unknown"`. The author should create a new module label if needed and add themselves as owner
-- [ ] **Use OpInfo** - Any testing for an operator or a cross-cutting feature must be done via OpInfo. Flag manual tests (e.g., `assertEqual(a + b, expected)`) for operators that already have OpInfo entries — these are redundant and will rot. When a PR adds dtype/device support to an operator, the testing should come from existing OpInfo infrastructure automatically (e.g., by adding the dtype to the operator's OpInfo `dtypes`), not from new manual tests. Likewise, a test checking a specific behavior for a single operator should not be a standalone test — the OpInfo infrastructure for that test category should be updated to cover the behavior across all applicable operators
+- [ ] **Use OpInfo** - Any testing for an operator or a cross-cutting feature must be done via OpInfo. Flag manual tests (e.g., `assertEqual(a + b, expected)`) for operators that already have OpInfo entries — these are redundant and will rot. When a PR adds dtype/device support to an operator, the testing should come from existing OpInfo infrastructure automatically (e.g., by adding the dtype to the operator's OpInfo `dtypes`), not from new manual tests
+- [ ] **Use @ops for operator tests** - PR writes manual per-operator test iterations instead of using the `@ops(op_db)` decorator which automatically parametrizes tests over OpInfo entries
+- [ ] **Use toleranceOverride** - PR hard-codes tolerance values in individual assertions instead of using `@toleranceOverride` / `@precisionOverride` decorators which set per-dtype tolerances
+- [ ] **Use DecorateInfo for OpInfo skips** - PR adds `@skipIf` conditionals inside OpInfo test methods instead of using `DecorateInfo` in the OpInfo's `skips` or `decorators` tuple
 - [ ] **Use ModuleInfo** - Manual forward/backward tests for `nn.Module` subclasses should use `ModuleInfo` from `torch/testing/_internal/common_modules.py` and the `@modules` decorator instead of hand-written per-module tests
 - [ ] **Use TestCase** - Tests inherit from `torch.testing._internal.common_utils.TestCase`
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`
@@ -196,18 +194,14 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 - [ ] **No device-agnostic tests in accelerator-specific files** - A regression test added to `test_mps.py`/`test_cuda.py`/`test_xpu.py`/... must exercise an accelerator-specific API or behavior. If it would pass verbatim on any backend, move it to a device-generic test (a generic test file using `instantiate_device_type_tests`, or an existing OpInfo/ModuleInfo). A hardcoded `device=`, `.to()`/`.cuda()`, or `torch.<device>.synchronize()` is incidental and does not count as accelerator-specific
 - [ ] **Use @dtypes** - PR writes separate test methods per dtype or manual `for dtype in [...]` loops instead of using the `@dtypes(...)` decorator from `common_device_type.py`
 - [ ] **Use @parametrize** - PR duplicates test methods that differ only in a parameter instead of using `@parametrize` from `common_utils.py`
-- [ ] **Use @ops for operator tests** - PR writes manual per-operator test iterations instead of using the `@ops(op_db)` decorator which automatically parametrizes tests over OpInfo entries
 - [ ] **Use make_tensor** - PR creates test tensors with `torch.rand(shape)` (implicit CPU, implicit dtype) instead of `make_tensor(shape, device=device, dtype=dtype)` from `torch.testing` which enforces explicit device/dtype
 - [ ] **Use common dtype groups** - PR manually lists dtypes like `[torch.float32, torch.float64]` instead of using helpers like `floating_types()`, `all_types_and_complex()`, etc. from `common_dtype.py`
-- [ ] **Use toleranceOverride** - PR hard-codes tolerance values in individual assertions instead of using `@toleranceOverride` / `@precisionOverride` decorators which set per-dtype tolerances
-- [ ] **Use DecorateInfo for OpInfo skips** - PR adds `@skipIf` conditionals inside OpInfo test methods instead of using `DecorateInfo` in the OpInfo's `skips` or `decorators` tuple
 - [ ] **Use largeTensorTest** - PR manually checks free memory before large-tensor tests instead of using `@largeTensorTest("4 GB")` decorator from `common_device_type.py`
 - [ ] **Descriptive test names** - Test method names describe what is being tested
 
 ### Test Quality
 
-- [ ] **Edge cases covered** - Tests include boundary conditions, empty inputs, error cases
-- [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason. Bare `assertRaises` should be flagged — always require a message pattern match
+- [ ] **Use assertRaisesRegex for expected exceptions** - When a test checks for an exception, it uses `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason
 - [ ] **No duplicated test logic** - Similar tests share a private helper method called from individual tests with different configs
 - [ ] **Prefer xfail over skip** - PR disables a test on a platform/config with `skip` (e.g. `@skipIf`, `@unittest.skip`, `self.skipTest`, `DecorateInfo(unittest.skip, ...)`) when the test merely fails rather than crashing. Prefer expected-failure (`@unittest.expectedFailure`, `DecorateInfo(unittest.expectedFailure, ...)`, or PyTorch's `xfailIf`/`expectedFailure*` helpers) instead. A skip silently hides the test forever — once the underlying bug is fixed or the platform gains support, the test stays disabled and the new coverage is lost. An xfail flips to a hard failure the moment the test starts passing, forcing the author to remove the marker and re-enable the test. Only accept a `skip` when the test would hard-crash the process (segfault, fatal abort that takes down the whole test binary), hang, or is genuinely flaky (non-deterministic pass/fail); in those cases the author should say so explicitly. A plain deterministic assertion failure or unsupported-op error is always an xfail, never a skip
 - [ ] **Use weakref for lifetime testing** - PR uses `sys.getrefcount()` to test whether objects are kept alive. Use `weakref.ref()` instead — create a weak reference, delete the strong references, then check if the weakref is dead (`wr() is None`). `sys.getrefcount` is a CPython implementation detail that varies across versions and is fragile
@@ -223,6 +217,7 @@ When reviewing changes to workflows, build scripts, or CI configuration:
 - [ ] **No cache-dependent binaries in sensitive contexts** - sccache-backed builds are susceptible to cache corruption; these artifacts should not access sensitive info or be published for general use
 - [ ] **Protected branch rules respected** - Changes to merge rules, release workflows, or deployment environments require extra scrutiny
 - [ ] **Immutable artifact references** - Docker images use immutable tags; no overwriting of published artifacts
+- [ ] **Third-party code pinned by commit SHA** - Pin dependencies (submodules, script clones/checkouts, `pip install git+`, pin files, Actions `uses:`) by full commit SHA, never mutable tags, branches, or no ref at all (first-party `pytorch/*` repos, including Actions refs and script clones, are exempt). Use the commit an upstream release tag points to (the `^{}` commit for annotated tags) and note the tag name. Shell scripts in `.ci/pytorch` read the SHA from `.github/ci_commit_pins/<repo>.txt` via `get_pinned_commit`, with the tag noted at the call site; other scripts may inline the SHA with a tag comment. Nightly pin bumps via `update-commit-hashes` in `.github/workflows/nightly.yml` are fine; do not add dependencies whose consumers the bump PR's CI does not exercise (e.g. schedule-only consumers), leaving bot-merged bumps untested; bump those by hand in reviewed PRs
 
 ### PyTorch API Security
 

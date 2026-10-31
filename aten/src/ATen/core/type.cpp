@@ -62,7 +62,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if (has_valid_strides_info &&
           type_verbosity() >= TypeVerbosity::TypeAndStride) {
         out << ", strides=[";
-        for (size_t i = 0; i < *ndim; ++i) {
+        for (const auto i : c10::irange(*ndim)) {
           if (i > 0) {
             out << ", ";
           }
@@ -733,7 +733,7 @@ TupleTypePtr TupleType::createWithSpec(const std::optional<c10::QualifiedName>& 
   std::vector<Argument> arguments;
   arguments.reserve(field_names.size());
   auto min_default_idx = field_names.size() - field_defaults.size();
-  for (size_t i = 0; i < field_names.size(); ++i) {
+  for (const auto i : c10::irange(field_names.size())) {
     if (i < min_default_idx) {
       Argument arg{
           /*name=*/std::string{field_names[i]},
@@ -838,7 +838,7 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
       return false;
     }
 
-    for (size_t i = 0; i < args_lhs.size(); ++i) {
+    for (const auto i : c10::irange(args_lhs.size())) {
       if (args_lhs[i].name() != args_rhs[i].name()) {
         return false;
       }

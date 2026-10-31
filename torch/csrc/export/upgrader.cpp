@@ -1,4 +1,5 @@
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/export/upgrader.h>
 #include <map>
 #include <set>
@@ -36,7 +37,7 @@ static void setFieldByKeypath(
     const std::vector<std::string>& keypath,
     nlohmann::json value) {
   nlohmann::json* current = &obj;
-  for (size_t i = 0; i < keypath.size() - 1; ++i) {
+  for (const auto i : c10::irange(keypath.size() - 1)) {
     const auto& key = keypath[i];
     TORCH_CHECK(current->contains(key), "Keypath not found: " + key);
     current = &((*current)[key]);
@@ -74,7 +75,7 @@ void registerUpgrader(
         std::ostringstream error_stream;
         error_stream << "Upgrader already registered for version " << version
                      << " and keypath: ";
-        for (size_t i = 0; i < keypath.size(); ++i) {
+        for (const auto i : c10::irange(keypath.size())) {
           if (i > 0)
             error_stream << '.';
           error_stream << keypath[i];

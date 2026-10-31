@@ -445,17 +445,15 @@ def online_softmax_combine(
     else:
         out_max = maximum(lhs_max, rhs_max)
 
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
+    scale = exp(-tl.abs(lhs_max - rhs_max), use_fast_math)
+    lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
+    rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
     # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
+    out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
 
@@ -496,14 +494,12 @@ def online_softmax_combine_with_sum(
     else:
         out_max = maximum(lhs_max, rhs_max)
 
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
+    scale = exp(-tl.abs(lhs_max - rhs_max), use_fast_math)
+    lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
+    rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
     out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
 

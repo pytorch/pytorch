@@ -676,6 +676,12 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
     return (False, TorchVersion('.'.join(numeric_version)))
 
 
+def _windows_nvcc_host_preprocessor_flags() -> list[str]:
+    # Match CMake's Windows CUDA flags: nvcc forwards /Zc:preprocessor to cl.
+    # Required by CUDA 13.2+ CCCL; safe on older CUDA with VS2019+.
+    return ['-Xcompiler', '/Zc:preprocessor']
+
+
 def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> None:
     if not CUDA_HOME:
         raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
@@ -1174,6 +1180,7 @@ class BuildExtension(_LazyBuildExt):
                             cflags = win_cuda_flags(cflags) + ['-std=c++20', '--use-local-env']
                             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                                 cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
+                            cflags = _windows_nvcc_host_preprocessor_flags() + cflags
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         cmd = _wrap_compiler([nvcc, '-c', src, '-o', obj] + include_list + cflags)
@@ -1265,6 +1272,7 @@ class BuildExtension(_LazyBuildExt):
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
                 if not IS_HIP_EXTENSION:
+                    cuda_cflags += _windows_nvcc_host_preprocessor_flags()
                     cuda_cflags.append('--use-local-env')
                     for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                         cuda_cflags.append('-Xcudafe')
@@ -1838,7 +1846,10 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         ])
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
-        paths.append(_join_rocm_home('include'))
+        rocm_home_include = _join_rocm_home('include')
+        # Distros that package ROCm under /usr give /usr/include; see the CUDA branch below.
+        if rocm_home_include != '/usr/include':
+            paths.append(rocm_home_include)
     elif device_type == "cuda":
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -2583,30 +2594,38 @@ def _write_ninja_file_and_compile_objects(
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
-    _write_ninja_file(
-        path=build_file_path,
-        cflags=cflags,
-        post_cflags=post_cflags,
-        cuda_cflags=cuda_cflags,
-        cuda_post_cflags=cuda_post_cflags,
-        cuda_dlink_post_cflags=cuda_dlink_post_cflags,
-        sycl_cflags=sycl_cflags,
-        sycl_post_cflags=sycl_post_cflags,
-        sycl_dlink_post_cflags=sycl_dlink_post_cflags,
-        sources=sources,
-        objects=objects,
-        ldflags=None,
-        library_target=None,
-        with_cuda=with_cuda,
-        with_sycl=with_sycl)
-    if verbose:
-        logger.info('Compiling objects...')
-    _run_ninja_build(
-        build_directory,
-        verbose,
-        # It would be better if we could tell users the name of the extension
-        # that failed to build but there isn't a good way to get it here.
-        error_prefix='Error compiling objects for extension')
+    # `build_ext -j` compiles extensions in threads that all share one
+    # build_temp, so without this two of them write build.ninja and run ninja in
+    # the same directory at once: the second build file replaces the first, and
+    # both processes append to one .ninja_deps, which ninja then reports as
+    # `premature end of file; recovering` and rebuilds from scratch. Ninja is
+    # meant to own its directory, so take the same lock `_jit_compile` takes and
+    # let one extension finish before the next one starts.
+    with FileLock(os.path.join(build_directory, 'lock')):
+        _write_ninja_file(
+            path=build_file_path,
+            cflags=cflags,
+            post_cflags=post_cflags,
+            cuda_cflags=cuda_cflags,
+            cuda_post_cflags=cuda_post_cflags,
+            cuda_dlink_post_cflags=cuda_dlink_post_cflags,
+            sycl_cflags=sycl_cflags,
+            sycl_post_cflags=sycl_post_cflags,
+            sycl_dlink_post_cflags=sycl_dlink_post_cflags,
+            sources=sources,
+            objects=objects,
+            ldflags=None,
+            library_target=None,
+            with_cuda=with_cuda,
+            with_sycl=with_sycl)
+        if verbose:
+            logger.info('Compiling objects...')
+        _run_ninja_build(
+            build_directory,
+            verbose,
+            # It would be better if we could tell users the name of the extension
+            # that failed to build but there isn't a good way to get it here.
+            error_prefix='Error compiling objects for extension')
 
 
 def _write_ninja_file_and_build_library(
@@ -3146,6 +3165,7 @@ def _write_ninja_file_to_build_library(path,
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
+            cuda_flags = _windows_nvcc_host_preprocessor_flags() + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
             cuda_flags = cuda_flags + ['-std=c++20']

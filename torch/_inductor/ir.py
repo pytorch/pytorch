@@ -47,6 +47,7 @@ import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
+import torch.fx.experimental._config as symbolic_shapes_config
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
@@ -4409,15 +4410,17 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-            min_func = Min
-            max_func = Max
-        elif any(
-            # Only needed when backed_size_oblivious is on.
-            x.has(sympy.Min, sympy.Max, Min, Max)
-            for x in (start, end, dim_size)
-            if isinstance(x, Expr)
+        if (
+            symbolic_shapes_config.backed_size_oblivious
+            or any(free_unbacked_symbols(x) for x in (start, end, dim_size))
+            or any(
+                x.has(sympy.Min, sympy.Max, Min, Max)
+                for x in (start, end, dim_size)
+                if isinstance(x, Expr)
+            )
         ):
+            # Avoid hint-based comparisons for size-oblivious and unbacked bounds;
+            # preserve symbolic Min/Max already present in the inputs.
             min_func = Min
             max_func = Max
         else:
@@ -6098,10 +6101,10 @@ class FinalizeCodegenResult:
 
 
 class _HasAliasingOrMutation(Protocol):
-    """Minimal view of scheduler.BaseSchedulerNode used by prologue fusion.
+    """Minimal view of scheduler.BaseSchedulerNode used by producer fusion.
 
     ir.py cannot import scheduler (circular), so this documents the single
-    method consumed by has_aliasing_or_mutation_for_prologue_fusion instead
+    method consumed by has_aliasing_or_mutation_for_producer_fusion instead
     of typing the argument as Any.
     """
 
@@ -6121,7 +6124,8 @@ class TemplateBuffer(OperationBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -6157,12 +6161,17 @@ class TemplateBuffer(OperationBuffer):
                 MutationOutput(NoneLayout(device=device), buf, self)
                 for buf in mutated_inputs
             ]
-        # Input buffer names eligible for prologue fusion.
-        self.allowed_prologue_inps: OrderedSet[str] = (
-            allowed_prologue_inps or OrderedSet()
+        # Input buffer names eligible for producer fusion, separated by where
+        # the producer code is emitted inside the template.
+        self.load_input_fusion_allowed_inputs: OrderedSet[str] = (
+            load_input_fusion_allowed_inputs or OrderedSet()
         )
-        # Per-template fusion overrides.  None means fall back to global
-        # config.epilogue_fusion / config.prologue_fusion.
+        self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
+            store_output_fusion_allowed_inputs or OrderedSet()
+        )
+        # Per-template overrides; None falls back to the corresponding global flag.
+        # Prologue controls load-input producer fusion. Epilogue controls both
+        # downstream consumer fusion and store-output producer fusion.
         self.allow_epilogue_fusion: bool | None = None
         self.allow_prologue_fusion: bool | None = None
 
@@ -6263,17 +6272,14 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
-
-    def has_aliasing_or_mutation_for_prologue_fusion(
+    def has_aliasing_or_mutation_for_producer_fusion(
         self, scheduler_node: _HasAliasingOrMutation
     ) -> bool:
-        """Return whether this template's aliasing/mutation blocks prologue fusion.
+        """Return whether this template's aliasing/mutation blocks producer fusion.
 
         The default preserves the scheduler's conservative behavior. External
-        template subclasses may override this when they can prove a prologue
-        producer only feeds independent, non-mutated template inputs.
+        template subclasses may override this when they can prove a producer only
+        feeds independent, non-mutated template inputs.
         """
         return scheduler_node.has_aliasing_or_mutation()
 
@@ -6355,7 +6361,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6371,7 +6378,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             inputs,
             make_kernel_render,
             mutated_inputs=mutated_inputs,
-            allowed_prologue_inps=allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6531,13 +6539,15 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: Sequence[IRNode],
         choice_timings_fn: Callable[[int | None], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
-        allowed_prologue_inps: OrderedSet[str],
+        load_input_fusion_allowed_inputs: OrderedSet[str],
+        store_output_fusion_allowed_inputs: OrderedSet[str],
     ) -> None:
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
-            allowed_prologue_inps=allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
@@ -7328,6 +7338,7 @@ class ExternKernel(InputsKernel):
         default_factory=dict
     )
     mutation_outputs: list[MutationOutput] = dataclasses.field(default_factory=list)
+    tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None
 
     def __init__(
         self,
@@ -7357,6 +7368,7 @@ class ExternKernel(InputsKernel):
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
         self.mutation_outputs = []
+        self.tunable_dyn_dims_mask = None
         self.fx_node = V.graph.current_node
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self.annotations: dict[str, object] = {}
@@ -8704,8 +8716,16 @@ class TMADescriptorStable(TMADescriptor):
     See also TMADescriptorExperimental for the old API.
     """
 
-    def __init__(self, tensor: IRNode, block_shape: list[int | torch.SymInt]):
+    def __init__(
+        self,
+        tensor: IRNode,
+        block_shape: list[int | torch.SymInt],
+        descriptor_module: str,
+        descriptor_class: str,
+    ):
         self.block_shape = block_shape
+        self.descriptor_module = descriptor_module
+        self.descriptor_class = descriptor_class
 
         super().__init__(
             tensor=tensor,
@@ -8787,32 +8807,19 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            get_reset_to_zero_args,
+            get_restore_value_args,
+            kernel_side_table,
+        )
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
         restore_value_args: list[str] = []
         reset_to_zero_args: list[str] = []
         if isinstance(kernel, Autotuner):
-            # https://github.com/triton-lang/triton/pull/5083
-            # changes kernel.restore_idx to kernel.restore_value
-            if hasattr(kernel, "restore_idx"):
-                restore_value_args.extend(
-                    kernel.fn.arg_names[i] for i in kernel.restore_idx
-                )
-            else:
-                if not hasattr(kernel, "restore_value"):
-                    raise AssertionError('Expected hasattr(kernel, "restore_value")')
-                restore_value_args.extend(kernel.restore_value)
-
-            if hasattr(kernel, "reset_idx"):
-                for i in kernel.reset_idx:
-                    reset_to_zero_args.append(kernel.fn.arg_names[i])
-            else:
-                if not hasattr(kernel, "reset_to_zero"):
-                    raise AssertionError('Expected hasattr(kernel, "reset_to_zero")')
-                reset_to_zero_args.extend(kernel.reset_to_zero)
-
+            restore_value_args = get_restore_value_args(kernel)
+            reset_to_zero_args = get_reset_to_zero_args(kernel)
             configs = kernel.configs
             kernel = kernel.fn
 
@@ -12383,6 +12390,16 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+def _drop_shim_config(args: Sequence[Any]) -> Sequence[Any]:
+    # The all_reduce C shims predate the optional config argument.
+    if not V.graph.cpp_wrapper:
+        return args
+    *args, config = args
+    if config is not None:
+        raise NotImplementedError("cpp_wrapper does not support collective configs")
+    return args
+
+
 class _AllReduce_Kernel(_CollectiveKernel):
     def __init__(
         self,
@@ -12405,6 +12422,11 @@ class _AllReduce_Kernel(_CollectiveKernel):
             unbacked_bindings=unbacked_bindings,
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def fill_non_provided_args(
+        self, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> Sequence[Any]:
+        return _drop_shim_config(super().fill_non_provided_args(args, kwargs))
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")

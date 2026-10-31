@@ -12,6 +12,7 @@ from typing import Any, cast
 import numpy as np
 
 import torch
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 # orjson serializes ~3-8x faster than stdlib json on large traces and emits bytes; not a
@@ -1081,7 +1082,7 @@ _RENDER_STAGES = (
     ("gpu_memcpy", 2, "Memcpy", 0),
     ("gpu_memset", 3, "Memset", 0),
     # GPU-side user annotations (collective/phase ranges) on the stream lane; not a kernel
-    # (no launch), so they render as a range nesting over the kernels they span.
+    # (no launch), so they render as a range on the row above the kernels they span.
     ("gpu_annotation", 4, "Annotation", 0),
     # CUDA-graph event-record / host-callback nodes on their stream lane. Rendered as render
     # stages (not kernels: no launch) so they carry graph id/node/annotation and become
@@ -1430,38 +1431,23 @@ def _build_render_stages(
         return None
     ts, dur, gpu = np.concatenate(ts_p), np.concatenate(dur_p), np.concatenate(gpu_p)
     stream, stage = np.concatenate(stream_p), np.concatenate(stage_p)
-    # Serialize overlapping kernel/memcpy/memset render stages per lane. A CUDA stream is
-    # serial, but CUPTI graph-replay timestamps overlap ~13%, which renders as messy multi-depth
-    # kernels instead of a clean depth-1 row beneath the spanning Annotation (which is the depth-0
-    # parent and must keep its full extent -- so it is excluded). Clamp each op's end to the next
-    # op's start on the same (gpu, stream) lane.
-    ann_iid = next(i for ks, i, _n, _c in _RENDER_STAGES if ks == "gpu_annotation")
-    end = ts + dur
-    sub = np.nonzero(stage != ann_iid)[0]
     # A lane is (gpu, stream), never a bare stream: the same stream id on two devices is two
-    # lanes. Shared by the clamp below and the stream-lane interning further down.
+    # lanes.
     lane = (gpu.astype(np.int64) << np.int64(32)) | (stream & 0xFFFFFFFF)
-    if len(sub):
-        order = sub[np.lexsort((ts[sub], lane[sub]))]
-        nxt_ts = np.empty(len(order), dtype=np.int64)
-        nxt_ts[:-1] = ts[order][1:]
-        nxt_ts[-1] = np.iinfo(np.int64).max
-        same = np.zeros(len(order), dtype=bool)
-        same[:-1] = lane[order][1:] == lane[order][:-1]
-        cap = np.where(same, nxt_ts, np.iinfo(np.int64).max)
-        end[order] = np.maximum(ts[order], np.minimum(end[order], cap))
-        dur = end - ts
     # One lane per (gpu, stream); lanes are split per gpu_id by Perfetto from
     # (gpu_id, stream_iid). Interning on the same (gpu, stream) key keeps each device's names
     # its own -- the iid table is global, so interning on the bare stream would let one device's
-    # resolver name ("DP") relabel another device's identically-numbered CUDA stream. The
-    # spanning annotation and its kernels share the lane and the viewer depth-nests them
-    # (annotation at depth 0, kernels at depth 1) once the kernels are clamped to not overlap
-    # each other. Perfetto sorts lanes lexicographically by name, so prefix every lane
-    # (resolver-named or "stream N") with a bracketed zero-padded lane id -> the lane order
-    # matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts after
-    # "stream 26674", and resolver-named lanes like "DP" interleave alphabetically). The "["
-    # is a constant leading char, so the padded digits still decide the order.
+    # resolver name ("DP") relabel another device's identically-numbered CUDA stream.
+    # Durations are CUPTI's, unclamped. trace_processor puts a stage that overlaps another on
+    # its lane (the spanning annotation, PDL, graph-replay timestamps) on a spill track of the
+    # same track group, and the UI draws the group as one lane: the annotation on the top row,
+    # its kernels below, and each further level of overlap on one more row. No stage is dropped
+    # or cut short. Perfetto sorts lanes lexicographically by name, so
+    # prefix every lane (resolver-named or "stream N") with a bracketed zero-padded lane id ->
+    # the lane order matches the chrome path's numeric lane-id order (otherwise "stream 7"
+    # sorts after "stream 26674", and resolver-named lanes like "DP" interleave
+    # alphabetically). The "[" is a constant leading char, so the padded digits still decide
+    # the order.
     uniq, inv = np.unique(lane, return_inverse=True)
     uniq_dev, uniq_lane = (uniq >> 32).tolist(), (uniq & 0xFFFFFFFF).tolist()
     width = len(str(max(uniq_lane))) if len(uniq) else 1
@@ -1859,6 +1845,7 @@ def _window_to_pftrace(
     base_ns: int,
     output_path: str,
     compression_level: int = 1,
+    trace_name: str | None = None,
 ) -> None:
     """Encode Cuspy's columnar window straight to a Perfetto-native trace (.pftrace),
     concatenated with the Kineto CPU events -- NO chrome-dict materialization. Full parity with
@@ -2338,6 +2325,14 @@ def _window_to_pftrace(
         render,
         counters,
         compression_level,
+        # The chrome export's top-level fields (distributedInfo, deviceProperties, ...). The
+        # input's own traceName is its file path; the export's traceName is set as chrome does.
+        [
+            (key, json.dumps(value))
+            for key, value in cpu_data.items()
+            if key not in ("traceEvents", "traceName")
+        ]
+        + [("traceName", json.dumps(trace_name or output_path))],
     )
     with open(output_path, "wb") as f:
         f.write(out)
@@ -2363,7 +2358,12 @@ def merge_trace_window_into_chrome_trace(
     # chrome event dicts entirely -- that build dominates the JSON path).
     if ".pftrace" in output_path:
         _window_to_pftrace(
-            data, trace_window, base_ns, output_path, pftrace_compression_level
+            data,
+            trace_window,
+            base_ns,
+            output_path,
+            pftrace_compression_level,
+            trace_name,
         )
         return
     original_events = list(data.get("traceEvents", []))
@@ -2487,11 +2487,7 @@ def merge_trace_window_into_chrome_trace(
         payload = _orjson.dumps(data)
     else:
         payload = json.dumps(data, separators=(",", ":")).encode()
-    # Encode once and write the whole buffer, gzipped when the path ends .gz (compresslevel=1
-    # favors throughput over size).
-    if output_path.endswith(".gz"):
-        with gzip.open(output_path, "wb", compresslevel=1) as f:
-            f.write(payload)
-    else:
-        with open(output_path, "wb") as f:
-            f.write(payload)
+    # Compression level 1 favors throughput over file size.
+    trace_file_opener = _get_trace_file_opener(output_path, compresslevel=1)
+    with trace_file_opener(output_path, "wb") as f:
+        f.write(payload)

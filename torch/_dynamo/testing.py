@@ -514,18 +514,23 @@ def make_test_cls_with_patches(
                 new_fn = unittest.expectedFailure(new_fn)
             setattr(DummyTestClass, new_name, decorator(new_fn))
         # NB: Doesn't handle slots correctly, but whatever
+        # Preserve lifecycle hooks installed by instantiate_device_type_tests
+        # for hardware-classified device test wrappers.
+        elif (
+            name in ("setUpClass", "tearDownClass")
+            and name in cls.__dict__
+            and getattr(cls, "hw_classification", None) is not None
+        ):
+            setattr(DummyTestClass, name, cls.__dict__[name])
         elif not hasattr(DummyTestClass, name):
             setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
 
 
-# test Python 3.11+ specific features
+# No-op since Python 3.11 is the minimum supported version
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 11):
-        return fn
-    # pyrefly: ignore [bad-return, bad-argument-type]
-    return unittest.skip(fn)
+    return fn
 
 
 def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:

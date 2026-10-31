@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -246,7 +246,7 @@ def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int) -> set[
 def _get_view_inverse_node_usages(
     later_node_usages: set[Node], self_aliases: set[Node]
 ) -> set[Node]:
-    def matching_view_metadata(a: FakeTensor, b: FakeTensor) -> bool:
+    def matching_view_metadata(a: torch.Tensor, b: torch.Tensor) -> bool:
         return (
             a.size() == b.size()  # type: ignore[bad-return]
             and a.stride() == b.stride()
@@ -262,9 +262,7 @@ def _get_view_inverse_node_usages(
         mutated_view = n.args[1]
         if not isinstance(base, Node):
             raise AssertionError(f"Expected Node for base, got {type(base)}")
-        if not isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-            base.meta["fake_result"], FakeTensor
-        ):
+        if not is_fake_tensor(base.meta["fake_result"]):
             raise AssertionError("Expected FakeTensor in base.meta['fake_result']")
         if not isinstance(mutated_view, Node):
             raise AssertionError(

@@ -962,7 +962,6 @@ def substitute_in_graph(
                         f"{original_sig} != {traceable_sig}"
                     )
 
-        from torch._dynamo.guards import GuardBuilder
         from torch._dynamo.trace_rules import (
             _polyfilled_function_ids,
             get_torch_obj_rule_map,
@@ -1001,24 +1000,7 @@ def substitute_in_graph(
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             return original_fn(*args, **kwargs)
 
-        def dispatch_fn(
-            self: VariableBuilder, value: Callable[_P, _R]
-        ) -> PolyfilledFunctionVariable:
-            if inspect.isclass(value):
-                guard_type = GuardBuilder.CLASS_MATCH
-            elif inspect.ismodule(value):
-                guard_type = GuardBuilder.MODULE_MATCH
-            else:
-                guard_type = GuardBuilder.ID_MATCH
-            guards = self.install_guards(guard_type)
-            if guards is None:
-                raise AssertionError("install_guards returned None")
-            return PolyfilledFunctionVariable(
-                value,
-                source=self.source,
-                **guards,
-            )
-
+        dispatch_fn = VariableBuilder.wrap_polyfilled_function
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
         _polyfilled_function_ids.add(id(original_fn))
         _polyfilled_function_ids.add(id(wrapped))

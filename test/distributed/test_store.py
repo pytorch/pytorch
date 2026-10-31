@@ -1332,6 +1332,32 @@ class TestClientProtocol(TestCase):
         thread.join()
 
 
+class PrefixStoreBarrierTimeoutTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_barrier_respects_store_timeout(self):
+        # Store::barrier(key, world_size) must use the virtual getTimeout(),
+        # so PrefixStore forwards the wrapped store's timeout, not the 300s default.
+        import time
+
+        store = dist.PrefixStore("prefix", dist.HashStore())
+        store.set_timeout(timedelta(milliseconds=1))
+        start = time.monotonic()
+        with self.assertRaises(DistStoreError):
+            store.barrier("barrier_key", 2)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_barrier_explicit_timeout_overrides_store_timeout(self):
+        import time
+
+        store = dist.PrefixStore("prefix", dist.HashStore())
+        store.set_timeout(timedelta(seconds=300))
+        start = time.monotonic()
+        with self.assertRaises(DistStoreError):
+            store.barrier("barrier_key2", 2, timedelta(milliseconds=1))
+        self.assertLess(time.monotonic() - start, 10)
+
+
 if __name__ == "__main__":
     if device_type != "cpu":
         if getattr(torch.get_device_module(device_type), "_initialized", False):
