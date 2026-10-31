@@ -87,7 +87,10 @@ class TracebackVariable(VariableTracker):
         frame_summary: traceback.FrameSummary,
         tb_next: Union["TracebackVariable", ConstantVariable],
     ) -> "TracebackVariable":
-        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+        from .builder import SourcelessBuilder
+
+        summary_vt = SourcelessBuilder.create_internal_frame_summary(frame_summary)
+        return cls(summary_vt, tb_next=tb_next)
 
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
@@ -226,6 +229,20 @@ class ExceptionVariable(VariableTracker):
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
+
+    @staticmethod
+    def create(  # noqa: RVT001
+        exc_type: type[BaseException],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "ExceptionVariable":
+        if exc_type is StopIteration:
+            return StopIterationVariable(exc_type, args, kwargs)
+        elif exc_type is AttributeError:
+            return AttributeErrorVariable(exc_type, args, kwargs)
+        elif exc_type is NameError:
+            return NameErrorVariable(exc_type, args, kwargs)
+        return ExceptionVariable(exc_type, args, kwargs)
 
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context

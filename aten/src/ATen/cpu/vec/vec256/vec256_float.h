@@ -159,6 +159,10 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<float> or_nan_if(const Vectorized<float>& mask) const {
+    return _mm256_or_ps(values, mask);
+  }
   Vectorized<float> abs() const {
     auto mask = _mm256_set1_ps(-0.f);
     return _mm256_andnot_ps(mask, values);

@@ -6,19 +6,20 @@ namespace at::native {
 
 
 template <typename Dtype>
-inline void gemm_internal_ck(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+inline bool gemm_internal_ck(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   static_assert(false&&sizeof(Dtype),"at::cuda::blas_gemm_internal_ck: not implemented");
+  return false;
 }
 
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 template <>
-void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double));
+bool gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
-void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float));
+bool gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
+bool gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
-void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
+bool gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
 

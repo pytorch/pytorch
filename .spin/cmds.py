@@ -199,6 +199,7 @@ FAST_LINTERS = {
     "GHA",
     "NATIVEFUNCTIONS",
     "PYREFLY",
+    "RAW_VT_CONSTRUCTION",
     "RUFF",
     "SET_LINTER",
     "SHELLCHECK",

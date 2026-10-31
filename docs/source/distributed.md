@@ -33,8 +33,7 @@ through the `torch.distributed.backends` entry point group and loaded on first u
 - `mpi`: only when PyTorch is built with MPI.
 - `ucc`: CPU and CUDA; only when PyTorch is built with UCC.
 - `xccl`: Intel XPU.
-- `fake`: no-op backend for testing; registered by importing
-  `torch.testing._internal.distributed.fake_pg`.
+- `fake`: no-op backend for testing.
 
 The table below shows which functions are available for use with a CPU or GPU
 for four of these backends. For NCCL, GPU refers to CUDA GPU while for XCCL to

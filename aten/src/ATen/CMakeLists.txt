@@ -1007,6 +1007,17 @@ if(USE_MPS)
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
         endif()
+        if(CAN_COMPILE_METAL_41)
+            # Shaders with Metal 4.1 kernels (native fp8), which shadow the 4.0 ones on macOS 27+
+            set(METAL_41_SHADERS ScaledMM)
+            foreach(TGT_STEM ${METAL_41_SHADERS})
+                string(CONCAT TGT_41 ${TGT_STEM} "_41.air")
+                list(APPEND AIR_41 ${TGT_41})
+                metal_to_air(${CMAKE_CURRENT_SOURCE_DIR}/native/mps/kernels/${TGT_STEM}.metal ${TGT_41} "-std=metal4.1;-mmacos-version-min=27.0")
+            endforeach()
+            air_to_metallib(kernels_41.metallib ${AIR_41})
+            list(APPEND METALLIB_DEPS kernels_41.metallib)
+        endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
                           DEPENDS ${METALLIB_DEPS}

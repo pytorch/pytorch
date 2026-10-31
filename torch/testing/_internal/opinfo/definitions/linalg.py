@@ -918,6 +918,14 @@ def sample_inputs_linalg_matrix_sqrth(
         yield SampleInput(a)
 
 
+def error_inputs_linalg_eig(op_info, device, **kwargs):
+    yield ErrorInput(
+        SampleInput(torch.randn(8, 8, device=device, dtype=torch.float16)),
+        error_type=RuntimeError,
+        error_regex="not implemented for 'Half'",
+    )
+
+
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.eig
@@ -930,6 +938,72 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
     for sample in samples:
         sample.output_process_fn_grad = out_fn
         yield sample
+
+    if torch.device(device).type == "mps":
+        make_fn = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(
+            make_fn, dtype=dtype, device=device, requires_grad=requires_grad
+        )
+
+        batches = [(), (3,)]
+        # Test sizes surrounding 32 KB threadgroup memory cutoff
+        ns = [32, 62, 63, 150]
+
+        for batch, n in product(batches, ns):
+            sample = SampleInput(make_arg(*batch, n, n))
+            sample.output_process_fn_grad = out_fn
+            yield sample
+
+        # The backward for most of these special matrices is ill-defined
+        if not requires_grad:
+            n = 8
+            scale = 2.0 ** torch.arange(0, 4 * n, 4)
+
+            A = torch.randn(n, n, dtype=dtype)
+            perm = torch.randperm(n)
+
+            special_matrices = [
+                torch.zeros(n, n, dtype=dtype),
+                torch.eye(n, dtype=dtype),
+                # Repeated eigenvalues
+                torch.tensor([2, 2, 2, -1, -1, 3, 3, 3], dtype=dtype).diag(),
+                torch.triu(torch.randn(n, n, dtype=dtype)),
+                # A cyclic permutation, on which Wilkinson shifts make no progress
+                torch.roll(torch.eye(n, dtype=dtype), 1, 0),
+                # A Jordan block, which is defective: all eigenvectors are parallel
+                2 * torch.eye(n, dtype=dtype)
+                + torch.diag(torch.ones(n - 1, dtype=dtype), 1),
+                # Badly scaled matrices
+                torch.randn(n, n, dtype=dtype) * scale.unsqueeze(-1) / scale,
+                A * 1e-30,
+                A * 1e-22,
+                A * 1e20,
+                torch.eye(4, dtype=dtype) * 1.4e-45,
+                torch.randn(8, 8, dtype=dtype) * 1e-40,
+                torch.randn(32, 32, dtype=dtype) * 1e-38,
+                # A lower triangular matrix
+                torch.tril(torch.randn(64, 64, dtype=dtype)),
+                # A randomly permuted upper triangular matrix
+                torch.randn(n, n, dtype=dtype).triu()[perm[:, None], perm],
+                # A badly scaled 2x2 diagonal matrix
+                torch.diag(torch.tensor([2.0**127, 1.0], dtype=dtype)),
+                torch.block_diag(
+                    torch.tensor([1]),
+                    1e-25 * torch.roll(torch.eye(3, dtype=dtype), -1, 0),
+                    torch.tensor([-1]),
+                    torch.tensor([0]),
+                ),
+                torch.tensor([[1e12, 1e12], [0.01, 1]], dtype=dtype),
+            ]
+
+            if dtype.is_complex:
+                special_matrices += [
+                    # Imaginary identity with swapped rows
+                    1j * torch.roll(torch.eye(3, dtype=dtype), 1, 0),
+                ]
+
+            for m in special_matrices:
+                yield SampleInput(m.to(device))
 
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -1377,6 +1451,7 @@ op_db: list[OpInfo] = [
         op=torch.linalg.eig,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_eig,
+        error_inputs_func=error_inputs_linalg_eig,
         check_batched_forward_grad=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -1394,22 +1469,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),
@@ -1434,29 +1493,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCPUIfNoLapack],
         skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),

@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision",
+    "labels",
+    "templates",
+    "reasoning"
+  ],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "skip_already_routed",
+        "close_question",
+        "close_expected_behavior",
+        "request_info",
+        "request_reproduction",
+        "transfer",
+        "redirect_oncall",
+        "label",
+        "triage_review"
+      ],
+      "description": "Which SKILL.md step decided the outcome."
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Labels to ADD, exact names from labels.json. Never list labels to remove."
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "redirect_to_forum",
+          "request_more_info",
+          "request_self_contained_reproduction",
+          "numerical_accuracy"
+        ]
+      },
+      "description": "templates.json keys whose comment should be posted, in order."
+    },
+    "transfer_repo": {
+      "type": "string",
+      "description": "Destination owner/repo, only for decision=transfer."
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "2-6 sentences: what the issue is about and why these labels."
+    }
+  }
+}
