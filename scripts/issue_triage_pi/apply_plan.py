@@ -230,6 +230,16 @@ def plan_effects(
         labels.append(TRIAGE_REVIEW)
     if decision == "triage_review":
         labels.append(TRIAGE_REVIEW)
+    keys = list(dict.fromkeys(plan.get("templates", [])))
+    effects.close = decision in CLOSING_TEMPLATES
+    if (decision == "close_expected_behavior" or "numerical_accuracy" in keys) and (
+        decision != "close_expected_behavior"
+        or {TRIAGE_REVIEW, "high priority"} & (existing_labels | set(labels))
+    ):
+        effects.close = False
+        labels.append(TRIAGE_REVIEW)
+        keys = [key for key in keys if key not in CLOSING_TEMPLATES.values()]
+        effects.notes.append("numerical dismissal conflicts with review; kept open")
     if "triaged" in labels and TRIAGE_REVIEW in existing_labels | set(labels):
         effects.notes.append("dropped 'triaged': the issue needs human review")
         labels = [label for label in labels if label != "triaged"]
@@ -237,13 +247,11 @@ def plan_effects(
     effects.redact_body = decision == "request_reproduction"
     if effects.redact_body:
         labels = [label for label in labels if label != "triaged"]
-    keys = list(dict.fromkeys(plan.get("templates", [])))
     if decision == "request_info" and "request_more_info" not in keys:
         keys.insert(0, "request_more_info")
     repro_template = "request_self_contained_reproduction"
     if effects.redact_body and repro_template not in keys:
         keys.insert(0, repro_template)
-    effects.close = decision in CLOSING_TEMPLATES
     if effects.close and CLOSING_TEMPLATES[decision] not in keys:
         keys.insert(0, CLOSING_TEMPLATES[decision])
     effects.comment, effects.comment_templates, posted = template_comment(
