@@ -1079,12 +1079,14 @@ class OrderedDictVariable(ConstDictVariable):
         view: "DictViewVariable | None" = None,
     ) -> None:
         super().install_dict_order_guard(tx, view=view)
+        # Even one linked key needs a guard: raw dict writes can leave the same
+        # storage without its OrderedDict link.
         if (
             self.source
             and not is_constant_source(self.source)
             and issubclass(self.python_type(), collections.OrderedDict)
             and (view is None or view.is_ordered)
-            and len(self.original_items) > 1
+            and self.original_items
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
