@@ -1496,6 +1496,10 @@ SparseTensor& _sspaddmm_out_cpu(
   TORCH_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(!dense.is_cuda(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
+  TORCH_CHECK(t.layout() == kSparse,
+      "sspaddmm: expected 'self' to have sparse layout, got 'self' with layout ", t.layout());
+  TORCH_CHECK(r.layout() == kSparse,
+      "sspaddmm: expected 'out' to have sparse layout, got 'out' with layout ", r.layout());
   TORCH_CHECK(sparse_.layout() == kSparse,
       "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout ", sparse_.layout());
   TORCH_CHECK(dense.layout() == kStrided,
@@ -1517,6 +1521,11 @@ SparseTensor& _sspaddmm_out_cpu(
   // NB: This has to occur before the checks, because r may alias t.
   // See test_saddmm
   get_sparse_impl(r)->raw_resize_(2, 0, {dim_i, dim_k});
+
+  TORCH_CHECK(t.sparse_dim() == 2,
+      "sspaddmm: Argument #1: matrices expected, got ", t.sparse_dim(), "D tensor");
+  TORCH_CHECK(t.dense_dim() == 0,
+      "sspaddmm: Argument #1: scalar values expected, got ", t.dense_dim(), "D values");
 
   TORCH_CHECK(dense.size(0) == dim_j,
       "sspaddmm: Argument #3: Expected dim 0 size ", dim_j, ", got ", dense.size(0));
