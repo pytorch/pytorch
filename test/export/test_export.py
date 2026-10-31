@@ -17237,6 +17237,34 @@ graph():
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    def test_split_const_gm_with_lifted_mutated_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("w", torch.randn(4, 4))
+                self.register_buffer("counter", torch.zeros(4))
+
+            def forward(self, x):
+                out = x @ self.w.t() + self.counter * 2
+                self.counter.add_(1)
+                return out
+
+        ep = torch.export.export(Model(), (torch.randn(4, 4),))
+        gm = copy.deepcopy(ep.graph_module)
+        placeholder_nodes = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        lifted_constant_names = [
+            n.name
+            for n, spec in zip(placeholder_nodes, ep.graph_signature.input_specs)
+            if spec.target is not None
+        ]
+        const_gm, _ = split_const_gm(gm, False, lifted_constant_names)
+        folded_targets = {
+            n.target for n in const_gm.graph.nodes if n.op == "call_function"
+        }
+        self.assertIn(torch.ops.aten.t.default, folded_targets)
+        self.assertNotIn(torch.ops.aten.add_.Tensor, folded_targets)
+        self.assertNotIn(torch.ops.aten.mul.Tensor, folded_targets)
+
     def test_istft_op(self):
         class istft_class(torch.nn.Module):
             def forward(self, spec):

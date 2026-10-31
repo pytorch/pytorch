@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import gc
 import io
+import itertools
 import os
 import shutil
 import subprocess
@@ -1061,37 +1062,44 @@ model(torch.ones(2))
                     self.index_two,
                 )
 
-        for always_keep_tensor_constants in (True, False):
-            model = Model(self.device)
-            ep = torch.export.export(model, tuple())
-            inductor_configs = {
-                "always_keep_tensor_constants": always_keep_tensor_constants,
-                "aot_inductor.package_cpp_only": self.package_cpp_only,
-            }
-            with WritableTempFile(suffix=".pt2") as f:
-                package_path = torch._inductor.aoti_compile_and_package(
-                    ep,
-                    package_path=f.name,
-                    inductor_configs=inductor_configs,
-                )
-                loaded = load_package(package_path)
-
-            actual = [tuple(out.clone() for out in loaded()) for _ in range(3)]
-            expected = []
-            for call_idx in range(3):
-                expected_one = torch.full((1,), call_idx + 2.0, device=self.device)
-                expected_two = torch.full((2,), call_idx + 2.0, device=self.device)
-                expected_index = torch.tensor([call_idx + 2.0, 1.0], device=self.device)
-                expected.append(
-                    (
-                        expected_one,
-                        expected_one,
-                        expected_one,
-                        expected_two,
-                        expected_index,
+        for always_keep_tensor_constants, runtime_folding in itertools.product(
+            (True, False), (True, False)
+        ):
+            with self.subTest(
+                always_keep_tensor_constants=always_keep_tensor_constants,
+                runtime_folding=runtime_folding,
+            ):
+                model = Model(self.device)
+                ep = torch.export.export(model, tuple())
+                inductor_configs = {
+                    "always_keep_tensor_constants": always_keep_tensor_constants,
+                    "aot_inductor.package_cpp_only": self.package_cpp_only,
+                    "aot_inductor.use_runtime_constant_folding": runtime_folding,
+                }
+                with WritableTempFile(suffix=".pt2") as f:
+                    package_path = torch._inductor.aoti_compile_and_package(
+                        ep,
+                        package_path=f.name,
+                        inductor_configs=inductor_configs,
                     )
-                )
-            self.assertEqual(actual, expected)
+                    loaded = load_package(package_path)
+
+                actual = [tuple(out.clone() for out in loaded()) for _ in range(3)]
+                expected = []
+                for call_idx in range(3):
+                    expected_one = torch.full((1,), call_idx + 2.0, device=self.device)
+                    expected_two = torch.full((2,), call_idx + 2.0, device=self.device)
+                    expected_index = torch.tensor([call_idx + 2.0, 1.0], device=self.device)
+                    expected.append(
+                        (
+                            expected_one,
+                            expected_one,
+                            expected_one,
+                            expected_two,
+                            expected_index,
+                        )
+                    )
+                self.assertEqual(actual, expected)
 
     @skipif(
         lambda device, package_cpp_only: package_cpp_only,

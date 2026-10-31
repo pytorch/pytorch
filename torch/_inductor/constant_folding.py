@@ -6,6 +6,11 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.freezing_utils import maybe_set_is_frozen_param
+from torch._inductor.fx_utils import (
+    get_mutated_input_nodes,
+    get_mutated_storages,
+    get_node_storage,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -99,6 +104,17 @@ class ConstantFolder(torch.fx.Interpreter):
         self.lifted_constant_names = lifted_constant_names
         self.deferred_value = object()
         self.skip_folding_node_fn = skip_folding_node_fn
+        self.mutated_storages = get_mutated_storages(gm)
+        # Identity fallback for written nodes without a fake tensor in meta["val"]
+        self.mutated_nodes = OrderedSet(
+            n for node in gm.graph.nodes for n in get_mutated_input_nodes(node)
+        )
+
+    def _reads_mutated_value(self, node: torch.fx.Node) -> bool:
+        if node in self.mutated_nodes:
+            return True
+        storage = get_node_storage(node)
+        return storage is not None and storage in self.mutated_storages
 
     def _support_dynamic_shape(self) -> bool:
         # ConstantFolder not support dynamic shape now
@@ -214,6 +230,12 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
+        # Values read from storage written in the graph (e.g. a buffer updated in
+        # forward) must remain runtime reads, otherwise later calls reuse the
+        # folded value.
+        if self._reads_mutated_value(node):
+            return self.unknown_value
+
         # TODO - fix errors with this
         if (
             node.op == "call_function"
@@ -314,7 +336,7 @@ class ConstantFolder(torch.fx.Interpreter):
         if self.lifted_constant_names is None:
             return
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
-            if n.name in (self.lifted_constant_names or ()):
+            if n.name in self.lifted_constant_names and not self._reads_mutated_value(n):
                 env[n] = self.deferred_value
 
 
