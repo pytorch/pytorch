@@ -79,6 +79,8 @@ def get_alignment_size_dtype(dtype: torch.dtype) -> int:
 
 
 def check_device(a: Tensor, b: Tensor) -> bool:
+    if getattr(a, "is_npu", False) and getattr(b, "is_npu", False):
+        return True
     return (a.is_cuda and b.is_cuda) or (a.is_xpu and b.is_xpu)
 
 
@@ -299,6 +301,11 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         dtype is torch.bfloat16
         and K > M
         and K > N
+        # NPU: torch.cuda.get_device_capability() raises AssertionError on
+        # builds without CUDA; skip the special case there (Ascend 910B-series
+        # is bf16-native, the same family the comment below targets) and fall
+        # through to the machine_balance estimate like the main path.
+        and not (getattr(torch, "npu", None) is not None and torch.npu.is_available())
         and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
     ):  # doesn't repro on h100s:
         return True
