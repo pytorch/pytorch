@@ -61,7 +61,6 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
-    enumerate_items_with_dict_position,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -1642,6 +1641,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             hooks_dict = getattr(self.value, name)
+            if not issubclass(type(hooks_dict), collections.OrderedDict):
+                return super().tp_getattro_impl(tx, name)
             hooks_dict_source = AttrSource(self.source, name)
             install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             tx.output.guard_on_key_order.add(hooks_dict_source)
@@ -1659,10 +1660,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value
 
-            result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(hooks_dict)
-            )
+            from .builder import _build_dict_items
+
+            result = _build_dict_items(hooks_dict, build_key_value)
 
             return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
         return super().tp_getattro_impl(tx, name)

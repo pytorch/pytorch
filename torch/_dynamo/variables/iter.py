@@ -891,10 +891,14 @@ class DictViewIterator(IteratorVariable):
     def __init__(
         self,
         items: dict[HashableTracker, VariableTracker],
+        *,
+        use_dict_storage: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if self.view_type == "keys":
+        if use_dict_storage and isinstance(items, dict):
+            self._iter = iter(getattr(dict, self.view_type)(items))
+        elif self.view_type == "keys":
             self._iter = iter(items)
         elif self.view_type == "values":
             self._iter = iter(items.values())  # type: ignore[bad-assignment]

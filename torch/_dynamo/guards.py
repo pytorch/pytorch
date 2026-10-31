@@ -208,6 +208,7 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -1455,6 +1456,10 @@ def check_closure(value: object, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
+
+
+def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, ...]:
+    return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
 
 
 def _constant_subclass_base_value(value: object) -> Any:
@@ -3781,6 +3786,26 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
+        eval_fn=lambda value, order: _ordered_dict_order(value) == order,
+    )
+    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        # Keep the container in the serialized guard state, even with a root leaf.
+        self.get_guard_manager(guard)
+        order = _ordered_dict_order(self.get(guard))
+        ref = self.arg_ref(guard)
+        get_value = eval(
+            f"lambda L: {ref}", _get_closure_vars() | {"G": self.runtime_global_scope}
+        )
+        code = [f"___ordered_dict_order_matches({ref})"]
+        # The root epilogue runs after source guards and cannot be skipped by
+        # ancestor dictionary-version shortcuts when only linked order changes.
+        self.guard_manager.root.add_ordered_dict_order_guard(
+            get_value, order, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
         eval_fn=lambda value, metadata: constants_identical(
             list(dict.keys(value)), metadata
@@ -4915,6 +4940,35 @@ class GuardsStatePickler(FunctionPicklerBase):
         return dict.fromkeys(elems).keys()
 
     @classmethod
+    def _restore_ordered_dict_state(
+        cls,
+        value: collections.OrderedDict[Any, Any],
+        state: tuple[Any, tuple[int, ...]],
+    ) -> None:
+        attrs, order = state
+        keys = list(dict.keys(value))
+        for index in order:
+            collections.OrderedDict.move_to_end(value, keys[index])
+        if attrs is None:
+            return
+        try:
+            setstate = cast(Any, value).__setstate__
+        except AttributeError:
+            slots = None
+            if isinstance(attrs, tuple):
+                attrs, slots = attrs
+            if attrs is not None:
+                # Preserve constructor attributes and aliases to the saved state.
+                for name, item in value.__dict__.items():
+                    attrs.setdefault(name, item)
+                object.__setattr__(value, "__dict__", attrs)
+            if slots:
+                for name, item in slots.items():
+                    setattr(value, name, item)
+        else:
+            setstate(attrs)
+
+    @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
 
@@ -5228,6 +5282,40 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
+
+        if (
+            issubclass(type(obj), collections.OrderedDict)
+            and type(obj) not in copyreg.dispatch_table
+            and inspect.getattr_static(obj, "__reduce__")
+            is collections.OrderedDict.__reduce__
+            and inspect.getattr_static(obj, "__reduce_ex__")
+            is collections.OrderedDict.__reduce_ex__
+        ):
+            if type(obj).__qualname__ != type(obj).__name__:
+                raise_local_type_error(type(obj))
+            # Native pickle normalizes storage to linked order, invalidating
+            # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
+            # Custom constructors/items/setitem must retain native callback order.
+            preserve_storage = type(type(obj)).__call__ is type.__call__ and all(
+                getattr(type(obj), name) is getattr(collections.OrderedDict, name)
+                for name in ("__new__", "__init__", "__setitem__", "items")
+            )
+            order = _ordered_dict_order(obj)
+            if not preserve_storage and order != tuple(range(dict.__len__(obj))):
+                raise torch._dynamo.exc.PackageError(
+                    "Cannot preserve OrderedDict storage order with custom "
+                    "construction or item methods"
+                )
+            reduced = obj.__reduce__()
+            state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
+            return (
+                reduced[0],
+                reduced[1],
+                (state, order if preserve_storage else ()),
+                reduced[3],
+                iter(dict.items(obj)) if preserve_storage else reduced[4],
+                type(self)._restore_ordered_dict_state,
+            )
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
