@@ -5652,6 +5652,29 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
 
+    @parametrize("check", ["is_none", "is_ellipsis", "not_tuple", "bool_list"])
+    def test_dynamic_slice_check_no_recompile(self, check):
+        def fn(x, y):
+            s = slice(y.shape[0], None)
+            if check == "is_none" and s is None:
+                return x
+            if check == "is_ellipsis" and s is Ellipsis:
+                return x
+            if check == "not_tuple" and not (slice(None), s):
+                return x
+            if check == "bool_list" and not bool([slice(None), s]):
+                return x
+            return x[:, s]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
+
+        x = torch.randn(2, 32)
+        for n in (5, 7, 9):
+            y = torch.zeros(n)
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_range_with_index(self):
         def fn(x):
             acc = 1
