@@ -44,6 +44,16 @@ class DeviceInterface:
     """
 
     @staticmethod
+    def load_aoti_callable(model_so_path: str, device: str) -> Callable[..., Any]:
+        """Load an AOTI shared library and return its boxed callable.
+
+        ``device`` includes the device index, if provided. Implementations own
+        runner construction and must keep its resources alive through the
+        returned callable. Backends without AOTI support inherit this error.
+        """
+        raise NotImplementedError
+
+    @staticmethod
     def get_cpp_device_options(
         aot_mode: bool, compile_only: bool
     ) -> (
@@ -355,6 +365,12 @@ class DeviceGuard:
 
 
 class CudaInterface(DeviceInterface):
+    @staticmethod
+    def load_aoti_callable(model_so_path: str, device: str) -> Callable[..., Any]:
+        return torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+            model_so_path, 1, device, "", True
+        ).run
+
     device = torch.cuda.device  # type: ignore[assignment]
 
     # register Event and Stream class into the backend interface
@@ -621,6 +637,12 @@ else:
 
 
 class XpuInterface(DeviceInterface):
+    @staticmethod
+    def load_aoti_callable(model_so_path: str, device: str) -> Callable[..., Any]:
+        return torch._C._aoti.AOTIModelContainerRunnerXpu(
+            model_so_path, 1, device, ""
+        ).run
+
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
@@ -725,6 +747,10 @@ class CpuDeviceProperties:
 
 
 class CpuInterface(DeviceInterface):
+    @staticmethod
+    def load_aoti_callable(model_so_path: str, device: str) -> Callable[..., Any]:
+        return torch._C._aoti.AOTIModelContainerRunnerCpu(model_so_path, 1).run
+
     # pyrefly: ignore [bad-override]
     class Event(torch.Event):
         def __init__(self, enable_timing: bool = True) -> None:
