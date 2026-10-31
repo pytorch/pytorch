@@ -2120,16 +2120,21 @@ class TestSaveLoad(TestCase):
         ops = sorted(str(n.target) for n in ep.graph.nodes if n.op == "call_function")
         with TemporaryFileName(suffix=".pt2") as path:
             save(ep, path)
+            # The loaded varlen op must be the packet that has a flop formula.
             script = (
                 "import torch;"
                 f"ep = torch.export.load(r'{path}');"
                 "print(sorted(str(n.target) for n in ep.graph.nodes"
-                " if n.op == 'call_function'))"
+                " if n.op == 'call_function'));"
+                "from torch.utils.flop_counter import flop_registry;"
+                "print([n.target.overloadpacket in flop_registry"
+                " for n in ep.graph.nodes"
+                " if str(n.target) == 'torch_attn._varlen_attn.default'])"
             )
             out = subprocess.check_output(
                 [sys.executable, "-c", script], cwd=os.path.dirname(path), text=True
             )
-        self.assertEqual(out.strip().splitlines()[-1], str(ops))
+        self.assertEqual(out.strip().splitlines()[-2:], [str(ops), "[True]"])
 
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
