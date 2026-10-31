@@ -6,7 +6,7 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
@@ -193,7 +193,7 @@ class HashableTracker:
 
     @staticmethod
     def iter_keys_by_identity(
-        mapping: dict["HashableTracker", VariableTracker],
+        mapping: Iterable["HashableTracker"],
     ) -> Iterator["HashableTracker"]:
         # OrderedDict's iterator looks up each stored key. Those internal lookups
         # must not trace user equality; the iterator's current key is already known.

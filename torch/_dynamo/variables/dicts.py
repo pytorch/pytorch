@@ -67,6 +67,7 @@ from ..utils import (
     odict_items,
     odict_keys,
     odict_values,
+    specialize_symnode,
     tracked_repr,
     unpack_iterable,
 )
@@ -1165,27 +1166,52 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
     ) -> VariableTracker:
-        # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
-        # Only supports eq/ne; returns NotImplemented for ordering.
-        from .builder import SourcelessBuilder
-
-        if op not in ("__eq__", "__ne__"):
+        try:
+            if op not in ("__eq__", "__ne__") or not pydict_check(other):
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
             return ConstantVariable.create(NotImplemented)
-        # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
-        # This is correct because CPython's dict_equal operates on the
-        # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
-        # -- it never calls __getitem__ or __len__ on dict subclasses.
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+        if self is other:
+            # Keys and values match by identity; avoid guarding nn.Module hook IDs.
+            return ConstantVariable.create(op == "__eq__")
         if not isinstance(other, ConstDictVariable):
-            return ConstantVariable.create(NotImplemented)
-        eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-            tx, [self, other], {}
+            unimplemented(
+                gb_type="Unsupported dictionary storage",
+                context=str(type(other)),
+                explanation="Dynamo cannot access this dictionary's stored keys and values.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        for mapping in (self, other):
+            mapping.install_dict_keys_match_guard()
+        if len(self.items) != len(other.items):
+            return ConstantVariable.create(op == "__ne__")
+        if self.source:
+            # Value comparisons can have order-dependent side effects.
+            tx.output.guard_on_key_order.add(self.source)
+        # CPython's dict_equal walks storage order even for OrderedDict.
+        items = (
+            dict.items(self.items)
+            if isinstance(self.items, dict)
+            else self.items.items()
         )
-        if op == "__ne__":
-            return VariableTracker.build(tx, not eq_result.as_python_constant())
-        return eq_result
+        for key, value in _iter_detecting_mutation(iter(items)):
+            # Native equality reuses each key's insertion-time hash.
+            other_value = other.items.get(key)
+            if other_value is None or isinstance(
+                other_value, variables.DeletedVariable
+            ):
+                # Keep the missing-key hint without repeating key comparisons.
+                other.install_dict_contains_guard(tx, key, key_present=False)
+                return ConstantVariable.create(op == "__ne__")
+            equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
+            if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
+                return ConstantVariable.create(op == "__ne__")
+        return ConstantVariable.create(op == "__eq__")
 
     def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         # DictGuardManager does not support getattr_manager for plain dicts,
@@ -1220,11 +1246,6 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             and (view is None or view.is_ordered)
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
-
-    # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
-    # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
-    # OrderedDict exposes no tp_getset / tp_members.
-    # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
     def dict_copy(
         self,
@@ -1298,6 +1319,55 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         # odict_inplace_or uses mutablemapping_update_arg, including __setitem__.
         self.odict_update(tx, [other], {})
         return self
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        result = ConstDictVariable.tp_richcompare_impl(self, tx, other, op)
+        if (
+            op not in ("__eq__", "__ne__")
+            or self is other
+            or not isinstance(other, OrderedDictVariable)
+        ):
+            return result
+        # Distinct hook dictionaries need key guards even when dict equality
+        # fails: replacing their IDs can make them equal on the next call.
+        for mapping in (self, other):
+            if mapping.source:
+                install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+        if result.as_python_constant() == (op == "__ne__"):
+            return result
+        # CPython's odict_richcompare checks key order only after dict equality.
+        # Lagging iterators detect mutations even after the last pair or a false
+        # comparison. Identity-only iteration avoids tracing internal key lookups.
+        mutation_checks = tuple(
+            _iter_detecting_mutation(
+                HashableTracker.iter_keys_by_identity(iter(mapping.items))
+            )
+            for mapping in (self, other)
+        )
+        pairs = zip(
+            HashableTracker.iter_keys_by_identity(self.items),
+            HashableTracker.iter_keys_by_identity(other.items),
+        )
+        for left, right in _iter_detecting_mutation(pairs):
+            equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
+            is_equal = specialize_symnode(
+                generic_is_true(tx, equal)
+            ).as_python_constant()
+            for iterator in mutation_checks:
+                next(iterator)
+            if not is_equal:
+                return ConstantVariable.create(op == "__ne__")
+        # Value comparisons can change either size before key comparison starts.
+        return ConstantVariable.create(
+            (len(self.items) == len(other.items)) == (op == "__eq__")
+        )
+
+    # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
+    # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
+    # OrderedDict exposes no tp_getset / tp_members.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
     def move_to_end(
         self: "OrderedDictVariable",
