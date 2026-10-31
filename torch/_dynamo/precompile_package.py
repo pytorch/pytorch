@@ -90,6 +90,11 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
+# The Triton settings _frozen_kernel_config pins. A capture's options apply
+# inside that patch, so both tracers refuse any that override them.
+FROZEN_KERNEL_PINS = {"triton.autotune_at_compile_time": True, "triton.multi_kernel": 0}
+
+
 def _frozen_kernel_config() -> dict[str, object]:
     """The Triton config both precompile tracers lower under.
 
@@ -118,6 +123,39 @@ def _frozen_kernel_config() -> dict[str, object]:
         )
         frozen["triton.multi_kernel"] = 0
     return frozen
+
+
+# The Inductor settings _capture_config pins. The options of a session's
+# Inductor wrapper apply inside this patch, so the session refuses any that
+# override them.
+CAPTURE_INDUCTOR_PATCH = {"bundled_autotune_remote_cache": False}
+
+# Options under which a compile saves no cache entry. A DynamoTracer artifact
+# ships the cache entries each graph's compile saves, so a capture refuses them.
+UNCACHED_INDUCTOR_OPTIONS = ("freezing", "force_disable_caches", "fx_wrapper")
+
+
+def _check_capture_options(options: Mapping[str, object]) -> None:
+    uncached = [k for k in UNCACHED_INDUCTOR_OPTIONS if options.get(k)]
+    if uncached:
+        raise PackageError(
+            f"a DynamoTracer capture cannot compile with {uncached} on: such a "
+            "compile saves no cache entry, and the artifact is built from the "
+            "cache entries each graph's compile saves."
+        )
+    pinned = CAPTURE_INDUCTOR_PATCH.items()
+    overridden = {k: v for k, v in pinned if options.get(k, v) != v}
+    if overridden:
+        raise PackageError(
+            f"a DynamoTracer capture always compiles with {overridden}: an "
+            "eager backward lowering fails on a remote autotune cache miss."
+        )
+    frozen = {k: v for k, v in FROZEN_KERNEL_PINS.items() if options.get(k, v) != v}
+    if frozen:
+        raise PackageError(
+            f"a DynamoTracer capture always compiles with {frozen}: the artifact "
+            "replays each kernel with the one config tuned during the capture."
+        )
 
 
 @contextlib.contextmanager
@@ -199,7 +237,7 @@ def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
         functorch_config.patch(functorch_patch),
         inductor_config.patch(
             {
-                "bundled_autotune_remote_cache": False,
+                **CAPTURE_INDUCTOR_PATCH,
                 **(_frozen_kernel_config() if lowers_kernels else {}),
             }
         ),
@@ -1674,6 +1712,9 @@ class _CapturePackage(CompilePackage):
         self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
+        # The (fwd, bwd) of the torch._dynamo.override_cudagraphs each backend graph
+        # compiled under, by backend id.
+        self.cudagraph_overrides: dict[str, tuple[bool | None, bool | None]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1690,6 +1731,9 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
+        context = torch._guards.TracingContext.try_get()
+        if context is not None and (a := context.cudagraph_annotation) is not None:
+            self.cudagraph_overrides[backend_id] = (a.fwd, a.bwd)
 
     def add_graph_break_op(
         self,
@@ -1891,7 +1935,7 @@ class PrecompileSession(Generic[_P, _R]):
         self,
         fn: Callable[_P, _R],
         *,
-        backend: str = "inductor",
+        backend: str | torch._TorchCompileInductorWrapper = "inductor",
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
         recompile_limit: int = 256,
@@ -1899,6 +1943,28 @@ class PrecompileSession(Generic[_P, _R]):
     ) -> None:
         self._fn = fn
         self._backend = backend
+        self._backend_name = (
+            backend if isinstance(backend, str) else backend.compiler_name
+        )
+        if not isinstance(backend, str):
+            _check_capture_options(backend.config)
+        # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
+        # graphs is decided again when it is post-compiled at load. The artifact
+        # records the capture's choice, and the capture's calls compile under it.
+        # graph_partition is in it because post-compile picks the wrapper for a
+        # partitioned graph by it, while the graph was partitioned at compile.
+        self._cudagraph_config: dict[str, bool] = {}
+        if self._backend_name == "inductor":
+            from torch._inductor import config as inductor_config
+
+            self._cudagraph_config = {
+                "triton.cudagraphs": inductor_config.triton.cudagraphs,
+                "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
+                "graph_partition": inductor_config.graph_partition,
+            }
+            if not isinstance(backend, str):
+                config = self._cudagraph_config
+                config.update((k, v) for k, v in backend.config.items() if k in config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2018,8 +2084,9 @@ class PrecompileSession(Generic[_P, _R]):
         )
         try:
             with (
-                _capture_config(lowers_kernels=self._backend == "inductor"),
+                _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
+                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 return self._compiled(*args, **kwargs)
         except Exception as e:
@@ -2066,7 +2133,7 @@ class PrecompileSession(Generic[_P, _R]):
                 # its own, and output_graph short-circuits an empty graph to
                 # noop_graph_call without filing anything under its id, which
                 # the bytecode still names; both are carried as-is.
-                if self._backend == "eager" or backend is noop_graph_call:
+                if self._backend_name == "eager" or backend is noop_graph_call:
                     artifact = EagerCacheArtifact(key=backend_id, content=backend)
             if artifact is None:
                 missing.append(backend_id)
@@ -2076,7 +2143,7 @@ class PrecompileSession(Generic[_P, _R]):
             raise PackageError(
                 f"precompile captured {len(entry.backend_ids)} backend graph(s) but "
                 f"{len(missing)} of them recorded no serializable artifact: "
-                f"{missing}. The {self._backend!r} backend reaches the artifact "
+                f"{missing}. The {self._backend_name!r} backend reaches the artifact "
                 f"through the AOTAutograd cache (bundled_autograd_cache); a graph "
                 f"that cache bypassed cannot be served. Check TORCH_LOGS=+aot for "
                 f"the bypass reason."
@@ -2279,6 +2346,29 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         package = self._package
+        # The artifact records the capture's CUDA graph config, not each graph's, so
+        # an override that decides a graph otherwise cannot be served. As compile_fx
+        # applies one: fwd decides the forward, and bwd=False alone keeps a CUDA
+        # graphed forward's backward out, if there is one.
+        flag = self._cudagraph_config.get("triton.cudagraphs", False)
+        overrides = package.cudagraph_overrides
+        for backend_id in backends.keys() & overrides.keys():
+            fwd, bwd = overrides[backend_id]
+            artifact = backends[backend_id]
+            backward = isinstance(artifact, BundledAOTAutogradCacheArtifact) and (
+                artifact.content.compiled_bw is not None
+            )
+            forward = flag if fwd is None else fwd
+            if self._backend_name == "inductor" and (
+                forward != flag or (forward and backward and bwd is False)
+            ):
+                raise PackageError(
+                    f"a DynamoTracer capture cannot serve torch._dynamo."
+                    f"override_cudagraphs(fwd={fwd}, bwd={bwd}) under "
+                    f"triton.cudagraphs={flag}: the artifact records the capture's "
+                    "CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. Set "
+                    "triton.cudagraphs to match, or remove the override."
+                )
         # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
         # on those of any compiled frame, and a graph's ops on the graph's devices.
         op_devices: dict[tuple[str, str], set[str]] = {
@@ -2325,15 +2415,23 @@ class PrecompileSession(Generic[_P, _R]):
             self._warned_ops |= warned
             _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
+        options = None if isinstance(self._backend, str) else self._backend.config
         return _build_multigraph_artifact(
-            entry, backends, summary, self._backend, self._fn, **sections
+            entry,
+            backends,
+            summary,
+            self._backend_name,
+            self._fn,
+            self._cudagraph_config,
+            inductor_options=options,
+            **sections,
         )
 
 
 def precompile_capture(
     fn: Callable[_P, _R],
     *,
-    backend: str = "inductor",
+    backend: str | torch._TorchCompileInductorWrapper = "inductor",
     guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
     | None = None,
     recompile_limit: int = 256,
