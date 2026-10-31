@@ -1103,9 +1103,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             aten._unsafe_index_put.default,
         }:
             inp = node.args[0]
-            if _aliases_graph_input(inp, mutated_args_by_op) and _result_escapes_graph(
-                node, mutated_args_by_op
-            ):
+            if isinstance(inp, torch.fx.Node) and _aliases_graph_input(
+                inp, mutated_args_by_op
+            ) and _result_escapes_graph(node, mutated_args_by_op):
                 return
         # Check if ALL mutated args can be inplaced
         # Only convert if we don't need to clone any tensor
