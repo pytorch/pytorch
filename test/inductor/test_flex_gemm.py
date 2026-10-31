@@ -10759,27 +10759,40 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             torch.compile(fn, fullgraph=True)(a, b, bias)
 
     @parametrize(
-        "case", ("invalid", "swapped", "partial", "k_major_b", "one_cta", "bf16")
+        "case",
+        (
+            # (name, two-CTA config overrides or None to pin only tile_m,
+            #  column-major operand or "", rejected)
+            ("invalid", {}, "", True),
+            ("swapped", dict(swap_ab=True), "a", True),
+            ("partial", None, "", False),
+            ("k_major_b", {}, "b", False),
+            # Each CTA would hold 80 of B's N columns, 2.5 K-major TF32 atoms.
+            ("k_major_b_partial_atom", dict(tile_n=160), "b", True),
+            ("swapped_k_major_partial_atom", dict(tile_n=160, swap_ab=True), "", True),
+            ("k_major_b_whole_atoms", dict(tile_n=128), "b", False),
+            ("one_cta", dict(tile_m=128, cluster_m=1), "", False),
+            ("bf16", {}, "", False),
+        ),
+        name_fn=lambda case: case[0],
     )
     @recover_orig_fp32_precision
     def test_tf32_config_respects_mn_smem_atom(self, device, case):
         if torch.cuda.get_device_capability()[0] not in (10, 11):
             self.skipTest("requires the SM100/SM110 TF32 mainloop")
+        name, overrides, col_major, rejected = case
         torch.set_float32_matmul_precision("high")
-        dtype = torch.bfloat16 if case == "bf16" else torch.float32
+        dtype = torch.bfloat16 if name == "bf16" else torch.float32
         a = self.makeTensor(128, 64, device=device, dtype=dtype).sign_()
         b = self.makeTensor(64, 128, device=device, dtype=dtype).sign_()
-        config = {"tile_m": 256, "is_dynamic_persistent": False}
-        if case != "partial":
-            config.update(
-                tile_n=32, cluster_m=2, cluster_n=1, swap_ab=case == "swapped"
-            )
-        if case == "one_cta":
-            config.update(tile_m=128, cluster_m=1)
-        if case == "k_major_b":
-            b = b.t().contiguous().t()
-        if case == "swapped":
+        if col_major == "a":
             a = a.t().contiguous().t()
+        if col_major == "b":
+            b = b.t().contiguous().t()
+        config = {"tile_m": 256, "is_dynamic_persistent": False}
+        if overrides is not None:
+            two_cta = dict(tile_n=32, cluster_m=2, cluster_n=1, swap_ab=False)
+            config |= two_cta | overrides
 
         def fn(a, b):
             return flex_gemm(
@@ -10790,7 +10803,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             )
 
         compiled = torch.compile(fn, fullgraph=True)
-        if case in ("invalid", "swapped"):
+        if rejected:
             with self.assertRaisesRegex(
                 InductorError, "no supported GemmConfig matches"
             ):
