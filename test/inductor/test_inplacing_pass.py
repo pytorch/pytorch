@@ -351,6 +351,25 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             actual_x.untyped_storage().data_ptr(),
         )
 
+    def test_index_put_copy_back_with_input_view_output(self):
+        def f(x, idx, values):
+            updated = aten.index_put.default(x, [idx], values, False)
+            x.copy_(updated)
+            return x.expand((2, x.shape[0]))
+
+        x = torch.randn(1024, device=device)
+        idx = torch.arange(10, device=device)
+        values = torch.ones(10, device=device)
+        expected_x, actual_x = x.clone(), x.clone()
+        expected = f(expected_x, idx, values)
+        from torch._inductor import metrics
+
+        metrics.generated_kernel_count = 0
+        actual = torch.compile(f)(actual_x, idx, values)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+
     def test_index_put_result_does_not_alias_mutated_input(self):
         def f(x, idx, val):
             out = torch.index_put(x, (idx,), val)
@@ -591,10 +610,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             if node.target is operator.getitem and node.args[0] is functionalized
         )
         expected_clones = [0] if enable_v2 else ["x"]
-        self.assertEqual(functionalized.meta["only_clone_these_tensors"], expected_clones)
+        self.assertEqual(
+            functionalized.meta["only_clone_these_tensors"], expected_clones
+        )
         self.assertFalse(_aliases_graph_input(result, {}))
         self.assertFalse(_result_escapes_graph(functionalized, {}))
         self.assertIn(aten.copy_.default, [node.target for node in gm.graph.nodes])
+        functionalized.meta["only_clone_these_tensors"] = []
+        self.assertTrue(_result_escapes_graph(functionalized, {}))
+        functionalized.meta["only_clone_these_tensors"] = expected_clones
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
@@ -987,7 +1011,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             guarded_gm = make_fx(guarded, tracing_mode="fake")(a, b)
             reinplace_inplaceable_ops_core(guarded_gm.graph)
             guarded_effect = next(
-                n for n in guarded_gm.graph.nodes
+                n
+                for n in guarded_gm.graph.nodes
                 if n.target is torch.ops.higher_order.with_effects
             )
             self.assertEqual(guarded_effect.args[1], my_add_functional._opoverload)
