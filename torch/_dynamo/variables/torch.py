@@ -49,6 +49,7 @@ from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
 from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_item_memo
+from torch.amp.autocast_mode import _autocast_entries
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -283,6 +284,14 @@ if torch.distributed.is_available():
 # Convert to dict for O(1) access times
 constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need_guards)
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
+
+# Third-party backends (e.g. PrivateUse1 devices) register after torch is
+# imported, so supported_ctx_manager_classes above cannot list their autocast
+# entries. They register through torch.utils.register_device_autocast_entry,
+# which adds them to the _autocast_entries registry that is_matching_cls and
+# call_function consult below, so registrations take effect regardless of
+# import order.
+
 
 # Ops that consume scalar values from 0-d tensors (via .item()) for computation
 # only, not for output shapes. When capture_scalar_outputs is enabled, these ops
@@ -724,10 +733,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         return (
             # Context manager type or function with @contextmanager is callable
             callable(value)
-            and (
-                hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
-            )
+            and hashable(value)  # accesses value.__hash__()
+            and (value in supported_ctx_manager_classes or value in _autocast_entries)
         )
 
     def call_function(
@@ -906,12 +913,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ):
-            # pyrefly: ignore [bad-argument-type]
+        elif self.value in _autocast_entries:
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.record_function,

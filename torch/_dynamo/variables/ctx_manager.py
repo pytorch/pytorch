@@ -19,7 +19,6 @@ restoring state changes.
 """
 
 import contextlib
-import inspect
 import logging
 import types
 import warnings
@@ -31,6 +30,7 @@ import torch._C
 from torch._dynamo import config
 from torch._guards import Guard, Source
 from torch._logging import warning_once
+from torch.amp.autocast_mode import _autocast_entries, _autocast_signature
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
@@ -1160,35 +1160,38 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return contextlib._GeneratorContextManager
 
 
+# Built-in legacy device-specific autocast entry points (torch.cuda/cpu.amp.
+# autocast) omit device_type from their signature; the registry itself lives in
+# torch.amp.autocast_mode so that torch.utils.register_device_autocast_entry can
+# extend it without importing torch._dynamo. The cuda/cpu aliases register
+# themselves next to their class definitions (torch/cuda/cpu/amp/autocast_mode.py),
+# which ``import torch`` loads eagerly before any out-of-tree backend autoloads,
+# so a backend import hook cannot silently remap them.
+
+
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(
-        func: torch.amp.autocast_mode.autocast,
+        func: Callable[..., Any],
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        if func not in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ]:
+        if func not in _autocast_entries:
             raise AssertionError(f"unexpected autocast function: {func}")
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        bound_args = inspect.signature(func).bind(*args, **kwargs)
+        bound_args = _autocast_signature(func).bind(*args, **kwargs)
         bound_args.apply_defaults()
         target_values = []
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            if key == "device_type" and func in [
-                torch.cuda.amp.autocast,
-                torch.cpu.amp.autocast,
-            ]:
-                # pyrefly: ignore [unnecessary-comparison]
-                arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
+            if key == "device_type" and _autocast_entries.get(func) is not None:
+                # legacy cuda/cpu and registered third-party autocast functions
+                # omit device_type from their signature; use the registered one.
+                arg = _autocast_entries[func]
             else:
                 arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):

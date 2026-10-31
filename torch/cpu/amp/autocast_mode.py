@@ -4,6 +4,7 @@ from typing import Any
 from typing_extensions import deprecated
 
 import torch
+from torch.amp.autocast_mode import _autocast_entries
 
 
 __all__ = ["autocast"]
@@ -69,3 +70,9 @@ class autocast(torch.amp.autocast_mode.autocast):
         if torch._jit_internal.is_scripting():
             return func
         return super().__call__(func)
+
+
+# Dynamo traces this legacy alias by device_type from _autocast_entries rather
+# than by running its __init__; register it here so the mapping is in place
+# during ``import torch``, before any out-of-tree backend autoloads.
+_autocast_entries[autocast] = "cpu"
