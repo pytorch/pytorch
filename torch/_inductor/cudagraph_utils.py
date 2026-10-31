@@ -311,16 +311,19 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> str | None:
-    # Only the CUDA graph tree manager calls this, so mutation of parameters/static
-    # inputs is allowed whatever config.triton.cudagraph_trees says now: a wrapper
-    # built under trees (a precompile artifact's) can run in a process without them.
-    mutation_indices: Sequence[int] = [
-        idx
-        for idx in func.mutated_input_idxs
-        if not (
-            idx in func.static_input_idxs or is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
-        )
-    ]
+    # doesn't work for non-trees because the warmup run would apply mutation twice
+    if torch._inductor.config.triton.cudagraph_trees:
+        # checking if mutation is only on parameters/static inputs
+        mutation_indices: Sequence[int] = [
+            idx
+            for idx in func.mutated_input_idxs
+            if not (
+                idx in func.static_input_idxs
+                or is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
+            )
+        ]
+    else:
+        mutation_indices = func.mutated_input_idxs
 
     static_inputs_log.debug(
         "check mutation static input indices: %s", func.static_input_idxs

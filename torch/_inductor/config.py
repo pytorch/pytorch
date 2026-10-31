@@ -3474,8 +3474,6 @@ class test_configs:
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
 
-    def _make_closure_patcher(**changes: Any) -> Any: ...
-
 
 class eager_numerics:
     # x / y in Triton is lowered to div.full which is approx
