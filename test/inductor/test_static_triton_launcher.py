@@ -948,7 +948,6 @@ class TestStaticTritonLauncher(TestCase):
                 cubin_file, "no_such_kernel", 0, device_interface.current_device()
             )
 
-    @skipIfXpu(msg="Only testing CUDA OOM behavior")
     def test_too_high_shared_mem(self):
         @triton.jit
         def simple_kernel(arg0, arg1):
