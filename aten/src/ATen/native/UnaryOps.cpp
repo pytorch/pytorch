@@ -708,8 +708,10 @@ Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 namespace {
 
 inline Tensor calc_ndtr(const Tensor& self) {
-  auto x_sqrt_2 = self * c10::frac_sqrt_2<double>;
-  return (1 + at::erf(x_sqrt_2)) * 0.5;
+  // ndtr(x) = erfc(-x / sqrt(2)) / 2. The equivalent (1 + erf(x / sqrt(2))) / 2
+  // cancels for x < 0 (erf rounds to -1 below x ~ -8.3) and loses the whole
+  // lower tail, which is representable down to x ~ -38 in float64.
+  return at::erfc(self * -c10::frac_sqrt_2<double>) * 0.5;
 }
 
 } // namespace
