@@ -837,7 +837,11 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             dim_val = _eval_at(dyn_expr, sym_val, s)
         except (AttributeError, TypeError, ValueError):  # unevaluatable here
             continue
-        if not (_TUNABLEOP_MIN_DYN_DIM <= dim_val <= dim_ceiling):
+        # The served shape is a rung whatever its size: it is the one size
+        # runtime is known to ask for, so the minimum does not apply to it.
+        if dim_val > dim_ceiling or (
+            dim_val < _TUNABLEOP_MIN_DYN_DIM and dim_val != served_dim
+        ):
             continue
         if dim_val in dim_vals:
             continue

@@ -493,6 +493,15 @@ class TestTunableOpPretune(TestCase):
             dims.add(bmreq.input_tensor_meta[0].sizes[0])
         self.assertIn(3000, dims, f"traced hint missing from {sorted(dims)}")
 
+    def test_a_small_traced_hint_is_still_tuned(self):
+        # A model served at a dim below _TUNABLEOP_MIN_DYN_DIM still needs that
+        # shape: dropping it leaves a guaranteed miss on the only size runtime
+        # is known to ask for.
+        s = sympy.Symbol("s_small", positive=True, integer=True)
+        submitted = _run(self._mm_winner("mm", s), sym=s, hint=4)
+        dims = {b.input_tensor_meta[0].sizes[0] for b in submitted}
+        self.assertIn(4, dims, f"the served dim was dropped: {sorted(dims)}")
+
     def test_traced_hint_first_then_largest_first(self):
         # The budget is shared and spent in order, so the one size runtime is
         # known to ask for goes first; the rest descend, since a fault on a big
@@ -721,17 +730,22 @@ class TestTunableOpPretune(TestCase):
             _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
             pretune.assert_not_called()
 
-    def test_finalize_hook_routes_extern_winners(self):
+    @parametrize("conflict", (False, True))
+    def test_finalize_hook_routes_extern_winners(self, conflict):
         # finalize_multi_template_buffers sends the chosen extern winner through
-        # the ladder. Spec'd mocks so the isinstance gates pass.
+        # the ladder, except on the layout-conflict fallback: there an input is
+        # frozen to a layout the constraints disagree with, and the meta rebuild
+        # reads the constraint. Spec'd mocks so the isinstance gates pass.
         import torch._inductor.ir as _ir
         from torch._inductor.scheduler import Scheduler, SchedulerNode
 
-        s = sympy.Symbol("s_fin", positive=True, integer=True)
+        s = sympy.Symbol(f"s_fin{int(conflict)}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         multi = mock.Mock(spec=_ir.MultiTemplateBuffer)
         multi.choices = [winner]
+        multi.inputs = winner.input_nodes
         multi.get_min_choice.return_value = (winner, None)
+        multi.choice_timings.return_value = {winner: 1.0}
         multi.origins = set()
         multi.layout = winner.layout
         multi.origin_node = None
@@ -739,7 +753,7 @@ class TestTunableOpPretune(TestCase):
         sched_node.node = multi
         sched = mock.Mock(spec=Scheduler)
         sched.nodes = [sched_node]
-        sched._has_layout_conflict_for_template.return_value = True
+        sched._has_layout_conflict_for_template.return_value = conflict
 
         # The finalizer replaces the node after the hook -- deep IR machinery
         # this test does not cover -- so raise a sentinel from the hook itself.
@@ -749,13 +763,19 @@ class TestTunableOpPretune(TestCase):
             pass
 
         winner.output_node = mock.Mock(return_value=mock.Mock())
+        # Without the hook to stop it, the conflict case runs on into IR the
+        # mocks do not model and trips the finalizer's own type assertion.
+        expected = AssertionError if conflict else _Stop
         with mock.patch(
             "torch._inductor.select_algorithm._maybe_pretune_tunableop",
             side_effect=_Stop,
         ) as pretune:
-            with self.assertRaises(_Stop):
+            with self.assertRaises(expected):
                 Scheduler.finalize_multi_template_buffers(sched)
-        pretune.assert_called_once_with(winner)
+        if conflict:
+            pretune.assert_not_called()
+        else:
+            pretune.assert_called_once_with(winner)
         winner.output_node.assert_called_once()
 
     def test_tune_mode_bypasses_the_fx_graph_cache(self):
