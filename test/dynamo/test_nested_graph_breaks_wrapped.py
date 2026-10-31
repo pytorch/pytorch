@@ -73,6 +73,9 @@ tests = [
     getattr(
         test_activation_checkpointing, "ActivationCheckpointingViaTagsTestsCUDA", None
     ),
+    getattr(
+        test_activation_checkpointing, "ActivationCheckpointingViaTagsTestsXPU", None
+    ),
     test_comprehensions.ComprehensionTests,
     test_ctx_manager.CtxManagerTests,
     test_decorators.DecoratorTests,
