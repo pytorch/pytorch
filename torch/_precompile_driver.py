@@ -1003,6 +1003,28 @@ def _build_installed_forward():
                 flagged = [e.eager_fallback and not e.bypassed for _, e in entries]
                 eager = [t for t, f in zip(targets, flagged) if f]
                 context.callback = _RefuseRecompileCallback(context.callback, eager)
+            else:
+                # A serve-time compile traces as the capture's calls did: Dynamo
+                # reads triton.cudagraphs while tracing (it specializes floats
+                # under it). Dynamo calls the callback only to compile, so a call
+                # a cached entry serves, and user code between graphs, run under
+                # the loading process's config.
+                compile_frame = context.callback
+                patch = torch._inductor.config._make_closure_patcher(**CUDAGRAPH_CONFIG)
+
+                def callback(*args, **kwargs):
+                    revert = patch()
+                    try:
+                        # pyrefly: ignore[not-callable]
+                        return compile_frame(*args, **kwargs)
+                    finally:
+                        revert()
+
+                # Matches the installed entries' backend, as Dynamo's own wrapped
+                # callbacks do.
+                # pyrefly: ignore[missing-attribute]
+                callback._torchdynamo_orig_backend = compile_frame
+                context.callback = callback
             compiled = context(fn)
         with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
             package.install(package_state["backends"])
@@ -1015,21 +1037,9 @@ def _build_installed_forward():
             f"changed since capture, regenerate the artifact against it."
         ) from _e
 
-    # A serve-time compile traces as the capture's calls did: Dynamo reads
-    # triton.cudagraphs while tracing (it specializes floats under it).
-    apply_cudagraph_config = torch._inductor.config._make_closure_patcher(
-        **CUDAGRAPH_CONFIG
-    )
-
     def forward(*args, **kwargs):
         try:
-            if not _ALLOW_SERVE_TIME_COMPILES:
-                return compiled(*args, **kwargs)
-            revert = apply_cudagraph_config()
-            try:
-                return compiled(*args, **kwargs)
-            finally:
-                revert()
+            return compiled(*args, **kwargs)
         except _RecompileRefusedError as _e:
             raise _PrecompileError(
                 f"precompile: no captured variant matches this call. Either a "
