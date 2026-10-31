@@ -16,6 +16,7 @@ from torch._inductor.fx_passes.reinplace import (
     _WAIT_TENSORS_OP,
     _alias_sources,
     _aliases_graph_input,
+    _generalized_scatter,
     _multi_output_aliases,
     _result_escapes_graph,
     inplaceable_foreach_ops,
@@ -178,6 +179,13 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
         y = graph.placeholder("y")
+
+        scatter = graph.call_function(_generalized_scatter, args=(x, y, []))
+        graph.call_function(aten.copy_.default, args=(x, scatter))
+        input_view = graph.call_function(aten.slice.Tensor, args=(x, 0, 0, 1))
+        graph.output(input_view)
+        self.assertTrue(_aliases_graph_input(x, {}))
+        self.assertFalse(_result_escapes_graph(scatter, {}))
 
         functionalized_v1 = graph.call_function(
             torch.ops.higher_order.auto_functionalized,
