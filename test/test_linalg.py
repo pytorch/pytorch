@@ -2319,18 +2319,18 @@ class TestLinalg(TestCase):
             expected = np.linalg.eig(a.cpu().numpy())
 
             # sort NumPy output
-            ind = np.argsort(expected[0], axis=-1)[::-1]
-            expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[:, None], axis=-1))
+            ind = np.argsort(expected[0], axis=-1)[..., ::-1]
+            expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[..., None, :], axis=-1))
 
             # sort PyTorch output
             # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
-            ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[::-1]
+            ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[..., ::-1]
             actual_np = [x.cpu().numpy() for x in actual]
             sorted_actual = (
                 np.take_along_axis(actual_np[0], ind, axis=-1),
-                np.take_along_axis(actual_np[1], ind[:, None], axis=-1))
+                np.take_along_axis(actual_np[1], ind[..., None, :], axis=-1))
 
             self.assertEqual(expected[0], sorted_actual[0], exact_dtype=False)
             self.assertEqual(abs(expected[1]), abs(sorted_actual[1]), exact_dtype=False)
@@ -2371,14 +2371,14 @@ class TestLinalg(TestCase):
 
             # check correctness using eigendecomposition identity
             w, v = actual
-            a = a.to(v.dtype)
+            a_for_identity = a.to(v.dtype)
 
             if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
                 pass
             elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
                 raise RuntimeError("eig returned empty tensors unexpectedly")
 
-            self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
+            self.assertEqual(a_for_identity @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
 
             # calculate eigenvalues only and check all are returned
             w_only = torch.linalg.eigvals(a)
@@ -2614,14 +2614,14 @@ class TestLinalg(TestCase):
             expected = np.linalg.eigvals(a.cpu().numpy())
 
             # sort NumPy output
-            ind = np.argsort(expected, axis=-1)[::-1]
+            ind = np.argsort(expected, axis=-1)[..., ::-1]
             expected = np.take_along_axis(expected, ind, axis=-1)
 
             # sort PyTorch output
             # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
-            ind = np.argsort(actual.cpu().numpy(), axis=-1)[::-1]
+            ind = np.argsort(actual.cpu().numpy(), axis=-1)[..., ::-1]
             actual_np = actual.cpu().numpy()
             sorted_actual = np.take_along_axis(actual_np, ind, axis=-1)
 
