@@ -197,6 +197,57 @@ class XpuScopeProfilerTest(TestCase):
         )
         self.assertEqual(count_metrics, 0)
 
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_available_scope_profiler_metrics(self):
+        if not self.required_env_setting():
+            self.skipTest("ZET_ENABLE_METRICS not set")
+
+        groups = torch.xpu.profiler.available_scope_profiler_metrics()
+        self.assertEqual(
+            groups,
+            torch.xpu.profiler.available_scope_profiler_metrics(
+                torch.xpu.current_device()
+            ),
+        )
+        with self.assertRaises(TypeError):
+            groups[""] = ()  # type: ignore[index]
+        for group, names in groups.items():
+            self.assertIsInstance(group, str)
+            self.assertTrue(group)
+            self.assertTrue(names)
+            for name in names:
+                self.assertIsInstance(name, str)
+                self.assertTrue(name)
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch._C._xpu_availableScopeProfilerMetrics(torch.xpu.device_count())
+
+        if not self.required_paranoid_settings():
+            self.skipTest("paranoid settings missing")
+
+        if not groups:
+            self.skipTest("device has no event-based metric group")
+
+        # Metrics collected together must come from one group.
+        group_name, group_metrics = next(iter(groups.items()))
+        names = list(group_metrics[:2])
+        a = torch.rand([100, 200]).to("xpu")
+        b = torch.rand([200, 300]).to("xpu")
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                {torch.profiler.ProfilerActivity.XPU: names},
+            ],
+        ) as p:
+            torch.matmul(a, b)
+
+        count_metrics = sum(
+            event.key.startswith("metrics: ") for event in p.key_averages()
+        )
+        self.assertGreater(
+            count_metrics, 0, f"no metric events for {names} from group {group_name}"
+        )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -115,6 +115,22 @@
 ```
 
 ```{eval-rst}
+.. automodule:: torch.xpu.profiler
+```
+```{eval-rst}
+.. currentmodule:: torch.xpu.profiler
+```
+
+## Hardware metrics
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+     available_scope_profiler_metrics
+```
+
+```{eval-rst}
 .. toctree::
     :hidden:
 
