@@ -9,8 +9,13 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, xfailIf
-
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    xfailIf,
+)
 
 # TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
 # ATen for every op; see LITE_MODE_TEST_FAILURES below.
@@ -384,6 +389,8 @@ if LITE_MODE:
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -404,6 +411,8 @@ copy_tests(
 class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
     TestCase
 ):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -433,6 +442,8 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     # https://github.com/pytorch/pytorch/issues/199205
     @xfailIf(LITE_MODE)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
