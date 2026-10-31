@@ -388,6 +388,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_registry_guard_sees_later_foreach_reinplace(self):
         def f(x, idx, values, other):
             updated = aten.index_put.default(x, [idx], values, False)
+            x.copy_(updated)
             result = aten._foreach_add.List([updated], [other])
             updated.copy_(result[0])
             return result[0]
