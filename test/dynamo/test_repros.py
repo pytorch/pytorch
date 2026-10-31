@@ -3867,6 +3867,34 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v.shape, ref_v.shape)
         self.assertIsInstance(v, Subclass)
 
+    @parametrize("call", ["overload", "packet"])
+    def test_inplace_view_on_input_via_ops_api(self, call):
+        # `torch.ops.aten.*` does not go through the is_tensor_method() path, so
+        # an inplace view op on a graph input needs the same guard here.
+        def fn(x):
+            if call == "overload":
+                torch.ops.aten.unsqueeze_.default(x, 0)
+            else:
+                torch.ops.aten.unsqueeze_(x, 0)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        # fullgraph first: a failed compile caches nothing, so the next call traces again.
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
+        self.assertEqual(opt_x.shape, ref_x.shape)
+
+    def test_inplace_view_on_copy_via_ops_api(self):
+        def fn(x):
+            v = x.clone()
+            torch.ops.aten.unsqueeze_(v, 0)
+            return v
+
+        x = torch.arange(24).reshape(4, 6)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
             tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]
