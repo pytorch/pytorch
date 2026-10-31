@@ -5093,6 +5093,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
         if torch.version.hip:
             return False
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return False
         return (
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
