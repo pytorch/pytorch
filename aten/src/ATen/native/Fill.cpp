@@ -148,6 +148,10 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
 }
 
 Tensor& zero_(Tensor &self) {
+  if (hasNonPowerOfTwoElementSize(self.scalar_type())) {
+    self.unsqueeze(-1).view(kByte).zero_();
+    return self;
+  }
   int64_t nelements = c10::multiply_integers(self.sizes());
   if (self.device() == at::kCPU &&
       self.is_non_overlapping_and_dense() &&
