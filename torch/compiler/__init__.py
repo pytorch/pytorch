@@ -616,8 +616,8 @@ def is_compiling() -> bool:
     Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().
 
     The flag is per session: it is True in the thread running a
-    ``torch.compile`` / ``torch.export`` tracing session, and in backward
-    started from inside that session read False.
+    ``torch.compile`` / ``torch.export`` tracing session. Any other
+    threads will see False.
 
     Note that there are 2 other related flags that should deprecated eventually:
       * torch._dynamo.external_utils.is_compiling()
