@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
@@ -30,16 +30,12 @@ if has_triton():
     import triton.language as tl
 
 
-def compile_with_ac(f, memory_budget):
-    return torch.compile(f, backend="aot_eager_decomp_partition")
-
-
-def get_act_mem(f):
+def get_act_mem(f, device):
     out = f()
     out.backward()
-    start_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
+    start_mem = torch.accelerator.memory_stats(device)["requested_bytes.all.current"]
     out = f()
-    cur_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
+    cur_mem = torch.accelerator.memory_stats(device)["requested_bytes.all.current"]
     act_mem = (cur_mem - start_mem) / (1024 * 1024)
     out.backward()
     return act_mem
@@ -62,7 +58,7 @@ def create_pair(B_I, O, device):
     return x, w
 
 
-def get_mem_and_flops(f, memory_budget=None):
+def get_mem_and_flops(f, device, memory_budget=None):
     # Returns megabytes rounded to 1 decimal point and FLOPs
     # Note that each value of size (512, 512, torch.float32) is 1 MiB
     torch._dynamo.reset()
@@ -71,7 +67,7 @@ def get_mem_and_flops(f, memory_budget=None):
             f = torch.compile(f, backend="aot_eager_decomp_partition")
 
         # We round this to nearest 10th of a megabyte.
-        return round(get_act_mem(f), 1), get_bw_flops(f)
+        return round(get_act_mem(f, device), 1), get_bw_flops(f)
 
 
 class MemoryBudgetTestDevice(TestCase):
@@ -90,13 +86,13 @@ class MemoryBudgetTestDevice(TestCase):
         def call():
             return f(x, w)
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
         self.assertEqual(eager_mem, 1.0)
-        mem_10, flops_10 = get_mem_and_flops(call, memory_budget=1.0)
+        mem_10, flops_10 = get_mem_and_flops(call, device, memory_budget=1.0)
         # Recomputing `.cos()` is not free here.
         self.assertEqual(mem_10, 1.0)
         self.assertEqual(eager_flops, flops_10)
-        mem_5, flops_5 = get_mem_and_flops(call, memory_budget=0.5)
+        mem_5, flops_5 = get_mem_and_flops(call, device, memory_budget=0.5)
         # We can just recompute `x.cos()` here to only depend on the inputs
         self.assertEqual(mem_5, 0.0)
         self.assertEqual(flops_5, eager_flops)
@@ -117,9 +113,9 @@ class MemoryBudgetTestDevice(TestCase):
         def call():
             return f(x, ws)
 
-        _, eager_flops = get_mem_and_flops(call)
+        _, eager_flops = get_mem_and_flops(call, device)
         for budget in range(11):
-            mem, flops = get_mem_and_flops(call, memory_budget=budget / 10)
+            mem, flops = get_mem_and_flops(call, device, memory_budget=budget / 10)
             if budget <= 5:
                 # We start saving the matmuls
                 self.assertEqual(mem, budget)
@@ -194,11 +190,13 @@ class MemoryBudgetTestDevice(TestCase):
             def call():
                 return f(x, ws)
 
-            eager_mem, _ = get_mem_and_flops(call)
+            eager_mem, _ = get_mem_and_flops(call, device)
             total_mem = sum(weight_shapes)
             self.assertEqual(eager_mem, sum(weight_shapes))
             for mem_achieved in exact_solves:
-                mem, _ = get_mem_and_flops(call, memory_budget=mem_achieved / total_mem)
+                mem, _ = get_mem_and_flops(
+                    call, device, memory_budget=mem_achieved / total_mem
+                )
                 self.assertEqual(mem, mem_achieved)
 
     @onlyAccelerator
@@ -289,10 +287,10 @@ class MemoryBudgetTestDevice(TestCase):
         def call():
             return f([x1, x2], [w1, w2])
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
         self.assertEqual(eager_mem, 8)
         self.assertEqual(eager_flops, 24)
-        comp_mem, comp_flops = get_mem_and_flops(call, memory_budget=0.5)
+        comp_mem, comp_flops = get_mem_and_flops(call, device, memory_budget=0.5)
         self.assertEqual(comp_mem, 4)
         # We are recomputing x1 @ w1 here!
         self.assertEqual(comp_flops, eager_flops + 4)
@@ -314,8 +312,8 @@ class MemoryBudgetTestDevice(TestCase):
         def call():
             return f(x, ws)
 
-        _, eager_flops = get_mem_and_flops(call)
-        mem, flops = get_mem_and_flops(call, memory_budget=0.2)
+        _, eager_flops = get_mem_and_flops(call, device)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=0.2)
         # We start saving the matmuls
         self.assertEqual(mem, 2)
         self.assertEqual(flops, eager_flops + 3)
@@ -332,15 +330,15 @@ class MemoryBudgetTestDevice(TestCase):
         def call():
             return f(xs, ws)
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
         self.assertEqual(eager_mem, 40)
         self.assertEqual(eager_flops, 320)
-        mem, flops = get_mem_and_flops(call, memory_budget=28 / eager_mem)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=28 / eager_mem)
         # Save w1 and w2
         self.assertEqual(mem, 28)
         # We're recomputing w3 (the cheap one!)
         self.assertEqual(flops - eager_flops, 2 * 2 * 6)
-        mem, flops = get_mem_and_flops(call, memory_budget=16 / eager_mem)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=16 / eager_mem)
         # Save w2. Note that even though saving w1 gets us closer to our memory
         # limit, w2 is actually *more* FLOPs than w1!
         self.assertEqual(mem, 12)
@@ -374,11 +372,11 @@ class MemoryBudgetTestDevice(TestCase):
             mm_flops /= 512**3 * 2
             attn_flops /= 512**3 * 2
 
-            eager_mem, eager_flops = get_mem_and_flops(call)
+            eager_mem, eager_flops = get_mem_and_flops(call, device)
             self.assertEqual(eager_mem, S * D * 2)
 
             mem, flops = get_mem_and_flops(
-                call, memory_budget=0.6
+                call, device, memory_budget=0.6
             )  # Force it to recompute one of mm or attn
             self.assertEqual(mem, S * D)
             if expected_recompute == "attn":
@@ -418,10 +416,10 @@ class MemoryBudgetTestDevice(TestCase):
         def call():
             return g(x).sum()
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
         # give the memory budget logic a value that should cause it to run,
         # but not recompute the matmuls
-        mem, flops = get_mem_and_flops(call, memory_budget=0.01)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=0.01)
         self.assertEqual(mem, eager_mem)
         self.assertEqual(flops, eager_flops)
 
@@ -433,5 +431,5 @@ instantiate_device_type_tests(
 
 if __name__ == "__main__":
     # I'm using the accelerator memory allocator to verify memory allocations
-    if HAS_GPU_AND_TRITON and not TEST_WITH_ROCM:
+    if HAS_TRITON and not TEST_WITH_ROCM:
         run_tests()
