@@ -2958,7 +2958,7 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        from .builder import wrap_fx_proxy, SourcelessBuilder
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
         if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
