@@ -2184,10 +2184,10 @@ _jvp_predispatch_functions = frozenset(
 
 # The functorch wrappers that pre-dispatch tracing keeps in the graph. They
 # change global state (functorch levels, forward-mode AD levels, the registered
-# vmap decompositions), or only work while a level that an earlier call entered
-# is still active. So they must stay where they are: dead code elimination must
-# keep them even with no users, and passes that check Node.is_impure() must not
-# fold, reorder or run one on its own.
+# vmap decompositions), or take as an argument a level that an earlier call
+# entered. So they must stay where they are: dead code elimination must keep
+# them even with no users, and passes that check Node.is_impure() must not fold,
+# reorder or run one on its own.
 # Registered here rather than in predispatch.py to avoid circular imports
 # (predispatch.py loads before torch.fx during torch.autograd init).
 _functorch_predispatch_functions = _jvp_predispatch_functions | {
