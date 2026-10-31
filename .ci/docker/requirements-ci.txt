@@ -396,6 +396,7 @@ pwlf==2.2.1
 pip==26.2.2
 pyyaml==6.0.3
 pyzstd
+zstandard
 setuptools==78.1.1
 packaging==24.2
 six
