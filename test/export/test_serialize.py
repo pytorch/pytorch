@@ -2924,9 +2924,7 @@ class TestPredispatchSerialization(TestCase):
 
         # A class defined inside a function cannot be found by name.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        reason = (
-            "__main__ module" if __name__ == "__main__" else "not in an imported module"
-        )
+        reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
         with self.assertRaisesRegex(SerializeError, reason):
             torch.export.save(ep, io.BytesIO())
 
@@ -3004,13 +3002,13 @@ class TestPredispatchSerialization(TestCase):
                 "cannot be used as a flat_apply function",
             ),
             (func_name, b'"os.system"', "not a class or function defined"),
-            (func_name, b'"torch.os.system"', "not in an imported module"),
-            (func_name, b'"torch.builtins.exec"', "not in an imported module"),
-            (func_name, b'"torch.does_not_exist.f"', "not in an imported module"),
+            (func_name, b'"torch.os.system"', "not a top-level"),
+            (func_name, b'"torch.builtins.exec"', "not a top-level"),
+            (func_name, b'"torch.does_not_exist.f"', "not a top-level"),
             (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
             (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
             (cls_name, b'"torch.autograd.Function"', "not a class or function defined"),
-            (cls_name, b'"torch.os.system"', "not in an imported module"),
+            (cls_name, b'"torch.os.system"', "not a top-level"),
         ]:
             with self.assertRaisesRegex(SerializeError, reason, msg=new):
                 load(artifact.exported_program.replace(old, new))
@@ -3033,7 +3031,7 @@ class TestPredispatchSerialization(TestCase):
                 patch.dict(sys.modules, {holder.__name__: holder}),
             ):
                 for new, reason in [
-                    (b'"flat_apply_side_effect.F"', "not in an imported module"),
+                    (b'"flat_apply_side_effect.F"', "not a top-level"),
                     (b'"flat_apply_holder.lazy"', "not a class or function"),
                 ]:
                     for old in (func_name, cls_name):

@@ -716,12 +716,13 @@ def _find_imported(name: str) -> Any:
     """
     Find the class or function that a saved flat_apply node names, without
     importing anything or running a module's code. Importing a module runs
-    its code, so a saved program must not decide what gets imported: as with
-    ``torch.load(weights_only=True)``, the module that defines the object has
-    to be imported before loading. The object must report the same qualified
-    name, so aliases such as ``torch.nn.Module`` (defined in
-    ``torch.nn.modules.module``) are refused. ``__main__`` modules are refused
-    too, because they differ between processes.
+    its code, so a saved program must not decide what gets imported. Only
+    top-level classes and functions of modules that are already imported are
+    found, so the module that defines one has to be imported before loading.
+    The object must report the same qualified name, so aliases such as
+    ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
+    ``__main__`` modules are refused too, because they differ between
+    processes.
     """
     module_name, _, attr = name.rpartition(".")
     if "__main__" in module_name.split("."):
@@ -729,9 +730,10 @@ def _find_imported(name: str) -> Any:
     module = sys.modules.get(module_name)
     if module is None:
         raise SerializeError(
-            f"{name} is not in an imported module. Import the module that "
-            "defines it first: load does not import modules named in a saved "
-            "program, because importing runs their code."
+            f"{name} is not a top-level class or function of an imported "
+            "module. If its module is not imported, import it first: load does "
+            "not import modules named in a saved program, because importing "
+            "runs their code."
         )
     # Reading an attribute can run code: getattr calls a module __getattr__,
     # and any attribute read on a lazily loaded module loads it. So the lookup
