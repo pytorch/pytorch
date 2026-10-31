@@ -191,8 +191,9 @@ struct rvv_traits<float> {
     const vbool16_t an = __riscv_vmfne_vv_f32m2_b16(a, a, vl);
     const vbool16_t bn = __riscv_vmfne_vv_f32m2_b16(b, b, vl);
     v_t r = __riscv_vfmax_vv_f32m2(a, b, vl);
-    r = __riscv_vmerge_vvm_f32m2(bn, b, r, vl);
-    r = __riscv_vmerge_vvm_f32m2(an, a, r, vl);
+    // v1.0 vmerge(vs2, vs1, mask) selects vs1 where mask is set
+    r = __riscv_vmerge_vvm_f32m2(r, b, bn, vl);
+    r = __riscv_vmerge_vvm_f32m2(r, a, an, vl);
     return r;
   }
 };
@@ -216,11 +217,13 @@ struct rvv_traits<double> {
   // maximumNumber). __riscv_vfmax_vv_f64m2(a, a, vl) is NaN only where a is
   // NaN, so combine both NaN masks with vmerge to pick the NaN operand.
   static v_t fmax_nan(v_t a, v_t b, size_t vl) {
-    const vbool8_t an = __riscv_vmfne_vv_f64m2_b8(a, a, vl);
-    const vbool8_t bn = __riscv_vmfne_vv_f64m2_b8(b, b, vl);
+    // f64m2's mask is vbool32_t (SEW/LMUL = 64/2)
+    const vbool32_t an = __riscv_vmfne_vv_f64m2_b32(a, a, vl);
+    const vbool32_t bn = __riscv_vmfne_vv_f64m2_b32(b, b, vl);
     v_t r = __riscv_vfmax_vv_f64m2(a, b, vl);
-    r = __riscv_vmerge_vvm_f64m2(bn, b, r, vl);
-    r = __riscv_vmerge_vvm_f64m2(an, a, r, vl);
+    // v1.0 vmerge(vs2, vs1, mask) selects vs1 where mask is set
+    r = __riscv_vmerge_vvm_f64m2(r, b, bn, vl);
+    r = __riscv_vmerge_vvm_f64m2(r, a, an, vl);
     return r;
   }
 };
