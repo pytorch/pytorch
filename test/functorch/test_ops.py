@@ -887,7 +887,6 @@ class TestOperatorsDevice(TestCase):
             {
                 skip("nn.functional.max_unpool1d"),  # silent incorrectness; Flaky
                 skip("nn.functional.max_unpool2d"),  # silent incorrectness; Flaky
-                xfail("nn.functional.ctc_loss"),  # Not Implemented
                 xfail(
                     "native_layer_norm", ""
                 ),  # Expected a proper Tensor but got None for argument #1 'other'
@@ -1008,9 +1007,7 @@ class TestOperatorsDevice(TestCase):
                 xfail(
                     "nn.functional.binary_cross_entropy"
                 ),  # vmap: inplace into a regular tensor
-                xfail(
-                    "nn.functional.ctc_loss"
-                ),  # derivate not implemented for _ctc_loss_backward
+                xfail("nn.functional.ctc_loss", device_type="cuda"),
                 # flaky on ROCM needs investigation
                 decorate("nn.functional.conv_transpose2d", decorator=skipIfRocm),
                 skip("nn.functional.dropout"),  # calls random op
