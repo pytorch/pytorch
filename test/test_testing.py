@@ -2510,6 +2510,40 @@ class TestTestParametrization(TestCase):
         if x == 1 or y == 6:
             raise RuntimeError('Boom')
 
+    def test_parametrize_callable(self):
+        # A callable arg_values receives the generic test class and no device class.
+        received = []
+
+        def arg_values(generic_cls, device_cls):
+            received.append((generic_cls, device_cls))
+            return ["a", subtest("b", name="beta")]
+
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", arg_values)
+            def test_foo(self, arg_name):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        self.assertEqual(received, [(TestParametrized, None)])
+        self.assertEqual(
+            _get_test_names_for_test_class(TestParametrized),
+            [
+                "TestParametrized.test_foo_arg_name_a",
+                "TestParametrized.test_foo_beta",
+            ],
+        )
+
+    def test_parametrize_callable_empty_list(self):
+        # A callable that yields no values is reported like any other empty arg_values.
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", lambda generic_cls, _: [])
+            def test_foo(self, arg_name):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "An empty arg_values was passed"):
+            instantiate_parametrized_tests(TestParametrized)
+
 
 class TestOmitSkippedTests(TestCase):
     def test_skipped_tests_are_omitted(self):
@@ -3020,6 +3054,91 @@ class TestTestParametrizationDeviceType(TestCase):
         if x == 1 or y == 6:
             raise RuntimeError('Boom')
 
+    def test_parametrize_callable_device_independent(self, device):
+        # Verifies the callable is given the generic and the instantiated device
+        # test class, once per device class.
+        received = []
+
+        def arg_values(generic_cls, device_cls):
+            received.append((generic_cls, device_cls))
+            return ["a", "b", "c"]
+
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", arg_values)
+            def test_foo(self, device, arg_name):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized,
+            locals_dict,
+            only_for=self.device_type,
+        )
+
+        device_cls = locals_dict[f"TestParametrized{self.device_type.upper()}"]
+
+        self.assertEqual(len(received), 1)
+        self.assertIs(received[0][0], TestParametrized)
+        self.assertIs(received[0][1], device_cls)
+
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_foo_arg_name_a_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_arg_name_b_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_arg_name_c_{self.device_type}",
+            ],
+        )
+
+    def test_parametrize_callable_empty_list(self, device):
+        # A callable that yields no values is reported like any other empty arg_values.
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", lambda generic_cls, device_cls: [])
+            def test_foo(self, device, arg_name):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "An empty arg_values was passed"):
+            instantiate_device_type_tests(
+                TestParametrized, dict(locals()), only_for=self.device_type
+            )
+
+    def test_parametrize_callable_subtest(self, device):
+        # Values returned by the callable go through the same subtest handling
+        # (explicit names and per-value decorators) as inline values.
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        def arg_values(generic_cls, device_cls):
+            return [
+                subtest("a", name="alpha"),
+                subtest("b", name="beta", decorators=[test_dec]),
+            ]
+
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", arg_values)
+            def test_foo(self, device, arg_name):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized, locals_dict, only_for=self.device_type
+        )
+        device_cls = locals_dict[f"TestParametrized{self.device_type.upper()}"]
+
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_foo_alpha_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_beta_{self.device_type}",
+            ],
+        )
+        decorated = [
+            name
+            for func, name in _get_test_funcs_for_test_class(device_cls)
+            if getattr(func, "_decorator_applied", False)
+        ]
+        self.assertEqual(decorated, [f"test_foo_beta_{self.device_type}"])
 
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())

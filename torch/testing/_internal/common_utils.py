@@ -872,6 +872,12 @@ class parametrize(_TestParametrizer):
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
         arg_values (iterable): Iterable of arg values (e.g. range(10)) or
             tuples of arg values (e.g. [(1, 2), (3, 4)]).
+            May also be a callable taking the generic test class and the device
+            test class (None for device-agnostic tests) and returning an
+            iterable. The callable runs at instantiation time and should be
+            cheap and side-effect-free. This does not apply to
+            subtest.arg_values. A callable is always called, so wrap callable
+            iterables (e.g. Enum classes) in list() to iterate over them.
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
@@ -915,7 +921,10 @@ class parametrize(_TestParametrizer):
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
             values = check_exhausted_iterator = object()
-            for idx, values in enumerate(self.arg_values):
+            arg_values = self.arg_values
+            if callable(arg_values):
+                arg_values = arg_values(generic_cls, device_cls)
+            for idx, values in enumerate(arg_values):
                 maybe_name = None
 
                 decorators: list[Any] = []
@@ -948,8 +957,12 @@ class parametrize(_TestParametrizer):
                 yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
-                raise ValueError(f'{test}: An empty arg_values was passed to @parametrize. '
-                                 'Note that this may result from reuse of a generator.')
+                raise ValueError(
+                    f'{test}: An empty arg_values was passed to @parametrize. '
+                    'Note that this may result from reuse of a generator. '
+                    'For callable arg_values, the callable must return a '
+                    'non-empty iterable.'
+                )
 
 
 class reparametrize(_TestParametrizer):
