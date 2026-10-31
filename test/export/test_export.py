@@ -948,6 +948,24 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
         self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
 
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_in_vmap_export(self) -> None:
+        class JvpInVmap(torch.nn.Module):
+            def forward(self, x, t):
+                def sin_jvp(x, t):
+                    return torch.func.jvp(torch.sin, (x,), (t,))
+
+                return torch.vmap(sin_jvp)(x, t)
+
+        inp = (torch.randn(3, 4), torch.randn(3, 4))
+        ep = export(JvpInVmap(), inp)
+        # Values recorded inside vmap and jvp are fake, not functorch wrappers.
+        for node in ep.graph.nodes:
+            if isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+        self.assertEqual(ep.module()(*inp), JvpInVmap()(*inp))
+
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):

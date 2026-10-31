@@ -711,8 +711,20 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # (snapshot_fake is called a lot)
     if is_fake_tensor(val):
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
-    else:
-        return val.detach()
+    functorch = torch._C._functorch
+    if functorch.is_batchedtensor(val) or functorch.is_gradtrackingtensor(val):
+        # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
+        # have no storage and outlive their level. Record a plain fake tensor
+        # with the shape the wrapper reports. Functorch is disabled so that an
+        # outer jvp does not wrap the new tensor again.
+        fake_mode = maybe_get_fake_mode(val)
+        if fake_mode is None:
+            raise AssertionError("expected a functorch wrapper of a fake tensor")
+        with disable_proxy_modes_tracing(), fake_mode, torch._C._DisableFuncTorch():
+            return torch.empty_strided(
+                val.shape, val.stride(), dtype=val.dtype, device=val.device
+            )
+    return val.detach()
 
 
 _ExtractValType: TypeAlias = (
