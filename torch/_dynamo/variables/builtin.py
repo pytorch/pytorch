@@ -2658,6 +2658,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_order_guard(tx)
         if isinstance(
             args[0],
             (
