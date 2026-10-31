@@ -3,15 +3,10 @@
 
 import importlib.util
 import logging
-import os
-import shutil
-import signal
 import subprocess
 import sys
 import unittest
 from dataclasses import dataclass
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import torch
 import torch.distributed as dist
@@ -41,13 +36,6 @@ from torch.testing._internal.common_utils import (
 
 
 log = logging.getLogger(__name__)
-
-_NCCL_EP_HEADER_ENV = (
-    "NCCL_EP_HOME",
-    "NCCL_HOME",
-    "NCCL_EP_JIT_SOURCE_DIR",
-    "NCCL_EP_JIT_BUILD_INCLUDE_DIR",
-)
 
 
 def _nccl_ep_available() -> bool:
@@ -79,137 +67,57 @@ def requires_nccl_ep():
 class TokenSwitchNCCLLoadingTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def _run_roundtrip(self, script, env):
-        with subprocess.Popen(
-            [
-                sys.executable,
-                script,
-                "TokenSwitchNCCLTest.test_dispatch_combine_roundtrip",
-                "-v",
-            ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            start_new_session=True,
-        ) as process:
-            try:
-                output, _ = process.communicate(timeout=600)
-            finally:
-                # Include workers and any JIT compiler children on timeout.
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-        self.assertEqual(process.returncode, 0, output)
-        self.assertIn("Ran 1 test", output)
-        self.assertNotIn("skipped=", output)
-
-    @parametrize(
-        "header",
-        [
-            "nccl_ep.h",
-            "nccl_ep/common.hpp",
-            "nccl_ep/ep_enums.h",
-            "nccl_ep/device/ht_ep.cuh",
-            "nccl.h",
-            "nccl_device.h",
-            "nccl_device/impl/core__types.h",
-        ],
-    )
-    def test_native_jit_headers(self, header):
-        ep = _import_nccl_ep()
-        home = Path(ep.__file__).resolve().parent / "share" / "nccl_ep"
-        path = home / "include" / header
-        self.assertTrue(path.is_file(), str(path))
-
-    @parametrize("value", [None, "", "/another/nccl/installation"])
-    def test_import_preserves_environment(self, value):
-        env = os.environ.copy()
-        for name in _NCCL_EP_HEADER_ENV:
-            if value is None:
-                env.pop(name, None)
-            else:
-                env[name] = value
-        script = """
-import os
-from torch.distributed._token_switch import _import_nccl_ep
-
-before = dict(os.environ)
-_import_nccl_ep()
-if dict(os.environ) != before:
-    raise AssertionError("Loading NCCL EP changed the environment")
-"""
+    def _run_script(self, script):
         result = subprocess.run(
             [sys.executable, "-c", script],
-            env=env,
             capture_output=True,
             text=True,
             timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    @skip_if_lt_x_gpu(2)
-    def test_jit_ignores_foreign_header_paths(self):
-        _import_nccl_ep()
-        # EP caches JIT paths per architecture. Use fresh workers and an empty
-        # disk cache so previously compiled kernels cannot hide wrong paths.
-        with TemporaryDirectory() as tmp:
-            env = {
-                **os.environ,
-                **dict.fromkeys(_NCCL_EP_HEADER_ENV, str(Path(tmp) / "foreign")),
-                "NCCL_EP_JIT_CACHE_DIR": str(Path(tmp) / "cache"),
-            }
-            self._run_roundtrip(__file__, env)
+    @parametrize("prepare_first", [False, True])
+    def test_import_external_library(self, prepare_first):
+        self._run_script(f"""
+import ctypes
 
-    @skip_if_lt_x_gpu(2)
-    def test_jit_cache_invalidates_ep_headers(self):
-        ep_path = Path(_import_nccl_ep().__file__).resolve()
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            copied_ep = root / ep_path.name
-            shutil.copy2(ep_path, copied_ep)
-            shutil.copytree(ep_path.parent / "share/nccl_ep", root / "share/nccl_ep")
-            (root / "lib").symlink_to(ep_path.parent / "lib", target_is_directory=True)
-            script = root / "roundtrip.py"
-            # Spawned workers reload this script before importing the test class.
-            script.write_text(f"""
-import importlib.util
-import sys
+if {prepare_first!r}:
+    import nccl.ep
+    nccl.ep.get_lib_version()
 
-import torch
+from torch.distributed._token_switch import _import_nccl_ep
+from torch.testing._internal.common_utils import TestCase
 
-spec = importlib.util.spec_from_file_location("torch._nccl_ep", {str(copied_ep)!r})
-if spec is None or spec.loader is None:
-    raise ImportError("Cannot load the copied NCCL EP extension")
-ep = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = ep
-spec.loader.exec_module(ep)
-torch._nccl_ep = ep
-sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
-from test_token_switch import TokenSwitchNCCLTest
-from torch.testing._internal.common_utils import run_tests
+native = _import_nccl_ep()
+import nccl.ep as ep
 
-if __name__ == "__main__":
-    run_tests()
+checks = TestCase()
+checks.assertTrue(hasattr(native, "_NcclEpGroup"))
+path = ep.get_lib_path()
+checks.assertIsNotNone(path)
+checks.assertTrue(path.is_file(), str(path))
+
+get_version = ctypes.CDLL(None).ncclEpGetVersion
+get_version.argtypes = [ctypes.POINTER(ctypes.c_int)]
+get_version.restype = ctypes.c_int
+version = ctypes.c_int()
+checks.assertEqual(get_version(ctypes.byref(version)), 0)
+expected = ep.get_lib_version()
+checks.assertEqual(version.value, expected.major * 10000 + expected.minor * 100 + expected.micro)
 """)
-            cache = root / "cache"
-            env = {**os.environ, "NCCL_EP_JIT_CACHE_DIR": str(cache)}
-            self._run_roundtrip(script, env)
-            cubins = set(cache.rglob("*.cubin"))
-            self.assertTrue(cubins, "The roundtrip did not populate the JIT cache")
-            self._run_roundtrip(script, env)
-            self.assertEqual(set(cache.rglob("*.cubin")), cubins)
 
-            header = root / "share/nccl_ep/include/nccl_ep/common.hpp"
-            header.write_text(
-                header.read_text() + "\n// JIT cache invalidation test.\n"
-            )
-            self._run_roundtrip(script, env)
-            self.assertTrue(
-                set(cache.rglob("*.cubin")) - cubins,
-                "Changing an EP header must invalidate cached kernels",
-            )
+    def test_missing_runtime_package(self):
+        self._run_script("""
+import sys
+from unittest.mock import patch
+
+from torch.distributed._token_switch import _import_nccl_ep
+from torch.testing._internal.common_utils import TestCase
+
+with patch.dict(sys.modules, {"nccl.ep": None}):
+    with TestCase().assertRaisesRegex(ImportError, "nccl-extensions"):
+        _import_nccl_ep()
+""")
 
 
 NUM_TOKENS = 16

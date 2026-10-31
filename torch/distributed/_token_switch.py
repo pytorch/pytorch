@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import abc
+import importlib.util
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
 
@@ -12,16 +13,28 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
 
-def _import_nccl_ep() -> Any:
+def _prepare_nccl_ep() -> None:
     try:
-        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
-        import torch._nccl_ep as _ep
+        # pyrefly: ignore [missing-import]  # optional nccl-extensions package
+        import nccl.ep as ep
     except ModuleNotFoundError as e:
-        if e.name != "torch._nccl_ep":
+        if e.name not in ("nccl", "nccl.ep"):
             raise
         raise ImportError(
-            "TokenSwitchNCCL requires PyTorch built with USE_NCCL_EP=1."
+            "TokenSwitchNCCL requires the nccl-extensions package. "
+            "Install it with `pip install nccl-extensions==0.1.0`."
         ) from e
+
+    # The public API loads libnccl_ep with RTLD_GLOBAL for our native bindings.
+    ep.get_lib_version()
+
+
+def _import_nccl_ep() -> Any:
+    if importlib.util.find_spec("torch._nccl_ep") is None:
+        raise ImportError("TokenSwitchNCCL requires PyTorch built with USE_NCCL_EP=1.")
+    _prepare_nccl_ep()
+    # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
+    import torch._nccl_ep as _ep
 
     return _ep
 

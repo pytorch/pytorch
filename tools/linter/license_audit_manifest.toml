@@ -92,12 +92,6 @@ paths = [
 ]
 
 [[spdx]]
-expression = 'Apache-2.0 AND BSD-3-Clause'
-paths = [
-  'third_party/nccl_ep/LICENSE-NCCL.txt',
-]
-
-[[spdx]]
 expression = 'BSD-2-Clause AND Zlib'
 paths = [
   'third_party/concurrentqueue/moodycamel/LICENSE.md',

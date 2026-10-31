@@ -484,7 +484,8 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
   # by torch/distributed/_token_switch.py so libtorch_cuda never references
-  # ncclEp*. EP is embedded here and uses torch_cuda's selected NCCL.
+  # ncclEp*. _token_switch.py loads nccl-extensions with RTLD_GLOBAL first,
+  # providing the EP entry points when this module is imported.
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
@@ -492,16 +493,11 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL USE_NCCL)
     # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
     # NCCL communicator registry, getNcclDataType, CUDA stream, embedded NCCL;
-    # __caffe2_nccl_ep: libnccl_ep.a + nccl_ep headers.
+    # __caffe2_nccl_ep: public nccl_ep headers.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     target_include_directories(_nccl_ep BEFORE PRIVATE
       ${NCCL_EP_INCLUDE_DIRS} ${NCCL_INCLUDE_DIRS})
-    # The external build refreshes staged headers while building this archive.
-    set_property(SOURCE "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
-      APPEND PROPERTY OBJECT_DEPENDS "${NCCL_EP_LIBRARIES}")
-    # Keep the pinned EP private when another package also loads libnccl_ep.
-    target_link_options(_nccl_ep PRIVATE "-Wl,--exclude-libs,libnccl_ep.a")
     set_target_properties(_nccl_ep PROPERTIES
       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
       INSTALL_RPATH "${_rpath_portable_origin}/lib")

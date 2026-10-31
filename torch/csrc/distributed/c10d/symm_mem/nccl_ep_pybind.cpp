@@ -1,6 +1,6 @@
 // Standalone Python extension (torch._nccl_ep) for the NCCL EP bindings.
 //
-// EP is linked statically here and loaded lazily by _token_switch.py.
+// _token_switch.py loads the external EP runtime before importing this module.
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
 #include <torch/csrc/utils/pybind.h>
 
