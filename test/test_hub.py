@@ -2,9 +2,13 @@
 
 import os
 import tempfile
+import threading
+import time
 import unittest
 import warnings
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import patch
 
 import torch
@@ -425,6 +429,66 @@ class TestHub(TestCase):
                     hub._safe_extract_zip(cached_zipfile, hub_dir)
 
                 self.assertIn("directory traversal", str(cm.exception))
+
+    def _run_concurrently(self, fn, num_workers=4):
+        # Slow down the download so that, without locking, every worker would
+        # see an empty cache and start its own download.
+        real_download = hub.download_url_to_file
+
+        def slow_download(*args, **kwargs):
+            time.sleep(0.5)
+            return real_download(*args, **kwargs)
+
+        barrier = threading.Barrier(num_workers)
+
+        def worker():
+            barrier.wait()
+            return fn()
+
+        with patch.object(
+            hub, "download_url_to_file", side_effect=slow_download
+        ) as mock_download:
+            with ThreadPoolExecutor(num_workers) as pool:
+                futures = [pool.submit(worker) for _ in range(num_workers)]
+                results = [f.result() for f in futures]
+        return results, mock_download.call_count
+
+    def test_load_state_dict_from_url_concurrent(self):
+        src = os.path.join(self.tmpdir.name, "weights.pt")
+        torch.save({"w": torch.arange(10)}, src)
+        model_dir = os.path.join(self.tmpdir.name, "checkpoints")
+
+        results, num_downloads = self._run_concurrently(
+            lambda: hub.load_state_dict_from_url(
+                Path(src).as_uri(), model_dir=model_dir, progress=False
+            )
+        )
+        self.assertEqual(num_downloads, 1)
+        for state_dict in results:
+            self.assertEqual(state_dict["w"], torch.arange(10))
+
+    def test_get_cache_or_reload_concurrent(self):
+        archive = os.path.join(self.tmpdir.name, "archive.zip")
+        # Mimic a GitHub archive: a single top-level directory.
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("repo-main/", "")
+            zf.writestr("repo-main/hubconf.py", "dependencies = []\n")
+
+        url = Path(archive).as_uri()
+        with patch.object(hub, "_git_archive_link", return_value=url):
+            results, num_downloads = self._run_concurrently(
+                lambda: hub._get_cache_or_reload(
+                    "owner/repo:main",
+                    force_reload=False,
+                    trust_repo=True,
+                    verbose=False,
+                    skip_validation=True,
+                )
+            )
+        self.assertEqual(num_downloads, 1)
+        repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
+        self.assertEqual(results, [repo_dir] * len(results))
+        self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
 
 
 if __name__ == "__main__":
