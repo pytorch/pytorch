@@ -131,16 +131,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
@@ -1130,9 +1126,13 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
   auto comm = getNCCLComm(key);
-  if (comm == nullptr) {
-    LOG(ERROR) << logPrefix()
-               << "No parent communicator exists for nocolor split";
+  // Must match the parent-comm check in initNCCLComm: without a healthy parent
+  // comm, members create the child via a fresh init instead of ncclCommSplit,
+  // so there is no collective split to join.
+  if (comm == nullptr || comm->isAborted()) {
+    LOG(INFO) << logPrefix()
+              << "No healthy parent communicator, skipping nocolor split";
+    return;
   }
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 }
@@ -1563,10 +1563,16 @@ void ProcessGroupNCCL::shutdown() {
   // Flush all collectives
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Since NCCL 2.31, ncclCommFinalize ends with a barrier among the comm's
+    // host-local ranks. Ranks can hold different comms (e.g. lazily created
+    // 2-rank P2P comms) and iterate this map in different orders, so finalize
+    // them in one group to let NCCL progress them concurrently.
+    C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
       ncclComm->finalize();
     }
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), std::nullopt);
   }
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
   // timeout is reach, this will throw an exception.
@@ -2000,7 +2006,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -2979,7 +2985,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3018,7 +3024,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,

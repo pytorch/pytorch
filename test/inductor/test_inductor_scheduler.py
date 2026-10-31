@@ -1,8 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+from concurrent.futures import Future
 from unittest import skipIf
-from unittest.mock import Mock, patch, PropertyMock
+from unittest.mock import call, Mock, patch, PropertyMock
 
 import sympy
 
@@ -47,6 +48,7 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+    WhyNoFuse,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
@@ -130,6 +132,21 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_why_no_fuse_names_are_lazy(self):
+        node1 = Mock()
+        node2 = Mock()
+        node1.get_name.return_value = "node1"
+        node2.get_name.return_value = "node2"
+
+        why = WhyNoFuse(node1, node2)
+        with patch("torch._inductor.scheduler.fusion_log.debug") as debug:
+            why("reason %s", "details")
+        debug.assert_called_once_with(why)
+        node1.get_name.assert_not_called()
+        node2.get_name.assert_not_called()
+
+        self.assertEqual(str(why), "cannot fuse node1 with node2: reason details")
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -149,6 +166,32 @@ class TestScheduler(TestCase):
         snode = object.__new__(ExternKernelSchedulerNode)
         snode.node = node
         return snode
+
+    @skipIf(not HAS_GPU, "candidate_tilings is used by the GPU scheduling backends")
+    @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
+    def test_candidate_tilings_cache_cleared_after_codegen(self):
+        # The cache is keyed on scheduler nodes; leaving entries behind keeps
+        # the compiled graph (and e.g. frozen constants) alive after compile.
+        def fn(x):
+            return x.t() + x
+
+        # Record the cache size after each codegen, before it is cleared, to
+        # check that the tiling analysis actually ran in this compile.
+        sizes_before_clear = []
+        orig_codegen = Scheduler._codegen
+
+        def codegen(self, *args, **kwargs):
+            out = orig_codegen(self, *args, **kwargs)
+            info = SIMDScheduling.candidate_tilings.cache_info()
+            sizes_before_clear.append(info.currsize)
+            return out
+
+        torch._dynamo.reset()
+        # A warm FX graph cache would skip scheduler codegen entirely.
+        with fresh_inductor_cache(), patch.object(Scheduler, "_codegen", codegen):
+            torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
+        self.assertGreater(max(sizes_before_clear, default=0), 0)
+        self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
 
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
@@ -758,6 +801,50 @@ class TestScheduler(TestCase):
             template, expected, speedup, fused_nodes
         )
 
+    def test_pending_template_fusions_sharing_a_compile_future(self):
+        # Two identical template + epilogue pairs render the same fused kernel
+        # source, so async compile hands both pending fusions one future.
+        scheduler = object.__new__(Scheduler)
+        nodes = {
+            name: self._mock_base_snode(name)
+            for name in ("template1", "epilogue1", "template2", "epilogue2")
+        }
+        for name in ("template1", "template2"):
+            nodes[name].is_template.return_value = True
+            nodes[name].get_template_node.return_value = None
+        scheduler.name_to_fused_node = dict(nodes)
+        scheduler._fusion_memory_state = None
+        scheduler.fuse_if_speedup = Mock(return_value=True)
+        future = Future()
+        future.set_result(None)
+        pending = {
+            i: PendingFusion(
+                Mock(),
+                nodes[f"template{i}"],
+                nodes[f"epilogue{i}"],
+                Mock(future=future),
+            )
+            for i in (1, 2)
+        }
+        fused_nodes = OrderedSet(nodes.values())
+
+        scheduler._evaluate_pending_template_fusions(
+            {nodes[f"epilogue{i}"]: [pending[i]] for i in (1, 2)}, fused_nodes
+        )
+
+        self.assertEqual(scheduler.fuse_if_speedup.call_count, 2)
+        scheduler.fuse_if_speedup.assert_has_calls(
+            [
+                call(
+                    nodes[f"template{i}"],
+                    nodes[f"epilogue{i}"],
+                    pending[i].callable_fn,
+                    fused_nodes,
+                )
+                for i in (1, 2)
+            ]
+        )
+
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
         node1 = self._mock_base_snode("node1")
@@ -1030,6 +1117,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._loop_mutation_trackers = []
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)

@@ -30,7 +30,7 @@ static inline void resolve_outer_offsets(
 
 template <typename I, typename O>
 kernel void embedding_dense_backward_count(
-    constant I* indices [[buffer(0)]],
+    device const I* indices [[buffer(0)]],
     device atomic_uint* counts [[buffer(1)]],
     constant EmbeddingDenseBackwardParams<uint32_t>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
@@ -46,8 +46,8 @@ kernel void embedding_dense_backward_count(
 
 template <typename T, typename I, typename O>
 kernel void embedding_dense_backward(
-    constant T* grad [[buffer(0)]],
-    constant I* indices [[buffer(1)]],
+    device const T* grad [[buffer(0)]],
+    device const I* indices [[buffer(1)]],
     constant uint* counts [[buffer(2)]],
     device AtomicType_t<float>* grad_weight [[buffer(3)]],
     constant EmbeddingDenseBackwardParams<uint32_t>& params [[buffer(4)]],
@@ -83,22 +83,22 @@ kernel void embedding_dense_backward(
       grad_val);
 }
 
-#define REGISTER_EMBEDDING_DENSE_BACKWARD_COUNT(I, O, OSUFFIX)                \
-  template [[host_name("embedding_dense_backward_count_" #I "_" #OSUFFIX)]]   \
-  kernel void embedding_dense_backward_count<I, O>(                           \
-      constant I * indices [[buffer(0)]],                                     \
-      device atomic_uint * counts [[buffer(1)]],                              \
-      constant EmbeddingDenseBackwardParams<uint32_t> & params [[buffer(2)]], \
+#define REGISTER_EMBEDDING_DENSE_BACKWARD_COUNT(I, O, OSUFFIX)               \
+  template [[host_name("embedding_dense_backward_count_" #I "_" #OSUFFIX)]]  \
+  kernel void embedding_dense_backward_count<I, O>(                          \
+      device const I* indices [[buffer(0)]],                                 \
+      device atomic_uint* counts [[buffer(1)]],                              \
+      constant EmbeddingDenseBackwardParams<uint32_t>& params [[buffer(2)]], \
       uint tid [[thread_position_in_grid]])
 
-#define REGISTER_EMBEDDING_DENSE_BACKWARD(T, I, O, OSUFFIX)                   \
-  template [[host_name("embedding_dense_backward_" #T "_" #I "_" #OSUFFIX)]]  \
-  kernel void embedding_dense_backward<T, I, O>(                              \
-      constant T * grad [[buffer(0)]],                                        \
-      constant I * indices [[buffer(1)]],                                     \
-      constant uint * counts [[buffer(2)]],                                   \
-      device AtomicType_t<float> * grad_weight [[buffer(3)]],                 \
-      constant EmbeddingDenseBackwardParams<uint32_t> & params [[buffer(4)]], \
+#define REGISTER_EMBEDDING_DENSE_BACKWARD(T, I, O, OSUFFIX)                  \
+  template [[host_name("embedding_dense_backward_" #T "_" #I "_" #OSUFFIX)]] \
+  kernel void embedding_dense_backward<T, I, O>(                             \
+      device const T* grad [[buffer(0)]],                                    \
+      device const I* indices [[buffer(1)]],                                 \
+      constant uint* counts [[buffer(2)]],                                   \
+      device AtomicType_t<float>* grad_weight [[buffer(3)]],                 \
+      constant EmbeddingDenseBackwardParams<uint32_t>& params [[buffer(4)]], \
       uint tid [[thread_position_in_grid]])
 
 REGISTER_EMBEDDING_DENSE_BACKWARD_COUNT(int, uint, 32);
