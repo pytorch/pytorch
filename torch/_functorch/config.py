@@ -74,8 +74,10 @@ enable_autograd_cache: bool = Config(
     default=True,
 )
 
+# Dynamo traces a custom autograd.Function into autograd_function_apply with its
+# fwd/bwd as subgraphs, so the cache key and the safety check cover both bodies.
 autograd_cache_allow_custom_autograd_functions: bool = Config(
-    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=True
 )
 
 # For now, this is just for enabling unit testing in test_aot_autograd_cache.py
