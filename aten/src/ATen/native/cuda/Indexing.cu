@@ -15,6 +15,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
@@ -44,11 +45,15 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
+#if defined(USE_ROCM)
+#include <ATen/cuda/cub.cuh>
+#endif
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <limits>
+#include <type_traits>
 
 #include <c10/macros/Macros.h>
 
@@ -507,6 +512,520 @@ __global__ void indexing_backward_kernel_quantized(
 namespace at::native {
 
 namespace {
+
+#if defined(USE_ROCM)
+constexpr int64_t INDEX_ADD_SORTED_CHUNK_SIZE = 512;
+// When runs average at least SPLIT_MIN_AVERAGE_RUN rows, CHUNK_SIZE boundaries
+// leave too few compact candidates to fill the GPU, so the compact kernels
+// split at SPLIT_CHUNK_SIZE instead. Long runs keep CHUNK_SIZE.
+constexpr int64_t INDEX_ADD_SORTED_SPLIT_CHUNK_SIZE = 128;
+constexpr int64_t INDEX_ADD_SORTED_SPLIT_MIN_AVERAGE_RUN = 128;
+// Threads per long-run final-pass block, split into chunk lanes.
+constexpr int INDEX_ADD_SORTED_FINAL_PASS_THREADS = 1024;
+constexpr int64_t INDEX_ADD_SORTED_LONG_RUN_SIZE = 8192;
+constexpr int64_t INDEX_ADD_SORTED_MIN_SORT_SIZE = 1000000;
+constexpr int64_t INDEX_ADD_SORTED_MAX_SCRATCH_BYTES = 64 * 1024 * 1024;
+
+template <typename index_t>
+__global__ void index_add_sorted_prepare_sort_kernel(
+    const index_t* index,
+    int32_t* keys,
+    int32_t* positions,
+    int64_t num_indices,
+    int64_t num_rows) {
+  for (int64_t current = blockIdx.x * blockDim.x + threadIdx.x;
+       current < num_indices;
+       current += blockDim.x * gridDim.x) {
+    const int64_t row = static_cast<int64_t>(index[current]);
+    const bool valid = row >= 0 && row < num_rows;
+    keys[current] = valid ? static_cast<int32_t>(row) : 0;
+    positions[current] = static_cast<int32_t>(current);
+    CUDA_KERNEL_ASSERT(valid);
+  }
+}
+
+// Returns the first segment offset greater than value. Fixed chunk boundaries
+// use this device-side upper_bound to find the duplicate run that owns them.
+template <typename offset_t>
+__device__ __forceinline__ int64_t index_add_sorted_upper_bound(
+    const offset_t* offsets,
+    int64_t count,
+    int64_t value) {
+  int64_t first = 0;
+  while (count > 0) {
+    const int64_t step = count / 2;
+    const int64_t current = first + step;
+    if (static_cast<int64_t>(offsets[current]) <= value) {
+      first = current + 1;
+      count -= step + 1;
+    } else {
+      count = step;
+    }
+  }
+  return first;
+}
+
+// Classifies runs that need two-pass reduction and records their fixed-size
+// chunk counts. Short and unused segments write zero so an exclusive scan can
+// turn this array into compact long-run scratch offsets.
+__global__ void index_add_sorted_long_chunk_counts_kernel(
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    int32_t* long_chunk_counts,
+    int64_t num_indices,
+    int64_t max_segments) {
+  const int64_t num_segments = *num_segments_ptr;
+  for (int64_t segment = blockIdx.x * blockDim.x + threadIdx.x;
+       segment < max_segments;
+       segment += blockDim.x * gridDim.x) {
+    int32_t count = 0;
+    if (segment < num_segments) {
+      const int64_t begin = static_cast<int64_t>(segment_offsets[segment]);
+      const int64_t end = segment + 1 < num_segments
+          ? static_cast<int64_t>(segment_offsets[segment + 1])
+          : num_indices;
+      const int64_t length = end - begin;
+      if (length >= INDEX_ADD_SORTED_LONG_RUN_SIZE) {
+        count = static_cast<int32_t>(
+            (length + INDEX_ADD_SORTED_CHUNK_SIZE - 1) /
+            INDEX_ADD_SORTED_CHUNK_SIZE);
+      }
+    }
+    long_chunk_counts[segment] = count;
+  }
+}
+
+// Non-atomic accumulate for output rows with exactly one writer.
+template <typename acc_t, typename output_t>
+__device__ __forceinline__ void index_add_sorted_add_owned(
+    output_t* output,
+    acc_t value) {
+  *output = static_cast<output_t>(static_cast<acc_t>(*output) + value);
+}
+
+__device__ __forceinline__ int64_t index_add_sorted_compact_chunk_size(
+    int64_t num_indices,
+    int64_t num_segments) {
+  return num_segments * INDEX_ADD_SORTED_SPLIT_MIN_AVERAGE_RUN <=
+          num_indices
+      ? INDEX_ADD_SORTED_SPLIT_CHUNK_SIZE
+      : INDEX_ADD_SORTED_CHUNK_SIZE;
+}
+
+// Broadcasts 64-bit metadata from logical lane zero by shuffling its two
+// 32-bit halves. The explicit width isolates subgroups packed into one wave64.
+__device__ __forceinline__ int64_t index_add_sorted_wave_broadcast_int64(
+    int64_t value,
+    int width) {
+  union Bits {
+    int64_t value;
+    uint32_t words[2];
+  } bits = {.value = value};
+  bits.words[0] = WARP_SHFL(bits.words[0], 0, width);
+  bits.words[1] = WARP_SHFL(bits.words[1], 0, width);
+  return bits.value;
+}
+
+// Describes whether a compact candidate is skipped, uniquely owns its output
+// row, or contributes one of multiple chunks through an atomic add.
+enum class IndexAddSortedCompactMode : uint32_t {
+  Invalid = 0,
+  Direct = 1,
+  Atomic = 2,
+};
+
+// Packed add of two adjacent fp16/bf16 values through the primitive behind
+// KernelUtils.h's ATOMICADD, which that header #undefs. Same version check.
+template <typename packed_t>
+__device__ __forceinline__ void index_add_sorted_packed_atomic_add(
+    packed_t* address,
+    packed_t value) {
+#if ROCM_VERSION < 60400
+  preview_unsafeAtomicAdd(address, value);
+#else
+  unsafeAtomicAdd(address, value);
+#endif
+}
+
+// Reduces every compact candidate (run start or chunk boundary) with several
+// logical subgroups per CTA. Metadata stays in subgroup registers, avoiding
+// shared-memory barriers. With vectorized_bfloat16, a 4-byte-aligned bf16
+// source is read in pairs.
+template <
+    typename scalar_t,
+    typename acc_t,
+    typename output_t,
+    typename index_t,
+    int64_t feature_size,
+    bool vectorized_bfloat16>
+__global__ void index_add_sorted_compact_dense_kernel(
+    const scalar_t* grad,
+    const index_t* sorted_indices,
+    const int32_t* sorted_positions,
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    const int32_t* long_chunk_counts,
+    output_t* grad_input,
+    int64_t num_indices,
+    int64_t num_rows,
+    int64_t outer_size) {
+  static_assert(feature_size == 128 || feature_size == 256);
+  static_assert(!vectorized_bfloat16 || std::is_same_v<scalar_t, c10::BFloat16>);
+  constexpr int64_t kValuesPerLane = 8;
+  constexpr int64_t kThreadsPerBlock = 256;
+  constexpr int64_t kGroupSize = feature_size / kValuesPerLane;
+  constexpr int64_t kGroupsPerBlock = kThreadsPerBlock / kGroupSize;
+  static_assert((kGroupSize & (kGroupSize - 1)) == 0);
+  static_assert(64 % kGroupSize == 0);
+  static_assert(kGroupSize * kGroupsPerBlock == kThreadsPerBlock);
+
+  const int64_t lane = threadIdx.x;
+  const int64_t group = threadIdx.y;
+  int64_t num_segments = lane == 0 ? *num_segments_ptr : 0;
+  num_segments =
+      index_add_sorted_wave_broadcast_int64(num_segments, kGroupSize);
+  const int64_t chunk_size =
+      index_add_sorted_compact_chunk_size(num_indices, num_segments);
+  const int64_t num_boundaries = (num_indices - 1) / chunk_size;
+  const int64_t candidates_per_outer = num_segments + num_boundaries;
+
+  const int64_t actual_work = outer_size * candidates_per_outer;
+  const int64_t work_stride =
+      static_cast<int64_t>(gridDim.x) * kGroupsPerBlock;
+  for (int64_t work =
+           static_cast<int64_t>(blockIdx.x) * kGroupsPerBlock + group;
+       work < actual_work;
+       work += work_stride) {
+    const int64_t candidate = work % candidates_per_outer;
+    const int64_t outer = work / candidates_per_outer;
+    int64_t chunk_begin = -1;
+    int64_t chunk_end = -1;
+    int64_t output_row = -1;
+    auto mode = IndexAddSortedCompactMode::Invalid;
+
+    if (lane == 0) {
+      int64_t segment;
+      int64_t run_end = num_indices;
+      const bool starts_run = candidate < num_segments;
+      if (starts_run) {
+        segment = candidate;
+        chunk_begin = static_cast<int64_t>(segment_offsets[segment]);
+        if (segment + 1 < num_segments) {
+          run_end = static_cast<int64_t>(segment_offsets[segment + 1]);
+        }
+      } else {
+        chunk_begin = (candidate - num_segments + 1) * chunk_size;
+        if (sorted_indices[chunk_begin] != sorted_indices[chunk_begin - 1]) {
+          chunk_begin = -1;
+          segment = -1;
+        } else {
+          const int64_t next_segment = index_add_sorted_upper_bound(
+              segment_offsets, num_segments, chunk_begin);
+          segment = next_segment - 1;
+          if (next_segment < num_segments) {
+            run_end = static_cast<int64_t>(segment_offsets[next_segment]);
+          }
+        }
+      }
+
+      if (chunk_begin >= 0 && long_chunk_counts[segment] != 0) {
+        chunk_begin = -1;
+      }
+      if (chunk_begin >= 0) {
+        const int64_t boundary_end =
+            ((chunk_begin / chunk_size) + 1) * chunk_size;
+        chunk_end = boundary_end < run_end ? boundary_end : run_end;
+        output_row = static_cast<int64_t>(sorted_indices[chunk_begin]);
+        mode = starts_run && chunk_end == run_end
+            ? IndexAddSortedCompactMode::Direct
+            : IndexAddSortedCompactMode::Atomic;
+      }
+    }
+
+    chunk_begin =
+        index_add_sorted_wave_broadcast_int64(chunk_begin, kGroupSize);
+    chunk_end =
+        index_add_sorted_wave_broadcast_int64(chunk_end, kGroupSize);
+    output_row =
+        index_add_sorted_wave_broadcast_int64(output_row, kGroupSize);
+    mode = static_cast<IndexAddSortedCompactMode>(WARP_SHFL(
+        static_cast<uint32_t>(mode), 0, kGroupSize));
+    if (mode == IndexAddSortedCompactMode::Invalid) {
+      continue;
+    }
+
+    const int64_t feature = lane * kValuesPerLane;
+    acc_t sums[kValuesPerLane] = {};
+    for (int64_t current = chunk_begin; current < chunk_end; ++current) {
+      const int64_t source_row =
+          static_cast<int64_t>(sorted_positions[current]);
+      const int64_t source_offset =
+          (outer * num_indices + source_row) * feature_size + feature;
+      if constexpr (vectorized_bfloat16) {
+#pragma unroll
+        for (int pair = 0; pair < kValuesPerLane / 2; ++pair) {
+          const auto values =
+              memory::load_vector<2>(grad + source_offset, pair);
+          sums[2 * pair] += static_cast<acc_t>(values.val[0]);
+          sums[2 * pair + 1] += static_cast<acc_t>(values.val[1]);
+        }
+      } else {
+#pragma unroll
+        for (int value = 0; value < kValuesPerLane; ++value) {
+          sums[value] += static_cast<acc_t>(grad[source_offset + value]);
+        }
+      }
+    }
+
+    const int64_t output_offset =
+        (outer * num_rows + output_row) * feature_size + feature;
+    if (mode == IndexAddSortedCompactMode::Direct) {
+#pragma unroll
+      for (int value = 0; value < kValuesPerLane; ++value) {
+        index_add_sorted_add_owned(
+            grad_input + output_offset + value, sums[value]);
+      }
+      continue;
+    }
+    output_t outputs[kValuesPerLane];
+#pragma unroll
+    for (int value = 0; value < kValuesPerLane; ++value) {
+      outputs[value] = static_cast<output_t>(sums[value]);
+    }
+    // The caller guarantees a 4-byte-aligned output, so every pair can use
+    // the packed atomic from KernelUtils.h.
+    if constexpr (std::is_same_v<output_t, c10::BFloat16>) {
+#pragma unroll
+      for (int pair = 0; pair < kValuesPerLane / 2; ++pair) {
+        __nv_bfloat162 packed;
+        packed.x = *reinterpret_cast<const __nv_bfloat16*>(&outputs[2 * pair]);
+        packed.y =
+            *reinterpret_cast<const __nv_bfloat16*>(&outputs[2 * pair + 1]);
+        index_add_sorted_packed_atomic_add(
+            reinterpret_cast<__nv_bfloat162*>(
+                grad_input + output_offset + 2 * pair),
+            packed);
+      }
+    } else if constexpr (std::is_same_v<output_t, c10::Half>) {
+#pragma unroll
+      for (int pair = 0; pair < kValuesPerLane / 2; ++pair) {
+        __half2 packed;
+        packed.x = static_cast<__half>(outputs[2 * pair]);
+        packed.y = static_cast<__half>(outputs[2 * pair + 1]);
+        index_add_sorted_packed_atomic_add(
+            reinterpret_cast<__half2*>(grad_input + output_offset + 2 * pair),
+            packed);
+      }
+    } else {
+#pragma unroll
+      for (int value = 0; value < kValuesPerLane; ++value) {
+        gpuAtomicAddNoReturn(
+            grad_input + output_offset + value, outputs[value]);
+      }
+    }
+  }
+}
+
+// First pass for exceptionally long runs. Each logical work item reduces at
+// most one fixed-size source chunk into bounded scratch, tiled over the
+// flattened outer and feature dimensions.
+template <
+    typename scalar_t,
+    typename acc_t,
+    typename scratch_t,
+    int values_per_thread>
+__global__ void index_add_sorted_long_first_pass_kernel(
+    const scalar_t* grad,
+    const int32_t* sorted_positions,
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    const int32_t* long_chunk_counts,
+    const int32_t* long_chunk_offsets,
+    scratch_t* scratch,
+    int64_t num_indices,
+    int64_t max_segments,
+    int64_t max_long_chunks,
+    int64_t inner_size,
+    int64_t feature_offset,
+    int64_t feature_count) {
+  static_assert(values_per_thread == 1 || values_per_thread == 2);
+  for (int64_t chunk = blockIdx.x; chunk < max_long_chunks;
+       chunk += gridDim.x) {
+    const int64_t segment = index_add_sorted_upper_bound(
+                                long_chunk_offsets, max_segments, chunk) -
+        1;
+    if (segment < 0 || segment >= max_segments) {
+      continue;
+    }
+    const int64_t first_chunk =
+        static_cast<int64_t>(long_chunk_offsets[segment]);
+    const int64_t chunk_count =
+        static_cast<int64_t>(long_chunk_counts[segment]);
+    const int64_t chunk_in_segment = chunk - first_chunk;
+    if (chunk_count == 0 || chunk_in_segment < 0 ||
+        chunk_in_segment >= chunk_count) {
+      continue;
+    }
+
+    const int64_t begin =
+        static_cast<int64_t>(segment_offsets[segment]) +
+        chunk_in_segment * INDEX_ADD_SORTED_CHUNK_SIZE;
+    const int64_t num_segments = *num_segments_ptr;
+    const int64_t run_end = segment + 1 < num_segments
+        ? static_cast<int64_t>(segment_offsets[segment + 1])
+        : num_indices;
+    const int64_t unbounded_end = begin + INDEX_ADD_SORTED_CHUNK_SIZE;
+    const int64_t end = unbounded_end < run_end ? unbounded_end : run_end;
+
+    if constexpr (values_per_thread == 2) {
+      static_assert(std::is_same_v<scalar_t, c10::BFloat16>);
+      static_assert(std::is_same_v<scratch_t, c10::BFloat16>);
+      for (int64_t local_feature = threadIdx.x * 2;
+           local_feature + 1 < feature_count;
+           local_feature += blockDim.x * 2) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        acc_t sum0 = acc_t(0);
+        acc_t sum1 = acc_t(0);
+        for (int64_t current = begin; current < end; ++current) {
+          const int64_t source_row =
+              static_cast<int64_t>(sorted_positions[current]);
+          const int64_t source_offset =
+              (outer * num_indices + source_row) * inner_size;
+          const auto values = memory::load_vector<2>(
+              grad + source_offset, static_cast<uint32_t>(feature / 2));
+          sum0 += static_cast<acc_t>(values.val[0]);
+          sum1 += static_cast<acc_t>(values.val[1]);
+        }
+        const int64_t scratch_offset =
+            chunk * feature_count + local_feature;
+        scratch[scratch_offset] = static_cast<scratch_t>(sum0);
+        scratch[scratch_offset + 1] = static_cast<scratch_t>(sum1);
+      }
+    } else {
+      for (int64_t local_feature = threadIdx.x;
+           local_feature < feature_count;
+           local_feature += blockDim.x) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        acc_t sum = acc_t(0);
+        for (int64_t current = begin; current < end; ++current) {
+          const int64_t source_row =
+              static_cast<int64_t>(sorted_positions[current]);
+          const int64_t source_offset =
+              (outer * num_indices + source_row) * inner_size + feature;
+          sum += static_cast<acc_t>(grad[source_offset]);
+        }
+        scratch[chunk * feature_count + local_feature] =
+            static_cast<scratch_t>(sum);
+      }
+    }
+  }
+}
+
+// Finalizes each long run by adding its first-pass scratch chunks into the
+// destination row once. Long runs are excluded from compact reduction, so this
+// pass needs no output atomics. A single hot row can own thousands of chunks
+// and only one block, so blockDim.y lanes stride over the chunks and are then
+// combined in lane order, which keeps the result deterministic.
+template <
+    typename scratch_t,
+    typename acc_t,
+    typename output_t,
+    typename index_t,
+    int values_per_thread>
+__global__ void index_add_sorted_long_final_pass_kernel(
+    const index_t* sorted_indices,
+    const int32_t* segment_offsets,
+    const int32_t* long_chunk_counts,
+    const int32_t* long_chunk_offsets,
+    const scratch_t* scratch,
+    output_t* grad_input,
+    int64_t num_rows,
+    int64_t max_segments,
+    int64_t max_long_chunks,
+    int64_t inner_size,
+    int64_t feature_offset,
+    int64_t feature_count) {
+  static_assert(values_per_thread == 1 || values_per_thread == 2);
+  static_assert(
+      values_per_thread == 1 ||
+      (std::is_same_v<scratch_t, c10::BFloat16> &&
+       std::is_same_v<output_t, c10::BFloat16>));
+  __shared__ acc_t partials[values_per_thread]
+                           [INDEX_ADD_SORTED_FINAL_PASS_THREADS];
+  const int64_t lane = threadIdx.y;
+  const int64_t num_lanes = blockDim.y;
+  const int64_t slot = lane * blockDim.x + threadIdx.x;
+  const int64_t features_per_step =
+      static_cast<int64_t>(blockDim.x) * values_per_thread;
+
+  // Bound by the chunks actually used so inputs without long runs exit at once.
+  const int64_t used_long_chunks =
+      static_cast<int64_t>(long_chunk_offsets[max_segments - 1]) +
+      static_cast<int64_t>(long_chunk_counts[max_segments - 1]);
+  for (int64_t chunk = blockIdx.x; chunk < used_long_chunks;
+       chunk += gridDim.x) {
+    const int64_t segment = index_add_sorted_upper_bound(
+                                long_chunk_offsets, max_segments, chunk) -
+        1;
+    if (segment < 0 || segment >= max_segments) {
+      continue;
+    }
+    const int64_t first_chunk =
+        static_cast<int64_t>(long_chunk_offsets[segment]);
+    const int64_t chunk_count =
+        static_cast<int64_t>(long_chunk_counts[segment]);
+    if (chunk != first_chunk || chunk_count == 0) {
+      continue;
+    }
+
+    const int64_t output_row = static_cast<int64_t>(
+        sorted_indices[static_cast<int64_t>(segment_offsets[segment])]);
+    // Every thread runs the same number of steps so the barriers stay uniform.
+    for (int64_t step = 0; step < feature_count; step += features_per_step) {
+      const int64_t local_feature =
+          step + static_cast<int64_t>(threadIdx.x) * values_per_thread;
+      const bool active = local_feature + values_per_thread <= feature_count;
+      acc_t sums[values_per_thread] = {};
+      if (active) {
+        for (int64_t current = lane; current < chunk_count;
+             current += num_lanes) {
+          const int64_t scratch_offset =
+              (first_chunk + current) * feature_count + local_feature;
+#pragma unroll
+          for (int value = 0; value < values_per_thread; ++value) {
+            sums[value] += static_cast<acc_t>(scratch[scratch_offset + value]);
+          }
+        }
+      }
+#pragma unroll
+      for (int value = 0; value < values_per_thread; ++value) {
+        partials[value][slot] = sums[value];
+      }
+      __syncthreads();
+      if (lane == 0 && active) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        const int64_t output_offset =
+            (outer * num_rows + output_row) * inner_size + feature;
+#pragma unroll
+        for (int value = 0; value < values_per_thread; ++value) {
+          acc_t sum = acc_t(0);
+          for (int64_t other = 0; other < num_lanes; ++other) {
+            sum += partials[value][other * blockDim.x + threadIdx.x];
+          }
+          index_add_sorted_add_owned(grad_input + output_offset + value, sum);
+        }
+      }
+      __syncthreads();
+    }
+  }
+}
+#endif
 
 class ReduceMultiply {
 public:
@@ -1141,6 +1660,293 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   return false;
 }
 
+#if defined(USE_ROCM)
+// Sorted-reduction index_add_ for large dim-contiguous workloads on
+// gfx942/gfx950. Returns false when the caller should use indexFunc.
+static bool index_add_sorted_rocm(
+    const Tensor& result,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const Scalar& alpha) {
+  const auto dtype = result.scalar_type();
+  const bool supported_dtype =
+      dtype == at::kHalf || dtype == at::kBFloat16 || dtype == at::kFloat ||
+      dtype == at::kDouble;
+  if (!supported_dtype || !alpha.equal(1) || result.dim() == 0 ||
+      source.dim() != result.dim() || !result.is_contiguous() ||
+      !source.is_contiguous() || !index.is_contiguous() ||
+      index.numel() > std::numeric_limits<int>::max()) {
+    return false;
+  }
+  // The packed bf16/fp16 output atomics need a 4-byte-aligned destination.
+  if ((dtype == at::kBFloat16 || dtype == at::kHalf) &&
+      reinterpret_cast<std::uintptr_t>(result.const_data_ptr()) % 4 != 0) {
+    return false;
+  }
+
+  const int64_t num_indices = index.numel();
+  const int64_t num_rows = result.size(dim);
+  int64_t outer_size = 1;
+  int64_t inner_size = 1;
+  for (const auto d : c10::irange(result.dim())) {
+    if (static_cast<int64_t>(d) < dim) {
+      outer_size *= result.size(d);
+    } else if (static_cast<int64_t>(d) > dim) {
+      inner_size *= result.size(d);
+    }
+  }
+
+  const bool supported_inner_size =
+      inner_size == 128 || inner_size == 256;
+  if (num_indices < INDEX_ADD_SORTED_MIN_SORT_SIZE ||
+      !supported_inner_size) {
+    return false;
+  }
+
+  if (num_rows == 0 || num_rows > std::numeric_limits<int>::max()) {
+    return false;
+  }
+  const auto position_options = index.options().dtype(at::kInt);
+  const int64_t max_segments = std::min(num_indices, num_rows);
+  // Upper bound for grid sizing; the kernels pick the stride on device.
+  const int64_t num_boundaries =
+      (num_indices - 1) / INDEX_ADD_SORTED_SPLIT_CHUNK_SIZE;
+  const int64_t max_candidates = max_segments + num_boundaries;
+  // Queried last: it allocates on every call.
+  if (!at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
+    return false;
+  }
+
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  const int64_t multiprocessor_count =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const Tensor sort_keys = at::empty({num_indices}, position_options);
+  const Tensor sorted_indices = at::empty({num_indices}, position_options);
+  const Tensor original_positions = at::empty({num_indices}, position_options);
+  const Tensor positions = at::empty({num_indices}, position_options);
+  const Tensor segment_offsets = at::empty({max_segments}, position_options);
+  const Tensor num_segments = at::empty({}, index.options().dtype(at::kLong));
+
+  constexpr int prepare_threads = 256;
+  const int prepare_grid = static_cast<int>(std::min<int64_t>(
+      ceil_div(num_indices, static_cast<int64_t>(prepare_threads)),
+      multiprocessor_count * 8));
+  AT_DISPATCH_INDEX_TYPES(
+      index.scalar_type(), "index_add_sorted_prepare_sort", [&] {
+        index_add_sorted_prepare_sort_kernel<index_t>
+            <<<prepare_grid, prepare_threads, 0, stream>>>(
+                index.const_data_ptr<index_t>(),
+                sort_keys.mutable_data_ptr<int32_t>(),
+                positions.mutable_data_ptr<int32_t>(),
+                num_indices,
+                num_rows);
+      });
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  // rocPRIM's default config merge-sorts up to 1,048,576 items. On gfx950 that
+  // made index_select backward at M = 1,000,000 (bf16/fp16/fp32, D = 128/256)
+  // 59-135 us slower per call than onesweep (median +101 us), so force onesweep.
+  cuda::cub::radix_sort_pairs_onesweep(
+      sort_keys.const_data_ptr<int32_t>(),
+      sorted_indices.mutable_data_ptr<int32_t>(),
+      positions.const_data_ptr<int32_t>(),
+      original_positions.mutable_data_ptr<int32_t>(),
+      num_indices,
+      0,
+      cuda::cub::get_num_bits(num_rows));
+  cuda::cub::unique_by_key(
+      sorted_indices.const_data_ptr<int32_t>(),
+      cccl_counting_iterator<int32_t>{0},
+      segment_offsets.mutable_data_ptr<int32_t>(),
+      num_segments.mutable_data_ptr<int64_t>(),
+      num_indices);
+
+  // Every sorted call can contain a long run, so the long-run passes always
+  // run. The scratch tile must hold at least one feature per long chunk (two
+  // for packed bf16); budgeting the largest such footprint over all supported
+  // dtypes keeps the tile width positive without a dtype-specific check.
+  static_assert(
+      INDEX_ADD_SORTED_MIN_SORT_SIZE >=
+      INDEX_ADD_SORTED_LONG_RUN_SIZE);
+  constexpr int64_t kMinScratchBytesPerChunk = std::max<int64_t>(
+      2 * sizeof(c10::BFloat16), sizeof(double));
+  static_assert(
+      std::numeric_limits<int>::max() / INDEX_ADD_SORTED_CHUNK_SIZE +
+          std::numeric_limits<int>::max() /
+              INDEX_ADD_SORTED_LONG_RUN_SIZE <=
+      INDEX_ADD_SORTED_MAX_SCRATCH_BYTES / kMinScratchBytesPerChunk);
+  const int64_t max_long_chunks =
+      num_indices / INDEX_ADD_SORTED_CHUNK_SIZE +
+      num_indices / INDEX_ADD_SORTED_LONG_RUN_SIZE;
+  // The radix sort has consumed `positions`; reuse its storage.
+  const Tensor& long_chunk_counts = positions;
+  const Tensor long_chunk_offsets = at::empty({max_segments}, position_options);
+  constexpr int metadata_threads = 256;
+  const int metadata_grid = static_cast<int>(std::min<int64_t>(
+      ceil_div(max_segments, static_cast<int64_t>(metadata_threads)),
+      multiprocessor_count * 8));
+  index_add_sorted_long_chunk_counts_kernel
+      <<<metadata_grid, metadata_threads, 0, stream>>>(
+          segment_offsets.const_data_ptr<int32_t>(),
+          num_segments.const_data_ptr<int64_t>(),
+          long_chunk_counts.mutable_data_ptr<int32_t>(),
+          num_indices,
+          max_segments);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  cuda::cub::exclusive_sum(
+      long_chunk_counts.const_data_ptr<int32_t>(),
+      long_chunk_offsets.mutable_data_ptr<int32_t>(),
+      max_segments);
+
+  const bool use_packed_bfloat16 = dtype == at::kBFloat16 &&
+      memory::can_vectorize_up_to<c10::BFloat16>(reinterpret_cast<const char*>(
+          source.const_data_ptr<c10::BFloat16>())) >= 2;
+  const int64_t max_blocks = multiprocessor_count * 8;
+  const int64_t max_work = outer_size * max_candidates;
+  const int64_t feature_plane = outer_size * inner_size;
+
+  const auto with_feature_size = [&](const auto& launch) -> void {
+    if (inner_size == 128) {
+      launch(std::integral_constant<int64_t, 128>{});
+    } else {
+      launch(std::integral_constant<int64_t, 256>{});
+    }
+  };
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      source.scalar_type(),
+      "index_add_sorted",
+      [&] {
+        using acc_t = at::opmath_type<scalar_t>;
+        using index_t = int32_t;
+
+        int64_t scratch_feature_tile = std::min<int64_t>(
+            feature_plane,
+            INDEX_ADD_SORTED_MAX_SCRATCH_BYTES /
+                (max_long_chunks * static_cast<int64_t>(sizeof(scalar_t))));
+        if (use_packed_bfloat16) {
+          scratch_feature_tile -= scratch_feature_tile % 2;
+        }
+        TORCH_INTERNAL_ASSERT(scratch_feature_tile > 0);
+        const Tensor long_scratch =
+            at::empty({max_long_chunks, scratch_feature_tile}, result.options());
+
+        // Explicit return type: a deduced one would instantiate the bf16-only
+        // values_per_thread == 2 kernels from the discarded branch below.
+        const auto launch_long_passes = [&](auto values_per_thread_constant,
+                                            int block_size) -> void {
+          constexpr int values_per_thread =
+              decltype(values_per_thread_constant)::value;
+          const int long_grid = static_cast<int>(std::min<int64_t>(
+              max_long_chunks,
+              multiprocessor_count * (values_per_thread == 2 ? 16 : 8)));
+          for (int64_t feature_offset = 0; feature_offset < feature_plane;
+               feature_offset += scratch_feature_tile) {
+            const int64_t feature_count = std::min<int64_t>(
+                scratch_feature_tile, feature_plane - feature_offset);
+            index_add_sorted_long_first_pass_kernel<
+                scalar_t,
+                acc_t,
+                scalar_t,
+                values_per_thread><<<long_grid, block_size, 0, stream>>>(
+                source.const_data_ptr<scalar_t>(),
+                original_positions.const_data_ptr<int32_t>(),
+                segment_offsets.const_data_ptr<int32_t>(),
+                num_segments.const_data_ptr<int64_t>(),
+                long_chunk_counts.const_data_ptr<int32_t>(),
+                long_chunk_offsets.const_data_ptr<int32_t>(),
+                long_scratch.mutable_data_ptr<scalar_t>(),
+                num_indices,
+                max_segments,
+                max_long_chunks,
+                inner_size,
+                feature_offset,
+                feature_count);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            index_add_sorted_long_final_pass_kernel<
+                scalar_t,
+                acc_t,
+                scalar_t,
+                index_t,
+                values_per_thread><<<
+                long_grid,
+                dim3(
+                    block_size,
+                    INDEX_ADD_SORTED_FINAL_PASS_THREADS / block_size),
+                0,
+                stream>>>(
+                sorted_indices.const_data_ptr<index_t>(),
+                segment_offsets.const_data_ptr<int32_t>(),
+                long_chunk_counts.const_data_ptr<int32_t>(),
+                long_chunk_offsets.const_data_ptr<int32_t>(),
+                long_scratch.const_data_ptr<scalar_t>(),
+                result.mutable_data_ptr<scalar_t>(),
+                num_rows,
+                max_segments,
+                max_long_chunks,
+                inner_size,
+                feature_offset,
+                feature_count);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          }
+        };
+
+        const auto launch_dense = [&](auto vectorized_constant) -> void {
+          constexpr bool vectorized = decltype(vectorized_constant)::value &&
+              std::is_same_v<scalar_t, c10::BFloat16>;
+          with_feature_size([&](auto feature_size_constant) {
+            constexpr int64_t feature_size =
+                decltype(feature_size_constant)::value;
+            constexpr int64_t group_size = feature_size / 8;
+            constexpr int64_t groups_per_block = 256 / group_size;
+            const int dense_grid = static_cast<int>(std::min<int64_t>(
+                ceil_div(max_work, groups_per_block), max_blocks));
+            index_add_sorted_compact_dense_kernel<
+                scalar_t,
+                acc_t,
+                scalar_t,
+                index_t,
+                feature_size,
+                vectorized><<<
+                dense_grid,
+                dim3(group_size, groups_per_block),
+                0,
+                stream>>>(
+                source.const_data_ptr<scalar_t>(),
+                sorted_indices.const_data_ptr<index_t>(),
+                original_positions.const_data_ptr<int32_t>(),
+                segment_offsets.const_data_ptr<int32_t>(),
+                num_segments.const_data_ptr<int64_t>(),
+                long_chunk_counts.const_data_ptr<int32_t>(),
+                result.mutable_data_ptr<scalar_t>(),
+                num_indices,
+                num_rows,
+                outer_size);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          });
+        };
+
+        if (use_packed_bfloat16) {
+          if constexpr (std::is_same_v<scalar_t, c10::BFloat16>) {
+            launch_dense(std::true_type{});
+            launch_long_passes(std::integral_constant<int, 2>{}, 64);
+          } else {
+            TORCH_INTERNAL_ASSERT(false);
+          }
+          return;
+        }
+
+        launch_dense(std::false_type{});
+        launch_long_passes(
+            std::integral_constant<int, 1>{}, static_cast<int>(inner_size));
+      });
+  return true;
+}
+#endif
+
 void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
   if (!result.is_same(self)) {
     result.copy_(self);
@@ -1179,6 +1985,11 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   if (sliceSize == 0) {
     return;
   }
+#if defined(USE_ROCM)
+  if (index_add_sorted_rocm(result, dim, index, source, alpha)) {
+    return;
+  }
+#endif
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   const bool indContig = index.is_contiguous();
 

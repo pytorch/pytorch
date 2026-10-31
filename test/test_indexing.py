@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from torch import tensor
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import evaluate_gfx_arch_within
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
@@ -21,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
     skipXLA,
@@ -2363,6 +2365,307 @@ class TestIndexingDevice(TestCase):
         expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
         out.index_add_(0, idx, src)
         self.assertEqual(out.cpu(), expected)
+
+    def _skip_unless_sorted_index_add_arch(self):
+        if not evaluate_gfx_arch_within(["gfx942", "gfx950"]):
+            self.skipTest("requires the MI300x/MI350x sorted index_add path")
+
+    def _ran_sorted_index_add(self, fn):
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA]
+        ) as prof:
+            fn()
+            torch.cuda.synchronize()
+        return any(
+            "index_add_sorted_prepare_sort_kernel" in event.name
+            for event in prof.events()
+        )
+
+    def _sorted_index_add_index(self, pattern, num_indices, device):
+        if pattern == "single_row":
+            num_rows = 2
+            index = torch.zeros(num_indices, device=device, dtype=torch.long)
+        elif pattern == "medium_runs":
+            num_rows = num_indices // 2000
+            index = torch.randperm(num_indices, device=device).remainder(num_rows)
+        elif pattern == "unique":
+            num_rows = num_indices
+            index = torch.randperm(num_indices, device=device)
+        elif pattern == "more_rows_than_indices":
+            num_rows = 2 * num_indices
+            index = torch.randint(0, num_rows, (num_indices,), device=device)
+        elif pattern in ("run_length_edges", "run_length_edges_with_singletons"):
+            # Lengths straddle both compact strides (128, 512) and the 8192-entry
+            # long-run threshold. Singletons pull the average run below 128,
+            # which switches the compact stride from 128 to 512.
+            edges = [127, 128, 129, 511, 512, 513, 8191, 8192, 8193]
+            with_singletons = pattern == "run_length_edges_with_singletons"
+            lengths = edges * (18 if with_singletons else 37)
+            remainder = num_indices - sum(lengths)
+            lengths += [1] * remainder if with_singletons else [remainder]
+            num_rows = len(lengths)
+            rows = torch.randperm(num_rows, device=device)
+            index = rows.repeat_interleave(torch.tensor(lengths, device=device))
+            index = index[torch.randperm(num_indices, device=device)]
+        else:
+            self.assertEqual(pattern, "mixed_runs")
+            num_rows = num_indices // 4
+            long_count = num_indices // 2
+            medium_count = num_indices // 4
+            short_count = num_indices - long_count - medium_count
+            index = torch.cat(
+                [
+                    torch.zeros(long_count, device=device, dtype=torch.long),
+                    torch.randint(1, 101, (medium_count,), device=device),
+                    torch.randint(101, num_rows, (short_count,), device=device),
+                ]
+            )[torch.randperm(num_indices, device=device)]
+        return index, num_rows
+
+    def _sorted_index_add_case(self, device, dtype, pattern, layout="dim0"):
+        num_indices = 1000000
+        dim, outer_size, inner_size, index_dtype = {
+            "dim0": (0, None, 128, torch.long),
+            "dim1": (1, 2, 128, torch.long),
+            "inner256": (0, None, 256, torch.long),
+        }[layout]
+        index, num_rows = self._sorted_index_add_index(pattern, num_indices, device)
+        prefix = (outer_size,) if outer_size else ()
+        source_shape = prefix + (num_indices, inner_size)
+        # ~32 small integers per output element keeps every partial sum exact in bf16.
+        keep = (32.0 / torch.bincount(index, minlength=num_rows)[index]).clamp(max=1)
+        keep_shape = [1] * len(source_shape)
+        keep_shape[dim] = num_indices
+        mask = torch.rand(source_shape, device=device) < keep.view(keep_shape)
+        values = torch.randint(-3, 4, source_shape, device=device)
+        source = (values * mask).to(dtype)
+        target = torch.randint(-4, 5, prefix + (num_rows, inner_size), device=device)
+        return target.to(dtype), dim, index.to(index_dtype), source
+
+    def _check_sorted_index_add(
+        self, target, dim, index, source, *, alpha=1, expect_sorted=True
+    ):
+        expected = (
+            target.cpu()
+            .double()
+            .index_add_(dim, index.cpu(), source.cpu().double(), alpha=alpha)
+            .to(target.dtype)
+        )
+        ran_sorted = self._ran_sorted_index_add(
+            lambda: target.index_add_(dim, index, source, alpha=alpha)
+        )
+        self.assertEqual(ran_sorted, expect_sorted)
+        self.assertEqual(target.cpu(), expected, atol=0, rtol=0)
+
+    def _runs_of_512_index(self, num_indices, device):
+        # Runs of exactly 512 entries, first in sorted order so each run is one
+        # 512-aligned chunk, padded with singleton rows so the average run stays
+        # below 128 and the compact stride is 512.
+        num_runs = 1000
+        run_entries = num_runs * 512
+        index = torch.cat(
+            [
+                torch.arange(run_entries, device=device).div(
+                    512, rounding_mode="floor"
+                ),
+                torch.arange(
+                    num_runs, num_runs + num_indices - run_entries, device=device
+                ),
+            ]
+        )
+        return index, num_runs
+
+    def _misaligned_copy(self, tensor):
+        storage = torch.empty(
+            tensor.numel() + 1, device=tensor.device, dtype=tensor.dtype
+        )
+        return storage[1:].view_as(tensor).copy_(tensor)
+
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize(
+        "pattern",
+        [
+            "single_row",
+            "medium_runs",
+            "unique",
+            "more_rows_than_indices",
+            "mixed_runs",
+            "run_length_edges",
+            "run_length_edges_with_singletons",
+        ],
+    )
+    def test_index_add_sorted_matches_reference(self, device, dtype, pattern):
+        self._skip_unless_sorted_index_add_arch()
+        self._check_sorted_index_add(
+            *self._sorted_index_add_case(device, dtype, pattern)
+        )
+
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("layout", ["dim1", "inner256"])
+    def test_index_add_sorted_layouts(self, device, dtype, layout):
+        self._skip_unless_sorted_index_add_arch()
+        self._check_sorted_index_add(
+            *self._sorted_index_add_case(device, dtype, "mixed_runs", layout)
+        )
+
+    @serialTest()
+    @onlyCUDA
+    @parametrize(
+        "case",
+        [
+            "alpha",
+            "misaligned_self",
+            "misaligned_source",
+            "int32_index",
+            "non_contiguous_self",
+            "non_contiguous_source",
+            "non_contiguous_index",
+            "misaligned_half_self",
+            "unsupported_dtype",
+            "below_sort_threshold",
+            "inner_size_64",
+            "deterministic",
+        ],
+    )
+    def test_index_add_sorted_dispatch(self, device, case):
+        self._skip_unless_sorted_index_add_arch()
+        target, dim, index, source = self._sorted_index_add_case(
+            device, torch.bfloat16, "mixed_runs"
+        )
+        alpha = 1
+        expect_sorted = False
+        if case == "alpha":
+            alpha = 2
+        elif case == "misaligned_self":
+            target = self._misaligned_copy(target)
+        elif case == "misaligned_source":
+            source = self._misaligned_copy(source)
+            expect_sorted = True
+        elif case == "int32_index":
+            index = index.int()
+            expect_sorted = True
+        elif case == "non_contiguous_self":
+            target = target.t().contiguous().t()
+        elif case == "non_contiguous_source":
+            source = source.t().contiguous().t()
+        elif case == "non_contiguous_index":
+            index = torch.stack([index, index], dim=1)[:, 0]
+        elif case == "misaligned_half_self":
+            target = self._misaligned_copy(target.half())
+            source = source.half()
+        elif case == "unsupported_dtype":
+            target = target.int()
+            source = source.int()
+        elif case == "below_sort_threshold":
+            index = index[:8192]
+            source = source[:8192]
+        elif case == "inner_size_64":
+            target = target[:, :64].contiguous()
+            source = source[:, :64].contiguous()
+
+        with DeterministicGuard(case == "deterministic"):
+            self._check_sorted_index_add(
+                target, dim, index, source, alpha=alpha, expect_sorted=expect_sorted
+            )
+
+    @serialTest()
+    @onlyCUDA
+    @parametrize("reduction_kind", ["compact", "long"])
+    def test_index_select_backward_sorted_accumulates_in_half(
+        self, device, reduction_kind
+    ):
+        self._skip_unless_sorted_index_add_arch()
+        num_indices = 1000000
+        inner_size = 128
+        chunk_size = 512
+        contributions_cpu = torch.tensor([0.000001, 0.0031], dtype=torch.half)
+        pair_sum = contributions_cpu.float().sum()
+        full_chunk_sum = (pair_sum * (chunk_size // 2)).half()
+        remainder = num_indices % chunk_size
+        remainder_sum = (pair_sum * (remainder // 2)).half()
+        if reduction_kind == "compact":
+            index, num_runs = self._runs_of_512_index(num_indices, device)
+            num_rows = int(index.max().item()) + 1
+            singles = contributions_cpu[
+                torch.arange(num_runs * chunk_size, num_indices).remainder(2)
+            ]
+            expected = torch.cat(
+                [
+                    torch.full((num_runs,), full_chunk_sum.item(), dtype=torch.half),
+                    singles,
+                ]
+            )
+            expected = expected.unsqueeze(1).expand(-1, inner_size).contiguous()
+        else:
+            num_rows = 1
+            index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+            expected_value = (
+                full_chunk_sum.float() * (num_indices // chunk_size)
+                + remainder_sum.float()
+            ).half()
+            expected = torch.empty((num_rows, inner_size), dtype=torch.half).fill_(
+                expected_value.item()
+            )
+
+        source = torch.zeros(
+            (num_rows, inner_size),
+            device=device,
+            dtype=torch.half,
+            requires_grad=True,
+        )
+        contributions = contributions_cpu.to(device)
+        grad_rows = contributions[torch.arange(num_indices, device=device).remainder(2)]
+        grad = grad_rows.unsqueeze(1).expand(-1, inner_size).contiguous()
+
+        ran_sorted = self._ran_sorted_index_add(
+            lambda: source.index_select(0, index).backward(grad)
+        )
+
+        self.assertTrue(ran_sorted)
+        self.assertEqual(source.grad.cpu(), expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @parametrize("reduction_kind", ["compact", "long"])
+    @parametrize("grad_alignment", ["aligned", "misaligned"])
+    def test_index_select_backward_sorted_accumulates_bfloat16_in_float(
+        self, device, reduction_kind, grad_alignment
+    ):
+        self._skip_unless_sorted_index_add_arch()
+        num_indices = 1000000
+        inner_size = 128
+        if reduction_kind == "compact":
+            index, _ = self._runs_of_512_index(num_indices, device)
+        else:
+            index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+        num_rows = int(index.max().item()) + 1
+        # A bf16 running sum of 512 equal values stalls at 256 * value.
+        feature_values = (
+            torch.arange(inner_size, device=device).remainder(4) + 1
+        ) * 0.25
+        grad = feature_values.to(torch.bfloat16).expand(num_indices, inner_size)
+        grad = grad.contiguous()
+        if grad_alignment == "misaligned":
+            grad = self._misaligned_copy(grad)
+        source = torch.zeros(
+            (num_rows, inner_size),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        counts = torch.bincount(index, minlength=num_rows).double()
+        expected = (counts.unsqueeze(1) * feature_values.double()).to(torch.bfloat16)
+
+        ran_sorted = self._ran_sorted_index_add(
+            lambda: source.index_select(0, index).backward(grad)
+        )
+
+        self.assertTrue(ran_sorted)
+        self.assertEqual(source.grad, expected, atol=0, rtol=0)
 
     @serialTest()
     @onlyAccelerator
