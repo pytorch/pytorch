@@ -819,6 +819,15 @@ See :func:`torch.bincount`
 )
 
 add_docstr_all(
+    "bitwise_count",
+    r"""
+bitwise_count() -> Tensor
+
+See :func:`torch.bitwise_count`
+""",
+)
+
+add_docstr_all(
     "bitwise_not",
     r"""
 bitwise_not() -> Tensor
