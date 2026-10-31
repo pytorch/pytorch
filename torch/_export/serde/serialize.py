@@ -2483,15 +2483,6 @@ class ExportedProgramSerializer(metaclass=Final):
         )
 
 
-# Namespaces of ops that public APIs put into saved programs but that torch
-# defines in Python modules `import torch` does not import. Load imports the
-# module before it looks up one of these ops.
-_OP_NAMESPACE_MODULES = {
-    "quantized_decomposed": "torch.ao.quantization.fx._decomposed",
-    "torch_attn": "torch.nn.attention.varlen",
-}
-
-
 @final
 class GraphModuleDeserializer(metaclass=Final):
     @dataclasses.dataclass
@@ -2550,10 +2541,6 @@ class GraphModuleDeserializer(metaclass=Final):
         elif serialized_target.startswith("torch"):
             module = torch  # type: ignore[misc]
             serialized_target_names = serialized_target.split(".")[1:]
-            if serialized_target.startswith("torch.ops."):
-                namespace = serialized_target_names[1]
-                if namespace in _OP_NAMESPACE_MODULES:
-                    torch.ops.import_module(_OP_NAMESPACE_MODULES[namespace])
         elif serialized_target.startswith("math"):
             module = math  # type: ignore[misc]
             serialized_target_names = serialized_target.split(".")[1:]
@@ -2920,9 +2907,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
-            if not serialized_node.outputs:
-                # serialize_hoo_outputs saves no outputs when the HOP returns ().
-                fx_node.meta["val"] = ()
             fx_node.meta.update(metadata)
 
         elif isinstance(
