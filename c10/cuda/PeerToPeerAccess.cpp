@@ -166,13 +166,15 @@ bool isFabricSupported() {
 // checked at export, so the full allocate/export/import cycle still runs.
 bool isFabricSupported(c10::DeviceIndex dev) {
   int fabric_supported = 0;
-  if (hipDeviceGetAttribute(
-          &fabric_supported,
-          hipDeviceAttributeHandleTypeFabricSupported,
-          static_cast<int>(dev)) != hipSuccess) {
+  hipError_t err = hipDeviceGetAttribute(
+      &fabric_supported,
+      hipDeviceAttributeHandleTypeFabricSupported,
+      static_cast<int>(dev));
+  if (err != hipSuccess) {
     (void)hipGetLastError();
     LOG(INFO)
-        << "Could not query FABRIC handle support, falling back to fd handle exchange\n";
+        << "status " << hipGetErrorString(err)
+        << " Could not query FABRIC handle support, falling back to fd handle exchange\n";
     return false;
   }
   if (!fabric_supported) {
@@ -193,43 +195,49 @@ bool isFabricSupported(c10::DeviceIndex dev) {
   // Failures below are returned, not checked. Each arms a sticky error that
   // must be consumed here or it surfaces at an unrelated call later.
   size_t granularity = 0;
-  if (hipMemGetAllocationGranularity(
-          &granularity, &prop, hipMemAllocationGranularityRecommended) !=
-      hipSuccess) {
+  err = hipMemGetAllocationGranularity(
+      &granularity, &prop, hipMemAllocationGranularityRecommended);
+  if (err != hipSuccess) {
     (void)hipGetLastError();
     LOG(INFO)
-        << "Could not get FABRIC allocation granularity, falling back to fd handle exchange\n";
+        << "status " << hipGetErrorString(err)
+        << " Could not get FABRIC allocation granularity, falling back to fd handle exchange\n";
     return false;
   }
 
   // 1. try allocating memory with FABRIC handle type
   hipMemGenericAllocationHandle_t handle{};
-  if (hipMemCreate(&handle, granularity, &prop, 0) != hipSuccess) {
+  err = hipMemCreate(&handle, granularity, &prop, 0);
+  if (err != hipSuccess) {
     (void)hipGetLastError();
     LOG(INFO)
-        << "Could not allocate memory with FABRIC handle, falling back to fd handle exchange\n";
+        << "status " << hipGetErrorString(err)
+        << " Could not allocate memory with FABRIC handle, falling back to fd handle exchange\n";
     return false;
   }
 
   // 2. check export. An unprovisioned accelerator fails here, not above.
   hipMemFabricHandle_t shared_handle{};
-  if (hipMemExportToShareableHandle(
-          &shared_handle, handle, hipMemHandleTypeFabric, 0) != hipSuccess) {
+  err = hipMemExportToShareableHandle(
+      &shared_handle, handle, hipMemHandleTypeFabric, 0);
+  if (err != hipSuccess) {
     (void)hipGetLastError();
     LOG(INFO)
-        << "Could not export FABRIC handle, falling back to fd handle exchange\n";
+        << "status " << hipGetErrorString(err)
+        << " Could not export FABRIC handle, falling back to fd handle exchange\n";
     (void)hipMemRelease(handle);
     return false;
   }
 
   // 3. check import
   hipMemGenericAllocationHandle_t import_handle{};
-  if (hipMemImportFromShareableHandle(
-          &import_handle, &shared_handle, hipMemHandleTypeFabric) !=
-      hipSuccess) {
+  err = hipMemImportFromShareableHandle(
+      &import_handle, &shared_handle, hipMemHandleTypeFabric);
+  if (err != hipSuccess) {
     (void)hipGetLastError();
     LOG(INFO)
-        << "Could not import FABRIC handle, falling back to fd handle exchange\n";
+        << "status " << hipGetErrorString(err)
+        << " Could not import FABRIC handle, falling back to fd handle exchange\n";
     (void)hipMemRelease(handle);
     return false;
   }
