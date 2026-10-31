@@ -81,9 +81,6 @@ fake_export_failures_xpu = fake_export_failures.copy()
 if not torch.xpu._is_compiled():
     fake_export_failures_xpu |= fake_export_no_gpu_failures
     fake_export_failures_xpu |= {
-        # https://github.com/intel/torch-xpu-ops/issues/5256
-        xfail("nn.functional.max_unpool2d"),
-        xfail("nn.functional.max_unpool2d", "grad"),
         # https://github.com/intel/torch-xpu-ops/issues/5277
         xfail("nn.functional.scaled_dot_product_attention"),
     }
