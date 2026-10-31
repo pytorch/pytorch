@@ -10,6 +10,7 @@ set(TORCH_SHIM_TEST_SRCS
   ${TORCH_SHIM_TEST_ROOT}/main.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_stable_ivalue.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_pyobject_conversion.cpp
+  ${TORCH_SHIM_TEST_ROOT}/test_foreach_copy.cpp
 )
 
 # CUDA graph capture isn't supported on ROCm yet.
