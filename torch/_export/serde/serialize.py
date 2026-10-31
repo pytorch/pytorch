@@ -1330,11 +1330,14 @@ class GraphModuleSerializer(metaclass=Final):
         """
         func, in_spec, *flat_args = node.args
         owner = node.graph.owning_module
-        func_spec = in_spec_value = None
-        if isinstance(func, torch.fx.Node) and func.op == "get_attr":
-            func_spec = getattr(owner, func.target)
-        if isinstance(in_spec, torch.fx.Node) and in_spec.op == "get_attr":
-            in_spec_value = getattr(owner, in_spec.target)
+        func_spec, in_spec_value = (
+            getattr(owner, arg.target)
+            if isinstance(arg, torch.fx.Node)
+            and arg.op == "get_attr"
+            and isinstance(arg.target, str)
+            else None
+            for arg in (func, in_spec)
+        )
         if not (
             isinstance(func_spec, pytree.TreeSpec)
             and isinstance(in_spec_value, pytree.TreeSpec)
