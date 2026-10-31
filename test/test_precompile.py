@@ -6695,7 +6695,9 @@ class TestPrecompileCudagraphs(TestCase):
             self.model.zero_grad(set_to_none=True)
             fn(self.model, self.x).sum().backward()
             grad = self.model.lin.weight.grad.clone()
-            self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+            served = self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+            # The forward and backward graphs, as the flag decides them.
+            self.assertEqual(served[0], 2 if flag else 0)
         # An eager capture records no CUDA graph config for an override to contradict.
         self._capture_step(fn, grad=True, backend="eager")
 
@@ -6720,8 +6722,8 @@ class TestPrecompileCudagraphs(TestCase):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
         no_trees = {"triton.cudagraph_trees": False}
-        recorded, _ = self._serve_in_fresh_process(y, config=no_trees, bumps=3)
-        self.assertGreater(recorded, 0)
+        served = self._serve_in_fresh_process(y, config=no_trees, bumps=3, skips=0)
+        self.assertGreater(served[0], 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
         # Post-compile would take the partitioned wrapper in a loading process
