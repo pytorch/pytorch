@@ -1483,15 +1483,19 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         log.warning(msg)
 
     def welford_reduce_fallback(self, dtype, value):
-        sum_ = ops.reduction(dtype, dtype, "sum", value)
+        # Shift by an input element so equal inputs give exactly zero M2
+        shift = ops.reduction(dtype, dtype, "max", value)
+        dx = ops.sub(value, shift)
+        dx_sum = ops.reduction(dtype, dtype, "sum", dx)
+
         self.inside_reduction = False
         rnumel = ops.index_expr(self.features.reduction_numel, dtype)
-        mean = ops.truediv(sum_, rnumel)
+        dx_mean = ops.truediv(dx_sum, rnumel)
+        mean = ops.add(shift, dx_mean)
 
         self.inside_reduction = True
-        dx = ops.sub(value, mean)
-        dx2 = ops.mul(dx, dx)
-        m2 = ops.reduction(dtype, dtype, "sum", dx2)
+        ddx = ops.sub(dx, dx_mean)
+        m2 = ops.reduction(dtype, dtype, "sum", ops.mul(ddx, ddx))
         return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def prepare_softmax_twopass_fallback(self, dtype, value):

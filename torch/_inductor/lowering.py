@@ -7586,11 +7586,31 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
-    x_mean = mean(x, axis, keepdim=True)
-    if return_mean:
-        x_mean.realize()
 
-    diffs = square(sub(x, x_mean))
+    # Shift by the first element of each reduction (a load, not a reduction)
+    # so that equal inputs give exactly zero M2 and exactly that element as mean.
+    x_loader = x.make_loader()
+
+    def shift_fn(index):
+        index = list(index)
+        for i in axis:
+            index[i] = sympy.S.Zero
+        return x_loader(index)
+
+    def make_shift(ranges):
+        return Pointwise.create(
+            device=x.get_device(),
+            dtype=x.get_dtype(),
+            inner_fn=shift_fn,
+            ranges=ranges,
+        )
+
+    dx = sub(x, make_shift(list(size)))
+    dx_mean = mean(dx, axis, keepdim=True)
+    if return_mean:
+        dx_mean.realize()
+
+    diffs = square(sub(dx, dx_mean))
     sum_result = sum_(diffs, axis, keepdim)
 
     denom = sympy_product(size[i] for i in axis)
@@ -7602,6 +7622,8 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     if not return_mean:
         return (x_var,)
 
+    kept_size = [sympy.S.One if i in axis else s for i, s in enumerate(size)]
+    x_mean = add(make_shift(kept_size), dx_mean)
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
 
