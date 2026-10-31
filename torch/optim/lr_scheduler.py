@@ -108,6 +108,13 @@ class LRScheduler:
     Subclasses implement :meth:`get_lr` and optionally override :meth:`step` to
     define scheduling behavior.
 
+    To receive forwarded scheduling inputs, overrides of ``step``, ``_update_lr``,
+    and ``get_lr`` must accept ``**kwargs``. They may also declare named inputs,
+    such as ``metrics``, and should ignore inputs they do not use. Overrides that
+    delegate to another scheduling method should forward the inputs unchanged.
+    For backward compatibility, methods without ``**kwargs`` are called without
+    extra inputs, even if they declare matching named parameters.
+
     Args:
         optimizer (Optimizer): The optimizer this scheduler will adjust the
             learning rates of.
@@ -1231,9 +1238,9 @@ class SequentialLR(LRScheduler):
         """Perform a step.
 
         Args:
-            **kwargs: Forwarded to the currently active sub-scheduler. One
-                still written against the older ``step`` API, which cannot
-                take them, is stepped without them.
+            **kwargs: Forwarded to the currently active sub-scheduler. For
+                backward compatibility, methods without ``**kwargs`` are called
+                without these inputs, even if they declare matching named parameters.
         """
         if "epoch" in kwargs:
             raise TypeError(
@@ -1627,9 +1634,9 @@ class ChainedScheduler(LRScheduler):
         """Perform a step.
 
         Args:
-            **kwargs: Forwarded to every contained scheduler. One still
-                written against the older ``step`` API, which cannot take
-                them, is stepped without them.
+            **kwargs: Forwarded to every contained scheduler. For backward
+                compatibility, methods without ``**kwargs`` are called without
+                these inputs, even if they declare matching named parameters.
         """
         if "epoch" in kwargs:
             raise TypeError(

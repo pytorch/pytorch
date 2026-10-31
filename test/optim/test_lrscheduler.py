@@ -676,6 +676,68 @@ class TestLRScheduler(TestCase):
             [float(group["lr"]) for group in self.opt.param_groups], initial_lrs
         )
 
+    @parametrize("accepts_kwargs", [False, True])
+    def test_named_get_lr_input_requires_kwargs(self, accepts_kwargs):
+        class NamedInputScheduler(self.LegacyGetLRScheduler):
+            def get_lr(self, *, metrics=None):
+                self.metrics = metrics
+                return super().get_lr()
+
+        class ForwardingScheduler(NamedInputScheduler):
+            def get_lr(self, *, metrics=None, **kwargs):
+                return super().get_lr(metrics=metrics)
+
+        scheduler_cls = ForwardingScheduler if accepts_kwargs else NamedInputScheduler
+        scheduler = scheduler_cls(self.opt)
+        self.opt.step()
+        scheduler.step(metrics=2.0, extra=3.0)
+
+        self.assertEqual(scheduler.metrics, 2.0 if accepts_kwargs else None)
+        self.assertEqual(scheduler.last_epoch, 1)
+
+    @parametrize("accepts_kwargs", [False, True])
+    def test_named_update_lr_input_requires_kwargs(self, accepts_kwargs):
+        class NamedInputScheduler(self.LegacyGetLRScheduler):
+            def _update_lr(self, epoch=None, *, metrics=None):
+                self.metrics = metrics
+                super()._update_lr(epoch)
+
+        class ForwardingScheduler(NamedInputScheduler):
+            def _update_lr(self, epoch=None, *, metrics=None, **kwargs):
+                super()._update_lr(epoch, metrics=metrics)
+
+        scheduler_cls = ForwardingScheduler if accepts_kwargs else NamedInputScheduler
+        scheduler = scheduler_cls(self.opt)
+        self.opt.step()
+        scheduler.step(metrics=2.0, extra=3.0)
+
+        self.assertEqual(scheduler.metrics, 2.0 if accepts_kwargs else None)
+        self.assertEqual(scheduler.last_epoch, 1)
+
+    @parametrize("accepts_kwargs", [False, True])
+    @parametrize("composite_cls", [SequentialLR, ChainedScheduler])
+    def test_named_step_input_requires_kwargs(self, accepts_kwargs, composite_cls):
+        class NamedInputScheduler(self.LegacyGetLRScheduler):
+            def step(self, epoch=None, *, metrics=None):
+                self.metrics = metrics
+                super().step(epoch)
+
+        class ForwardingScheduler(NamedInputScheduler):
+            def step(self, epoch=None, *, metrics=None, **kwargs):
+                super().step(epoch, metrics=metrics)
+
+        scheduler_cls = ForwardingScheduler if accepts_kwargs else NamedInputScheduler
+        child = scheduler_cls(self.opt)
+        if composite_cls is SequentialLR:
+            scheduler = composite_cls(self.opt, [child], milestones=[])
+        else:
+            scheduler = composite_cls([child])
+        self.opt.step()
+        scheduler.step(metrics=2.0, extra=3.0)
+
+        self.assertEqual(child.metrics, 2.0 if accepts_kwargs else None)
+        self.assertEqual(child.last_epoch, 1)
+
     def test_plateau_lr_rejects_invalid_optimizer(self):
         with self.assertRaisesRegex(TypeError, "object is not an Optimizer"):
             PlateauLR(object())  # type: ignore[arg-type]
