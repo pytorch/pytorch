@@ -3089,6 +3089,19 @@ torch_name_rule_map = [
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
+# Dynamo routes these callables on a registered privateuse1 backend module
+# (torch.<name>) to TorchInGraphFunctionVariable so they are traced by the
+# dedicated handlers in TorchInGraphFunctionVariable._get_handlers() instead
+# of graph-breaking. Keep in sync with the handler probes in _get_handlers().
+# The per-function contract is documented for backend authors in
+# torch.utils.rename_privateuse1_backend's docstring.
+_PRIVATEUSE1_ROUTED_FNS: tuple[str, ...] = (
+    "current_stream",
+    "synchronize",
+    "_exchange_device",
+    "_maybe_exchange_device",
+)
+
 
 @functools.cache
 def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
@@ -3111,7 +3124,49 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     )
                 else:
                     d[obj] = v
+    # PrivateUse1 backends (e.g. npu) register a device module on torch after
+    # import, so the map (built lazily on first lookup) is probed here whenever
+    # it is (re)built. A backend that registers after the map already exists is
+    # routed in place by _register_privateuse1_backend(), called from
+    # torch._register_device_module, without rebuilding the map (a rebuild
+    # would drop substitute_in_graph polyfill entries). When no backend is
+    # registered this adds nothing.
+    _probe_privateuse1_rule_map(d)
     return d
+
+
+def _get_privateuse1_backend_fns() -> dict[str, Callable[..., Any]]:
+    name = torch._C._get_privateuse1_backend_name()
+    if name == "privateuseone":
+        return {}
+    backend_mod = getattr(torch, name, None)
+    if backend_mod is None:
+        return {}
+    return {
+        fn_name: fn
+        for fn_name in _PRIVATEUSE1_ROUTED_FNS
+        if callable(fn := getattr(backend_mod, fn_name, None))
+    }
+
+
+def _probe_privateuse1_rule_map(d: dict[Any, type["VariableTracker"]]) -> None:
+    for fn in _get_privateuse1_backend_fns().values():
+        d.setdefault(fn, TorchInGraphFunctionVariable)
+
+
+def _register_privateuse1_backend() -> None:
+    # A privateuse1 backend registers torch.<name> after Dynamo is loaded;
+    # route its stream/synchronize/exchange_device functions in the existing
+    # rule map in place and clear the handler cache so the backend's handlers
+    # are probed on the next compile. Called from torch._register_device_module;
+    # when the backend registered before the first map build, the build itself
+    # picks it up. Probe only when the map already exists: building it from
+    # scratch here would resolve every torch_name_rule_map entry through
+    # load_object/importlib, a cost that should stay on processes that actually
+    # compile, not on every import torch_npu-style registration.
+    if get_torch_obj_rule_map.cache_info().currsize:
+        _probe_privateuse1_rule_map(get_torch_obj_rule_map())
+    TorchInGraphFunctionVariable._get_handlers.cache_clear()
 
 
 def _load_obj_from_str(fully_qualified_name: str) -> Any:

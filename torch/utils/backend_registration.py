@@ -127,6 +127,43 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (2) ``current_device() -> int``
         Returns the index of a currently selected device.
 
+    Note(Dynamo): To have stream and device-exchange calls traced inside
+    compiled regions, BackendModule may define any of the following functions;
+    each is matched by name and routed in-graph by TorchDynamo when present:
+
+    (1) ``current_stream(device: Union[int, str, torch.device, None] = None) -> torch.Stream``
+        Return the current stream for the device; Dynamo traces it from its
+        symbolic stream state instead of calling the backend function.
+    (2) ``synchronize(device: Union[int, str, torch.device, None] = None) -> None``
+        Wait for all kernels on the device to complete; Dynamo emits
+        ``torch.ops.streams.synchronize_device`` for it.
+    (3) ``_exchange_device(device_index: int) -> int``
+        Switch the current device and return the previous one. A negative
+        index returns -1 without switching; an out-of-range index must fail
+        rather than leave the device in an invalid state (torch.cuda raises).
+    (4) ``_maybe_exchange_device(device_index: int) -> int``
+        Switch to the requested device unless the target is not usable, in
+        which case return the current device without switching (matching
+        torch.cuda's MaybeExchangeDevice, which defers when the target has no
+        primary context). A negative index returns -1 without switching.
+
+    If either exchange function is present, BackendModule must also define
+    ``current_device() -> int`` and ``set_device(int)``: the exchange handler
+    guards on the current device at trace time and registers a cleanup hook
+    that restores the previous device when tracing finishes. Both exchange
+    functions must return -1 for a negative index, and ``set_device(-1)`` must
+    be a no-op: the cleanup hook calls ``set_device(prev)`` and ``prev`` is -1
+    when the exchange was called with a negative index.
+
+    The runtime behavior of the emitted exchange node depends on the backend.
+    Under the eager backend it runs at runtime and switches the device, leaving
+    it switched (matching eager semantics). Under aot_eager and inductor the
+    node is a plain Python callable, so AOTAutograd executes it once during
+    compilation, after the cleanup hooks have already run: the switch happens
+    at compile time, is not undone, and is absent from the compiled graph, and
+    the current_device guard captures the post-switch device. This matches the
+    existing torch.cuda behavior.
+
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
 

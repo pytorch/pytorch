@@ -3369,6 +3369,16 @@ def _register_device_module(device_type: str, module: _ModuleType) -> None:
     setattr(m, device_type, module)
     torch_module_name = ".".join([__name__, device_type])
     sys.modules[torch_module_name] = module
+    # A privateuse1 backend registers torch.<name> after torch import; route
+    # its stream/synchronize/exchange_device functions in Dynamo's existing
+    # rule map (rebuilt lazily on lookup) in place, without rebuilding the map,
+    # which would drop substitute_in_graph polyfill entries.
+    if (
+        device_type != "privateuseone"
+        and device_type == torch._C._get_privateuse1_backend_name()
+        and "torch._dynamo.trace_rules" in sys.modules
+    ):
+        torch._dynamo.trace_rules._register_privateuse1_backend()
 
 
 from torch import (
