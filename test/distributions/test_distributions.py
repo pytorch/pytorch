@@ -1903,6 +1903,44 @@ class TestDistributionsDevice(DistributionsTestCase):
             ):
                 torch.binomial(total_count, total_prob)
 
+    def test_categorical_zero_prob_log_prob_is_neg_inf(self):
+        # Events with probability exactly 0 must have log_prob == -inf in every
+        # dtype, matching the logits=-inf path (probs are clamped internally).
+        for dtype in (torch.float32, torch.float64):
+            probs = torch.tensor([0.0, 1.0], dtype=dtype)
+            cat = Categorical(probs=probs)
+            self.assertEqual(
+                cat.log_prob(torch.tensor(0)), torch.tensor(-inf, dtype=dtype)
+            )
+            self.assertTrue(torch.isfinite(cat.log_prob(torch.tensor(1))))
+            from_logits = Categorical(logits=torch.tensor([-inf, 0.0], dtype=dtype))
+            self.assertEqual(
+                cat.log_prob(torch.arange(2)), from_logits.log_prob(torch.arange(2))
+            )
+            one_hot = OneHotCategorical(probs=probs)
+            self.assertEqual(
+                one_hot.log_prob(torch.tensor([1.0, 0.0], dtype=dtype)),
+                torch.tensor(-inf, dtype=dtype),
+            )
+            multinomial = Multinomial(5, probs=probs)
+            self.assertEqual(
+                multinomial.log_prob(torch.tensor([1.0, 4.0], dtype=dtype)),
+                torch.tensor(-inf, dtype=dtype),
+            )
+            self.assertTrue(
+                torch.isfinite(
+                    multinomial.log_prob(torch.tensor([0.0, 5.0], dtype=dtype))
+                )
+            )
+
+    def test_categorical_zero_prob_log_prob_grad_is_finite(self):
+        probs = torch.tensor([0.0, 0.3, 0.7], requires_grad=True)
+        Categorical(probs=probs).log_prob(torch.tensor([1, 2])).sum().backward()
+        self.assertTrue(torch.isfinite(probs.grad).all())
+        probs = torch.tensor([0.0, 0.3, 0.7], requires_grad=True)
+        Multinomial(4, probs=probs).log_prob(torch.tensor([0.0, 1.0, 3.0])).backward()
+        self.assertTrue(torch.isfinite(probs.grad).all())
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_multinomial_1d(self):
