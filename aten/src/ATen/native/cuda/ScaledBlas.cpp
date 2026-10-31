@@ -74,6 +74,17 @@ bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 
+// ROCm rowwise FP8 needs mat_b as e4m3fnuz on gfx942 and e4m3fn elsewhere. Shared
+// by v1 _scaled_mm, _scaled_rowwise_rowwise and the _scaled_addmm alpha == 0 and
+// empty-dimension shortcuts, which skip _scaled_rowwise_rowwise.
+void _check_rocm_rowwise_mat_b_dtype(const Tensor& mat_b) {
+  if (_scaled_mm_is_fnuz()) {
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "expected mat_b.dtype() to be at::kFloat8_e4m3fnuz, but got ", mat_b.dtype());
+  } else {
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "expected mat_b.dtype() to be at::kFloat8_e4m3fn, but got ", mat_b.dtype());
+  }
+}
+
 #if ROCM_VERSION >= 70000
 static void check_blockwise_e8m0fnu_arch_supported() {
   std::vector<std::string> mx_archs{"gfx950"};
@@ -472,6 +483,32 @@ _tunable_scaled_gemm(
   return dispatched;
 }
 
+// Some backends only take row-major mat1 x column-major mat2, i.e. transa == 't'
+// and transb == 'n' in cublasCommonArgs. Shared by _scaled_gemm and the
+// _scaled_addmm alpha == 0 shortcut, which skips _scaled_gemm.
+#ifdef USE_ROCM
+// hipBLASLt only has solutions for every layout permutation with tensorwise scaling;
+// row-wise and block-wise bind their scale vectors to the operand orientation and are
+// TN-only on all gfx archs. scaled_mm_arch_allowed() ignores sm90_only/sm100_only on
+// ROCm, so it cannot express this.
+bool _scaled_gemm_requires_tn(bool tensorwise) {
+  return !tensorwise;
+}
+constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by hipBLASLt for non-tensorwise scaling";
+#else
+// H100 only supports row-major x column-major, but all permutations are supported on Blackwells
+bool _scaled_gemm_requires_tn([[maybe_unused]] bool tensorwise) {
+  return scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false);
+}
+constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by cuBLASLt";
+#endif
+
+void _check_scaled_gemm_layout(char transa, char transb, bool tensorwise) {
+  if (_scaled_gemm_requires_tn(tensorwise)) {
+    TORCH_CHECK(transa == 't' && transb == 'n', tn_only_msg);
+  }
+}
+
 struct ScaledGemmEpilogue {
   std::optional<Tensor> accumulator;
   float beta = 0.0f;
@@ -502,22 +539,11 @@ _scaled_gemm(
       swizzle_choice_a,
       swizzle_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-#ifdef USE_ROCM
-  // hipBLASLt only has solutions for every layout permutation with tensorwise scaling;
-  // row-wise and block-wise bind their scale vectors to the operand orientation and are
-  // TN-only on all gfx archs. scaled_mm_arch_allowed() ignores sm90_only/sm100_only on
-  // ROCm, so it cannot express this.
-  const bool tn_only = scaling_choice_a != ScalingType::TensorWise ||
-      scaling_choice_b != ScalingType::TensorWise;
-  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by hipBLASLt for non-tensorwise scaling";
-#else
-  // H100 only supports row-major x column-major, but all permutations are supported on Blackwells
-  const bool tn_only = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false);
-  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by cuBLASLt";
-#endif
-  if (tn_only) {
-    TORCH_CHECK(args.transa == 't' && args.transb == 'n', tn_only_msg);
-  }
+  _check_scaled_gemm_layout(
+      args.transa,
+      args.transb,
+      scaling_choice_a == ScalingType::TensorWise &&
+          scaling_choice_b == ScalingType::TensorWise);
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
   if (effective_accumulator && mat1.size(0) == 1 &&
@@ -525,14 +551,15 @@ _scaled_gemm(
     out.copy_(*effective_accumulator);
     effective_accumulator = out;
   }
-  TORCH_CHECK(
+  // TORCH_META_FUNC(_scaled_addmm) guarantees canonical input/out of one dtype.
+  TORCH_INTERNAL_ASSERT(
       !effective_accumulator ||
           (effective_accumulator->stride(0) == args.result_ld &&
            effective_accumulator->scalar_type() == out_dtype_),
       "scaled_addmm: input and output must have the same dtype and leading dimension");
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   // TunableOp's ScaledGemmParams cannot represent the addmm accumulator/alpha/beta
-  // yet, so bypass it for epilogues (ROCm blocks the accumulator upstream, CUDA-only).
+  // yet, so bypass it for epilogues.
   const bool tunable_supports_epilogue = !effective_accumulator &&
       epilogue.alpha == 1.0f && epilogue.beta == 0.0f;
   bool tunable_op_enabled =
@@ -783,16 +810,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           out);
     }
 #else
-    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
-    Tensor b = mat2;
-    if (_scaled_mm_is_fnuz()) {
-      TORCH_CHECK_VALUE(b.dtype() == at::kFloat8_e4m3fnuz,
-          "Expected b.dtype() == at::kFloat8_e4m3fnuz, got: ", b.dtype());
-    }
-    else {
-      TORCH_CHECK_VALUE(b.dtype() == at::kFloat8_e4m3fn,
-          "Expected b.dtype() == at::kFloat8_e4m3fn, got: ", b.dtype());
-    }
+    _check_rocm_rowwise_mat_b_dtype(mat2);
     // Until more than bf16 is supported.
     TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16,
          "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
@@ -902,6 +920,25 @@ bool rowwise_uses_cublas(
 #endif
 }
 
+// Rowwise scales are fp32 with M elements shaped [M, 1] for A and N elements for B.
+// Shared by _scaled_rowwise_rowwise and the _scaled_addmm alpha == 0 and
+// empty-dimension shortcuts, which skip _scaled_rowwise_rowwise.
+void _check_rowwise_scales(
+    const Tensor& mat_a, const Tensor& mat_b,
+    const Tensor& scale_a, const Tensor& scale_b) {
+  TORCH_CHECK_VALUE(scale_a.size(0) == mat_a.size(0) && scale_a.size(1) == 1, "scale_a must have shape [", mat_a.size(0), ", 1], got [", scale_a.sizes(), "]");
+  TORCH_CHECK_VALUE(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel());
+  TORCH_CHECK_VALUE(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel());
+
+  // if we have a scale of shape [256, 1] (say), then stride can be [1, 0] - handle this case
+  TORCH_CHECK_VALUE(
+      scale_a.stride(1) == 1 ||
+      scale_a.size(1) == 1,
+      "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1)
+  );
+  TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
+}
+
 Tensor&
 _scaled_rowwise_rowwise(
           const Tensor& mat_a, const Tensor& mat_b,
@@ -915,17 +952,7 @@ _scaled_rowwise_rowwise(
   // A, B are FP8, scales are fp32, shape M/N for A/B
   TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK_VALUE(scale_a.size(0) == mat_a.size(0) && scale_a.size(1) == 1, "scale_a must have shape [", mat_a.size(0), ", 1], got [", scale_a.sizes(), "]");
-  TORCH_CHECK_VALUE(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
-  TORCH_CHECK_VALUE(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
-
-  // if we have a scale of shape [256, 1] (say), then stride can be [1, 0] - handle this case
-  TORCH_CHECK_VALUE(
-      scale_a.stride(1) == 1 ||
-      scale_a.size(1) == 1,
-      "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1)
-  );
-  TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
+  _check_rowwise_scales(mat_a, mat_b, scale_a, scale_b);
 
   auto scaling_choice_a = ScalingType::RowWise;
   auto scaling_choice_b = ScalingType::RowWise;
@@ -951,14 +978,7 @@ _scaled_rowwise_rowwise(
   }
 #else
 
-  // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
-  //Tensor b = mat_b;
-  if (_scaled_mm_is_fnuz()) {
-    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "expected mat_b.dtype() to be at::kFloat8_e4m3fnuz, but got ", mat_b.dtype());
-  }
-  else {
-    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "expected mat_b.dtype() to be at::kFloat8_e4m3fn, but got ", mat_b.dtype());
-  }
+  _check_rocm_rowwise_mat_b_dtype(mat_b);
   // Until more than bf16 is supported.
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16,
        "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
@@ -1526,10 +1546,6 @@ void scaled_mm_cuda_v2_impl(
       allowed_device,
       op_name,
       " is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
-#ifdef USE_ROCM
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !accumulator.has_value(), op_name, " is not implemented for ROCm");
-#endif
   if (accumulator) {
     // Layout was validated by the meta function; cuBLASLt additionally needs
     // a 16-byte aligned C pointer, which in-place callers can violate.
@@ -1671,6 +1687,18 @@ void scaled_mm_cuda_v2_impl(
 
   ScaledGemmEpilogue epilogue;
   if (accumulator) {
+#ifdef USE_ROCM
+    // hipBLASLt's C operand is verified only for rowwise FP8 with BF16 output
+    // on gfx942/gfx950 with ROCm 7.0+. Reject other configurations before the
+    // alpha == 0 and empty-dimension shortcuts below.
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        ROCM_VERSION >= 70000 &&
+            at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"}) &&
+            gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE &&
+            out_mut.scalar_type() == ScalarType::BFloat16,
+        op_name,
+        " on ROCm only supports rowwise FP8 scaling with BF16 output on gfx942/gfx950 with ROCm 7.0+");
+#endif
     TORCH_CHECK_NOT_IMPLEMENTED(
         gemm_impl != ScaledGemmImplementation::MXFP4_MXFP4,
         op_name,
@@ -1690,6 +1718,27 @@ void scaled_mm_cuda_v2_impl(
     epilogue.alpha = alpha.to<float>();
     if (mat_a.size(0) == 0 || mat_a.size(1) == 0 ||
         mat_b.size(1) == 0 || epilogue.alpha == 0.0f) {
+      // The GEMM is skipped, so apply the checks it would have run, in the same
+      // order: for rowwise (the recipe ROCm admits) the scale checks and the ROCm
+      // mat_b flavor check of _scaled_rowwise_rowwise, then for every recipe the
+      // operand-layout check of _scaled_gemm. Other recipes' scale checks still
+      // run only with the GEMM. Empty scales and operands have no layout.
+      const bool non_empty_mn = mat_a.size(0) > 0 && mat_b.size(1) > 0;
+      if (gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {
+        if (non_empty_mn) {
+          _check_rowwise_scales(mat_a, mat_b, scale_a[0], scale_b[0]);
+        }
+#ifdef USE_ROCM
+        _check_rocm_rowwise_mat_b_dtype(mat_b);
+#endif
+      }
+      const bool tensorwise =
+          gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE;
+      if (non_empty_mn && mat_a.size(1) > 0 &&
+          _scaled_gemm_requires_tn(tensorwise)) {
+        cublasCommonArgs layout(mat_a, mat_b, out_mut);
+        _check_scaled_gemm_layout(layout.transa, layout.transb, tensorwise);
+      }
       if (epilogue.beta == 0.0f) {
         out_mut.zero_();
       } else {

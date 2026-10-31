@@ -1575,6 +1575,20 @@ scaled_mm_v2_fallback = fallback_handler(
 )
 
 
+def _flatten_scaled_mm_bias(bias):
+    # The meta check guarantees N elements. CUDA/ROCm eager hands cuBLASLt or
+    # hipBLASLt a raw bias pointer, i.e. one flat vector added across columns,
+    # while templates (Triton, CK, CUTLASS) broadcast only a 1-D bias correctly,
+    # so normalize [N, 1], [1, N], [1, 1, N], ... to [N] there. Other devices'
+    # eager kernels broadcast the bias by shape, so leave it unchanged.
+    if bias is None or len(bias.get_size()) == 1:
+        return bias
+    device = bias.get_device()
+    if device is None or device.type != "cuda":
+        return bias
+    return lowerings[aten.reshape](bias, [-1])
+
+
 @register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
 def tuned_scaled_mm_v2(
     mat_a,
@@ -1599,6 +1613,7 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
+    bias = _flatten_scaled_mm_bias(bias)
 
     mxfp_format = _get_rocm_mxfp_v2_format(
         mat_a,
@@ -1952,6 +1967,7 @@ def tuned_scaled_mm(
     Returns:
         Tensor: The result of the scaled matrix multiplication
     """
+    bias = _flatten_scaled_mm_bias(bias)
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype

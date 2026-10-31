@@ -212,16 +212,21 @@ TORCH_META_FUNC(_scaled_addmm)(
           self.scalar_type() == kFloat,
       "input must have dtype BFloat16, Half, or Float, but got ",
       self.scalar_type());
+  const auto is_canonical = [](const Tensor& t) {
+    return t.stride(1) == 1 && t.stride(0) == std::max<int64_t>(1, t.size(1));
+  };
   TORCH_CHECK_VALUE(
-      self.stride(1) == 1 &&
-          self.stride(0) == std::max<int64_t>(1, self.size(1)),
-      "input must have canonical contiguous row-major strides");
+      is_canonical(self), "input must have canonical contiguous row-major strides");
 
   set_output_raw_strided(
       0,
       {mat1.size(0), mat2.size(1)},
       {},
       self.options());
+  // With empty strides the .out wrapper passes out= through unchanged.
+  TORCH_CHECK_VALUE(
+      is_canonical(maybe_get_output(0)),
+      "out must have canonical contiguous row-major strides");
 }
 
 // V2: Grouped scaled matrix multiply. Shape inference + output allocation runs

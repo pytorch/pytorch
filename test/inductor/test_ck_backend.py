@@ -391,9 +391,9 @@ class TestCKBackend(TestCase):
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
-    @parametrize("has_bias", (True, False))
+    @parametrize("bias_shape", (None, "n", "1_n", "n_1", "1_1_n"))
     def test_max_autotune_scaled_mm(
-        self, max_autotune_gemm_backends, quantize_type, has_bias
+        self, max_autotune_gemm_backends, quantize_type, bias_shape
     ):
         use_fast_accum = False
         runtime_arch = torch.cuda.get_device_properties(0).gcnArchName
@@ -403,16 +403,19 @@ class TestCKBackend(TestCase):
         dtype = torch.bfloat16
         tensor_options = {"device": "cuda", "dtype": dtype}
 
-        M = 2240
         N = 2048
         K = 256
+        # CK broadcasts only a 1-D bias; a square shape keeps a bias read per
+        # row instead of per column in bounds, so the mismatch shows in values.
+        M = 2240 if bias_shape in (None, "n") else N
 
         x = torch.randn(M, K, **tensor_options)
         w = torch.randn(N, K, **tensor_options)
 
         bias = None
-        if has_bias:
-            bias = torch.randn(N, **tensor_options)
+        if bias_shape is not None:
+            view_shape = {"n": (N,), "1_n": (1, N), "n_1": (N, 1), "1_1_n": (1, 1, N)}
+            bias = torch.randn(N, **tensor_options).reshape(view_shape[bias_shape])
 
         dtype_float8 = (
             torch.float8_e4m3fnuz if "gfx94" in runtime_arch else torch.float8_e4m3fn
