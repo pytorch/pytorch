@@ -1012,27 +1012,21 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             inner_op_before = with_effects_nodes_before[0].args[1]
             self.assertEqual(inner_op_before, my_swap_functional._opoverload)
 
-            # with_effects wraps multiple inner results in one nested tuple.
+            # with_effects flattens the inner op's multiple results after the token.
             alias_args = {
                 my_swap_functional._opoverload: (0, 1),
             }
-            result_tuple = next(
+            first_result = next(
                 n for n in gm.graph.nodes
                 if n.target is operator.getitem
                 and n.args[0] is with_effects_nodes_before[0]
                 and n.args[1] == 1
             )
-            first_result = next(
-                n for n in gm.graph.nodes
-                if n.target is operator.getitem
-                and n.args[0] is result_tuple
-                and n.args[1] == 0
-            )
             second_result = next(
                 n for n in gm.graph.nodes
                 if n.target is operator.getitem
-                and n.args[0] is result_tuple
-                and n.args[1] == 1
+                and n.args[0] is with_effects_nodes_before[0]
+                and n.args[1] == 2
             )
             self.assertEqual(
                 _alias_sources(first_result, alias_args),
