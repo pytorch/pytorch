@@ -1799,6 +1799,7 @@ class Module:
 
         result = None
         called_always_called_hooks = set()
+        compiling = torch.compiler.is_compiling()
 
         def inner():
             nonlocal result, args, kwargs
@@ -1845,7 +1846,7 @@ class Module:
                     *self._forward_hooks.items(),
                 ):
                     # Only the eager exception handlers below read this set.
-                    if not torch.compiler.is_compiling() and (
+                    if not compiling and (
                         hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called
                     ):
                         called_always_called_hooks.add(hook_id)
@@ -1888,7 +1889,7 @@ class Module:
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
         # exception.
-        if torch.compiler.is_compiling():
+        if compiling:
             return inner()
 
         try:

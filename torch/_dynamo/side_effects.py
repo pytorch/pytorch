@@ -1033,10 +1033,7 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
-        variable = variables.NewGlobalVariable(
-            mutation_type=AttributeMutationExisting(),
-            source=source,
-        )
+        variable = variables.NewGlobalVariable.create(source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
@@ -1351,7 +1348,7 @@ class SideEffects:
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
                         cg(var.source)
-                        cg(variables.ConstantVariable(name))
+                        cg(variables.ConstantVariable.create(name))
                         cg(value)
                         cg.extend_output(
                             [*create_call_method(3), create_instruction("POP_TOP")]
@@ -2161,7 +2158,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                         )
                     )
                     cg(var.source)  # type: ignore[attr-defined]
-                    cg(variables.ConstantVariable(name))
+                    cg(variables.ConstantVariable.create(name))
                     ctx.suffixes.append(
                         [
                             *create_call_function(2, False),
@@ -2189,7 +2186,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 )
             )
             cg(var.source)  # type: ignore[attr-defined]
-            cg(variables.ConstantVariable(name))
+            cg(variables.ConstantVariable.create(name))
             cg(value)
             ctx.suffixes.append(
                 [
@@ -2207,7 +2204,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             cg.load_import_from("builtins", "object")
             cg.load_method("__setattr__")
             cg(var.source)  # type: ignore[attr-defined]
-            cg(variables.ConstantVariable(name))
+            cg(variables.ConstantVariable.create(name))
             cg(value)
             ctx.suffixes.append([*create_call_method(3), create_instruction("POP_TOP")])
             side_effect_occurred = True
