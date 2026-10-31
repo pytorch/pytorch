@@ -5066,7 +5066,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if current_node is not None and is_single_launch_kernel:
                 scheduler = V.graph.scheduler
                 previous_node = (
-                    scheduler.previous_node if scheduler is not None else None
+                    scheduler.previous_nodes[-1]
+                    if scheduler is not None and scheduler.previous_nodes is not None
+                    else None
                 )
                 if previous_node is not None:
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
@@ -5101,27 +5103,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         if not self._enable_pdl_codegen():
             return
-        current_node = V.kernel.current_node
-        prev_node = (
-            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
+        prev_nodes = (
+            V.graph.scheduler.previous_nodes if V.graph.scheduler is not None else None
         )
 
         def matching_dep(dep):
-            if prev_node is None:
-                raise AssertionError("prev_node must not be None")
-            if current_node is None:
-                raise AssertionError("current_node must not be None")
-            prev_deps = prev_node.read_writes.writes
+            if prev_nodes is None:
+                raise AssertionError("prev_nodes must not be None")
+            prev_deps = [w for n in prev_nodes for w in n.read_writes.writes]
             if consider_reads:
-                prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+                prev_deps += [r for n in prev_nodes for r in n.read_writes.reads]
+            real = V.graph.scheduler.mutation_real_name
             return any(
-                dep == current_node.mutation_renames.get(w.name, w.name)
-                for w in prev_deps
+                real.get(dep, dep) == real.get(w.name, w.name) for w in prev_deps
             )
 
         if not dependencies:
             raise AssertionError("dependencies must not be empty")
-        need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
+        need_wait = prev_nodes is None or any(matching_dep(d) for d in dependencies)
         if not need_wait:
             return
         # hoist before the loop
@@ -5162,10 +5161,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
-        # gdc_wait only covers the direct predecessor, so a kernel that exits
-        # without waiting lets its dependents start before older kernels finish.
-        if not has_wait and self._enable_pdl_codegen():
-            code.writeline(self.GDC_WAIT)
+        self._pdl_has_wait = has_wait
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
@@ -6896,7 +6892,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
 
-        self._handle_pdl_before_access(self.post_loop_store, var)
+        self._handle_pdl_before_access(self.post_loop_store, name)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
@@ -9063,8 +9059,8 @@ class TritonScheduling(SIMDScheduling):
 
         current_device = V.graph.get_current_device_or_throw()
 
-        # The default wrapper's async_compile.triton literal is this dedented, stripped
-        # source; the eager submission must be the same bytes so CompiledTritonKernels
+        # A string-form wrapper's (C++, FX) async_compile.triton literal is this dedented,
+        # stripped source; the eager submission must be the same bytes so CompiledTritonKernels
         # (keyed on the exact string) hits at wrapper time instead of compiling the
         # kernel twice and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
@@ -9095,6 +9091,10 @@ class TritonScheduling(SIMDScheduling):
             src_code,
             current_device.type,
             metadata=metadata_comment,
+            # A template is built with its one config already.
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):

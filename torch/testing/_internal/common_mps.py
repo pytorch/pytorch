@@ -27,8 +27,6 @@ if torch.backends.mps.is_available():
             "cholesky_inverse",
             "float_power",
             "geqrf",
-            "linalg.eig",
-            "linalg.eigvals",
             "linalg.inv",
             "linalg.inv_ex",
             "linalg.ldl_factor",
@@ -51,8 +49,6 @@ if torch.backends.mps.is_available():
             # No 5-D bicubic sampler on MPS. float32 only: f16/bf16 are skipped below.
             # TODO: drop this when MPS has 5-D bicubic.
             "nn.functional.grid_sample": [torch.float32],
-            "linalg.eig": None,
-            "linalg.eigvals": None,
             "hash_tensor": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
@@ -112,14 +108,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.huber_loss": [
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-                torch.int16,
-                torch.int32,
-            ],
-            "nn.functional.adaptive_avg_pool3d": None,
             "nn.functional.adaptive_max_pool1d": [
                 torch.int16,
                 torch.int32,
@@ -137,7 +125,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "nn.functional.adaptive_max_pool3d": None,
-            "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.local_response_norm": [
                 torch.int8,
@@ -227,12 +214,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
-            "nn.functional.silu": [
-                torch.int16,
-                torch.int32,
-                torch.uint8,
-                torch.int8,
-            ],
             "nn.functional.softplus": [
                 torch.int32,
                 torch.uint8,
@@ -257,7 +238,6 @@ if torch.backends.mps.is_available():
             "_segment_reduceoffsets": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
-            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
@@ -267,6 +247,9 @@ if torch.backends.mps.is_available():
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "cdouble": None,
             "double": None,
+            "_refs._conversions.cdouble": None,
+            "_refs._conversions.double": None,
+            "_refs.special.ndtri": None,
             "log_softmaxwith_dtype": [
                 torch.uint8,
                 torch.int8,
@@ -276,9 +259,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
             ],
             "float_power": None,
-            # MPS: input sizes must be divisible by output sizes
-            "nn.functional.adaptive_avg_pool1d": None,
-            "nn.functional.adaptive_avg_pool2d": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
@@ -415,6 +395,48 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": [torch.float16, torch.bfloat16],
         }
 
+        # Failures in TestUnaryUfuncs, which compares against NumPy references,
+        # keyed by test name and then by op name
+        UNARY_UFUNCS_XFAILLIST: dict[str, dict[str, tuple[torch.dtype, ...]]] = {
+            "test_reference_numerics_extremal": {
+                # MPS bug: C99 special values for inf/nan inputs, e.g. exp(inf+infj) is nan+nanj
+                **dict.fromkeys(
+                    (
+                        "exp",
+                        "_refs.exp",
+                        "exp2",
+                        "_refs.exp2",
+                        "tan",
+                        "_refs.tan",
+                        "tanh",
+                        "_refs.tanh",
+                        "nn.functional.tanhshrink",
+                        "_refs.nn.functional.tanhshrink",
+                        "sigmoid",
+                        "_refs.sigmoid",
+                    ),
+                    (torch.complex64,),
+                ),
+                # NumPy deviates from C99, e.g. atanh(1+0j) is inf+0.785j rather than
+                # inf+0j (CPU skips these tests for the same reason)
+                **dict.fromkeys(
+                    ("_refs.atan", "atanh", "_refs.atanh"), (torch.complex64,)
+                ),
+            },
+            "test_reference_numerics_small": {
+                # MPS bug: cancellation for small arguments
+                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), (torch.complex64,)),
+                # NumPy deviates from C99 for atan(+-1j)
+                "_refs.atan": (torch.complex64,),
+                # NumPy reference computes int8/uint8 in float16
+                "nn.functional.silu": (torch.int8, torch.uint8),
+            },
+            "test_reference_numerics_normal": {
+                # NumPy reference can't negate bool and computes int8/uint8 in float16
+                "nn.functional.silu": (torch.bool, torch.int8, torch.uint8),
+            },
+        }
+
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
                 d.device_type = device_type
@@ -468,6 +490,18 @@ if torch.backends.mps.is_available():
                     addDecorator(
                         op,
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
+                    )
+
+            for test_name, xfails in UNARY_UFUNCS_XFAILLIST.items():
+                if key in xfails:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            "TestUnaryUfuncs",
+                            test_name,
+                            dtypes=xfails[key],
+                        ),
                     )
 
             # If op is not supported for complex types, expect it to fail

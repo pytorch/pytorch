@@ -3934,6 +3934,8 @@ class ExternKernelCaller(ChoiceCaller):
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             inner.annotations["ktc"] = self.annotations["ktc"]
+        if isinstance(inner, ir.ExternKernel):
+            inner.tunable_dyn_dims_mask = self.tunable_dyn_dims_mask
         return ir.TensorBox.create(inner)
 
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
@@ -5421,10 +5423,23 @@ class AlgorithmSelectorCache(PersistentCache):
                         hint_override=hint_override,
                     )
 
+                storage_offset = cast(int, storage_offset)
+                # Layout offsets are relative to the input data pointer, so views
+                # reaching before it have a negative offset and as_strided
+                # rejects those. Allocate the base to cover the rebased view and
+                # shift the offset into it instead. The base comes from
+                # benchmark_example_value, which already put the data pointer
+                # -storage_offset elements in, so this stays absolute.
+                shift = max(0, -storage_offset)
+                storage_offset += shift
+
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
-                needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, cast(int, storage_offset)
+                needed_size = (
+                    torch._prims_common.compute_required_storage_length(
+                        sizes, strides, storage_offset
+                    )
+                    + shift
                 )
                 current_size = base.untyped_storage().size() // base.element_size()
                 if needed_size > current_size:
@@ -5458,8 +5473,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # Only used for benchmarking tensor setup, not correctness.
         # Offset is almost always 0; use that as fallback.
         out_offset = V.graph.sizevars.optimization_hint(layout.offset, fallback=0)
-        needed_out_size = torch._prims_common.compute_required_storage_length(
-            out.size(), out.stride(), out_offset
+        out_shift = max(0, -out_offset)
+        out_offset += out_shift
+        needed_out_size = (
+            torch._prims_common.compute_required_storage_length(
+                out.size(), out.stride(), out_offset
+            )
+            + out_shift
         )
         # untyped_storage() counts bytes, unlike the deprecated TypedStorage.size().
         current_out_size = out_base.untyped_storage().size() // out_base.element_size()
@@ -5569,15 +5589,15 @@ class AlgorithmSelectorCache(PersistentCache):
         if not work.wait(timeout):
             raise TimeoutError("Barrier timeout before benchmarking")
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         total_time = 0.0
 
         for i in range(nruns):
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
-            start_evt = torch.cuda.Event(enable_timing=True)
-            end_evt = torch.cuda.Event(enable_timing=True)
+            start_evt = torch.Event(enable_timing=True)
+            end_evt = torch.Event(enable_timing=True)
 
             start_evt.record()
             choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
@@ -5614,7 +5634,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Use default process group (None = all ranks)
         process_group = None
-        rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
             cls._uses_layout_preserving_inputs(choice)
@@ -5636,10 +5655,9 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             avg_time = total_time / nruns
-
             # All-reduce to get avg time across ranks
             time_tensor = torch.tensor(
-                [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
+                [avg_time], dtype=torch.float32, device=f"{inputs[0].device}"
             )
             work = dist.all_reduce(
                 time_tensor,
@@ -6402,6 +6420,25 @@ class AlgorithmSelectorCache(PersistentCache):
         # Preserve the original dtype before unwrapping, since dtype views
         # (e.g. uint8 -> float4_e2m1fn_x2) would be lost by unwrap_view.
         original_dtype = node.get_dtype()
+        # Read before unwrapping: the view's offset is relative to the buffer
+        # being unwrapped away, and unwrap_view would drop it.
+        view_offset = V.graph.sizevars.optimization_hint_with_override(
+            node.get_layout().offset,
+            hint_override=hint_override,
+        )
+        # The kernel indexes the whole view, which reaches past the buffer for a
+        # positive offset, so size the fake input for the view's span as well.
+        view_span = torch._prims_common.compute_required_storage_length(
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(),
+                hint_override=hint_override,
+            ),
+            V.graph.sizevars.optimization_hints_with_override(
+                get_strides_with_layout_constraints(node),
+                hint_override=hint_override,
+            ),
+            0,
+        )
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
 
@@ -6428,6 +6465,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 V.graph.get_allocation_size(node),
                 hint_override=hint_override,
             ),
+            view_offset,
+            view_span,
         )
         # Restore dtype if it was lost by unwrapping a dtype view
         if result.dtype != original_dtype:
@@ -6436,27 +6475,46 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @staticmethod
     def generate_example_value(
-        size, stride, device, dtype, extra_size, allocation_size=None
+        size,
+        stride,
+        device,
+        dtype,
+        extra_size,
+        allocation_size=None,
+        view_offset=0,
+        view_span=None,
     ):
+        # Named for rand_strided, which the generated code calls positionally.
+        reserve = size if allocation_size is None else allocation_size
+        reserve_span = torch._prims_common.compute_required_storage_length(
+            reserve, stride, 0
+        )
+        if view_span is None:
+            # No separate view: the kernel indexes the buffer itself.
+            view_span = torch._prims_common.compute_required_storage_length(
+                size, stride, 0
+            )
+        # A negative view_offset reaches before the buffer and cannot be given
+        # to as_strided, so place the data pointer that much further in.
+        shift = max(0, -view_offset)
+        # The kernel can index both the buffer and the whole view, so the
+        # storage holds shift elements in front of the data pointer and then
+        # whichever of the two reaches further past it. A negative extra_size
+        # means the buffer has no leading region, not that it needs less of one.
+        backing_size = max(extra_size, 0) + shift + max(reserve_span, view_span)
+        # rand_strided allocates reserve_span + extra_size, and only pads behind,
+        # so the view's room in front of the buffer is requested as padding.
+        pad_after = backing_size - reserve_span
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
-            if allocation_size is None or allocation_size == size:
-                return rand_strided(
-                    size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                )
-            else:
-                return rand_strided(
-                    allocation_size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                ).as_strided(size, stride)
+            return rand_strided(
+                reserve,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=pad_after,
+            ).as_strided(size, stride, shift)
 
     @staticmethod
     def key_of(node):

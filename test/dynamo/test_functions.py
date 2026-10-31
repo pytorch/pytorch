@@ -4,6 +4,7 @@ import cmath
 import collections
 import collections.abc
 import contextlib
+import datetime
 import enum
 import functools
 import inspect
@@ -12,6 +13,7 @@ import keyword
 import math
 import multiprocessing.reduction
 import operator
+import os
 import random
 import sys
 import types
@@ -28,6 +30,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
+from torch._dynamo import decorators, trace_rules
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
@@ -38,13 +41,16 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
+from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -219,6 +225,8 @@ def deque_length_hints():
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -626,6 +634,30 @@ partial_fn = functools.partial(fn, scale=2)
             filter(lambda x: True, [1, 2]),
         )
         return a
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_itertools_product_zero_repeat_preserves_inputs(self, backend):
+        def fn(x):
+            first = iter([7, 8])
+            second = iter([9, 10])
+            product = list(itertools.product(first, second, repeat=0))
+            return x + next(first, -1) + next(second, -1), product
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(fn(x), (x + 16, [()]))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_itertools_product_zero_repeat_does_not_call_iter(self):
+        class Iterable:
+            def __iter__(self):
+                raise AssertionError("repeat=0 must not call iter")
+
+        def fn(x):
+            return x + len(list(itertools.product(Iterable(), repeat=0)))
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_itertools_permutations_basic(self):
         def fn():
@@ -1972,25 +2004,10 @@ partial_fn = functools.partial(fn, scale=2)
         if x.device.type == "cpu":
             return x + 1
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @make_test
-    def test_get_device_properties_tensor_device(a):
-        x = a.to("cuda")
-        prop = torch.cuda.get_device_properties(x.device)
-        if prop.major == 8:
-            return x + prop.multi_processor_count
-        return x + prop.max_threads_per_multi_processor
-
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
         return b.type(m.type())
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    @make_test
-    def test_tensor_type2(a, b):
-        m = a.to(device_type)
-        return m + b.type(m.type())
 
     @make_test
     def test_tensor_type3(a, b):
@@ -2000,12 +2017,6 @@ partial_fn = functools.partial(fn, scale=2)
     @make_test
     def test_tensor_type4(a, b):
         m = a.type("torch.HalfTensor")
-        return b.type(m.type())
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    @make_test
-    def test_tensor_type5(a, b):
-        m = a.to(device_type).half()
         return b.type(m.type())
 
     @make_test
@@ -2515,6 +2526,258 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @parametrize("wrapped", (False, True))
+    def test_inspect_signature_skip_function(self, wrapped):
+        def fn(x):
+            target = torch.fx.Node.__init__
+            if wrapped:
+                target = torch.no_grad()(target)
+            return x + 1, str(inspect.signature(target))
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        with patch.object(
+            torch.fx.Node.__init__, "__signature__", inspect.Signature(), create=True
+        ):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        if wrapped:
+
+            def user_fn(x):
+                return x
+
+            def identity_fn(x):
+                target = torch.no_grad()(torch.fx.Node.__init__)
+                alias = target
+                other = torch.no_grad()(torch.fx.Node.__init__)
+                user_target = torch.no_grad()(user_fn)
+                return x + 1, (
+                    target is alias,
+                    target.__wrapped__ is torch.fx.Node.__init__,
+                    target.__wrapped__ is target,
+                    target is target.__wrapped__,
+                    target is other,
+                    target is user_target,
+                    user_target is target,
+                )
+
+            opt_identity_fn = torch.compile(
+                identity_fn, backend="eager", fullgraph=True
+            )
+            self.assertEqual(identity_fn(x), opt_identity_fn(x))
+
+    @parametrize(
+        "target",
+        (
+            torch.fx.Node.__init__,
+            os.getpid,
+            str.join,
+            int.__add__,
+            dict.__dict__["fromkeys"],
+            slice.start,
+            int.real,
+        ),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_skip_function_missing_attr_error(self, target):
+        def fn(x):
+            try:
+                target.__missing_attribute__
+            except AttributeError as exc:
+                return x + 1, exc.args, exc.name, exc.obj
+
+        x = torch.ones(1)
+        expected = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = opt_fn(x)
+        self.assertEqual(expected[:3], actual[:3])
+        self.assertIs(expected[3], actual[3])
+
+        def replacement():
+            pass
+
+        replacement.__missing_attribute__ = 1
+        target = replacement
+        self.assertIsNone(fn(x))
+        self.assertIsNone(opt_fn(x))
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_wrapped_skip_function_metadata(self, target):
+        def fn(x):
+            wrapped = torch.no_grad()(target)
+            return (
+                x + 1,
+                wrapped.__qualname__.upper(),
+                wrapped.__module__.split("."),
+                wrapped.__name__.startswith("__"),
+                len(wrapped.__doc__),
+            )
+
+        counter = CompileCounterWithBackend("eager")
+        fullgraph = hasattr(target, "__module__")
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x + 1), opt_fn(x + 1))
+        if fullgraph:
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_wrapped_skip_function_defaultdict(self, target):
+        def fn(x):
+            wrapped = torch.no_grad()(target)
+            try:
+                dd = collections.defaultdict(wrapped)
+                result = len(dd), dd.default_factory is wrapped
+            except TypeError:
+                result = "TypeError"
+            return x + 1, result
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    @parametrize("kind", ("function", "method", "nested"))
+    def test_context_wrapped_function_families(self, kind):
+        def function(x):
+            return x.sin(), torch.is_grad_enabled()
+
+        class Object:
+            def method(self, x):
+                return function(x)
+
+        obj = Object()
+
+        def fn(x):
+            target = function
+            if kind == "method":
+                target = obj.method
+            elif kind == "nested":
+
+                def target(x):
+                    return function(x)
+
+            wrapped = torch.no_grad()(target)
+            return wrapped(x), torch.is_grad_enabled()
+
+        x = torch.ones(1, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertFalse(opt_fn(x)[0][0].requires_grad)
+        self.assertEqual(fn(x + 1), opt_fn(x + 1))
+
+    def test_wrapped_method_descriptor_call(self):
+        target = str.join
+
+        def fn(x):
+            value = x + 1
+            wrapped = torch.no_grad()(target)
+            other = torch.no_grad()(target)
+            nested = torch.no_grad()(wrapped)
+            result = wrapped("-", ("a", "b"))
+            missing = None
+            try:
+                wrapped.__missing_attribute__
+            except AttributeError as exc:
+                missing = exc.args, exc.name, exc.obj is wrapped
+            try:
+                wrapped(1, ())
+            except TypeError:
+                return (
+                    value,
+                    result,
+                    nested("-", ("a", "b")),
+                    missing,
+                    torch.is_grad_enabled(),
+                    (
+                        wrapped.__wrapped__ is target,
+                        wrapped is target,
+                        wrapped is other,
+                        nested.__wrapped__ is wrapped,
+                    ),
+                )
+
+        x = torch.ones(1, requires_grad=True)
+        with patch.object(
+            WrappedMethodDescriptorVariable,
+            "call_function",
+            autospec=True,
+            side_effect=WrappedMethodDescriptorVariable.call_function,
+        ) as call_function:
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+            self.assertEqual(fn(x + 1), opt_fn(x + 1))
+        call_function.assert_called()
+
+    @parametrize("consumer", ("dict", "vars", "closure", "instancecheck"))
+    def test_wrapped_skip_function_runtime_attributes(self, consumer):
+        target = torch.fx.Node.__init__
+
+        class Meta(type):
+            def __instancecheck__(cls, obj):
+                return obj is target
+
+        class Marker(metaclass=Meta):
+            pass
+
+        def fn(x):
+            result = x + 1
+            wrapped = torch.no_grad()(target)
+            if consumer in ("dict", "vars"):
+                attributes = wrapped.__dict__ if consumer == "dict" else vars(wrapped)
+                return result, len(attributes), "__wrapped__" in attributes
+            if consumer == "closure":
+                return result, wrapped.__closure__ is target.__closure__
+            return result, isinstance(wrapped, Marker)
+
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(
+            fn, backend=counter, fullgraph=consumer == "instancecheck"
+        )
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+        if consumer == "instancecheck":
+            self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_wrapped_skip_function_metadata_in_helper(self):
+        def helper(x, target):
+            return x + 1 if target.__name__.startswith("__") else x - 1
+
+        def fn(x):
+            return helper(x, torch.no_grad()(torch.fx.Node.__init__))
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    def test_functools_wraps_name(self):
+        # https://github.com/pytorch/pytorch/issues/201123
+        def deco(func):
+            @functools.wraps(func)
+            def new_func(x):
+                return func(x)
+
+            return new_func
+
+        @deco
+        def add_(x):
+            return x + 1
+
+        def fn(x, method=add_):
+            return x + len(method.__name__) + len(method.__qualname__)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -4349,6 +4612,48 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + 123 + 12)
 
+    @parametrize("disallowed", [False, True])
+    def test_getattr_metaclass_respects_disallow_in_graph(self, disallowed):
+        class Meta(type):
+            def __getattr__(cls, name):
+                if name == "dynamic_attr":
+                    return len(name)
+                raise AttributeError(name)
+
+        class C(metaclass=Meta):
+            pass
+
+        callback = Meta.__getattr__
+        if disallowed:
+            self.addCleanup(
+                lambda: trace_rules._allowed_callable_ids.remove(id(callback))
+            )
+            self.addCleanup(
+                lambda: trace_rules._disallowed_callable_ids.remove(id(callback))
+            )
+            torch.compiler.allow_in_graph(callback)
+            torch._dynamo.disallow_in_graph(callback)
+
+        def fn(x):
+            y = x.sin()
+            # A tensor default avoids getattr's all-constant eager fallback.
+            return y + getattr(C, "dynamic_attr", x)
+
+        x = torch.ones(2)
+        strict_counter = torch._dynamo.testing.CompileCounter()
+        strict_fn = torch.compile(fn, backend=strict_counter, fullgraph=True)
+        if disallowed:
+            with self.assertRaisesRegex(Unsupported, "marked as skipped"):
+                strict_fn(x)
+            self.assertEqual(strict_counter.frame_count, 0)
+        else:
+            self.assertEqual(strict_fn(x), fn(x))
+            self.assertEqual(strict_counter.frame_count, 1)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter)(x), fn(x))
+        self.assertEqual(counter.frame_count, 2 if disallowed else 1)
+
     def test_two_point_iter(self):
         def fn(x, y):
             it = map(lambda n: n + 1, range(6))
@@ -4763,30 +5068,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_manual_seed(self):
-        import torch._inductor.config as inductor_config
-
-        seed_fns = (
-            torch.cuda.manual_seed,
-            torch.cuda.manual_seed_all,
-            torch.cuda.random.manual_seed,
-            torch.cuda.random.manual_seed_all,
-        )
-
-        with inductor_config.patch("fallback_random", True):
-            for seed_fn in seed_fns:
-                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
-                    torch._dynamo.reset()
-
-                    @torch.compile  # noqa: UNSPECIFIED_BACKEND
-                    def foo():
-                        seed_fn(3)
-                        return torch.rand(4, device="cuda")
-
-                    self.assertEqual(foo(), foo())
-                    self.assertEqual(foo(), foo())
 
     def test_partial_across_graph_break_uninvoked(self):
         from functools import partial
@@ -5520,6 +5801,29 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
+
+    @parametrize("check", ["is_none", "is_ellipsis", "not_tuple", "bool_list"])
+    def test_dynamic_slice_check_no_recompile(self, check):
+        def fn(x, y):
+            s = slice(y.shape[0], None)
+            if check == "is_none" and s is None:
+                return x
+            if check == "is_ellipsis" and s is Ellipsis:
+                return x
+            if check == "not_tuple" and not (slice(None), s):
+                return x
+            if check == "bool_list" and not bool([slice(None), s]):
+                return x
+            return x[:, s]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
+
+        x = torch.randn(2, 32)
+        for n in (5, 7, 9):
+            y = torch.zeros(n)
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_range_with_index(self):
         def fn(x):
@@ -6270,67 +6574,62 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_wrap_triton_handled_during_tracing(self):
-        import triton
-        import triton.language as tl
+    def test_torch_op_overload_attr_recompiles(self):
+        def fn(x, y):
+            return torch.ops.aten.add.Tensor(x, y)
 
-        @triton.jit
-        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
-            pid = tl.program_id(axis=0)
-            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+        compile_count = 0
 
-        def fn(x: torch.Tensor) -> torch.Tensor:
-            out = torch.empty_like(x)
-            n_elements = x.numel()
+        def backend(gm, _example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return torch.fx.Interpreter(gm).run
 
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(2)
+        y = torch.tensor(3)
+        original = torch.ops.aten.add.Tensor
+        try:
+            self.assertEqual(fn(x, y), torch.tensor(5))
+            self.assertEqual(compiled(x, y), torch.tensor(5))
+            self.assertEqual(compile_count, 1)
+            torch.ops.aten.add.Tensor = torch.ops.aten.mul.Tensor
+            self.assertEqual(fn(x, y), torch.tensor(6))
+            self.assertEqual(compiled(x, y), torch.tensor(6))
+            self.assertEqual(compile_count, 2)
+        finally:
+            torch.ops.aten.add.Tensor = original
 
-            wrapped = torch.library.wrap_triton(sin_kernel)
-            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+    def test_torch_op_overload_property_effects(self):
+        calls = []
 
-            return out
+        class Packet(torch._ops.OpOverloadPacket):
+            @property
+            def member(self):
+                calls.append("member")
+                return torch.ops.aten.add.Tensor
 
-        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+        op = torch.ops.aten.add
+        packet = Packet(op._qualified_op_name, op.__name__, op._op, op._overload_names)
 
-        x = torch.randn(1024, device=device_type)
-        result = compiled(x)
+        def fn(x):
+            return packet.member(x, x)
 
-        self.assertEqual(result, torch.sin(x))
+        compile_count = 0
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_capture_triton_handled_during_tracing(self):
-        import triton
-        import triton.language as tl
+        def backend(gm, _example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return torch.fx.Interpreter(gm).run
 
-        @triton.jit
-        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
-            pid = tl.program_id(axis=0)
-            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
-
-        def fn(x: torch.Tensor) -> torch.Tensor:
-            out = torch.empty_like(x)
-            n_elements = x.numel()
-
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            wrapped = torch._library.capture_triton(sin_kernel)
-            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
-
-            return out
-
-        compiled = torch.compile(fn, fullgraph=True, backend="eager")
-
-        x = torch.randn(1024, device=device_type)
-        result = compiled(x)
-
-        self.assertEqual(result, torch.sin(x))
+        x = torch.tensor(3)
+        self.assertEqual(fn(x), torch.tensor(6))
+        self.assertEqual(calls, ["member"])
+        calls.clear()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x), torch.tensor(6))
+        self.assertEqual(calls, ["member"])
+        self.assertEqual(compile_count, 1)
 
     def test_property_descriptor_on_instance(self):
         class Foo:
@@ -7144,6 +7443,43 @@ class GraphModule(torch.nn.Module):
             torch.compile(fn, backend="eager", fullgraph=True)(obj), fn(obj)
         )
 
+    @parametrize("disallowed", [False, True])
+    def test_polyfilled_user_method_respects_disallow_in_graph(self, disallowed):
+        def isoformat(self, /):
+            return f"{self.year:0>4}-{self.month:0>2}-{self.day:0>2}"
+
+        original = datetime.date.isoformat
+        torch.compiler.substitute_in_graph(original)(isoformat)
+        self.addCleanup(decorators._unregister_substitute_in_graph, original)
+        if disallowed:
+            self.addCleanup(
+                lambda: trace_rules._allowed_callable_ids.remove(id(isoformat))
+            )
+            self.addCleanup(
+                lambda: trace_rules._disallowed_callable_ids.remove(id(isoformat))
+            )
+            torch.compiler.allow_in_graph(isoformat)
+            torch._dynamo.disallow_in_graph(isoformat)
+
+        def fn(x, day):
+            y = x.sin()
+            return y + len(day.isoformat())
+
+        args = (torch.ones(2), datetime.date(2026, 10, 26))
+        strict_counter = torch._dynamo.testing.CompileCounter()
+        strict_fn = torch.compile(fn, backend=strict_counter, fullgraph=True)
+        if disallowed:
+            with self.assertRaisesRegex(Unsupported, "marked as skipped"):
+                strict_fn(*args)
+            self.assertEqual(strict_counter.frame_count, 0)
+        else:
+            self.assertEqual(strict_fn(*args), fn(*args))
+            self.assertEqual(strict_counter.frame_count, 1)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter)(*args), fn(*args))
+        self.assertEqual(counter.frame_count, 2 if disallowed else 1)
+
     def test_classmethod_descriptor_mro_sources(self):
         class Direct(dict):
             fromkeys = dict.__dict__["fromkeys"]
@@ -7329,6 +7665,132 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
 
 
+class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
+    """Tests CUDA-only device properties unavailable on other accelerators."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_get_device_properties_tensor_device(self, device):
+        def fn(a):
+            x = a.to(device)
+            prop = torch.cuda.get_device_properties(x.device)
+            if prop.major == 8:
+                return x + prop.multi_processor_count
+            return x + prop.max_threads_per_multi_processor
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_frame_count=1
+        )
+
+
+class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_device_manual_seed(self, device):
+        import torch._inductor.config as inductor_config
+
+        device_mod = torch.get_device_module(device)
+        seed_fns = (
+            device_mod.manual_seed,
+            device_mod.manual_seed_all,
+            device_mod.random.manual_seed,
+            device_mod.random.manual_seed_all,
+        )
+
+        with inductor_config.patch("fallback_random", True):
+            for seed_fn in seed_fns:
+                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
+                    torch._dynamo.reset()
+
+                    @torch.compile  # noqa: UNSPECIFIED_BACKEND
+                    def foo():
+                        seed_fn(3)
+                        return torch.rand(4, device=device)
+
+                    self.assertEqual(foo(), foo())
+                    self.assertEqual(foo(), foo())
+
+    def test_tensor_type2(self, device):
+        def fn(a, b):
+            m = a.to(device)
+            return m + b.type(m.type())
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=2, expected_frame_count=1
+        )
+
+    def test_tensor_type5(self, device):
+        def fn(a, b):
+            m = a.to(device).half()
+            return b.type(m.type())
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=2, expected_frame_count=1
+        )
+
+    @xfailIfNoAcceleratorTriton
+    def test_wrap_triton_handled_during_tracing(self, device):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch.library.wrap_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
+    @xfailIfNoAcceleratorTriton
+    def test_capture_triton_handled_during_tracing(self, device):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch._library.capture_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
+
 def udf_mul(x, y):
     return x * y
 
@@ -7385,6 +7847,8 @@ class WrapperModule(torch.nn.Module):
 
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -8776,6 +9240,63 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    def test_full_with_tensor_fill_value_infers_dtype(self):
+        cases = (
+            (torch.bool, True),
+            (torch.int32, 5),
+            (torch.int64, 5),
+            (torch.float16, 2.5),
+            (torch.float64, 2.5),
+        )
+
+        for fill_dtype, value in cases:
+            with self.subTest(fill_dtype=fill_dtype):
+
+                def func(fill_value):
+                    return torch.full((2,), fill_value)
+
+                fill_value = torch.tensor(value, dtype=fill_dtype)
+                expected = func(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_explicit_dtype(self):
+        def func(fill_value, dtype):
+            return torch.full((2,), fill_value, dtype=dtype)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for dtype in (None, torch.float64):
+            with self.subTest(dtype=dtype):
+                expected = func(fill_value, dtype)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, dtype
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_out_dtype(self):
+        def func(fill_value, out):
+            return torch.full((2,), fill_value, out=out)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for out_dtype in (None, torch.float64):
+            with self.subTest(out_dtype=out_dtype):
+                expected_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                result_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                expected = func(fill_value, expected_out)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, result_out
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -8825,6 +9346,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         result = func_compiled(x)
 
         self.assertEqual(result, expected)
+
+
+_FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)
+
+instantiate_device_type_tests(FunctionTestsCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    FunctionTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+def get_function_device_test_classes():
+    return [
+        cls
+        for cls in globals().values()
+        if isinstance(cls, type)
+        and cls not in _FUNCTION_DEVICE_TEST_BASES
+        and issubclass(cls, _FUNCTION_DEVICE_TEST_BASES)
+    ]
 
 
 instantiate_parametrized_tests(FunctionTests)
