@@ -6801,7 +6801,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or SM70 or SM75:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,

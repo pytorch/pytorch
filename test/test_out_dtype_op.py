@@ -15,10 +15,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
     TEST_CUDA,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, _get_torch_cuda_version
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
@@ -197,6 +198,10 @@ class TestOutDtypeOpDevice(TestCase):
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
     @unittest.skipIf(TEST_CUDA and not SM80OrLater, "_int_mm unavailable")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(
+        TEST_CUDA and not TEST_WITH_ROCM and _get_torch_cuda_version() >= (13, 0),
+        "xfail on CUDA 13 until cuBLAS adds the supported kernel",
+    )
     @skipIfNoDynamoSupport
     def test_out_dtype_inductor_decomp(self, device) -> None:
         def func(x, w):
