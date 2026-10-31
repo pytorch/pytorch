@@ -307,10 +307,8 @@ class TestTunableOpPretune(TestCase):
             self.assertEqual(len(batches), 1, f"operands disagree on batch {batches}")
 
     def test_symbol_spanning_two_axes_is_rejected(self):
-        # M = 1000*s and N = s share one symbol. The ceiling is derived from a
-        # single expression, so capping N at 16384 would let M reach 16,384,000;
-        # the buckets also differ in two dims, which nearest match will not
-        # borrow across. The single-axis control below isolates the cause.
+        # M = 1000*s and N = s share one symbol: capping N at 16384 would let
+        # M reach 16,384,000. The single-axis control isolates the cause.
         s = sympy.Symbol("s_shared", positive=True, integer=True)
         k = 256
         shared = _FakeWinner(
@@ -553,6 +551,15 @@ class TestTunableOpPretune(TestCase):
         self.assertGreaterEqual(timeouts[0], tunableop._TUNABLEOP_MIN_BUCKET_BUDGET)
         self.assertFalse(tunableop._pretuned_gemms.failed, "healthy rung charged")
 
+    def test_a_short_timeout_still_tunes_the_traced_shape(self):
+        # The per-bucket floor must not turn the ladder off wholesale when the
+        # configured budget is smaller than it.
+        s = sympy.Symbol("s_shortbudget", positive=True, integer=True)
+        with config.patch({"cuda.autotune_tunableop_timeout": 30.0}):
+            submitted = _run(self._mm_winner("mm", s), sym=s)
+        dims = {b.input_tensor_meta[0].sizes[0] for b in submitted}
+        self.assertIn(512, dims, f"the traced shape was dropped: {sorted(dims)}")
+
     def test_non_ok_outcome_continues(self):
         s = sympy.Symbol("s_cont", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
@@ -734,10 +741,9 @@ class TestTunableOpPretune(TestCase):
 
     @parametrize("conflict", (False, True))
     def test_finalize_hook_routes_extern_winners(self, conflict):
-        # finalize_multi_template_buffers sends the chosen extern winner through
-        # the ladder, except on the layout-conflict fallback: there an input is
-        # frozen to a layout the constraints disagree with, and the meta rebuild
-        # reads the constraint. Spec'd mocks so the isinstance gates pass.
+        # The finalizer sends the extern winner through the ladder, except on
+        # the layout-conflict fallback where the meta rebuild would read the
+        # constraint. Spec'd mocks so the isinstance gates pass.
         import torch._inductor.ir as _ir
         from torch._inductor.scheduler import Scheduler, SchedulerNode
 
@@ -757,10 +763,8 @@ class TestTunableOpPretune(TestCase):
         sched.nodes = [sched_node]
         sched._has_layout_conflict_for_template.return_value = conflict
 
-        # The finalizer replaces the node after the hook -- deep IR machinery
-        # this test does not cover -- so raise a sentinel from the hook itself.
-        # Reaching it proves output_node() already ran, which is the order the
-        # select_algorithm call sites use.
+        # Raise a sentinel from the hook: reaching it proves output_node()
+        # already ran, which is the order the select_algorithm sites use.
         class _Stop(Exception):
             pass
 
@@ -864,10 +868,8 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             with open(results) as f:
                 content = f.read()
 
-        # Rows are op_signature,params_signature,solution,time, and the params
-        # signature is ab_M_N_K_ld_... in the BLAS frame, which transposes the
-        # operands -- a dynamic dim on A's rows lands in N, not M. Compare the
-        # whole M_N_K triple rather than depending on which one varies.
+        # Rows are op,params,solution,time; params is ab_M_N_K_ld_... in the
+        # BLAS frame, which transposes the operands, so compare the triple.
         shapes = set()
         for line in content.splitlines():
             parts = line.split(",")

@@ -3026,7 +3026,8 @@ class cuda(cutlass):
 
     # Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning
     # can hang, which subprocess isolation alone does not fix, so the wait is
-    # bounded.
+    # bounded. Set below about a minute only the traced shape is tuned: a rung
+    # needs a slice big enough to be a fair trial rather than a timeout.
     autotune_tunableop_timeout: float = float(
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_TIMEOUT", "900")
     )

@@ -258,9 +258,8 @@ class BenchmarkJob:
         for name, value in settings.items():
             getattr(tunable, name)(value)
         # TunableOp cannot tune under CUDA-graph capture, and benchmark_run_fn
-        # captures if either flag is set: benchmark_with_cudagraphs (per-choice)
-        # or config_cudagraph_benchmarking (snapshotted True on ROCm under
-        # max-autotune). Cleared here, the one place every job passes through.
+        # captures if either flag is set. Cleared here, the one place every
+        # job passes through.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
 
@@ -625,17 +624,14 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     return Outcome(float(value), "ok")
 
 
-# Per-process record of tuned ladder BUCKETS, keyed per bucket so a run that
-# stops part-way leaves the untuned rungs for the next one. Without it a model
-# with N identical layers resubmits every bucket N times, and each submission
-# pickles a job and materializes full-size tensors. Cleared with fresh_cache.
+# Tuned ladder BUCKETS, keyed per bucket so a run that stops part-way leaves
+# the rest for the next one. Without it a model with N identical layers
+# resubmits every bucket N times. Cleared with fresh_cache.
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
-        # Buckets that faulted, and how often. A rung that hangs or crashes is
-        # never added to `seen`, so without this every identical layer would
-        # retry it with a fresh budget -- and, since the order is fixed, would
-        # spend that budget before reaching the rungs that still work.
+        # Buckets that faulted, and how often: a rung that hangs never
+        # reaches `seen`, so without this every layer retries it.
         self.failed: dict[Any, int] = {}
 
     def cache_clear(self) -> None:
@@ -653,10 +649,9 @@ _TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
 # deadline than the rung, and it would kill the worker and charge a fault.
 _TUNABLEOP_MIN_BUCKET_BUDGET = 60.0
 
-# ExternKernelChoice names the ladder covers, matched by string. bias_addmm
-# rewrites its own bias (inp[0]) before dispatching, so the rebuilt meta is not
-# what aten receives. addmm_dtype is ROCm-only: on CUDA it stays on the cublasLt
-# path, which hard-errors under TunableOp (cuda/Blas.cpp).
+# ExternKernelChoice names the ladder covers. bias_addmm rewrites its own bias
+# (inp[0]) first, so the rebuilt meta is not what aten gets; addmm_dtype is
+# ROCm-only, hard-erroring on the CUDA cublasLt path (cuda/Blas.cpp).
 _TUNABLEOP_GEMM_CHOICES = frozenset(
     [
         "mm",
@@ -675,10 +670,9 @@ _TUNABLEOP_GEMM_CHOICES = frozenset(
 # for an expression dim the smallest symbol values already yield substantial GEMMs.
 _TUNABLEOP_MIN_DYN_DIM = 8
 
-# Cap on a bucket's total footprint -- every operand plus the output, which the
-# worker allocates at once. The dim ceiling bounds the dynamic dim, not the
-# problem size: a bmm with dynamic batch at dim 16384 and K = N = 4096 fp16 is
-# 512 GiB in one operand alone. Each fault can cost a cold worker restart.
+# Cap on a bucket's total footprint: every operand plus the output, allocated
+# at once. The dim ceiling bounds the dynamic dim, not the problem size -- a
+# bmm with batch 16384 and K = N = 4096 fp16 is 512 GiB in one operand.
 _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 
 # Ceiling on the SYMBOL, not the dim: a declared range says what a symbol MAY
@@ -1037,11 +1031,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not bmreqs:
         return
 
-    # Keyed on everything the recorded entry depends on: the rebuilt metas,
-    # the device and results file the worker is keyed on, and the extern
-    # kwargs that reach the TunableOp signature (_scaled_mm's use_fast_accum).
-    # The filename is resolved as submit() resolves it; get_filename() reads
-    # "" until something sets it, which would key the first GEMM apart.
+    # Keyed on the rebuilt metas, the worker scope, and the extern kwargs
+    # that reach the signature (_scaled_mm's use_fast_accum). The filename is
+    # resolved as submit() does; get_filename() reads "" until it is pinned.
     with _worker_lock:
         filename = _resolve_and_pin_filename_locked(winner.layout.device.index)
     scope = ((winner.layout.device.type, winner.layout.device.index), filename)
@@ -1073,14 +1065,17 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
-        if remaining < _TUNABLEOP_MIN_BUCKET_BUDGET:
+        # The floor applies from the second rung on: holding the first to it
+        # would turn the ladder off wholesale for a budget below the floor.
+        if remaining <= 0 or (i and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET):
             log.warning(
-                "TunableOp range pre-tune for %s exhausted its %.0fs budget after "
-                "%d/%d sizes; skipping the rest.",
+                "TunableOp range pre-tune for %s stopped after %d/%d sizes with "
+                "%.0fs of its %.0fs budget left.",
                 winner.name,
-                config.cuda.autotune_tunableop_timeout,
                 i,
                 len(bmreqs),
+                max(remaining, 0.0),
+                config.cuda.autotune_tunableop_timeout,
             )
             break
         bucket_start = time.monotonic()
