@@ -3,10 +3,12 @@
 
 import cutlass
 import cutlass.cute as cute
+from cutlass import const_expr
 
 from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
     grouped_reduce_supports_config,
 )
+from torch._vendor.quack import layout_utils
 from torch._vendor.quack.epilogue.ops import setup_epi_tensor, TileStore
 
 
@@ -119,6 +121,16 @@ class GroupedMainStore(TileStore):
             config, 1, self.min_fragment_n
         ):
             return False
+        if config.device_capacity == 9:
+            # WGMMA fragments keep adjacent N columns in one thread, so a pair
+            # contracts in registers; the STSM store then needs QuACK's gated
+            # register permute (see store_convert) and its tile_n % 32 contract.
+            return (
+                self.group == 2
+                and self.min_fragment_n is None
+                and not config.swap_ab
+                and config.tile_n % 32 == 0
+            )
         supported_arch = (
             config.device_capacity in (10, 11)
             if self.group == 2
@@ -154,13 +166,17 @@ class GroupedMainStore(TileStore):
     def config_support_error(self, configs):
         if self.group == 4:
             return "group-4 grouped main outputs require an SM100 config"
-        return "group-2 grouped main outputs require an SM100 or SM110 config"
+        if self.min_fragment_n is not None:
+            return "paired fragment reductions require an SM100 or SM110 config"
+        return "group-2 grouped main outputs require an SM90, SM100, or SM110 config"
 
     def to_params(self, gemm, args):
         tensor = getattr(args, self.name)
         layout = cutlass.utils.LayoutEnum.from_tensor(tensor)
         if not layout.is_n_major_c():
             raise ValueError("grouped main output must be N-major")
+        if gemm.arch == 90 and tensor.element_type.width != 16:
+            raise ValueError("grouped main outputs on SM90 must be 16-bit")
         setattr(gemm, self._layout_gemm_attr(), layout)
         setattr(gemm, self._dtype_gemm_attr(), tensor.element_type)
         epi_tile = _contract_epi_tile_n(gemm.epi_tile, self.group)
@@ -195,6 +211,31 @@ class GroupedMainStore(TileStore):
         )
         tiler = (tiler_m, cute.make_layout(cute.size(tiler_n) // self.group))
         return cute.make_tiled_copy(atom, layout_tv, tiler)
+
+    @cute.jit
+    def store_convert(
+        self,
+        gemm,
+        tRS_rAuxOut,
+        sr_seed,
+        tidx,
+        tile_coord_mnkl,
+        num_prev_subtiles,
+        epi_idx,
+    ):
+        out = super().store_convert(
+            gemm,
+            tRS_rAuxOut,
+            sr_seed,
+            tidx,
+            tile_coord_mnkl,
+            num_prev_subtiles,
+            epi_idx,
+        )
+        if const_expr(gemm.arch == 90):
+            # Same STSM register permute as QuACK's gated TileStore on SM90.
+            layout_utils.permute_gated_Cregs_b16(out)
+        return out
 
     def min_epi_tile_n(self, arg_tensor):
         """Keep stores vectorizable and fragment reductions complete."""
