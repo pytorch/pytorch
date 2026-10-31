@@ -288,9 +288,9 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   return flag;
 }
 
-// Set while merge() constructs its child: the child inherits the parent's
-// global_ranks_in_group, which does not map the merged group's ranks.
-thread_local bool constructingMergedGroup = false;
+// Set while merge(), shrink(), or split() of a group whose ranks are not known
+// to be global constructs its child; see groupRanksNotGlobal_.
+thread_local bool constructingUnmappedGroup = false;
 
 } // namespace
 
@@ -1038,21 +1038,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
   init();
-  // The rank fr_dump_file?backend=nccl dumps under. Not globalRank(): that is
-  // the rank in the first ProcessGroupNCCL, which may be a subgroup. An empty
-  // global_ranks_in_group is only the world mapping for the default group;
-  // shrink() and stateless groups also leave it empty, so it only fills an
-  // unset rank rather than overwriting a real one with a group-local rank.
+  // The rank fr_dump_file?backend=nccl dumps under: this group's global rank.
+  // Not globalRank(): that is the rank in the first ProcessGroupNCCL, which may
+  // be a subgroup. An empty global_ranks_in_group is only the world mapping for
+  // the default group, so it only fills an unset rank.
   auto* recorder = FlightRecorderCUDA::get();
   const auto& ranks = groupRanks();
-  if (constructingMergedGroup) {
-    // merge() children inherit the parent's list; leave the rank alone.
+  groupRanksNotGlobal_ = constructingUnmappedGroup ||
+      (options_->global_ranks_in_group.empty() && recorder->getRank() >= 0);
+  if (groupRanksNotGlobal_) {
+    // Leave the rank alone.
   } else if (static_cast<size_t>(rank_) >= ranks.size()) {
     LOG(WARNING) << logPrefix() << "rank " << rank_
                  << " is outside global_ranks_in_group; Flight Recorder rank "
                     "left unchanged.";
-  } else if (
-      !options_->global_ranks_in_group.empty() || recorder->getRank() < 0) {
+  } else {
     auto global_rank = static_cast<int>(ranks[rank_]);
     auto previous = recorder->getRank();
     if (previous >= 0 && previous != global_rank) {
@@ -1388,7 +1388,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   // This value must be non-negative int32 and all ranks are.
   ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   // eagerConnectSingleDevice() initializes the child from ncclCommSplit before
-  // returning, so split does not need a separate Store connection.
+  // returning, so split does not need a separate Store connection. The child's
+  // list comes from groupRanks(), so it is no more global than ours.
+  constructingUnmappedGroup = groupRanksNotGlobal_;
+  auto reset = c10::make_scope_exit([] { constructingUnmappedGroup = false; });
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store, groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
@@ -1410,8 +1413,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
   // Unlike split(), merge returns an uninitialized child. Its first collective
   // may block in broadcastUniqueNCCLID() while holding the Store connection,
   // so preserve an independent connection.
-  constructingMergedGroup = true;
-  auto reset = c10::make_scope_exit([] { constructingMergedGroup = false; });
+  // The child keeps the parent's list, which does not map the merged group.
+  constructingUnmappedGroup = true;
+  auto reset = c10::make_scope_exit([] { constructingUnmappedGroup = false; });
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
@@ -6244,6 +6248,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     new_opts->config = options_->config;
   }
 
+  // Ranks are renumbered after the exclusion, so they are not global.
+  constructingUnmappedGroup = true;
+  auto reset = c10::make_scope_exit([] { constructingUnmappedGroup = false; });
   auto new_pg = c10::make_intrusive<ProcessGroupNCCL>(
       new_store, new_rank, new_size, new_opts);
 
