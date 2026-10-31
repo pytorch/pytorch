@@ -374,7 +374,7 @@ def flex_attention(
         num_score_mod_placeholders=len(placeholder_inps),
         backend=backend,
     ):
-        return create_flex_flash_attention_kernel(
+        out, lse = create_flex_flash_attention_kernel(
             query,
             key,
             value,
@@ -394,6 +394,8 @@ def flex_attention(
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
+        # FA4 returns natural-log lse; the flex_attention HOP returns log2.
+        return out, lowerings[aten.div](lse, math.log(2))
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
@@ -1043,7 +1045,11 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+        # The HOP's logsumexp is log2; FA4 expects natural log.
+        logsumexp = lowerings[aten.mul](logsumexp, math.log(2))
+        (logsumexp,) = maybe_realize([logsumexp])
         if grad_logsumexp is not None:
+            grad_logsumexp = lowerings[aten.div](grad_logsumexp, math.log(2))
             (grad_logsumexp,) = maybe_realize([grad_logsumexp])
 
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
