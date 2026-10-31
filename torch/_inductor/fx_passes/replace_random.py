@@ -22,7 +22,7 @@ patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
 
-def _shape_to_offset(shape, device: torch.device):
+def _shape_to_offset(shape, device: torch.device, dtype: torch.dtype | None):
     # Modified from torch/_prims/rng_prims.py:philox_rand_offset
     nelem = 1
     for s in shape:
@@ -42,8 +42,8 @@ def _shape_to_offset(shape, device: torch.device):
         return 0
 
     block_size = 256
-    unroll = 4
-    curand4_engine_calls = 4
+    # See elems_per_iter in Dropout.cu.
+    elems = max(inductor_prims.rand_eager_vec(dtype), 4)
 
     device_property = torch.cuda.get_device_properties(device)
 
@@ -53,7 +53,7 @@ def _shape_to_offset(shape, device: torch.device):
     grid_size = -torch.sym_min(-grid_size, -1)
     grid_size = torch.sym_min(grid_size, max_grid)
 
-    return ((nelem - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+    return ((nelem - 1) // (block_size * grid_size * elems) + 1) * elems
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
@@ -254,11 +254,10 @@ def replace_random(
     if mode == "rand" and config.align_random_eager and device.type == "cuda":
         # Only enable when align_random_eager is on.
         def replacement_align(size):
-            offset = _shape_to_offset(size, device)
-
             align_dtype = dtype
             if isinstance(align_dtype, (tuple, list)):
                 align_dtype = align_dtype[0] if len(align_dtype) else None
+            offset = _shape_to_offset(size, device, align_dtype)
 
             result = inductor_prims.random(
                 size,
