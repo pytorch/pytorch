@@ -3304,13 +3304,9 @@ class TestConvolutionNNDevice(NNTestCase):
             self.assertEqual(maxdiff2, 0)
             self.assertEqual(maxdiff3, 0)
 
-    # XPU: skipped due to fp16 weight gradient divergence across chunked
-    # backward (oneDNN jit:ir generates different reduction trees per batch size).
-    # Tracked in: https://github.com/intel/torch-xpu-ops/issues/3975
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()
-    @skipXPU
     # MI200-specific MIOpen failure, addressed by
     # https://github.com/ROCm/rocm-libraries/pull/11809
     @skipIfRocmArch(MI200_ARCH)
@@ -3738,11 +3734,6 @@ class TestConvolutionNNDevice(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     @serialTest()
-    # XPU: skipped due to fp16 depthwise conv precision divergence
-    # on channels_last format with large tensor indexing.
-    # Tracked in: https://github.com/intel/torch-xpu-ops/issues/3974
-    # Related pytorch issue: https://github.com/pytorch/pytorch/issues/186314
-    @skipXPU
     # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
     # Reference: https://github.com/ROCm/MIOpen/pull/2838
     @xfailIf(
@@ -3828,6 +3819,226 @@ class TestConvolutionNNDevice(NNTestCase):
         self._check_slow_conv_dilated(
             torch.ops.aten.slow_conv_dilated3d, input, weight, bias, kwargs
         )
+
+    @skipCUDAIfNoCudnn
+    def test_conv1d_non_contiguous(self, device):
+        x = torch.randn(192, 16, 50, device=device)
+        x = x.permute(0, 2, 1).contiguous().permute(0, 2, 1)
+        m = torch.nn.Conv1d(
+            in_channels=16, out_channels=32, kernel_size=2, bias=True
+        ).to(device)
+        m(x)
+
+    @skipCUDAIfNoCudnn
+    @tf32_on_and_off(0.015)
+    def test_conv_not_mutate_stride(self, device):
+        weight = torch.randn(64, 64, 1, 1, device=device)
+        x = torch.randn(2, 64, 10, 10, device=device).to(
+            memory_format=torch.channels_last
+        )
+        weight_stride = weight.stride()
+
+        def conv(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+                bias=None,
+            )
+
+        out_nhwc = conv(x, weight)
+        self.assertEqual(weight.stride(), weight_stride)
+        self.assertTrue(out_nhwc.is_contiguous(memory_format=torch.channels_last))
+
+        x = x.contiguous(memory_format=torch.contiguous_format)
+        out_c = conv(x, weight)
+        self.assertTrue(out_c.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertEqual(out_c, out_nhwc)
+        self.assertEqual(weight.stride(), weight_stride)
+
+    @skipCUDAIfNoCudnn
+    def test_grouped_conv_nhwc_support(self, device):
+        input = torch.randn((16, 16, 8, 8), dtype=torch.float16, device=device).to(
+            memory_format=torch.channels_last
+        )
+        weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device=device).to(
+            memory_format=torch.channels_last
+        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4)
+        input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device=device).to(
+            memory_format=torch.channels_last
+        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4)
+
+    @unittest.expectedFailure
+    @skipCUDAIfNoCudnn
+    def test_conv_memory_layout_dominance(self, device):
+        input = torch.randint(
+            1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device, requires_grad=True
+        )
+        conv = nn.Conv2d(8, 4, 3).to(device).float()
+
+        out = conv(input)
+        self.assertTrue(out.is_contiguous())
+
+        input = input.contiguous(memory_format=torch.channels_last)
+        out = conv(input)
+        self.assertTrue(out.is_contiguous())
+
+        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
+        out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+        input = input.contiguous()
+        out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+    def test_conv1d_noncontiguous_weight(self, device):
+        input = torch.tensor([1, 1, 1], dtype=torch.double, device=device).view(1, 1, 3)
+        weights1 = torch.tensor([1], dtype=torch.double, device=device).expand(1, 1, 2)
+        weights2 = (
+            torch.tensor([1], dtype=torch.double, device=device)
+            .expand(1, 1, 2)
+            .contiguous()
+        )
+        self.assertEqual(
+            F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
+            F.conv1d(input, weights2, bias=None, stride=2, dilation=2),
+        )
+
+    @skipCUDAIfNoCudnn
+    def test_contig_wrong_stride(self, device):
+        x = torch.randn(1, 16, 5, 5, device=device)
+        stride = list(x.stride())
+        stride[0] = 20
+        x.set_(x.storage(), 0, x.size(), stride)
+        self.assertTrue(x.is_contiguous())
+        F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
+        F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
+
+    @dtypes(torch.half, torch.float, torch.cfloat)
+    def test_conv2d_nhwc(self, device, dtype):
+        def helper(n, c, h, w, out_channels, kernel_size, groups):
+            input = torch.randint(
+                -3, 3, (n, c, h, w), dtype=torch.int64, device=device
+            ).to(dtype, memory_format=torch.channels_last)
+            input.requires_grad_()
+            conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).to(
+                device=device, dtype=dtype, memory_format=torch.channels_last
+            )
+            for p in conv.parameters():
+                p.data = torch.randint_like(p, -3, 3, dtype=torch.int64).to(p.dtype)
+
+            ref_input = input.detach().clone().contiguous().double().requires_grad_()
+            ref_conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)
+            ref_conv.load_state_dict(conv.state_dict())
+            ref_conv = ref_conv.to(
+                device=device, dtype=torch.double, memory_format=torch.contiguous_format
+            )
+
+            out = conv(input)
+            ref_out = ref_conv(ref_input)
+
+            grad = torch.randint_like(out, -3, 3, dtype=torch.int64).to(out.dtype)
+            ref_grad = grad.detach().clone().double().contiguous()
+
+            out.backward(grad)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(input.grad.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(
+                conv.weight.grad.is_contiguous(memory_format=torch.channels_last)
+            )
+
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ref_input.grad.is_contiguous())
+            self.assertTrue(ref_conv.weight.grad.is_contiguous())
+
+            self.assertEqual(out, ref_out, exact_dtype=False)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
+            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
+
+        helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
+        helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
+        helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=1)
+        helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=16)
+
+    # CPU conv3d does not preserve channels_last_3d for half, nor for float at
+    # larger spatial sizes, so the memory-format assertions below only hold on
+    # accelerators.
+    @onlyAccelerator
+    @expectedFailureMPS
+    @dtypes(torch.half, torch.float)
+    def test_conv3d_ndhwc(self, device, dtype):
+        def helper(n, c, d, h, w, out_channels, kernel_size, groups):
+            input = torch.randint(
+                -2, 2, (n, c, d, h, w), dtype=dtype, device=device
+            ).to(memory_format=torch.channels_last_3d)
+            input.requires_grad_()
+            conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups).to(
+                device=device, dtype=dtype, memory_format=torch.channels_last_3d
+            )
+            for p in conv.parameters():
+                p.data = torch.randint_like(p, -2, 2)
+
+            ref_input = input.detach().clone().contiguous().double().requires_grad_()
+            ref_conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups)
+            ref_conv.load_state_dict(conv.state_dict())
+            ref_conv = ref_conv.to(
+                device=device, dtype=torch.double, memory_format=torch.contiguous_format
+            )
+
+            out = conv(input)
+            ref_out = ref_conv(ref_input)
+
+            grad = torch.randint_like(out, -2, 2)
+            ref_grad = grad.detach().clone().double().contiguous()
+
+            out.backward(grad)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(
+                input.grad.is_contiguous(memory_format=torch.channels_last_3d)
+            )
+            self.assertTrue(
+                conv.weight.grad.is_contiguous(memory_format=torch.channels_last_3d)
+            )
+
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ref_input.grad.is_contiguous())
+            self.assertTrue(ref_conv.weight.grad.is_contiguous())
+
+            self.assertEqual(out, ref_out, exact_dtype=False)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
+            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
+
+        helper(2, 8, 4, 4, 4, out_channels=4, kernel_size=3, groups=1)
+        helper(2, 8, 4, 4, 4, out_channels=8, kernel_size=3, groups=8)
+        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=1)
+        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=16)
+
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
+    def test_conv2d_nhwc_support(self, device, dtype):
+        input = torch.randn(
+            (1, 16, 1, 1), dtype=dtype, device=device, requires_grad=True
+        )
+        weight = torch.randn(
+            (8, 16, 3, 3), dtype=dtype, device=device, requires_grad=True
+        )
+        weight = weight.to(memory_format=torch.channels_last)
+        o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+        self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
+        o.sum().backward()
 
 
 class TestConvolutionNNCPU(NNTestCase):
@@ -4135,47 +4346,6 @@ class TestConvolutionNNCUDA(NNTestCase):
         self.assertTrue(conv.bias.grad.isfinite().all())
 
     @skipCUDAIfNoCudnn
-    def test_cudnn_non_contiguous(self, device):
-        x = torch.randn(192, 16, 50, device=device)
-        x = x.permute(0, 2, 1).contiguous().permute(0, 2, 1)
-        m = torch.nn.Conv1d(
-            in_channels=16, out_channels=32, kernel_size=2, bias=True
-        ).to(device)
-        m(x)
-
-    @skipCUDAIfNoCudnn
-    @tf32_on_and_off(0.015)
-    def test_cudnn_not_mutate_stride(self, device):
-        weight = torch.randn(64, 64, 1, 1, device=device)
-        x = torch.randn(2, 64, 10, 10, device=device).to(
-            memory_format=torch.channels_last
-        )
-        weight_stride = weight.stride()
-
-        def conv(x, weight):
-            return torch.convolution(
-                x,
-                weight,
-                stride=(1, 1),
-                padding=(0, 0),
-                dilation=(1, 1),
-                transposed=False,
-                output_padding=(0, 0),
-                groups=1,
-                bias=None,
-            )
-
-        out_nhwc = conv(x, weight)
-        self.assertEqual(weight.stride(), weight_stride)
-        self.assertTrue(out_nhwc.is_contiguous(memory_format=torch.channels_last))
-
-        x = x.contiguous(memory_format=torch.contiguous_format)
-        out_c = conv(x, weight)
-        self.assertTrue(out_c.is_contiguous(memory_format=torch.contiguous_format))
-        self.assertEqual(out_c, out_nhwc)
-        self.assertEqual(weight.stride(), weight_stride)
-
-    @skipCUDAIfNoCudnn
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self, device):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device=device)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device=device)
@@ -4191,56 +4361,6 @@ class TestConvolutionNNCUDA(NNTestCase):
             )
 
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
-
-    @skipCUDAIfNoCudnn
-    def test_grouped_conv_cudnn_nhwc_support(self, device):
-        input = torch.randn((16, 16, 8, 8), dtype=torch.float16, device=device).to(
-            memory_format=torch.channels_last
-        )
-        weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device=device).to(
-            memory_format=torch.channels_last
-        )
-        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4)
-        input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device=device).to(
-            memory_format=torch.channels_last
-        )
-        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4)
-
-    @unittest.expectedFailure
-    @skipCUDAIfNoCudnn
-    def test_conv_cudnn_memory_layout_dominance(self, device):
-        input = torch.randint(
-            1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device, requires_grad=True
-        )
-        conv = nn.Conv2d(8, 4, 3).to(device).float()
-
-        out = conv(input)
-        self.assertTrue(out.is_contiguous())
-
-        input = input.contiguous(memory_format=torch.channels_last)
-        out = conv(input)
-        self.assertTrue(out.is_contiguous())
-
-        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
-        out = conv(input)
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-
-        input = input.contiguous()
-        out = conv(input)
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-
-    def test_cudnn_noncontiguous_weight(self, device):
-        input = torch.tensor([1, 1, 1], dtype=torch.double, device=device).view(1, 1, 3)
-        weights1 = torch.tensor([1], dtype=torch.double, device=device).expand(1, 1, 2)
-        weights2 = (
-            torch.tensor([1], dtype=torch.double, device=device)
-            .expand(1, 1, 2)
-            .contiguous()
-        )
-        self.assertEqual(
-            F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
-            F.conv1d(input, weights2, bias=None, stride=2, dilation=2),
-        )
 
     @skipCUDAIfNoCudnn
     @dtypes(
@@ -4291,16 +4411,6 @@ class TestConvolutionNNCUDA(NNTestCase):
 
         run_test(benchmark=False)
         run_test(benchmark=True)
-
-    @skipCUDAIfNoCudnn
-    def test_contig_wrong_stride_cudnn(self, device):
-        x = torch.randn(1, 16, 5, 5, device=device)
-        stride = list(x.stride())
-        stride[0] = 20
-        x.set_(x.storage(), 0, x.size(), stride)
-        self.assertTrue(x.is_contiguous())
-        F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
-        F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @skipCUDAIfNoCudnn
     @dtypes(torch.half)
@@ -4358,120 +4468,6 @@ class TestConvolutionNNCUDA(NNTestCase):
         ):
             backend = torch._C._select_conv_backend(*args)
         self.assertEqual(backend, expected)
-
-    @dtypes(torch.half, torch.float, torch.cfloat)
-    def test_conv_cudnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, groups):
-            input = torch.randint(
-                -3, 3, (n, c, h, w), dtype=torch.int64, device=device
-            ).to(dtype, memory_format=torch.channels_last)
-            input.requires_grad_()
-            conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups).to(
-                device=device, dtype=dtype, memory_format=torch.channels_last
-            )
-            for p in conv.parameters():
-                p.data = torch.randint_like(p, -3, 3, dtype=torch.int64).to(p.dtype)
-
-            ref_input = input.detach().clone().contiguous().double().requires_grad_()
-            ref_conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)
-            ref_conv.load_state_dict(conv.state_dict())
-            ref_conv = ref_conv.to(
-                device=device, dtype=torch.double, memory_format=torch.contiguous_format
-            )
-
-            out = conv(input)
-            ref_out = ref_conv(ref_input)
-
-            grad = torch.randint_like(out, -3, 3, dtype=torch.int64).to(out.dtype)
-            ref_grad = grad.detach().clone().double().contiguous()
-
-            out.backward(grad)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(input.grad.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(
-                conv.weight.grad.is_contiguous(memory_format=torch.channels_last)
-            )
-
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertTrue(ref_input.grad.is_contiguous())
-            self.assertTrue(ref_conv.weight.grad.is_contiguous())
-
-            self.assertEqual(out, ref_out, exact_dtype=False)
-            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
-            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
-            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
-
-        helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
-        helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
-        helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=1)
-        helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=16)
-
-    @dtypes(torch.half, torch.float)
-    def test_conv_cudnn_ndhwc(self, device, dtype):
-        def helper(n, c, d, h, w, out_channels, kernel_size, groups):
-            input = torch.randint(
-                -2, 2, (n, c, d, h, w), dtype=dtype, device=device
-            ).to(memory_format=torch.channels_last_3d)
-            input.requires_grad_()
-            conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups).to(
-                device=device, dtype=dtype, memory_format=torch.channels_last_3d
-            )
-            for p in conv.parameters():
-                p.data = torch.randint_like(p, -2, 2)
-
-            ref_input = input.detach().clone().contiguous().double().requires_grad_()
-            ref_conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups)
-            ref_conv.load_state_dict(conv.state_dict())
-            ref_conv = ref_conv.to(
-                device=device, dtype=torch.double, memory_format=torch.contiguous_format
-            )
-
-            out = conv(input)
-            ref_out = ref_conv(ref_input)
-
-            grad = torch.randint_like(out, -2, 2)
-            ref_grad = grad.detach().clone().double().contiguous()
-
-            out.backward(grad)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
-            self.assertTrue(
-                input.grad.is_contiguous(memory_format=torch.channels_last_3d)
-            )
-            self.assertTrue(
-                conv.weight.grad.is_contiguous(memory_format=torch.channels_last_3d)
-            )
-
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertTrue(ref_input.grad.is_contiguous())
-            self.assertTrue(ref_conv.weight.grad.is_contiguous())
-
-            self.assertEqual(out, ref_out, exact_dtype=False)
-            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
-            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
-            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
-
-        helper(2, 8, 4, 4, 4, out_channels=4, kernel_size=3, groups=1)
-        helper(2, 8, 4, 4, 4, out_channels=8, kernel_size=3, groups=8)
-        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=1)
-        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=16)
-
-    @skipCUDAIfNoCudnn
-    @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
-    def test_conv_cudnn_nhwc_support(self, device, dtype):
-        input = torch.randn(
-            (1, 16, 1, 1), dtype=dtype, device=device, requires_grad=True
-        )
-        weight = torch.randn(
-            (8, 16, 3, 3), dtype=dtype, device=device, requires_grad=True
-        )
-        weight = weight.to(memory_format=torch.channels_last)
-        o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
-        self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
-        o.sum().backward()
 
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
