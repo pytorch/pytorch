@@ -4970,7 +4970,9 @@ class TestPrecompileDynamoCapture(TestCase):
         with open(self.artifact) as f:
             meta = _parse_artifact_metadata(f.read())
         self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
-        self._serve_in_fresh_process([((self.x2,), {}, y)])
+        # Under crossref the guards hold only inside the harness's mode.
+        if not TEST_WITH_CROSSREF:
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib
