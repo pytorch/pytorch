@@ -417,23 +417,21 @@ class FlightRecorderHandler(DebugHandler):
         parts.extend(self._dump_tables("FR Trace", addrs, list(resps)))
 
         # Backend.NCCL is nccl2 by default, which records into its own
-        # instance rather than the stock ProcessGroupNCCL one below.
-        for name, endpoint, params in (
-            ("NCCL", "dump_nccl_trace_json", "onlyactive=true"),
-            ("nccl2", "fr_trace_json", "backend=nccl2"),
-        ):
+        # instance rather than the stock ProcessGroupNCCL one ("nccl").
+        for name, backend in (("NCCL", "nccl"), ("nccl2", "nccl2")):
             title = f"FR Trace {name}"
             parts.append("")
             try:
                 backend_addrs, backend_resps = fetch_all(
-                    endpoint, params, timeout=self.fetch_timeout
+                    "fr_trace_json", f"backend={backend}", timeout=self.fetch_timeout
                 )
                 parts.extend(
                     self._dump_tables(title, backend_addrs, list(backend_resps))
                 )
             except Exception:
-                # Debug level: builds without NCCL fail the NCCL fetch on every
-                # periodic dump. The nccl2 one is just empty without a group.
+                # Debug level: hit on every periodic dump while no worker
+                # returns a usable trace (e.g. all time out). Without a group
+                # the section is just empty.
                 logger.debug("Failed to fetch %s trace", name, exc_info=True)
                 parts.append(f"=== {title} ===\nFailed to fetch {name} trace")
 

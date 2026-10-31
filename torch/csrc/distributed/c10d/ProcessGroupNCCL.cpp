@@ -1694,10 +1694,6 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
-  // Serialize all calls to this function to avoid corrupting data, but allow
-  // multiple calls in one runtime. User is responsible for preserving the
-  // output file from an earlier call before a later call overwrites it.
-  static std::mutex writeDebugInfoMutex;
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
@@ -1708,8 +1704,10 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace(true, includeStackTrace, onlyActive);
     // dump_nccl_trace will hang so we don't grab the global lock until we get
-    // the trace.
-    std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
+    // the trace. The lock serializes writes to the dump file across all
+    // recorders; callers must preserve an earlier file before a later write
+    // overwrites it.
+    std::lock_guard<std::mutex> lock(DebugInfoWriter::writeMutex());
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
