@@ -981,9 +981,10 @@ def _build_installed_forward():
         # A serve-time compile is not part of the artifact: record it nowhere.
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
-        # CUDAGRAPH_CONFIG holds the capture's CUDA graph keys, ambient ones too.
         backend: object = BACKEND
         if _ALLOW_SERVE_TIME_COMPILES and BACKEND == "inductor":
+            # CUDAGRAPH_CONFIG holds the capture's CUDA graph keys, ambient ones
+            # too.
             options = {**(INDUCTOR_OPTIONS or {}), **CUDAGRAPH_CONFIG}
             backend = torch._TorchCompileInductorWrapper(None, options, None)
         with torch._dynamo.config.patch(caching_precompile=False):

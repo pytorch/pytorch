@@ -158,8 +158,20 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
+def _cudagraph_inputs() -> dict[str, object]:
+    # The ambient settings a capture's CUDA graph record is derived from.
+    import torch._inductor.config as c
+
+    return {
+        "triton.cudagraphs": c.triton.cudagraphs,
+        "triton.cudagraph_trees": c.triton.cudagraph_trees,
+        "graph_partition": c.graph_partition,
+        "cpp_wrapper": c.cpp_wrapper,
+    }
+
+
 def _check_cudagraph_policy(cudagraph_config: Mapping[str, bool]) -> None:
-    # Read on every compile: it decides how the capture wraps each graph (and can
+    # Checked on every call: it decides how the capture wraps each graph (and can
     # turn off the box a forward shares with its backward), while a loaded artifact
     # wraps them by CUDAGRAPH_CONFIG.
     import torch._inductor.config as inductor_config
@@ -1971,12 +1983,13 @@ class PrecompileSession(Generic[_P, _R]):
         # graph_partition is in it because post-compile picks the wrapper for a
         # partitioned graph by it, while the graph was partitioned at compile.
         self._cudagraph_config: dict[str, bool] = {}
-        # What each captured call compiles under: the record, and the cpp_wrapper
-        # it was derived from.
-        self._call_config: dict[str, bool] = {}
+        # The ambient settings the record was derived from, which the calls must
+        # not change.
+        self._cudagraph_inputs: dict[str, object] = {}
         if self._backend_name == "inductor":
             from torch._inductor import config as inductor_config
 
+            self._cudagraph_inputs = _cudagraph_inputs()
             self._cudagraph_config = {
                 "triton.cudagraphs": inductor_config.triton.cudagraphs,
                 "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
@@ -1994,7 +2007,6 @@ class PrecompileSession(Generic[_P, _R]):
                 config["graph_partition"]
             ):
                 config["triton.cudagraphs"] = False
-            self._call_config = {**config, "cpp_wrapper": cpp_wrapper}
             _check_cudagraph_policy(config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
@@ -2113,11 +2125,21 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
+        if self._cudagraph_inputs:
+            ambient = _cudagraph_inputs()
+            changed = [k for k, v in self._cudagraph_inputs.items() if ambient[k] != v]
+            if changed:
+                raise PackageError(
+                    f"{changed} changed since capture() began: the artifact "
+                    "records one CUDA graph config, read when capture() is called, "
+                    "for every captured call. Set it before capture(), or pass it "
+                    "in options."
+                )
         try:
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
-                torch._inductor.config.patch(self._call_config),
+                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 _check_cudagraph_policy(self._cudagraph_config)
                 return self._compiled(*args, **kwargs)

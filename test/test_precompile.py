@@ -4957,19 +4957,18 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served", out.stdout)
         return out.stdout
 
-    def test_a_cpp_wrapper_set_after_capture_began_does_not_change_the_record(self):
-        single = self.mod.single
+    @parametrize("key", ["cpp_wrapper", "graph_partition", "triton.cudagraphs"])
+    def test_a_cudagraph_input_changed_after_capture_began_refuses(self, key):
+        from torch._dynamo.precompile_package import _cudagraph_inputs
+
         options = {"triton.cudagraphs": True, "graph_partition": True}
-        with self._capture(single, options=options) as cap:
-            # The calls compile under the cpp_wrapper capture() read.
-            with torch._inductor.config.patch(cpp_wrapper=True):
-                y = cap(self.model, self.x2)
-        with open(self.artifact) as f:
-            meta = _parse_artifact_metadata(f.read())
-        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
-        # Under crossref the guards hold only inside the harness's mode.
-        if not TEST_WITH_CROSSREF:
-            self._serve_in_fresh_process([((self.x2,), {}, y)])
+        with self._capture(self.mod.single, options=options) as cap:
+            # The check compares the ambient value, not the options over it.
+            flipped = {key: not _cudagraph_inputs()[key]}
+            with torch._inductor.config.patch(flipped):
+                with self.assertRaisesRegex(PrecompileError, "changed since capture"):
+                    cap(self.model, self.x2)
+            cap(self.model, self.x2)
 
     def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
         single = self.mod.single
@@ -5042,7 +5041,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with torch._inductor.config.patch(cudagraph_policy=object()):
             with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
                 self._capture(single, options=on)
-        # It is read on every compile, so one set after capture() began refuses too.
+        # It is checked on every call, so one set after capture() began refuses too.
         with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
             with self._capture(single, options=on) as cap:
                 with torch._inductor.config.patch(cudagraph_policy=object()):
