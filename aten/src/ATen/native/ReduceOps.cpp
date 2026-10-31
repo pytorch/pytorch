@@ -5,6 +5,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -373,6 +374,18 @@ TORCH_META_FUNC(aminmax)
       ", but got ",
       max.dtype(),
       " instead");
+  if (min.defined() && max.defined()) {
+    // The two outputs are written independently, so overlapping storage makes
+    // whichever write lands last clobber the other, silently.
+    // Only Partial and Full are rejected. TooHard covers non-dense outputs and
+    // symbolic shapes, where overlap cannot be proven either way; requiring No
+    // there would reject non-contiguous out= tensors that do not overlap.
+    const auto overlap = at::get_overlap_status(min, max);
+    TORCH_CHECK_VALUE(
+        overlap != at::MemOverlapStatus::Partial &&
+            overlap != at::MemOverlapStatus::Full,
+        "aminmax(): the `min` and `max` out= tensors must not overlap.");
+  }
 
   DimVector shape;
   if (dim_opt.has_value()) {
@@ -490,7 +503,19 @@ Tensor& _logcumsumexp_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   return result;
 }
 
+// Checked in the composites rather than in the backend kernels:
+// _logcumsumexp_out_cuda short-circuits 0-d and empty inputs before any dtype
+// dispatch, so without this the supported dtypes would differ between CPU and
+// CUDA. Mirrored by the logcumsumexp meta registration.
+static void check_logcumsumexp_dtype(const Tensor& self) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+      "logcumsumexp(): input dtype should be either floating point or complex. "
+      "Got ", self.scalar_type(), " instead.");
+}
+
 Tensor logcumsumexp(const Tensor& self, int64_t dim) {
+  check_logcumsumexp_dtype(self);
   auto result = [&]() {
     return at::_logcumsumexp(self, dim);
   }();
@@ -498,6 +523,7 @@ Tensor logcumsumexp(const Tensor& self, int64_t dim) {
 }
 
 Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
+  check_logcumsumexp_dtype(self);
   check_scalar_type_device_layout_equal(result, self);
   {
     at::_logcumsumexp_out(result, self.toType(result.scalar_type()), dim);
@@ -1110,8 +1136,8 @@ static void pre_check_gradient(const Tensor& self, std::optional<int64_t> spacin
 }
 
 static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
-  for (const auto i : c10::irange(coordinates.size())) {
-    TORCH_CHECK(self.device() == coordinates[i].device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinates[i].device(), "!");
+  for (const auto& coordinate : coordinates) {
+    TORCH_CHECK(self.device() == coordinate.device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinate.device(), "!");
   }
 
   std::vector<Tensor> result;
@@ -1993,8 +2019,8 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu() || self.is_privateuseone(),
-              fname, " supports tensors on a CPU, CUDA, XPU or PrivateUse1 device only, got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu() || self.is_mps() || self.is_privateuseone(),
+              fname, " supports tensors on a CPU, CUDA, XPU, MPS or PrivateUse1 device only, got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());

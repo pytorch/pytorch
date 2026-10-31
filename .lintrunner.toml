@@ -224,6 +224,11 @@ exclude_patterns = [
     'c10/test/**/*.h',
     'c10/test/**/*.cpp',
     'third_party/**/*',
+    'torch/csrc/profiler/kineto/benchmarks/**',
+    'torch/csrc/profiler/kineto/libkineto/test/**',
+    # Need ROCm/XPU SDK headers, which the lint image doesn't have
+    'torch/csrc/profiler/kineto/libkineto/src/Roc*',
+    'torch/csrc/profiler/kineto/libkineto/src/plugin/xpupti/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
@@ -266,7 +271,6 @@ exclude_patterns = [
     'c10/util/llvmMathExtras.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
-    'c10/util/overflows.h',
     'c10/util/safe_numerics.h',
     'c10/util/signal_handler.cpp',
     'c10/util/StringUtil.cpp',
@@ -278,6 +282,7 @@ exclude_patterns = [
     'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/irange.h',
     'torch/headeronly/util/MathConstants.h',
+    'torch/headeronly/util/overflows.h',
 ]
 init_command = [
     'python3',
@@ -329,6 +334,7 @@ include_patterns = [
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
     'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/overflows.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -457,6 +463,10 @@ exclude_patterns=[
     '**/*.ps1',
     '**/*.ptl',
     'fb/**',
+    # Directory paths, not files: the .claude/skills symlink, and .agents/skills
+    # when a diff replaces that path's earlier symlink. Files are linted below them.
+    '.claude/skills',
+    '.agents/skills',
     '**/fb/**',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -587,11 +597,19 @@ code = 'RAWTHROW'
 include_patterns = [
     '**/*.cpp',
     '**/*.h',
+    '**/*.cc',
+    '**/*.cu',
+    '**/*.cuh',
+    '**/*.hpp',
+    '**/*.inl',
+    '**/*.mm',
 ]
 exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
+    'third_party/dynolog_headers/**',
+    'third_party/perfetto/sdk/**',  # amalgamated perfetto SDK
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
     'c10/util/order_preserving_flat_hash_map.h',
@@ -600,12 +618,12 @@ exclude_patterns = [
     # c10/util/Exception.h would break those builds. AlignedAllocator.h has a
     # second reason: its bad_alloc reaches Python as MemoryError.
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
-    # Converting these changes the Python-visible exception type, so they get
-    # their own PR later in this stack.
-    'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
-    'c10/util/StringUtil.cpp',  # range_error -> ValueError
-    # Burned down later in this stack. Nothing may be added here.
-    'torch/csrc/jit/**',
+    # llvm/ADT/SmallVector.cpp, carried verbatim under Apache-2.0 WITH
+    # LLVM-exception with a three-line delta recorded at the top of the file.
+    # Its length_error/bad_alloc are upstream's contract, and c10 has no type
+    # that preserves bad_alloc's MemoryError anyway: torch.OutOfMemoryError
+    # derives from RuntimeError, not MemoryError.
+    'c10/util/SmallVector.cpp',
 ]
 command = [
     'python3',
@@ -629,6 +647,8 @@ exclude_patterns = [
     '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
+    # TODO: use full <torch/csrc/profiler/kineto/...> includes
+    'torch/csrc/profiler/kineto/**',
 ]
 command = [
     'python3',
@@ -812,6 +832,10 @@ exclude_patterns = [
     '**/gradlew',
     'fb/**',
     '**/fb/**',
+    # Directory paths, not files: the .claude/skills symlink, and .agents/skills
+    # when a diff replaces that path's earlier symlink. Files are linted below them.
+    '.claude/skills',
+    '.agents/skills',
 ]
 command = [
     'python3',
@@ -985,7 +1009,8 @@ command = [
 [[linter]]
 code = 'SHELLCHECK'
 include_patterns = [
-    '.ci/pytorch/**/*.sh'
+    '.ci/pytorch/**/*.sh',
+    '.claude/hooks/claude_code/*.sh',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -1158,6 +1183,7 @@ include_patterns = [
 exclude_patterns = [
     'c10/util/CallOnce.h',
     '**/fb/**',
+    'torch/csrc/profiler/kineto/**',  # Kineto doesn't depend on c10
 ]
 command = [
     'python3',
@@ -1203,6 +1229,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/csrc/profiler/kineto/**',  # Kineto doesn't depend on c10
 ]
 command = [
     'python3',
@@ -1597,6 +1624,25 @@ include_patterns = [
 ]
 
 [[linter]]
+code = 'LICENSE_FILES'
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
+    'tools/linter/adapters/license_files_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    'pyproject.toml',
+    'test/test_license.py',
+    'tools/linter/license_files_audit.py',
+    'tools/linter/license_audit_manifest.toml',
+]
+
+[[linter]]
 code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
@@ -1948,6 +1994,18 @@ command = [
 ]
 
 [[linter]]
+code = "RAW_VT_CONSTRUCTION"
+include_patterns = [
+  "torch/**/*.py",
+  "tools/linter/adapters/raw_vt_construction_linter.py",
+  "tools/test/test_raw_vt_construction_linter.py",
+]
+command = [
+  "python3",
+  "tools/linter/adapters/raw_vt_construction_linter.py",
+]
+
+[[linter]]
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',
@@ -2098,4 +2156,17 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'TEST_LINTER'
+include_patterns = [
+    'test/**/*.py',
+    'tools/linter/adapters/test_linter_allowlist.json',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/test_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]

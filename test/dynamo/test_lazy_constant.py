@@ -1,15 +1,170 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import operator
 import sys
+from unittest import mock
 
 import torch
 import torch._dynamo
+from torch._dynamo.comptime import comptime
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+from torch._dynamo.variables.base import SourceLocation, VariableTracker
+from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.lazy import (
+    ComputedLazyCache,
+    LazyCache,
+    LazyVariableTracker,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
+
+
+_constant_vt_capture: list[VariableTracker] = []
+
+
+def _capture_constant_vt(ctx) -> None:
+    tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+    flag_vt = tx.symbolic_locals.get("flag")
+    if flag_vt is None:
+        raise AssertionError("flag VariableTracker was not found")
+    _constant_vt_capture.append(flag_vt)
+
+
+@instantiate_parametrized_tests
+class CachedConstantSourceLocationTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "value",
+        (None, True, False, NotImplemented),
+        name_fn=lambda value: repr(value).lower(),
+    )
+    def test_cached_singleton_source_location_cow(self, value):
+        prototype = ConstantVariable.create(value)
+        self.assertIs(prototype, ConstantVariable.create(value))
+        self.assertEqual(prototype.get_id(None), id(value))
+        self.assertIsNone(prototype.source)
+        self.assertIsNone(prototype.source_location)
+        self.assertIsNone(prototype.mutation_type)
+        self.assertIsNone(prototype.dict_vt)
+
+        location = SourceLocation("constant.py", 1)
+        located = prototype.with_source_location(location)
+        self.assertIsNot(located, prototype)
+        self.assertEqual(located.source_location, location)
+        self.assertIsNone(prototype.source_location)
+
+        source = ConstantSource("constant")
+        sourceful = ConstantVariable.create(value, source=source)
+        self.assertIsNot(sourceful, prototype)
+        self.assertEqual(sourceful.source, source)
+        self.assertIs(
+            ConstantVariable.create(value, source_location=location).source_location,
+            location,
+        )
+
+    def test_cached_true_source_location_across_compilations(self):
+        _constant_vt_capture.clear()
+        self.addCleanup(_constant_vt_capture.clear)
+        namespace = {
+            "_capture_constant_vt": _capture_constant_vt,
+            "comptime": comptime,
+        }
+        exec(
+            compile(
+                "def first(x):\n"
+                "    flag = True\n"
+                "    comptime(_capture_constant_vt)\n"
+                "    return x + 1, flag\n",
+                "first_file.py",
+                "exec",
+            ),
+            namespace,
+        )
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(namespace["first"], backend="eager", fullgraph=True)(x),
+            (x + 1, True),
+        )
+
+        torch._dynamo.reset()
+        exec(
+            compile(
+                "def second(x):\n"
+                "    flag = True\n"
+                "    comptime(_capture_constant_vt)\n"
+                "    return x + 2, flag\n",
+                "second_file.py",
+                "exec",
+            ),
+            namespace,
+        )
+        self.assertEqual(
+            torch.compile(namespace["second"], backend="eager", fullgraph=True)(x),
+            (x + 2, True),
+        )
+
+        self.assertEqual(len(_constant_vt_capture), 2)
+        first_vt, second_vt = _constant_vt_capture
+        self.assertIsNot(first_vt, second_vt)
+        self.assertEqual(first_vt.source_location.filename, "first_file.py")
+        self.assertEqual(second_vt.source_location.filename, "second_file.py")
+        self.assertIsNone(ConstantVariable.create(True).source_location)
+
+    @parametrize(
+        "cache_kind,attach_before_realize",
+        (
+            ("lazy", True),
+            ("lazy", False),
+            ("computed", True),
+            ("computed", False),
+        ),
+        name_fn=lambda cache_kind, attach_before_realize: (
+            f"{cache_kind}_{'before' if attach_before_realize else 'after'}"
+        ),
+    )
+    def test_lazy_source_location_cow(self, cache_kind, attach_before_realize):
+        prototype = ConstantVariable.create(True)
+        location = SourceLocation("lazy.py", 1)
+        if cache_kind == "lazy":
+            cache = LazyCache(object(), object())
+        else:
+            cache = ComputedLazyCache(True, [], [], operator.add, 1)
+        lazy = LazyVariableTracker(cache)
+
+        if attach_before_realize:
+            self.assertIs(lazy.with_source_location(location), lazy)
+
+        from torch._dynamo import variables
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        with (
+            mock.patch.object(
+                InstructionTranslator, "current_tx", return_value=object()
+            ),
+            mock.patch.object(variables.builder, "VariableBuilder") as variable_builder,
+        ):
+            variable_builder.return_value.return_value = prototype
+            realized = lazy.realize()
+
+        if not attach_before_realize:
+            self.assertIs(realized, prototype)
+            self.assertIs(lazy.with_source_location(location), lazy)
+
+        self.assertIsNot(lazy.realize(), prototype)
+        self.assertEqual(lazy.realize().source_location, location)
+        self.assertIsNone(prototype.source_location)
 
 
 class LazyConstantVariableTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
@@ -542,6 +697,8 @@ class LazyConstantVariableTests(TestCase):
 
 
 class ComputedLazyConstantTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _check(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
@@ -565,6 +722,16 @@ class ComputedLazyConstantTests(TestCase):
             (lambda t, a, b: (t.sin(), a - b), [(t, 5, 2), (t, 9, 3)]),
             (lambda t, a, b: (t.sin(), a * b), [(t, 5, 2), (t, 9, 3)]),
             (lambda t, a, b: (t.sin(), a + b), [(t, "x", "y"), (t, "p", "q")]),
+            (lambda t, a, b: (t.sin(), a & b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a | b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a ^ b), [(t, 6, 3), (t, 12, 10)]),
+            (lambda t, a, b: (t.sin(), a == b), [(t, 1, 1), (t, 1, 2)]),
+            (lambda t, a, b: (t.sin(), a != b), [(t, 1, 1), (t, 1, 2)]),
+            (lambda t, a, b: (t.sin(), a < b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a <= b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a > b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a >= b), [(t, 1, 2), (t, 3, 2)]),
+            (lambda t, a, b: (t.sin(), a < b), [(t, "x", "y"), (t, "p", "q")]),
         ]
         for i, (fn, arg_sets) in enumerate(cases):
             with self.subTest(case=i):
@@ -580,6 +747,163 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=1)
 
+    def test_unused_computed_inplace_bitwise_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            a &= b
+            return t.sin(), a
+
+        self._check(fn, [(t, 6, 3), (t, 12, 10)], expected_frames=1)
+
+    def test_unused_computed_inplace_division_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def floordiv(t, a):
+            a //= 2
+            return t.sin(), a
+
+        def mod(t, a):
+            a %= 4
+            return t.sin(), a
+
+        def truediv(t, a):
+            a /= 2.0
+            return t.sin(), a
+
+        cases = [
+            (floordiv, [(t, 7), (t, 9)]),
+            (mod, [(t, 7), (t, 9)]),
+            (truediv, [(t, 7.0), (t, 9.0)]),
+        ]
+        for fn, arg_sets in cases:
+            with self.subTest(name=fn.__name__):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_unused_unary_ops_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("neg_int", lambda t, a: (t.sin(), -a), [(t, 5), (t, 9)]),
+            ("pos_int", lambda t, a: (t.sin(), +a), [(t, 5), (t, 9)]),
+            ("abs_int", lambda t, a: (t.sin(), abs(a)), [(t, -5), (t, 9)]),
+            ("not_int", lambda t, a: (t.sin(), not a), [(t, 5), (t, 0)]),
+            ("invert_int", lambda t, a: (t.sin(), ~a), [(t, 5), (t, 9)]),
+            ("neg_float", lambda t, a: (t.sin(), -a), [(t, 5.5), (t, -9.25)]),
+            ("neg_bool", lambda t, a: (t.sin(), -a), [(t, True), (t, False)]),
+            ("not_bool", lambda t, a: (t.sin(), not a), [(t, True), (t, False)]),
+            ("not_str", lambda t, a: (t.sin(), not a), [(t, "x"), (t, "")]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_unary_symbolic_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("neg", lambda t, a: t * (-a)),
+            ("pos", lambda t, a: t * (+a)),
+            ("abs", lambda t, a: t * abs(a)),
+            ("not", lambda t, a: t * (not a)),
+            ("invert", lambda t, a: t * (~a)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, [(t, 5), (t, 7)], expected_frames=1)
+
+    def test_unary_type_error_surfaces(self):
+        t = torch.ones(2)
+        cases = [("neg", lambda a: -a), ("pos", lambda a: +a), ("abs", abs)]
+        for name, unary in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+
+                def fn(t, a):
+                    return t.sin(), unary(a)
+
+                opt_fn = torch.compile(fn, backend="eager")
+                with self.assertRaisesRegex(TypeError, "bad operand type"):
+                    opt_fn(t, "x")
+
+    def test_unused_builtin_fns_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("len_str", lambda t, a: (t.sin(), len(a)), [(t, "xy"), (t, "pqr")]),
+            ("str_int", lambda t, a: (t.sin(), str(a)), [(t, 5), (t, 9)]),
+            ("bool_int", lambda t, a: (t.sin(), bool(a)), [(t, 5), (t, 0)]),
+            ("min_int", lambda t, a, b: (t.sin(), min(a, b)), [(t, 1, 2), (t, 9, 3)]),
+            ("max_int", lambda t, a, b: (t.sin(), max(a, b)), [(t, 1, 2), (t, 9, 3)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_min_max_mixed_types_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, flag):
+            if isinstance(max(flag, 0.5), bool):
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, True), (t, False)], expected_frames=2)
+
+    def test_str_on_symbolic_int_compiles(self):
+        t = torch.ones(2)
+        d = {str(i): i for i in range(4)}
+
+        def fn(t, idx):
+            return t.relu() * d[str(idx)]
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for idx in range(4):
+            self.assertEqual(fn(t, idx), opt_fn(t, idx))
+        self.assertGreater(counter.frame_count, 1)
+
+    def test_builtin_fn_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if len(a) > 2:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, "xy"), (t, "pqrs")], expected_frames=2)
+
+    def test_len_on_int_falls_back(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            try:
+                return t.sin(), len(a)
+            except TypeError:
+                return t.cos(), 0
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
+    def test_unary_op_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if -a < 0:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 5), (t, -5)], expected_frames=2)
+
+    def test_chained_unary_binary_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), -(a + b) * 2
+
+        self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=1)
+
     def test_unused_division_recompiles(self):
         t = torch.ones(2)
 
@@ -587,6 +911,140 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), a / b
 
         self._check(fn, [(t, 4, 2), (t, 9, 3)], expected_frames=2)
+
+    def test_unused_constant_divisor_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("floordiv_int", lambda t, a: (t.sin(), a // 2), [(t, 7), (t, 9)]),
+            ("mod_int", lambda t, a: (t.sin(), a % 4), [(t, 7), (t, 9)]),
+            ("truediv_float", lambda t, a: (t.sin(), a / 2.0), [(t, 7.0), (t, 9.0)]),
+            ("floordiv_float", lambda t, a: (t.sin(), a // 2.0), [(t, 7.5), (t, 9.5)]),
+            ("mod_float", lambda t, a: (t.sin(), a % 2.0), [(t, 7.5), (t, 9.5)]),
+            ("truediv_float_int", lambda t, a: (t.sin(), a / 2), [(t, 7.0), (t, 9.0)]),
+            ("floordiv_sum", lambda t, a: (t.sin(), (a + 1) // 2), [(t, 7), (t, 9)]),
+            ("floordiv_by_int", lambda t, a: (t.sin(), a // 2), [(t, 7.5), (t, 9.5)]),
+            ("mod_by_int", lambda t, a: (t.sin(), a % 4), [(t, 7.5), (t, 9.5)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_unused_mixed_type_division_recompiles(self):
+        t = torch.ones(2)
+        cases = [
+            ("floordiv", lambda t, a: (t.sin(), a // 2.0), [(t, 7), (t, 9)]),
+            ("mod", lambda t, a: (t.sin(), a % 2.0), [(t, 7), (t, 9)]),
+            ("bool", lambda t, a: (t.sin(), a // 2.0), [(t, True), (t, False)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=2)
+
+    def test_unused_int_truediv_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), a / 2
+
+        self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
+
+    def test_unused_lazy_divisor_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a // b
+
+        self._check(fn, [(t, 7, 2), (t, 7, 4)], expected_frames=2)
+
+    def test_unused_computed_divisor_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a // (b + 1)
+
+        self._check(fn, [(t, 7, 1), (t, 7, 3)], expected_frames=2)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_lazy_divisor_zero_raises_in_traced_handler(self):
+        # a dynamic b sends 7 // 0 to eager (pre-existing); keep b static
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            try:
+                r = a // b
+            except ZeroDivisionError:
+                r = -1
+            return t.sin(), r
+
+        self._check(fn, [(t, 7, 2), (t, 7, 0)], expected_frames=2)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_lazy_int_overflow_raises_in_traced_handler(self):
+        # a dynamic a falls back to eager; keep a static
+        t = torch.ones(2)
+
+        def truediv(t, a):
+            try:
+                r = a / 2
+            except OverflowError:
+                r = -1
+            return t.sin(), r
+
+        def floordiv(t, a):
+            try:
+                r = a // 2.0
+            except OverflowError:
+                r = -1
+            return t.sin(), r
+
+        for fn in (truediv, floordiv):
+            with self.subTest(name=fn.__name__):
+                torch._dynamo.reset()
+                self._check(fn, [(t, 7), (t, 10**400)], expected_frames=2)
+
+    def test_unused_comparison_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a + 1 == b
+
+        self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 5, 0)], expected_frames=1)
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_symbolic_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("and", lambda t, a, b: t * (a & b)),
+            ("or", lambda t, a, b: t * (a | b)),
+            ("xor", lambda t, a, b: t * (a ^ b)),
+            ("lt", lambda t, a, b: t * (a < b)),
+            ("eq", lambda t, a, b: t * (a == b)),
+            ("floordiv", lambda t, a, b: t * (a // 2)),
+            ("mod", lambda t, a, b: t * (a % 4)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                for a, b in ((6, 3), (12, 12), (10, 20)):
+                    self.assertTrue(same(fn(t, a, b), opt_fn(t, a, b)))
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_symbolic_float_operand_realizes(self):
+        t = torch.ones(3)
+        cases = [
+            ("truediv", lambda t, a: t * (a / 2.0)),
+            ("floordiv", lambda t, a: t * (a // 2.0)),
+            ("mod", lambda t, a: t * (a % 2.0)),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager")
+                for a in (6.5, 13.0, 10.25):
+                    self.assertTrue(same(fn(t, a), opt_fn(t, a)))
 
     def test_operand_type_change_recompiles(self):
         t = torch.ones(2)
@@ -658,6 +1116,16 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 7, 5)], expected_frames=2)
 
+    def test_division_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if a // 2 > 3:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
+
     def test_computed_constant_in_tensor_math_recompiles(self):
         t = torch.ones(2)
 
@@ -665,6 +1133,14 @@ class ComputedLazyConstantTests(TestCase):
             return t * (a + b)
 
         self._check(fn, [(t, 1.5, 2.0), (t, 3.25, 4.0)], expected_frames=2)
+
+    def test_division_in_tensor_math_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t * (a / 2.0)
+
+        self._check(fn, [(t, 1.5), (t, 3.25)], expected_frames=2)
 
     def test_computed_constant_as_dict_key_realizes(self):
         t = torch.ones(2)

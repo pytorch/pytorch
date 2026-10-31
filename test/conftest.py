@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
 xml_key = StashKey["LogXMLReruns"]()
+# Under pytest's cache (<cache_dir>/v/). run_test.py reads these files, and the
+# torchci report writer publishes next to them (StepcurrentPlugin.directory).
 STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 
@@ -102,6 +104,20 @@ def pytest_addoption(parser: Parser) -> None:
         dest="hw_classification",
         type=str.upper,
         help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
+    )
+    parser.addoption(
+        "--multigpu-min-gpus",
+        action="store",
+        type=int,
+        default=0,
+        dest="multigpu_min_gpus",
+        metavar="N",
+        help="Among the auto-applied `multigpu` tests (see pytest_itemcollected), "
+        "keep only those declaring an accelerator requirement of at least N GPUs "
+        "via skip_if_lt_x_gpu/requires_world_size; deselect the rest. "
+        "0 (default) disables the filter, so runs "
+        "without it are unaffected. Layered on top of `-m multigpu` so a "
+        "larger-runner config can run just the >2-GPU distributed tests.",
     )
     shard_addoptions(parser)
 
@@ -165,6 +181,11 @@ def pytest_configure(config: Config) -> None:
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
             "hw_classification_plugin",
         )
+    if config.getoption("multigpu_min_gpus"):
+        config.pluginmanager.register(
+            MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
+            "multigpu_min_filter_plugin",
+        )
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -175,6 +196,16 @@ def pytest_unconfigure(config: Config) -> None:
 
 
 class _NodeReporterReruns(_NodeReporter):
+    """Writes captured output without pytest's per-stream header and omits it
+    when empty, so tests that print nothing don't each get <system-out> and
+    <system-err> elements (pytest.ini sets junit_logging_reruns = all). Also
+    escapes skip reasons, which pytest<8 leaves unescaped.
+
+    pytest constructs these reporters and LogXMLReruns.node_reporter only
+    reassigns __class__, so this class may override methods but must not add
+    state or change how instance data is represented.
+    """
+
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
@@ -241,21 +272,11 @@ class LogXMLReruns(LogXML):
                 report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
-        nodeid: str | TestReport = getattr(report, "nodeid", report)
-        # Local hack to handle xdist report order.
-        workernode = getattr(report, "node", None)
-
-        key = nodeid, workernode
-
-        if key in self.node_reporters:
-            # TODO: breaks for --dist=each
-            return self.node_reporters[key]
-
-        reporter = _NodeReporterReruns(nodeid, self)
-
-        self.node_reporters[key] = reporter
-        self.node_reporters_ordered.append(reporter)
-
+        # The reporter key type varies across pytest versions, so let pytest build it.
+        reporter = super().node_reporter(report)
+        if not issubclass(_NodeReporterReruns, type(reporter)):
+            raise AssertionError(f"unexpected node reporter type {type(reporter)}")
+        reporter.__class__ = _NodeReporterReruns
         return reporter
 
 
@@ -381,6 +402,40 @@ def _spawns_multiple_processes(
     return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
 
 
+def _safe_obj(item: Any) -> object | None:
+    # item.obj imports the test module, so any exception is possible here.
+    try:
+        return item.obj
+    except Exception:
+        return None
+
+
+def _decorator_gpu_requirement(func: object | None) -> int:
+    """Highest accelerator requirement stamped on ``func`` (or anything in its
+    ``__wrapped__`` chain) by ``skip_if_lt_x_gpu`` (``_min_gpus_required``) or
+    ``requires_world_size`` (``_required_world_size``). 0 when unstamped."""
+    best = 0
+    while func is not None:
+        for attr in ("_min_gpus_required", "_required_world_size"):
+            try:
+                best = max(best, int(getattr(func, attr)))  # type: ignore[arg-type]
+            except (AttributeError, TypeError, ValueError):
+                pass
+        func = getattr(func, "__wrapped__", None)
+    return best
+
+
+def _resolve_gpu_requirement(item: Any) -> int:
+    """Accelerators a distributed test declares it needs, read at collection from
+    its decorator stamps (see _decorator_gpu_requirement). 0 when undeclared.
+
+    Class world_size is not consulted. On a 4-GPU runner a literal 4 is
+    indistinguishable from capacity-scaled NUM_DEVICES/DEVICE_COUNT values that
+    still run on 2 GPUs.
+    """
+    return _decorator_gpu_requirement(_safe_obj(item))
+
+
 def pytest_itemcollected(item: Any) -> None:
     """
     Auto-apply the `multigpu` marker based on the resolved test class. Runs
@@ -392,6 +447,42 @@ def pytest_itemcollected(item: Any) -> None:
         item.add_marker("multigpu")
 
 
+class MultiGpuMinFilterPlugin:
+    """Deselect auto-`multigpu`-marked tests whose resolved accelerator
+    requirement is below ``--multigpu-min-gpus`` (see _resolve_gpu_requirement),
+    so a larger-runner config can run just the >N-GPU distributed tests on top of
+    the existing `-m multigpu` selection. Only `multigpu`-marked items are
+    considered, and the plugin is registered only when the option is set, so runs
+    without it (e.g. every CUDA distributed job) are untouched."""
+
+    def __init__(self, min_gpus: int) -> None:
+        self.min_gpus = min_gpus
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        selected, deselected = [], []
+        for item in items:
+            is_multigpu = any(m.name == "multigpu" for m in item.iter_markers())
+            if is_multigpu and _resolve_gpu_requirement(item) < self.min_gpus:
+                deselected.append(item)
+            else:
+                selected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        selected = len(session.items)
+        if session.config.getoption("verbose") >= 0:
+            print(
+                f"multigpu-min-gpus={self.min_gpus}: final selected {selected}",
+                flush=True,
+            )
+        count_file = os.getenv("PYTORCH_MULTIGPU_SELECTION_COUNT_FILE")
+        if count_file:
+            with open(count_file, "a") as fp:
+                fp.write(f"{selected}\n")
+
+
 class StepcurrentPlugin:
     # Modified fromo _pytest/stepwise.py in order to save the currently running
     # test instead of the last failed test
@@ -401,14 +492,14 @@ class StepcurrentPlugin:
         if config.cache is None:
             raise AssertionError("Expected config.cache to not be None")
         self.cache: pytest.Cache = config.cache
-        directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
-        self.lastrun_location = f"{directory}/lastrun"
+        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{self.directory}/lastrun"
         self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
 
-        self.made_failing_xml_location = f"{directory}/made_failing_xml"
+        self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:

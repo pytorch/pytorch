@@ -548,8 +548,8 @@ static PyObject* view_func_impl(
           out = view_func(new_base);
         }
       } else {
-        out = new_base.as_strided(
-            self.sizes(), self.strides(), self.storage_offset());
+        out = new_base.as_strided_symint(
+            self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
       }
     }
   }
@@ -1350,6 +1350,10 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       "randn_like",
       "uniform_",
       "bernoulli",
+      "exponential_",
+      "geometric_",
+      "log_normal_",
+      "multinomial",
   });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
@@ -2468,7 +2472,6 @@ create_native_op_schema(
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "can't happen");
-        break;
     }
     idx++;
   }
@@ -2581,7 +2584,6 @@ create_native_op_schema(
         }
         default:
           TORCH_INTERNAL_ASSERT(false, "can't happen");
-          break;
       }
     }
   }
@@ -3304,6 +3306,24 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_has_grad_dtype_override(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "_has_grad_dtype_override");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      !var.grad_fn(),
+      "_has_grad_dtype_override is only supported for leaf tensors.");
+  const auto* meta = torch::autograd::impl::get_autograd_meta(var);
+  return torch::autograd::utils::wrap(
+      meta &&
+      (meta->grad_dtype_.has_value() || meta->allow_grad_dtype_mismatch_));
+  END_HANDLE_TH_ERRORS
+}
+
 static int THPVariable_set_grad_dtype(
     THPVariable* self,
     PyObject* obj,
@@ -3347,29 +3367,35 @@ static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static inline int copy_value_(const Tensor& self, PyObject* value) {
+  if (THPVariable_Check(value)) {
+    auto value_ = THPVariable_Unpack(value);
+    {
+      pybind11::gil_scoped_release no_gil;
+      self.copy_(value_);
+      return 0;
+    }
+  } else {
+    auto scalar = valueToScalar(self.options(), value);
+    {
+      pybind11::gil_scoped_release no_gil;
+      self.fill_(scalar);
+      return 0;
+    }
+  }
+}
+
 static int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_real = at::real(self_);
-  auto real_ = valueToTensor(self_real.options(), real, self_real.device());
-  {
-    pybind11::gil_scoped_release no_gil;
-    self_real.copy_(real_);
-    return 0;
-  }
+  return copy_value_(at::real(self_), real);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_imag = at::imag(self_);
-  auto imag_ = valueToTensor(self_imag.options(), imag, self_imag.device());
-  {
-    pybind11::gil_scoped_release no_gil;
-    self_imag.copy_(imag_);
-    return 0;
-  }
+  return copy_value_(at::imag(self_), imag);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -3494,6 +3520,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"grad_dtype",
      (getter)THPVariable_get_grad_dtype,
      (setter)THPVariable_set_grad_dtype,
+     nullptr,
+     nullptr},
+    {"_has_grad_dtype_override",
+     (getter)THPVariable_get_has_grad_dtype_override,
+     nullptr,
      nullptr,
      nullptr},
     {nullptr}};

@@ -2,6 +2,7 @@
 import base64
 import binascii
 import functools
+import operator
 import os
 import re
 import sys
@@ -11,12 +12,13 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
-from torch._dynamo import external_utils
+from torch._dynamo import external_utils, polyfills, trace_rules
 from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -36,7 +38,35 @@ def tensor_constant_result():
     return torch.tensor([4.0])
 
 
+class CodelessCallPartial(functools.partial):
+    pass
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _override_trace_rule(self, fn, *, disallow=False):
+        fn_id = id(fn)
+        registries = (
+            trace_rules._allowed_callable_ids,
+            trace_rules._disallowed_callable_ids,
+            trace_rules._nonstrict_trace_callable_ids,
+        )
+        prior_state = tuple(fn_id in registry for registry in registries)
+
+        def restore():
+            for registry, was_present in zip(registries, prior_state):
+                registry.remove(fn_id)
+                if was_present:
+                    registry.add(fn_id)
+            torch._dynamo.reset()
+
+        self.addCleanup(restore)
+        torch.compiler.allow_in_graph(fn)
+        if disallow:
+            torch._dynamo.disallow_in_graph(fn)
+        torch._dynamo.reset()
+
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -279,6 +309,77 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
+
+    def test_internal_comparisons_ignore_allow_in_graph(self):
+        class SortKey:
+            def __init__(self, value):
+                self.value = value
+
+            def __lt__(self, other):
+                return self.value % 3 < other.value % 3
+
+        def fn(x, y, z):
+            values = [3, 4, 5]
+            values.sort(key=SortKey)
+            return max([x, y, z], key=lambda t: t.ndim).sum() + values[0]
+
+        self._override_trace_rule(operator.lt)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y, z), fn(x, y, z))
+
+    def test_internal_pytree_helper_ignores_allow_in_graph(self):
+        from torch.utils import _pytree
+
+        def fn(x):
+            return x + (1 if _pytree.tree_is_leaf(x) else 2)
+
+        self._override_trace_rule(_pytree._get_node_type)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_computed_lazy_operator_ignores_disallow_in_graph(self):
+        def fn(x, a, b):
+            return x * (a + b)
+
+        self._override_trace_rule(operator.add, disallow=True)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, 2, 3), fn(x, 2, 3))
+
+    def test_internal_iterator_helper_ignores_allow_in_graph(self):
+        class Sequence:
+            def __init__(self, values):
+                self.values = values
+
+            def __len__(self):
+                return len(self.values)
+
+            def __getitem__(self, index):
+                return self.values[index]
+
+        def fn(x):
+            return x + sum(reversed(Sequence([1, 2, 3])))
+
+        self._override_trace_rule(polyfills.builtins.reversed_sequence_iterator)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_context_wrapper_ignores_allow_in_graph(self):
+        def target(y):
+            return y.sin()
+
+        def fn(x):
+            return torch.no_grad()(target)(x)
+
+        self._override_trace_rule(polyfills._fn_with_ctx)
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_allow_in_graph_no_id_reuse(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -636,6 +737,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -932,6 +1034,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1265,6 +1368,41 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(y, torch.ones(3) + 3)
 
+    @parametrize("attr", ["__torch_dynamo_polyfill__", "__wrapped__"])
+    @parametrize("registered", [False, True])
+    def test_substitute_in_graph_callable_attribute(self, attr, registered):
+        def original(x):
+            return x + 1
+
+        def polyfill(x):
+            return x + 2
+
+        if registered:
+
+            def replacement(x):
+                return x + 3
+
+            self.addCleanup(
+                torch._dynamo.decorators._unregister_substitute_in_graph, polyfill
+            )
+            polyfill = torch.compiler.substitute_in_graph(polyfill)(replacement)
+
+        wrapped = torch.compiler.substitute_in_graph(original)(polyfill)
+        self.addCleanup(
+            torch._dynamo.decorators._unregister_substitute_in_graph, original
+        )
+
+        def fn(x):
+            return getattr(wrapped, attr)(x)
+
+        x = torch.randn(3)
+        self.assertEqual(wrapped(x), x + 1)
+        self.assertEqual(fn(x), x + 2)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x), x + (3 if registered else 2))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
@@ -1342,6 +1480,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 return polyfill(data, newline=newline)
 
         wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+
+        unregister = torch._dynamo.decorators._unregister_substitute_in_graph
+        self.addCleanup(unregister, binascii.b2a_base64)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = binascii.b2a_base64
@@ -1538,8 +1679,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         if compile_outer:
 
             class Foo:
-                @compile_decorator
                 @staticmethod
+                @compile_decorator
                 def bar(x):
                     return x.sin()
 
@@ -1566,8 +1707,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         class Foo:
-            @torch.compile(backend=cnt)
             @staticmethod
+            @torch.compile(backend=cnt)
             def bar(x):
                 return x.sin()
 
@@ -1576,6 +1717,32 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(Foo.bar(x), expected)
         self.assertEqual(Foo().bar(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_class_caching_precompile(self):
+        # Regression: @torch.compile on a class under caching_precompile=True
+        # crashed in _TorchDynamoContext.__call__ before reaching the isclass
+        # branch — the caching_precompile block accessed fn.__code__ on the
+        # class and raised `AttributeError: type object 'Foo' has no attribute
+        # '__code__'` at decoration time. Third-party libs decorate autograd
+        # Function subclasses this way at import.
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        class Foo:
+            def __call__(self, x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo()(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        CompiledPartial = torch.compile(backend="eager")(CodelessCallPartial)
+        self.assertEqual(CompiledPartial(torch.sin)(x), expected)
 
     def test_class_methods(self):
         class A:
@@ -2042,6 +2209,57 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         # should not raise error
         with torch.compiler.set_stance("fail_on_recompile"):
             f(torch.randn(3, 3))
+
+    def test_set_stance_fail_on_recompile_with_nonrecursive_disable(self):
+        scale = [1]
+
+        def inner(x):
+            return x * scale[0]
+
+        @torch._dynamo.disable(recursive=False)
+        def skipped(x):
+            return inner(x.cos())
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return skipped(x.sin())
+
+        x = torch.randn(3)
+        f(x)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(f(x), x.sin().cos())
+            scale[0] = 2
+            with self.assertRaisesRegex(RuntimeError, "function name: 'inner'"):
+                f(x)
+
+    def test_refuse_recompile_with_nonrecursive_disable(self):
+        # An installed precompile artifact binds this callback into its context.
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
+        scale = [1]
+
+        def inner(x):
+            return x * scale[0]
+
+        @torch._dynamo.disable(recursive=False)
+        def skipped(x):
+            return inner(x.cos())
+
+        def f(x):
+            return skipped(x.sin())
+
+        x = torch.randn(3)
+        context = torch._dynamo.optimize(backend="eager")
+        context(f)(x)
+        context.callback = _RefuseRecompileCallback(context.callback)
+        refusing = context(f)
+        self.assertEqual(refusing(x), x.sin().cos())
+        scale[0] = 2
+        with self.assertRaisesRegex(_RecompileRefusedError, "function name: 'inner'"):
+            refusing(x)
 
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
@@ -2986,6 +3204,50 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         # invoked again and the first-compile annotation sticks.
         callee(torch.randn(4))
         self.assertEqual(annotations, [])
+
+    def test_nonstrict_trace_bound_method_in_region(self):
+        # `nonstrict_trace` applied to a bound method inside the compiled
+        # region must keep the receiver bound, matching what decorating the
+        # bound method outside the region already does.
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                torch._dynamo.graph_break()
+                return x + self.bias
+
+        obj = Counter(10)
+
+        def fn(x):
+            return torch._dynamo.nonstrict_trace(obj.m)(x)
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nonstrict_trace_bound_method_matches_decorated(self):
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                return x + self.bias
+
+        obj = Counter(10)
+        decorated = torch._dynamo.nonstrict_trace(obj.m)
+
+        def inside(x):
+            return torch._dynamo.nonstrict_trace(obj.m)(x)
+
+        def outside(x):
+            return decorated(x)
+
+        x = torch.randn(3)
+        a = torch.compile(inside, fullgraph=True, backend="aot_eager")(x)
+        b = torch.compile(outside, fullgraph=True, backend="aot_eager")(x)
+        self.assertEqual(a, b)
+        self.assertEqual(a, obj.m(x))
 
 
 instantiate_parametrized_tests(DecoratorTests)

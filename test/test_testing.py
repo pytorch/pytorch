@@ -7,13 +7,17 @@ import functools
 import importlib
 import inspect
 import itertools
+import json
 import math
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest.mock
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -22,10 +26,10 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    TemporaryFileName, getRocmVersion,
+    TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -33,7 +37,7 @@ from torch.testing._internal.common_device_type import \
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal import opinfo
+from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
@@ -488,6 +492,8 @@ if __name__ == '__main__':
             dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
+            elif self.device_type == 'xpu':
+                dtypes = op.dtypesIfXPU
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -577,6 +583,17 @@ class TestFrameworkUtils(TestCase):
             self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
             self.assertEqual(getRocmVersion(), (7, 15, 26306))
 
+    def test_windows_sm89_xfail_excludes_rocm(self):
+        def test_fn():
+            pass
+
+        with unittest.mock.patch.multiple(
+            common_cuda, IS_WINDOWS=True, TEST_WITH_ROCM=True, SM89OrLater=True
+        ):
+            self.assertIs(
+                common_cuda.xfailCUDAIfSM89OrLaterOnWindows(test_fn), test_fn
+            )
+
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
@@ -629,13 +646,178 @@ if __name__ == '__main__':
         self.assertNotIn('OK', stderr.decode('ascii'))
 
 
+# Golden-file tests for the junit XML that CI uploads (tools/stats/upload_test_stats.py).
+# junit_xml_testdata/pytest_suite.py runs for real; its XML is normalized to drop
+# run-to-run noise and compared to expected/. After an intentional change:
+#     REGENERATE_JUNIT_GOLDENS=1 python test/test_testing.py -k TestJunitXml
+_JUNIT_TESTDATA = Path(__file__).resolve().parent / "junit_xml_testdata"
+_REGENERATE_JUNIT_GOLDENS = os.environ.get("REGENERATE_JUNIT_GOLDENS") == "1"
+# Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
+# PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
+# installed torch, and don't write bytecode into test/.
+_JUNIT_CHILD_ENV = {
+    k: v
+    for k, v in os.environ.items()
+    if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+    and not k.startswith("PYTORCH_TEST_")
+} | {"PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def _junit_child_versions() -> dict[str, str | None]:
+    """pytest and pytest-rerunfailures versions as the fixture suite's interpreter and environment see them."""
+    code = (
+        "import importlib.metadata as m, json\n"
+        "def version(dist):\n"
+        "    try:\n"
+        "        return m.version(dist)\n"
+        "    except m.PackageNotFoundError:\n"
+        "        return None\n"
+        "print(json.dumps({d: version(d) for d in ('pytest', 'pytest-rerunfailures')}))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], env=_JUNIT_CHILD_ENV, capture_output=True, text=True, check=True
+    )
+    return json.loads(proc.stdout)
+
+
+def _redact_junit(text: str) -> str:
+    text = re.sub(r"(?:/[\w.+-]+)+/([\w.+-]+\.py)", r"PATH/\1", text)
+    return re.sub(r"(PATH/[\w.+-]+):\d+", r"\1:LINE", text)
+
+
+def _normalize_junit_xml(raw: str) -> str:
+    """Keep structure, attributes and the first line of text; drop run-specific noise."""
+    root = ET.fromstring(raw)
+    for el in root.iter():
+        if "time" in el.attrib:
+            el.set("time", "0.000")
+        for attr in ("timestamp", "hostname"):
+            el.attrib.pop(attr, None)
+        for attr in ("classname", "file", "name", "message", "value", "type"):
+            if attr in el.attrib:
+                el.set(attr, _redact_junit(el.attrib[attr]))
+        lines = [ln.strip() for ln in (el.text or "").splitlines() if ln.strip()]
+        if lines:
+            el.text = _redact_junit(lines[0])
+            if len(lines) > 1:
+                el.text += "\nELIDED"
+        el.tail = None
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="unicode").strip() + "\n"
+
+
+def _count_junit_tags(normalized: str) -> collections.Counter[str]:
+    return collections.Counter(el.tag for el in ET.fromstring(normalized).iter())
+
+
+# The fixture runs as the default config, so its XML doesn't depend on the test
+# config or device; skip the configs and GPU builds that would only repeat it.
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "junit XML shape doesn't depend on the device")
+class TestJunitXml(TestCase):
+    provenance: str
+    golden_skip: str | None
+    has_rerunfailures: bool
+    raw_xml: str
+    output: str
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        versions = _junit_child_versions()
+        if versions["pytest"] is None:
+            raise unittest.SkipTest("the fixture suite needs pytest")
+        cls.has_rerunfailures = versions["pytest-rerunfailures"] is not None
+        # The goldens depend on the pytest and pytest-rerunfailures versions they record.
+        cls.provenance = ", ".join(f"{dist} {v or 'missing'}" for dist, v in versions.items())
+        header = f"<!-- provenance: {cls.provenance} -->"
+        golden = _JUNIT_TESTDATA / "expected" / "pytest.xml"
+        cls.golden_skip = None
+        if not _REGENERATE_JUNIT_GOLDENS and golden.exists() and header not in golden.read_text().splitlines():
+            cls.golden_skip = (
+                f"goldens were generated with other versions than {cls.provenance}; "
+                "rerun with REGENERATE_JUNIT_GOLDENS=1"
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            xml_path = Path(tmp) / "report.xml"
+            # Run in place under test/ so test/conftest.py and pytest.ini apply, as in CI.
+            proc = subprocess.run(
+                [
+                    sys.executable, "-m", "pytest", "junit_xml_testdata/pytest_suite.py",
+                    f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-q",
+                ],
+                cwd=_JUNIT_TESTDATA.parent,
+                env=_JUNIT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if not xml_path.exists():
+                raise RuntimeError(
+                    f"pytest produced no XML (exit {proc.returncode})\n"
+                    f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}"
+                )
+            cls.raw_xml = xml_path.read_text()
+            cls.output = proc.stdout + proc.stderr
+        super().setUpClass()
+
+    def _assert_matches_golden(self, name: str, doc: str) -> None:
+        golden = _JUNIT_TESTDATA / "expected" / f"{name}.xml"
+        if _REGENERATE_JUNIT_GOLDENS:
+            golden.write_text(
+                "<!-- generated by test/test_testing.py -->\n"
+                f"<!-- provenance: {self.provenance} -->\n{doc}"
+            )
+            return
+        if self.golden_skip:
+            self.skipTest(self.golden_skip)
+        self.assertTrue(golden.exists(), f"{golden} is missing; generate it with REGENERATE_JUNIT_GOLDENS=1")
+        expected = "".join(
+            ln for ln in golden.read_text().splitlines(keepends=True) if not ln.startswith("<!--")
+        )
+        self.assertMultiLineEqual(expected, doc, f"{golden} is stale; rerun with REGENERATE_JUNIT_GOLDENS=1")
+
+    def test_pytest_outcome_counts(self) -> None:
+        # Unlike the goldens, these hold on every pytest version.
+        if not self.has_rerunfailures:
+            self.skipTest("the fixture suite needs pytest-rerunfailures")
+        self.assertNotIn("INTERNALERROR", self.output)
+        counts = _count_junit_tags(_normalize_junit_xml(self.raw_xml))
+        # <testsuite tests="14"> counts the teardown error separately, but it merges
+        # into its <testcase>
+        self.assertEqual(counts["testcase"], 13)
+        # assert_failure, raises_non_assertion, xpass_strict, rerun_then_fail
+        self.assertEqual(counts["failure"], 4)
+        # setup, teardown
+        self.assertEqual(counts["error"], 2)
+        # skip, skipif, xfail; non-strict xpass emits nothing
+        self.assertEqual(counts["skipped"], 3)
+        # 2 each for rerun_then_pass and rerun_then_fail
+        self.assertEqual(counts["rerun"], 4)
+
+    def test_pytest_outcome_shapes(self) -> None:
+        self._assert_matches_golden("pytest", _normalize_junit_xml(self.raw_xml))
+
+    def test_sanitize_pytest_xml(self) -> None:
+        with TemporaryFileName() as path:
+            Path(path).write_text(self.raw_xml)
+            sanitize_pytest_xml(path)
+            normalized = _normalize_junit_xml(Path(path).read_text())
+        self._assert_matches_golden("pytest_sanitized", normalized)
+
+
 class TestPeriodicDecorator(TestCase):
+    @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_gates_on_periodic_mode(self, periodic_enabled):
+    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=in_ci,
+            IS_SANDCASTLE=False,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             class TestP(unittest.TestCase):
                 def setUp(self):
@@ -648,19 +830,23 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        self.assertEqual(calls, ["setUp", "test"] if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUp", "test"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
+    @parametrize("on_sandcastle", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_class_gates_setup(self, periodic_enabled):
+    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled):
         calls = []
-        with unittest.mock.patch(
-            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
-            periodic_enabled,
+        with unittest.mock.patch.multiple(
+            "torch.testing._internal.common_utils",
+            IS_CI=False,
+            IS_SANDCASTLE=on_sandcastle,
+            TEST_WITH_PERIODIC=periodic_enabled,
         ):
             @periodic
             class TestP(unittest.TestCase):
@@ -678,11 +864,11 @@ class TestPeriodicDecorator(TestCase):
         result = unittest.TestResult()
         unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
 
+        skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
         self.assertIn("periodic", marks)
-        expected_calls = ["setUpClass", "test", "tearDownClass"]
-        self.assertEqual(calls, expected_calls if periodic_enabled else [])
-        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
+        self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
@@ -692,26 +878,18 @@ class TestPeriodicDecorator(TestCase):
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     def test_periodic_config_selects_only_periodic_tests(self):
         source = """\
-import os
-
 from torch.testing._internal.common_utils import periodic, run_tests, serialTest
 
 def test_plain_pytest():
-    if os.getenv("EXPECT_PERIODIC") == "1":
-        raise AssertionError("plain pytest test ran in periodic mode")
     print("PLAIN_PYTEST_RAN")
 
 @periodic
 def test_periodic_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic pytest test ran outside periodic mode")
     print("PERIODIC_PYTEST_RAN")
 
 @serialTest()
 @periodic
 def test_periodic_serial_pytest():
-    if os.getenv("EXPECT_PERIODIC") != "1":
-        raise AssertionError("periodic serial test ran outside periodic mode")
     print("PERIODIC_SERIAL_PYTEST_RAN")
 
 if __name__ == "__main__":
@@ -742,7 +920,6 @@ if __name__ == "__main__":
 
             def run_test(periodic_mode):
                 test_env = env.copy()
-                test_env["EXPECT_PERIODIC"] = "1" if periodic_mode else "0"
                 if periodic_mode:
                     test_env["TEST_CONFIG"] = "periodic"
                     test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
@@ -766,8 +943,8 @@ if __name__ == "__main__":
         self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
         self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertNotIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
 
     def test_periodic_does_not_leak_across_parametrized_tests(self):
         with unittest.mock.patch(
@@ -789,7 +966,7 @@ if __name__ == "__main__":
 
     @periodic
     def test_periodic_smoke(self):
-        self.assertTrue(TEST_WITH_PERIODIC)
+        self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
@@ -1209,7 +1386,7 @@ class TestAssertCloseMultiDevice(TestCase):
                 fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 class TestAssertCloseErrorMessage(TestCase):
@@ -2334,6 +2511,45 @@ class TestTestParametrization(TestCase):
             raise RuntimeError('Boom')
 
 
+class TestOmitSkippedTests(TestCase):
+    def test_skipped_tests_are_omitted(self):
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", True):
+
+            class TestOmitted(TestCase):
+                def test_runs(self):
+                    pass
+
+                @unittest.skip("never runs here")
+                def test_skipped(self):
+                    pass
+
+                @unittest.skip("never runs here")
+                @parametrize("x", [1, 2])
+                def test_skipped_parametrized(self, x):
+                    pass
+
+                @parametrize("x", [subtest(1, decorators=[unittest.skip("never runs here")]), 2])
+                def test_partly_skipped(self, x):
+                    pass
+
+            instantiate_parametrized_tests(TestOmitted)
+
+        self.assertEqual(
+            _get_test_names_for_test_class(TestOmitted),
+            ['TestOmitted.test_partly_skipped_x_2', 'TestOmitted.test_runs'],
+        )
+
+    def test_skipped_tests_are_kept_by_default(self):
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+
+            class TestKept(TestCase):
+                @unittest.skip("never runs here")
+                def test_skipped(self):
+                    pass
+
+        self.assertEqual(_get_test_names_for_test_class(TestKept), ['TestKept.test_skipped'])
+
+
 class TestTestParametrizationDeviceType(TestCase):
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
@@ -2834,15 +3050,25 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.flydsl.intrinsics",  # depends on flydsl
+                           "torch._native.cutedsl",  # depends on cutlass
+                           "torch._native.ops.reductions.traits",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",  # depends on cutlass
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
+                           "torch._native.ops.norm.rmsnorm_kernels",  # depends on cutlass
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
-                           "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_general",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_rowtile",  # depends on cutlass
+                           "torch._native.ops.reductions.tile",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_coltile",  # depends on cutlass
+                           "torch._native.ops.reductions.ordered",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
@@ -2854,6 +3080,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
+                           "torch._inductor.kernel.flex_gemm.quack_ops",  # depends on cutlass
                            "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:

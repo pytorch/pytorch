@@ -55,8 +55,9 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -171,6 +172,46 @@ def get_gpu_type() -> str:
     return chosen
 
 
+def has_free_threaded_python() -> bool:
+    """
+    Detect if Python is running in free-threaded mode (without GIL).
+
+    Uses the sys._is_gil_enabled() API available in Python 3.13+ with
+    the --disable-gil flag or PEP 703 implementation.
+
+    Returns:
+        bool: True if running free-threaded Python, False otherwise
+    """
+    # Python 3.13+ with free-threading support
+    # Standard Python (always has GIL)
+    return hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled()
+
+
+def should_use_thread_workers() -> bool:
+    """
+    Determine if compilation workers should use threads instead of processes.
+
+    Checks the compile_worker_mode config and nogil availability.
+
+    Returns:
+        bool: True if thread workers should be used, False for process workers
+    """
+    from torch._inductor import config
+
+    mode = config.compile_worker_mode
+
+    if mode == "thread":
+        return True
+    elif mode == "process":
+        return False
+    elif mode == "auto":
+        return has_free_threaded_python()
+    else:
+        raise ValueError(
+            f"Invalid compile_worker_mode: {mode!r}. Expected one of 'thread', 'process', or 'auto'."
+        )
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -195,6 +236,12 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+
+
+# FX metadata marking a compiler-created ``_scaled_mm(..., scale_result=...)``
+# that represents an explicit post-GEMM scalar multiply.  Unlike the public
+# operator argument, this scale must still be applied for BF16 output.
+FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
 
 # Scanned exactly once, when this module is imported. Safe because both
 # registration paths precede any import of inductor: autoloaded out-of-tree
@@ -356,6 +403,39 @@ def _constexpr_type_repr_prefix(value: object) -> str | None:
     return None
 
 
+def sanitize_constexpr_for_repr(
+    value: object, *, canonicalize_namedtuples: bool = True
+) -> object:
+    """Prepare constexpr reprs with Enum values and collision-safe NamedTuples."""
+    if isinstance(value, enum.Enum):
+        return sanitize_constexpr_for_repr(
+            value.value, canonicalize_namedtuples=canonicalize_namedtuples
+        )
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        children = tuple(
+            sanitize_constexpr_for_repr(
+                child, canonicalize_namedtuples=canonicalize_namedtuples
+            )
+            for child in repr_children.values
+        )
+        unchanged = all(
+            child is original for child, original in zip(children, repr_children.values)
+        )
+        if canonicalize_namedtuples and pytree.is_namedtuple_instance(value):
+            cls = cast(type[NamedTuple], type(value))
+            helper_type = namedtuple_type(cls.__name__, tuple(cls._fields))
+            if cls is helper_type and unchanged:
+                return value
+            return helper_type(*children)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if unchanged:
+            return value
+        return repr_children.rebuild(children)
+    return value
+
+
 def _collect_importable_constexpr_types(
     value: object,
     result: dict[str, ImportableConstexprType],
@@ -364,6 +444,16 @@ def _collect_importable_constexpr_types(
     if id(value) in seen:
         return
     seen.add(id(value))
+
+    # NamedTuple tl.constexpr values are reconstructed by
+    # namedtuple_helpers.namedtuple_type (pickle-safe, works for __main__).
+    # Do not emit a user-module import for them.
+    if pytree.is_namedtuple_instance(value):
+        repr_children = get_constexpr_repr_children(value)
+        if repr_children is not None:
+            for child in repr_children.values:
+                _collect_importable_constexpr_types(child, result, seen)
+        return
 
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
@@ -401,7 +491,11 @@ def _collect_importable_constexpr_types(
                         "evaluated as a constructor call. Set repr=False or init=True."
                     )
         root_name = type_qualname.split(".", 1)[0]
-        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+        # Structural NamedTuple aliases are emitted before user-type imports.
+        # Reserve their namespace so an import cannot replace an emitted type.
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES or root_name.startswith(
+            "_NamedTuple_"
+        ):
             raise ImportError(
                 "Triton constexpr value type "
                 f"{type_module}.{type_qualname} requires import name {root_name}, "
@@ -466,7 +560,13 @@ TMA_DESCRIPTOR_SIZE = 128
 #
 # 1. Legality. `make_tensor_descriptor` enforces rank 1-5, a unit innermost
 #    stride, and an innermost *block* extent of at least 16 bytes. This is the
-#    only alignment-shaped rule Triton actually checks.
+#    only alignment-shaped rule Triton actually checks. Note what it does NOT
+#    constrain: the logical innermost *extent*. `can_use_tma` requires that to
+#    be a 16-byte multiple; TDM has no such rule, because a descriptor load
+#    bounds-checks against the logical shape and zero-fills beyond it, so a
+#    block may legally overhang the extent. That is what admits FP16 head_dim
+#    65 (a 130-byte extent under a 128-element block). Do not copy TMA's rule
+#    here: it would reject padded head dimensions that are correct on TDM.
 # 2. Operand policy. Inductor additionally requires 16-byte storage offset and
 #    outer strides. Conservative, not required: it constrains where an operand
 #    may start, and does not establish base-pointer alignment.
@@ -1296,11 +1396,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1346,8 +1441,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -1720,46 +1814,6 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
     return input_devices | out_devices
 
 
-import gc
-
-
-def unload_xpu_triton_pyds() -> None:
-    # unload __triton_launcher.pyd
-    for module_name in list(sys.modules.keys()):
-        if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
-            continue
-        m = sys.modules[module_name]
-        for attr_name in m.__dict__:
-            if attr_name.startswith("triton_"):
-                kernel = getattr(m, attr_name)
-                if isinstance(
-                    kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
-                ):
-                    for result in kernel.compile_results:
-                        if isinstance(
-                            result,
-                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
-                        ):
-                            # pyrefly: ignore [missing-attribute]
-                            run = result.kernel.run
-                            if hasattr(run, "mod"):
-                                run.mod.__del__()
-        del sys.modules[module_name]
-
-    # unload spirv_utils.pyd
-    if "triton.runtime.driver" in sys.modules:
-        driver_mod = sys.modules["triton.runtime.driver"]
-        if hasattr(driver_mod.driver.active, "utils"):
-            utils_cls = type(driver_mod.driver.active.utils)
-            if hasattr(utils_cls, "instance"):
-                del utils_cls.instance
-            elif hasattr(utils_cls, "_instance"):
-                utils_cls._instance = None
-            del driver_mod.driver.active.utils
-
-    gc.collect()
-
-
 _registered_caches: list[Any] = []
 
 
@@ -1842,9 +1896,6 @@ def fresh_cache(
                             }
                         )
         if delete:
-            if is_windows() and torch.xpu.is_available():
-                unload_xpu_triton_pyds()
-
             shutil.rmtree(
                 inductor_cache_dir,
                 # Let's not fail if we can't clean up the temp dir. Also note that for
@@ -2109,13 +2160,19 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.cache
 def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
         device = torch.device(get_gpu_type(), index_or_device)
 
+    # Resolve the threshold outside of the cache so that changing
+    # config.max_autotune_gemm_min_sms after the first call takes effect.
+    return _is_big_gpu(device, config.max_autotune_gemm_min_sms)
+
+
+@functools.cache
+def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
     prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
@@ -2128,7 +2185,9 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = min_sms_override
+    if min_sms is None:
+        min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -2165,13 +2224,15 @@ def is_nvidia_sm100_or_later() -> bool:
     )
 
 
-def get_num_sms() -> int:
+def get_num_sms(two_ctas: bool = False) -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
     if torch.xpu.is_available():
-        return get_max_num_sms()
-    carveout = torch._C._get_sm_carveout_experimental()
-    return get_max_num_sms() - (carveout if carveout is not None else 0)
+        num_sms = get_max_num_sms()
+    else:
+        carveout = torch._C._get_sm_carveout_experimental()
+        num_sms = get_max_num_sms() - (carveout if carveout is not None else 0)
+    return num_sms // 2 * 2 if two_ctas else num_sms
 
 
 def get_tma_workspace_arg(
@@ -2194,12 +2255,74 @@ def get_tma_workspace_arg(
     )
 
 
+def kpack_supported() -> bool:
+    """Whether to enable default kpack > 1 for the current ROCm arch.
+
+    Enabled on gfx908 (CDNA1), gfx90a (CDNA2) and gfx942 (CDNA3): the archs whose
+    MFMA K-extents are modeled by the dtype_size-keyed _MFMA_KDIM tables, so a
+    kpack > 1 pack can be checked against block_k for underfill. gfx950 (CDNA4)
+    is excluded because the Triton compiler forces kpack to 1 regardless
+    (triton/backends/amd/compiler.py), so a kpack > 1 default is a no-op.
+    """
+    return rocm_gfx_arch() in ("gfx908", "gfx90a", "gfx942")
+
+
 def get_default_kpack(block_k: int = 16) -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+    if rocm_gfx_arch() == "gfx942" and block_k <= 16:
         return 1
-    return 2
+    if kpack_supported() and block_k >= 16:
+        return 2
+    return 1
+
+
+# K-extent (kdim) of the CDNA MFMA instruction Triton selects, keyed by
+# (element_byte_width, matrix_instr_nonkdim).
+_MFMA_KDIM_CDNA3 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+# CDNA1 (gfx908) and CDNA2 (gfx90a) share this table: every (dtype_size, nonkdim)
+# entry resolves to the same K-extent on both, so they are merged.
+#   - CDNA2 is exact -- its bf16 MFMA (bf16_1k) matches f16 (16x16x16 / 32x32x8)
+#     and int8 is 16x16x16 / 32x32x8.
+#   - CDNA1 is exact for f16/int8/f32, but its bf16 MFMA is smaller (16x16x8 /
+#     32x32x4). dtype_size=2 cannot distinguish bf16 from f16, so it is keyed to
+#     the larger f16 extent: the underfill check stays conservative for CDNA1
+#     bf16 (may over-prune, never under-validate -> no packing garbage).
+# fp8 has no native instruction on either and is emulated with f16, landing on
+# the same K-extent as int8.
+_MFMA_KDIM_CDNA1_CDNA2 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 16,  # f8/i8    -> 16x16x16
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 8,  # f8/i8    -> 32x32x8
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """MFMA K-extent for the current CDNA arch, None for an unknown
+    (dtype_size, nonkdim) pair. Only gfx908/gfx90a/gfx942 are distinguished since
+    kpack > 1 (the sole consumer) is limited to those archs."""
+    arch = rocm_gfx_arch()
+    if arch in ("gfx908", "gfx90a"):
+        return _MFMA_KDIM_CDNA1_CDNA2.get((dtype_size, matrix_instr_nonkdim))
+    elif arch == "gfx942":
+        return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
+    else:
+        return None
 
 
 def _use_template_for_gpu(
@@ -2222,6 +2345,17 @@ def _use_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
+
+
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
 
 
 def _use_conv_autotune_backend(backend: str) -> bool:
@@ -2553,6 +2687,54 @@ def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
     return _tdm_row_major_from_strides(strides_i)
 
 
+def _tdm_operand_policy_violation(
+    mat: IRNode,
+    accepted_dtypes: OrderedSet[torch.dtype],
+    offset: _IntLike,
+    outer_strides: Sequence[_IntLike],
+) -> str | None:
+    """Apply the shared TDM operand policy, or return why it does not hold.
+
+    Rank, orientation and symbol resolution differ between the dense MM and Flex
+    paths, so each caller prepares those itself and passes the results in. Every
+    check here is guard-free, which lets the callers keep their different guard
+    policies while agreeing on the rules.
+    """
+    from .virtualized import V
+
+    dtype = mat.get_dtype()
+    if dtype not in accepted_dtypes:
+        return f"unsupported dtype {dtype}"
+    if mat.get_name() in V.graph.unaligned_buffers:
+        return "buffer is marked unaligned"
+
+    itemsize = dtype.itemsize
+    aligned = _bytes_aligned
+
+    # Operand policy (rule 2). The innermost request extent (rule 1) depends on
+    # what the caller actually asks for, so it stays with the caller.
+    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
+        return f"offset is not {_TDM_OPERAND_ALIGNMENT_BYTES}-byte aligned"
+    # Redundant under the 128-byte check below, kept because that one is
+    # provisional while this is an independent policy on outer strides.
+    if not all(
+        aligned(s * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES) for s in outer_strides
+    ):
+        return f"outer strides are not {_TDM_OPERAND_ALIGNMENT_BYTES}-byte aligned"
+
+    # Direct-path policy (rule 3): relative only, proves nothing about the
+    # absolute address.
+    if not all(
+        aligned(s * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES)
+        for s in outer_strides
+    ):
+        return (
+            "outer strides are not "
+            f"{_TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES}-byte aligned"
+        )
+    return None
+
+
 def _tdm_operand_compatible(
     mat: IRNode,
     accepted_dtypes: OrderedSet[torch.dtype],
@@ -2560,12 +2742,9 @@ def _tdm_operand_compatible(
     """Check descriptor semantics and the current direct-path selection policy."""
     from .virtualized import V
 
-    dtype = mat.get_dtype()
     sizes = mat.get_size()
     strides = mat.get_stride()
-    if dtype not in accepted_dtypes or len(sizes) != 2 or len(strides) != 2:
-        return False
-    if mat.get_name() in V.graph.unaligned_buffers:
+    if len(sizes) != 2 or len(strides) != 2:
         return False
 
     strides_i = [
@@ -2578,24 +2757,16 @@ def _tdm_operand_compatible(
     if row_major is None:
         return False
     outer_idx = 0 if row_major else 1
-    itemsize = dtype.itemsize
 
-    aligned = _bytes_aligned
-
-    # Operand policy (rule 2). The innermost block extent (rule 1) is checked by
-    # the template config filter, not by constraining the tensor extent here.
-    if not aligned(offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
-        return False
-    # Redundant under the 128-byte check below, kept because that one is
-    # provisional while this is an independent policy on outer strides.
-    if not aligned(strides_i[outer_idx] * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES):
-        return False
-
-    # Direct-path policy (rule 3): relative only, proves nothing about the
-    # absolute address.
-    return aligned(
-        strides_i[outer_idx] * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES
+    violation = _tdm_operand_policy_violation(
+        mat, accepted_dtypes, offset, [strides_i[outer_idx]]
     )
+    if violation is not None:
+        # Covers the shared dtype/alignment policy only; the rank and
+        # orientation exits above return before a reason exists.
+        log.debug("Dense TDM operand rejected for %s: %s", mat.get_name(), violation)
+        return False
+    return True
 
 
 def _guard_tdm_operand_layout(mat: IRNode) -> None:
@@ -2680,6 +2851,104 @@ def commit_tdm_operand_layout(*matrices: IRNode) -> None:
         matrices, _TDM_SUPPORTED_DTYPES, TDMGuardMode.EXACT
     ):
         raise AssertionError("TDM layout commit revalidation failed")
+
+
+def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
+    """Return whether generic tensor descriptor codegen may target AMD TDM."""
+    return (
+        config.triton.use_tensor_descriptor
+        and config.assume_aligned_inputs
+        and _gfx1250_device_prereqs(device)
+    )
+
+
+def use_flex_tdm_descriptor(
+    *matrices: IRNode,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]],
+) -> bool:
+    """Return whether flex operands satisfy TDM descriptor and request constraints."""
+    from .virtualized import V
+
+    if not config.triton.enable_flex_tdm:
+        return False
+    if not matrices or not _gfx1250_device_prereqs(matrices[0].get_device()):
+        return False
+
+    # Checked rather than zipped loosely: zip() truncates, so a short list would
+    # silently leave later operands unvalidated.
+    if len(block_shapes) != len(matrices):
+        raise AssertionError("Expected one block shape per flex descriptor operand")
+
+    def _reject(mat: IRNode, reason: str) -> bool:
+        log.debug("Flex TDM descriptor rejected for %s: %s", mat.get_name(), reason)
+        return False
+
+    def operand_admissible(
+        mat: IRNode, block_shape: Sequence[sympy.Expr | int]
+    ) -> bool:
+        reject = functools.partial(_reject, mat)
+
+        sizes = mat.get_size()
+        strides = mat.get_stride()
+        if len(sizes) != 4 or len(strides) != 4:
+            return reject("expected four-dimensional sizes and strides")
+
+        itemsize = mat.get_dtype().itemsize
+        aligned = _bytes_aligned
+
+        if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
+            return reject("innermost stride is not statically known to be one")
+
+        # Offsets and strides stay symbolic so alignment can be proven without
+        # specializing dynamic sequence lengths; unprovable alignment disables
+        # TDM. The shared policy never resolves a hint, so passing the
+        # unresolved expressions keeps that property.
+        violation = _tdm_operand_policy_violation(
+            mat, _TDM_SUPPORTED_DTYPES, mat.get_layout().offset, strides[:-1]
+        )
+        if violation is not None:
+            return reject(violation)
+
+        if len(block_shape) != 2:
+            return reject("expected a two-dimensional block shape")
+
+        # Rule 1, against the extent actually requested, which is the block
+        # width rather than the logical dim. This is the frontend's minimum,
+        # not an alignment policy.
+        if not V.graph.sizevars.statically_known_geq(
+            block_shape[-1] * itemsize, _TDM_MIN_INNERMOST_REQUEST_BYTES
+        ):
+            return reject(
+                "innermost request extent is not statically known to hold at "
+                f"least {_TDM_MIN_INNERMOST_REQUEST_BYTES} bytes"
+            )
+
+        if not aligned(
+            block_shape[-1] * itemsize,
+            _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
+        ):
+            return reject("block width is not 128-byte aligned")
+
+        return True
+
+    # List-wide and guard-free, as in ``_tdm_operands_compatible``: rejecting a
+    # later operand must not leave guards behind for an earlier one.
+    if not all(
+        operand_admissible(mat, block_shape)
+        for mat, block_shape in zip(matrices, block_shapes)
+    ):
+        return False
+
+    # Bounds only: this does not pin a dynamic sequence length.
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=True
+    ):
+        log.debug(
+            "Flex TDM descriptor rejected for %s: shapes do not fit in int32",
+            [mat.get_name() for mat in matrices],
+        )
+        return False
+    return True
 
 
 def _tma_descriptor_max_offset_fits_in_int32(
@@ -2775,11 +3044,11 @@ def ensure_nv_universal_gemm_available() -> bool:
     """
     try:
         available = importlib.util.find_spec("cutlass.operators") is not None
+        if available:
+            _ensure_fp4_dtype_registered()
+        return available
     except (ImportError, ValueError):
         return False
-    if available:
-        _ensure_fp4_dtype_registered()
-    return available
 
 
 def _ensure_fp4_dtype_registered():
@@ -2968,18 +3237,14 @@ def use_nv_universal_gemm_template(
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
         6. Base pointers are 16-byte aligned
-        7. Shape dimensions are not unbacked symbols
+        7. Shape dimensions are static
 
     Note:
         - Shape and stride constraints are handled internally by
           cutlass.operators.get_operators() which filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
-        - Dynamic shapes are supported as long as they have hints
-          (from example inputs).
     """
-    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
-
     if not ensure_cute_available():
         return False
 
@@ -3000,13 +3265,12 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass.operators can't handle unbacked symbols because it needs to evaluate
-    # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
-    # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
+    # cutlass.operators 0.2 cannot handle symbolic shapes because it hashes
+    # dimensions while evaluating its constraints.
     dims_to_check = [m, n, k]
     if g is not None:
         dims_to_check.append(g)
-    if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
+    if has_free_symbols(dims_to_check):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
@@ -3049,6 +3313,8 @@ def use_decompose_k_choice(
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
         and config.triton.num_decompose_k_splits > 0
+        # Callers rely on False to retain the regular MM fallback.
+        and bool(get_k_splits(m, n, k))
     )
 
 
@@ -3402,19 +3668,34 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    from .codecache import PyCodeCache
+
     remove_quote = kwargs.pop("remove_quote", False)
-    # pyrefly: ignore [bad-argument-type]
-    result, source_codes = run_and_get_code(fn, *args, **kwargs)
-    kernels = []
+    # A module-level kernel's def is renamed and its benchmark harness cut, so take the
+    # source it is compiled from, which every load of a wrapper passes, cache hits too.
+    # Keyed by wrapper: one wrapper can be loaded more than once.
+    module_level: dict[str, list[str]] = {}
+    orig_load = PyCodeCache.load_by_key_path
+
+    def load(key: str, *load_args: Any, **load_kwargs: Any) -> Any:
+        if kernel_sources := load_kwargs.get("kernel_sources"):
+            module_level[key] = [src.strip() for _, src in kernel_sources.values()]
+        return orig_load(key, *load_args, **load_kwargs)
+
+    with mock.patch.object(PyCodeCache, "load_by_key_path", load):
+        # pyrefly: ignore [bad-argument-type]
+        result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels: list[str] = []
     for code in source_codes:
         if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
         else:
-            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
-        if remove_quote:
-            kernels = [kernel[3:-3] for kernel in kernels]
+            scraped = re.findall(r"'''.*?'''", code, re.DOTALL)
+            kernels.extend(k[3:-3] if remove_quote else k for k in scraped)
+    for sources in module_level.values():
+        kernels.extend(sources)
     return result, kernels
 
 
@@ -3641,6 +3922,14 @@ def parallel_num_threads() -> int:
     return threads
 
 
+def fp32_matmul_precision_key() -> str:
+    # Read per-backend fp32 precision instead of
+    # torch.get_float32_matmul_precision(), which raises if the legacy and
+    # per-backend APIs have been mixed.
+    getter = torch._C._get_fp32_precision_getter
+    return f"cuda:{getter('cuda', 'matmul')},mkldnn:{getter('mkldnn', 'matmul')}"
+
+
 @functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
@@ -3650,31 +3939,44 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
-    if torch.xpu.is_available():
-        is_tf32 = torch.backends.mkldnn.allow_tf32
-    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
+def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
+    is_tf32 = False
+    if device.type == "cuda":
+        is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    elif device.type == "xpu":
+        is_tf32 = bool(torch.backends.mkldnn.allow_tf32)
+    device_info_key = _get_device_info_key(device)
+    ds_tops = (
+        datasheet_tops(dtype, is_tf32=is_tf32, device_name=device_info_key)
+        if device_info_key is not None
+        else None
+    )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device.type != "cuda" or not torch.cuda.is_available():
         log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only."
+            "get_device_tflops: no Triton fallback available for %s. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only.",
+            device,
         )
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
-        8,
-        0,
-    )
+    device_idx = device.index
+    if device_idx is None:
+        log.warning("get_device_tflops requires a concrete CUDA device; returning 0.0")
+        return 0.0
+    try:
+        SM80OrLater = torch.cuda.get_device_capability(device_idx) >= (8, 0)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to query CUDA capability for %s; returning 0.0 TFLOPS",
+            device,
+            exc_info=True,
+        )
+        return 0.0
 
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise AssertionError(
@@ -3685,14 +3987,15 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate()
+        # Triton's tflops helpers are dimensioned in kHz; max_clock_rate is MHz.
+        sm_clock = max_clock_rate(device_idx) * 1e3
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            return get_max_tensorcore_tflops(dtype, sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock, device_idx)
         else:
-            return get_max_simd_tflops(torch.float32, sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock, device_idx)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
@@ -3703,14 +4006,99 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32)
 
 
+def get_device_tflops(
+    dtype: torch.dtype, device: torch.device | str | None = None
+) -> float:
+    """
+    Return peak compute throughput without assuming a CUDA device.
+
+    Prefer registered or built-in device information. Devices exposed through
+    PyTorch's ``cuda`` device type, including ROCm, retain the existing Triton
+    fallback; other devices without registered information return zero.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for TFLOPS estimation")
+        return 0.0
+    try:
+        resolved_device = decode_device(resolved_device)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to resolve a device index for %s; returning 0.0 TFLOPS",
+            resolved_device,
+            exc_info=True,
+        )
+        return 0.0
+    return _get_device_tflops(dtype, resolved_device)
+
+
+def _current_accelerator_device() -> torch.device | None:
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return None
+    return torch.device(accelerator.type, torch.accelerator.current_device_index())
+
+
+def _get_device_info_key(device: torch.device) -> str | None:
+    try:
+        properties = get_interface_for_device(device).Worker.get_device_properties(
+            device
+        )
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.debug("Unable to query properties for %s", device, exc_info=True)
+        return None
+    if isinstance(properties, Mapping):
+        name = properties.get("arch")
+        if not isinstance(name, str):
+            name = properties.get("name")
+    else:
+        name = getattr(properties, "name", None)
+    return name if isinstance(name, str) else None
+
+
+@functools.cache
+def _get_device_dram_gbps(device: torch.device) -> float | None:
+    device_info_key = _get_device_info_key(device)
+    ds_bw = (
+        datasheet_dram_bw_gbs(device_info_key) if device_info_key is not None else None
+    )
+    if ds_bw is not None:
+        return ds_bw
+
+    if device.type in ("cuda", "xpu"):
+        from triton.testing import get_dram_gbps
+
+        return get_dram_gbps(device.index)
+
+    log.warning(
+        "No DRAM bandwidth estimate available for %s (reported key: %s); "
+        "returning None",
+        device,
+        device_info_key or "unknown",
+    )
+    return None
+
+
+def get_device_dram_gbps(device: torch.device | str | None = None) -> float | None:
+    """
+    Return DRAM bandwidth in GB/s without assuming a CUDA device.
+
+    Prefer a registered datasheet entry. CUDA and XPU retain the Triton
+    fallback; other unknown accelerators return None.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for DRAM bandwidth estimation")
+        return None
+    return _get_device_dram_gbps(resolved_device)
+
+
 @functools.cache
 def get_gpu_dram_gbps() -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    from .analysis.device_info import datasheet_dram_bw_gbs
-
     ds_bw = datasheet_dram_bw_gbs()
     if ds_bw is not None:
         return ds_bw
@@ -3859,6 +4247,44 @@ def is_output_of_multi_outputs_template(
         and len(input_buf.inputs) == 1
         and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
+
+
+def get_collective_config(node: torch.fx.Node) -> dict[str, Any] | None:
+    """A functional collective's per-collective configuration, if any."""
+    target = node.target
+    if (
+        not isinstance(target, torch._ops.OpOverload)
+        or target.namespace != "_c10d_functional"
+    ):
+        return None
+    for index, arg in enumerate(target._schema.arguments):
+        if arg.name == "config":
+            if index < len(node.args):
+                return node.args[index]  # type: ignore[return-value]
+            return node.kwargs.get("config")  # type: ignore[return-value]
+    return None
+
+
+def _config_value_key(value: Any) -> Any:
+    # Types are part of the key so 1, 1.0 and True stay distinct.
+    if isinstance(value, dict):
+        return (
+            dict,
+            tuple(sorted((k, _config_value_key(v)) for k, v in value.items())),
+        )
+    if isinstance(value, (list, tuple)):
+        return (type(value), tuple(_config_value_key(v) for v in value))
+    return (type(value), value)
+
+
+def collective_config_value_key(config: dict[str, Any] | None) -> Any:
+    """A hashable form of a collective configuration."""
+    return None if config is None else _config_value_key(config)
+
+
+def collective_config_key(node: torch.fx.Node) -> Any:
+    """A hashable form of the collective's configuration."""
+    return collective_config_value_key(get_collective_config(node))
 
 
 def is_collective(
@@ -4078,14 +4504,11 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         self: PythonWrapperCodegen,
         kernel_name: str,
         kernel_code: str,
-        metadata: str | None = None,
-        gpu: bool = True,
-        cpp_definition: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, *args, **kwargs)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -4183,7 +4606,9 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    if dtype == torch.bfloat16 and torch.cuda.is_available():
+    if dtype == torch.bfloat16 and torch.version.hip:
+        return True
+    elif dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
     elif dtype == torch.bfloat16 and torch.xpu.is_available():
         return True
@@ -4463,6 +4888,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    if config.avoid_32bit_indexing_guards:
+        return False
 
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
@@ -4867,6 +5295,22 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
                 return True
 
     return False
+
+
+def fx_node_crosses_devices(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node reads or produces tensors on more than one device.
+
+    A CUDA graph cannot record such an op: whatever it touches on the other
+    device lives outside the graph's memory pool. Meta tensors have no storage
+    and are ignored.
+    """
+    devices: OrderedSet[torch.device] = OrderedSet()
+    for node in (*fx_node.all_input_nodes, fx_node):
+        for val in pytree.tree_leaves(node.meta.get("val")):
+            if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                devices.add(val.device)
+    return len(devices) > 1
 
 
 def is_cudagraph_unsafe_op(node: Operation) -> bool:
@@ -5433,20 +5877,87 @@ def is_collective_op(op_name: str) -> bool:
 
 
 @lru_cache
-def tlx_only_cuda_options() -> list[str]:
+def _tlx_registry() -> Any:
     try:
         # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
+        from triton.language.extra.tlx.inductor import registry
 
-        return tlx_only_cuda_options
-
+        return registry
     except ImportError:
+        return None
+
+
+def _tlx_registry_options(name: str) -> list[str]:
+    from torch._inductor import config
+    from torch._inductor.compile_worker.utils import in_toplevel_process
+
+    # Importing the registry replaces config.inductor_choices_class, which keys
+    # the FX graph cache, so the parent must not import it while TLX is off.
+    # Compile workers do not inherit config.patch'd tlx_mode, so they stay
+    # ungated to avoid dropping enabled TLX options.
+    if config.triton.tlx_mode is None and in_toplevel_process():
         return []
+    registry = _tlx_registry()
+    return [] if registry is None else getattr(registry, name, [])
+
+
+def tlx_only_cuda_options() -> list[str]:
+    return _tlx_registry_options("tlx_only_cuda_options")
+
+
+def forwarded_cuda_compile_options() -> list[str]:
+    """CUDA Triton compile options forwarded from kernel configs.
+
+    ``ctas_per_cga`` is also set by Meta autoWS 2CTA templates, so it must be
+    forwarded even when TLX is off.
+    """
+    return list(dict.fromkeys(["ctas_per_cga", *tlx_only_cuda_options()]))
+
+
+def tlx_only_hip_options() -> list[str]:
+    return _tlx_registry_options("tlx_only_hip_options")
+
+
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP compiler options forwarded to Triton."""
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
 
 
 def _round_up(x: int, y: int) -> int:
     """Round x up to the nearest multiple of y."""
     return ((x + y - 1) // y) * y
+
+
+@functools.lru_cache
+def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> bool:
+    try:
+        version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
+    except ValueError:
+        # Preview builds can carry a non-numeric component; assume the layout
+        # every other arch uses rather than raising from shape inference.
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    if version < min_version:
+        return False
+    return _rocm_native_device_arch_name("cuda").startswith("gfx950")
+
+
+def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
+    """
+    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
+    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    """
+    # is_available() is not stable across a process lifetime, so it must stay
+    # outside the cache -- a False from before device init would otherwise be
+    # remembered and pick the wrong scale layout for the rest of the run.
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False
+    # torch.version.rocm is the SDK release that the kernel's ROCM_VERSION gate
+    # was compiled against; torch.version.hip only tracks it on shipped ROCm.
+    return _prefers_swizzle_32_8_cached(
+        mat_dtype, getattr(torch.version, "rocm", None) or torch.version.hip
+    )
 
 
 def _infer_scale_swizzle_impl(
@@ -5530,13 +6041,29 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD/XPU: no swizzle
+            # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
+            # because the two counts are equal whenever the paddings coincide
+            # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the
+            # layout existing callers already pass. Getting the 32x8 layout
+            # requires passing the swizzle explicitly.
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+            if _prefers_swizzle_32_8(mat_dtype):
+                # AMD gfx950: 32x8-tiled scales
+                expected_numel_a = _round_up(mat_size[0], 32) * _round_up(
+                    ceildiv(K_multiplier * mat_size[1], 32), 8
+                )
+                expected_numel_b = _round_up(mat_size[1], 32) * _round_up(
+                    ceildiv(K_multiplier * mat_size[0], 32), 8
+                )
+                if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                    scale_numel, expected_numel_b
+                ):
+                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8
 
     return None, None
 

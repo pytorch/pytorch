@@ -126,6 +126,8 @@ ignores = [
     "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    # Kineto has its own ROCm backend and must not be hipified.
+    "torch/csrc/profiler/kineto/*",
     # Correct path to generate HIPConfig.h:
     #   CUDAConfig.h.in -> (amd_build) HIPConfig.h.in -> (cmake) HIPConfig.h
     "aten/src/ATen/cuda/CUDAConfig.h",
@@ -176,7 +178,6 @@ hip_platform_files = [
     "third_party/fbgemm/src/EmbeddingSpMDM.cc",
     "third_party/gloo/cmake/Dependencies.cmake",
     "third_party/gloo/gloo/cuda.cu",
-    "third_party/kineto/libkineto/CMakeLists.txt",
     "third_party/nvfuser/CMakeLists.txt",
     "third_party/tensorpipe/cmake/Hip.cmake",
 ]

@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, Optional
+from typing_extensions import deprecated
 from warnings import warn
 
 
@@ -56,6 +57,13 @@ __all__ = [
     "FunctionEvent",
     "MemRecordsAcc",
 ]
+
+_WITH_MODULES_DEPRECATION_MSG = (
+    "with_modules is deprecated and will be removed in a future release; "
+    "stop passing it. It only collects data for TorchScript models, which "
+    "are themselves deprecated, and does nothing in eager mode. Use "
+    "with_stack=True, which records nn.Module events for eager models."
+)
 
 try:
     # Available in Python >= 3.2
@@ -153,8 +161,9 @@ class profile:
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -220,7 +229,7 @@ class profile:
         with_flops=False,
         profile_memory=False,
         with_stack=False,
-        with_modules=False,
+        with_modules=None,
         use_kineto=False,
         use_cpu=True,
         experimental_config=None,
@@ -228,7 +237,10 @@ class profile:
         custom_trace_id_callback=None,
         post_processing_timeout_s: float | None = None,
         activity_filters: dict[ProfilerActivity, set[str]] | None = None,
+        _profiler_extensions: dict[str, str] | None = None,
     ):
+        if with_modules is not None:
+            warn(_WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -244,7 +256,7 @@ class profile:
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
+        self.with_modules = bool(with_modules)
         self.use_cpu = use_cpu
         self.acc_events = acc_events
         if experimental_config is None:
@@ -257,32 +269,6 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if (
-            experimental_config.profiler_metrics
-            or experimental_config.profiler_measure_per_kernel
-        ):
-            warn(
-                "profiler_metrics and profiler_measure_per_kernel are deprecated "
-                "and ignored. These options will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        if experimental_config.adjust_profiler_step:
-            warn(
-                "adjust_profiler_step is deprecated and ignored. It will be "
-                "removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        if with_modules:
-            warn(
-                "with_modules is deprecated and will be removed in a future release. "
-                "It only collects data for TorchScript models, which are themselves "
-                "deprecated, and does nothing in eager mode. Use with_stack=True, "
-                "which records nn.Module events for eager models.",
-                FutureWarning,
-                stacklevel=2,
-            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -291,6 +277,7 @@ class profile:
         self.custom_trace_id_callback = custom_trace_id_callback
         self.post_processing_timeout_s = post_processing_timeout_s
         self.activity_filters = activity_filters or {}
+        self._profiler_extensions = _profiler_extensions or {}
         self.trace_id = ""
         if not self.use_cpu:
             if not use_kineto:
@@ -418,6 +405,7 @@ class profile:
             self.config(create_trace_id=True),
             self.kineto_activities,
             activity_filter=self.activity_filters,
+            profiler_extensions=self._profiler_extensions,
         )
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
@@ -754,7 +742,6 @@ class profile:
                 is_user_annotation=kineto_event.is_user_annotation(),
                 is_python_function=kineto_event.is_python_function(),
                 activity_type=kineto_event.activity_type(),
-                metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
                 typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),
@@ -789,9 +776,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                # Skip OVERHEAD events (profiler-internal host cost):
-                # they do no device work and would otherwise inflate reported device time.
-                if fe.activity_type != "overhead":
+                # Unlinked runtime/driver records and overhead have external_id=0.
+                # Their correlation ids can alias PyTorch operator ids, so do not
+                # use them to look up device work. See KinetoEvent::externalId().
+                if fe.external_id != 0:
                     frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
@@ -1219,16 +1207,24 @@ class emit_nvtx:
         return False
 
 
+@deprecated(
+    "`torch.autograd.profiler.load_nvprof` is deprecated and will be removed "
+    "in PyTorch 2.17.",
+    category=FutureWarning,
+)
 def load_nvprof(path):
     """Open an nvprof trace file and parse autograd annotations.
+
+    .. deprecated::
+        This function is deprecated and will be removed in PyTorch 2.17.
 
     Args:
         path (str): path to nvprof trace
     """
-    return EventList(parse_nvprof_trace(path))
+    return EventList(_parse_nvprof_trace(path))
 
 
-class EnforceUnique:
+class _EnforceUnique:
     """Raises an error if a key is seen more than once."""
 
     def __init__(self):
@@ -1243,7 +1239,34 @@ class EnforceUnique:
         self.seen.add(key)
 
 
+@deprecated(
+    "`torch.autograd.profiler.EnforceUnique` is deprecated and will be removed "
+    "in PyTorch 2.17.",
+    category=FutureWarning,
+)
+class EnforceUnique(_EnforceUnique):
+    """Raises an error if a key is seen more than once.
+
+    .. deprecated::
+        This class is deprecated and will be removed in PyTorch 2.17.
+    """
+
+
+@deprecated(
+    "`torch.autograd.profiler.parse_nvprof_trace` is deprecated and will be "
+    "removed in PyTorch 2.17.",
+    category=FutureWarning,
+)
 def parse_nvprof_trace(path):
+    """Parse autograd annotations from an nvprof trace file.
+
+    .. deprecated::
+        This function is deprecated and will be removed in PyTorch 2.17.
+    """
+    return _parse_nvprof_trace(path)
+
+
+def _parse_nvprof_trace(path):
     import sqlite3
 
     conn = sqlite3.connect(path)
@@ -1266,7 +1289,7 @@ def parse_nvprof_trace(path):
     """
     functions = []
     functions_map = {}
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(marker_query):
         unique.see(row["marker_id"])
         evt = FunctionEvent(
@@ -1296,7 +1319,7 @@ def parse_nvprof_trace(path):
         INNER JOIN CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL AS kernel
             ON kernel.correlationId = runtime.correlationId
     """
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2

@@ -281,7 +281,9 @@ class Guard:
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
-    _unserializable: bool = False
+    # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
+    # serialize_guards refuses it.
+    _unserializable: type | None = None
     _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
@@ -1202,6 +1204,7 @@ class TracingContext:
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["end_lineno"] = self.loc_in_frame_positions.end_lineno
             kwargs["colno"] = self.loc_in_frame_positions.col_offset
             kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
         return traceback.FrameSummary(
@@ -1440,10 +1443,18 @@ class Source:
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
+        """Resolve this source, reporting only errors raised by this source's operation."""
         if self in cache:
             return cache[self]
-        value = eval(self._name_template, globals, locals)
+        try:
+            value = eval(self._name_template, globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, None, error)
+            raise
         cache[self] = value
         return value
 
@@ -1498,6 +1509,8 @@ class ChainedSource(Source):
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1506,9 +1519,18 @@ class ChainedSource(Source):
         while tmpvar in locals:
             tmpvar = f"tmp{counter}"
             counter += 1
-        locals[tmpvar] = self.base.get_value(globals, locals, cache)
-        value = eval(self._name_template.format(tmpvar), globals, locals)
-        del locals[tmpvar]
+        # Resolve dependencies outside the try so on_error sees the exact
+        # Source operation that failed, rather than an enclosing source.
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        locals[tmpvar] = base_value
+        try:
+            value = eval(self._name_template.format(tmpvar), globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        finally:
+            del locals[tmpvar]
         cache[self] = value
         return value
 
@@ -1538,7 +1560,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
@@ -1568,11 +1589,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = [
-                x
-                for x in out
-                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            ]
+            fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
                     (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)

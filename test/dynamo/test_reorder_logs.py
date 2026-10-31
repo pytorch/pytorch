@@ -11,6 +11,7 @@ import torch._dynamo.testing
 from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -59,6 +60,8 @@ def f_warning_once(x):
 
 @instantiate_parametrized_tests
 class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "ignore_method, fn, captured_logger, should_ignore_logger",
         [
@@ -186,6 +189,8 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dont_reorder_print(self):
         def f(x):
             x = x + x
@@ -243,6 +248,47 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(captured.output), 1)
             self.assertIn("moo tensor(6.)", captured.output[0])
             self.assertTrue(same(opt_out, torch.full((3,), 4.0)))
+
+    def test_reorder_callable_logger_method(self):
+        class RegisteredLog:
+            def __init__(self):
+                self.reads = 0
+                self.messages = []
+
+            @property
+            def __func__(self):
+                self.reads += 1
+                if self.reads > 1:
+                    raise RuntimeError("duplicate __func__ lookup")
+                return None
+
+            def __call__(self, message):
+                self.messages.append(message)
+
+        log = RegisteredLog()
+        callable_logger = logging.getLogger(f"{__name__}.reorderable_callable")
+        self.addCleanup(delattr, callable_logger, "info")
+        callable_logger.info = log
+
+        def f(x, logger):
+            logger.info("moo")
+            x.clone()
+            return x
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(3)
+        with torch._dynamo.config.patch(
+            reorderable_logging_functions={log}, ignore_logging_functions=set()
+        ):
+            opt_f = torch.compile(f, backend=counter, fullgraph=True)
+            self.assertIs(opt_f(x, callable_logger), x)
+            self.assertEqual(log.reads, 1)
+            self.assertEqual(log.messages, ["moo"])
+            self.assertIs(opt_f(x, callable_logger), x)
+            self.assertEqual(log.reads, 1)
+            self.assertEqual(log.messages, ["moo", "moo"])
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
 
     @torch._dynamo.config.patch(reorderable_logging_functions={logging.Logger.info})
     def test_dont_reorder_logger_method_kwargs(self):

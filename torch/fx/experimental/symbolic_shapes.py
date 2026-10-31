@@ -909,9 +909,10 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
 def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     """
     Eliminates any integer factor from a given expression.
-    E.g., 6x + 4y reduces to 3x + 2y.
+    E.g., 6x + 4y reduces to 3x + 2y, and an integer reduces to its sign.
 
-    Useful when an expression is == or != to 0.
+    The factor is positive, so the result has the same sign as expr and is
+    zero exactly when expr is. This makes it safe for relations with 0.
     """
 
     def integer_coefficient(x: sympy.Expr) -> int:
@@ -949,7 +950,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
             sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative
         )
     elif expr.is_Integer:
-        return S.One
+        return sympy.sign(expr)
     elif expr.is_Mul:
         return div_by_factor(expr, integer_coefficient(expr))
     return expr
@@ -4223,6 +4224,7 @@ class ShapeEnv:
         self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
+        self._var_to_range_version_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
         # Separate counter tracking only replacement changes, used by
@@ -4439,6 +4441,7 @@ class ShapeEnv:
             "source_name_to_debug_name",
             "_prev_cache_key",
             "_version_counter",
+            "_var_to_range_version_counter",
             "dim_constraints",
             # source locations are OK to diverge
             "var_to_range_sloc",
@@ -4870,7 +4873,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4880,6 +4883,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            self._var_to_range_version_counter,
         )
 
     def _update_version_counter(self) -> None:
@@ -5000,7 +5004,9 @@ class ShapeEnv:
         If the tensor has symbolic sizes from a different ShapeEnv,
         delegates to transfer_symbols_from_foreign_shape_env.
         """
-        fake_mode = getattr(ex, "fake_mode", None)
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+
+        fake_mode = maybe_get_fake_mode(ex) if is_fake_tensor(ex) else None
         if fake_mode is not None and fake_mode.shape_env is not self:
             return self.transfer_symbols_from_foreign_shape_env(
                 ex.size(),
@@ -7407,6 +7413,42 @@ class ShapeEnv:
 
         return None
 
+    def _maybe_evaluate_singleton_int(self, expr: sympy.Basic) -> sympy.Basic | None:
+        # Substituting SingletonInt into a sympy tree rebuilds Mul/Add without
+        # SingletonInt's operator overloads (2*j0 becomes Mul(2, j0) instead of
+        # coeff=2), so only evaluate relations whose sides are integer constants
+        # or positive integer multiples of a SingletonInt-valued symbol.
+        if not isinstance(expr, Relational):
+            return None
+
+        def evaluate_side(term: sympy.Basic) -> sympy.Integer | SingletonInt | None:
+            if isinstance(term, sympy.Integer):
+                return term
+            if not isinstance(term, sympy.Expr):
+                # Boolean operands (e.g. Eq(Eq(u0, 1), True)) have no coefficient.
+                return None
+            coeff, sym = term.as_coeff_Mul()
+            val = self.backed_var_to_val.get(sym)
+            if not isinstance(val, SingletonInt) or not (
+                isinstance(coeff, sympy.Integer) and coeff > 0
+            ):
+                return None
+            return coeff * val
+
+        lhs, rhs = evaluate_side(expr.lhs), evaluate_side(expr.rhs)
+        if lhs is None or rhs is None:
+            return None
+        if not isinstance(lhs, SingletonInt) and not isinstance(rhs, SingletonInt):
+            return None
+
+        try:
+            result = type(expr)(lhs, rhs)
+        except (NotImplementedError, TypeError, ValueError):
+            return None
+        if isinstance(result, sympy.logic.boolalg.BooleanAtom):
+            return result
+        return None
+
     def _maybe_evaluate_range_only(
         self,
         expr: sympy.Basic,
@@ -7466,6 +7508,10 @@ class ShapeEnv:
             )
 
         expr = canonicalize_bool_expr(expr)
+
+        singleton_int_expr = self._maybe_evaluate_singleton_int(expr)
+        if singleton_int_expr is not None:
+            return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
             if not self._resimplify_floor_div_axioms:
@@ -7787,15 +7833,38 @@ class ShapeEnv:
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
             if div_replacements:
-                new_expr = expr.xreplace(div_replacements)
-                new_expr = safe_expand(new_expr)
+                new_expr = safe_expand(expr.xreplace(div_replacements))
                 new_pows = new_expr.atoms(sympy.Pow)
                 new_rationals = new_expr.atoms(sympy.Rational).difference(
                     new_expr.atoms(sympy.Integer)
                 )
-                # divisions simplified away
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
+
+        if expr.has(CleanDiv):
+            # Cancel matching factors in the same product, for example
+            # C * CleanDiv(x, C) -> x.
+            def cancel_clean_div(mul: sympy.Expr) -> sympy.Expr:
+                args = list(mul.args)
+                # Each cancellation shrinks args, so there are O(len(args)) iterations.
+                while True:
+                    for clean_div in args:
+                        if not isinstance(clean_div, CleanDiv):
+                            continue
+                        base, divisor = clean_div.args
+                        if divisor in args:
+                            args.remove(clean_div)
+                            args.remove(divisor)
+                            args.append(base)
+                            break
+                    else:
+                        return sympy.Mul(*args)
+
+            expr = expr.replace(
+                lambda node: node.is_Mul
+                and any(isinstance(arg, CleanDiv) for arg in node.args),
+                cancel_clean_div,
+            )
         return expr
 
     # TODO: overload for allow_none literal
@@ -8005,10 +8074,12 @@ class ShapeEnv:
                 sloc = self._get_sloc()
                 vr_sloc = ValueRangesSLoc(sloc, sloc)
             self.var_to_range_sloc[symbol] = vr_sloc
+            changed = True
         else:
             old = self.var_to_range[symbol]
             new = old & vr
-            if new != old:
+            changed = new != old
+            if changed:
                 if vr_sloc is None:
                     sloc = self._get_sloc()
                     vr_sloc = ValueRangesSLoc(sloc, sloc)
@@ -8018,6 +8089,10 @@ class ShapeEnv:
                     self.var_to_range_sloc[symbol].upper = vr_sloc.upper
                 self.var_to_range[symbol] = new
                 self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
+
+        if changed:
+            self._var_to_range_version_counter += 1
+            self._update_version_counter()
 
         if (v := self.backed_var_to_val.get(symbol)) is not None:
             r = self.var_to_range[symbol]
@@ -9278,9 +9353,6 @@ class ShapeEnv:
                     self.var_to_range[symbol].lower,
                     "range_refined_to_singleton",
                 )
-
-            # Clears the cache, since this update can change the result.
-            self._maybe_evaluate_static.cache_clear()
 
     @lru_cache(maxsize=None)
     @record_shapeenv_event()
