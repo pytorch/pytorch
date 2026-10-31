@@ -976,7 +976,8 @@ def _sfdp_params_check(match):
         query.device == key.device == value.device
     ):
         return False
-    # fused kernels use tf32
+    # The fused fp32 kernel may compute in reduced precision (tf32 on CUDA);
+    # the device interface decides whether fusing fp32 is safe.
     iface = _attention_iface(query.device.type)
     if not iface.is_fp32_attention_fusion_safe(query.dtype):
         if iface.should_warn_tf32_disabled():
@@ -1009,6 +1010,23 @@ def _sfdp_params_check(match):
             # attention mask to fail as expected.
             or attn_mask.dim() == 0
         ):
+            return False
+    # Serialized attention patterns wildcard list[int] arguments as Ignored(),
+    # so softmax reductions (aten.amax.default and aten.sum.dim_IntList) must be
+    # checked to ensure they reduce over the last dimension (-1 or ndim - 1).
+    for node in filter_nodes(match.nodes, aten.amax.default) + filter_nodes(
+        match.nodes, aten.sum.dim_IntList
+    ):
+        if len(node.args) < 2:
+            return False
+        dim = node.args[1]
+        if not isinstance(dim, (list, tuple)) or len(dim) != 1:
+            return False
+        inp = node.args[0]
+        inp_val = inp.meta.get("val") if hasattr(inp, "meta") else None
+        ndim = inp_val.ndim if isinstance(inp_val, torch.Tensor) else None
+        d = dim[0]
+        if d != -1 and (ndim is None or d != ndim - 1):
             return False
     return True
 
@@ -1347,7 +1365,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_24,
                 [g(), g(), g(), b_float()],
                 {},
-                _sfdp_extra_check,
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_25,

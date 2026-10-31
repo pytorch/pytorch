@@ -285,7 +285,8 @@ class DeviceInterface:
         """Queried by inductor's SDPA pattern matcher (_sfdp_params_check) to
         decide whether fusing an fp32 attention pattern is safe. True fuses;
         False keeps the unfused code. Base default allows fusion everywhere;
-        CudaInterface gates it on the tf32 precision knob."""
+        CudaInterface gates it on the tf32 precision knob on CUDA, but not on
+        ROCm, whose fused fp32 kernel computes in full fp32."""
         return True
 
     @staticmethod
@@ -480,6 +481,10 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
+        # On ROCm the fused fp32 kernel (AOTriton mem-efficient attention)
+        # computes in full fp32 regardless of fp32_precision.
+        if torch.version.hip is not None:
+            return True
         return (
             dtype != torch.float32
             or CudaInterface.get_fp32_attention_precision() == "tf32"

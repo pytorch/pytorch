@@ -165,7 +165,16 @@ class TestAttentionFusionDeviceHooks(TestCase):
             self.assertTrue(CudaInterface.is_fp32_attention_fusion_safe(torch.float32))
             matmul.fp32_precision = "ieee"
             self.assertTrue(CudaInterface.is_fp32_attention_fusion_safe(torch.half))
-            self.assertFalse(CudaInterface.is_fp32_attention_fusion_safe(torch.float32))
+            # Under "ieee" CUDA refuses fp32 fusion (its fused kernels use tf32),
+            # while ROCm's fused fp32 kernel computes in full fp32 and fuses.
+            with mock.patch.object(torch.version, "hip", None):
+                self.assertFalse(
+                    CudaInterface.is_fp32_attention_fusion_safe(torch.float32)
+                )
+            with mock.patch.object(torch.version, "hip", "7.0.0"):
+                self.assertTrue(
+                    CudaInterface.is_fp32_attention_fusion_safe(torch.float32)
+                )
             matmul.fp32_precision = "ieee"
             with (
                 mock.patch.object(torch.cuda, "is_available", lambda: True),
