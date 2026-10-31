@@ -3258,6 +3258,16 @@
       ]
     }
   ],
+  "GB2807": [
+    {
+      "Gb_type": "privateuse1 backend missing current_device/set_device",
+      "Context": "torch.{privateuse1_backend_name}.{required}() is missing; {self.value.__name__} requires it",
+      "Explanation": "torch.{privateuse1_backend_name} defines {self.value.__name__} but not {required}(). The Dynamo exchange contract (see the Note(Dynamo) section of torch.utils.rename_privateuse1_backend's docstring) requires both current_device() and set_device()",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0185": [
     {
       "Gb_type": "failed to convert numpy.ndarray to Tensor",

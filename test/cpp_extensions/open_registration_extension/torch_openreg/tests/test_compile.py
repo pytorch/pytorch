@@ -469,6 +469,57 @@ class TestPrivateUse1Routing(TestCase):
             trace_rules._register_privateuse1_backend()
             torch.openreg.set_device(prev_device)
 
+    def test_backend_current_stream_mismatch(self):
+        # The backend's own current_stream is routed by name (the reverse
+        # lookup cannot resolve it for interfaces that define no
+        # current_stream). It must still fail loudly when the symbolic state is
+        # tracking a different device instead of silently returning that
+        # stream.
+        cpu_stream = torch.Stream(device="cpu")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, s):
+            with s:
+                torch.openreg.current_stream()
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            fn(torch.tensor(1.0), cpu_stream)
+        msg = str(ctx.exception)
+        self.assertIn("Dynamo stream mismatch", msg)
+        self.assertIn("openreg", msg)
+        self.assertIn("cpu", msg)
+
+    def test_exchange_device_missing_contract_methods(self):
+        # The exchange handler checks the current_device/set_device contract
+        # before tracing: without set_device the cleanup hook would otherwise
+        # raise an AttributeError after leaving the process on the switched
+        # device. The graph break must fire instead and leave the device
+        # untouched.
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        prev_device = torch.openreg.current_device()
+        orig_set_device = torch.openreg.set_device
+        try:
+            del torch.openreg.set_device
+            TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn():
+                torch.openreg._exchange_device(1)
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+                fn()
+            msg = str(ctx.exception)
+            self.assertIn("privateuse1 backend missing current_device/set_device", msg)
+            self.assertIn("torch.openreg", msg)
+            # The contract check runs before any exchange, so the failed trace
+            # must not have switched the device.
+            self.assertEqual(torch.openreg.current_device(), prev_device)
+        finally:
+            torch.openreg.set_device = orig_set_device
+            TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
 
 if __name__ == "__main__":
     run_tests()

@@ -3099,6 +3099,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     # lookup cannot resolve it.
                     acc = torch.accelerator.current_accelerator()
                     requested_type = acc.type if acc is not None else None
+                elif self.value is backend_current_stream:
+                    # The backend's own function: the reverse lookup only
+                    # matches interfaces that define current_stream, so map it
+                    # by name, like _synchronize_fn_to_device_type does for
+                    # synchronize.
+                    requested_type = privateuse1_backend_name
                 else:
                     # no-arg call or int device index: the device type of the
                     # module whose current_stream was called
@@ -3543,7 +3549,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 for required in ("current_device", "set_device"):
                     if not hasattr(device_mod, required):
                         unimplemented(
-                            gb_type="privateuse1_exchange_missing_contract_methods",
+                            gb_type="privateuse1 backend missing current_device/set_device",
                             context=(
                                 f"torch.{privateuse1_backend_name}.{required}() is "
                                 f"missing; {self.value.__name__} requires it"
