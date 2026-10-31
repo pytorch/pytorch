@@ -148,6 +148,7 @@ range of distributions.
     permute
     permute_copy
     put
+    put_along_dim
     reshape
     row_indices_copy
     row_stack
