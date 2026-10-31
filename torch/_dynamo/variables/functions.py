@@ -428,6 +428,20 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
+    def raise_if_readonly_slot(
+        self, tx: "InstructionTranslatorBase", name: object
+    ) -> None:
+        # func_setattro is PyObject_GenericSetAttr: a READONLY tp_members entry
+        # (e.g. __closure__, __globals__) raises AttributeError on set and delete
+        # instead of landing in __dict__. Writable and unmodeled slots are out of
+        # scope and keep their existing paths.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c
+        if not isinstance(name, str):
+            return
+        entry = self.lookup_tp_getset_member(name)
+        if entry is not None and entry.setter is readonly_setter:
+            readonly_setter(self, tx, None)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -435,6 +449,8 @@ class BaseUserFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__") and args[0].is_python_constant():
+            self.raise_if_readonly_slot(tx, args[0].as_python_constant())
         if name == "__setattr__":
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
@@ -627,6 +643,10 @@ class BaseUserFunctionVariable(VariableTracker):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # __globals__ and __builtins__ are READONLY PyMemberDefs in funcobject.c.
+        # Reads keep the existing lookup (the getter declines); writes raise.
+        "__globals__": Member(lambda s, tx: None, readonly_setter),
+        "__builtins__": Member(lambda s, tx: None, readonly_setter),
     }
 
     def lookup_instance_dict(
@@ -3191,6 +3211,16 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     """
 
     _cpython_type = types.FunctionType
+
+    def raise_if_readonly_slot(
+        self, tx: "InstructionTranslatorBase", name: object
+    ) -> None:
+        # python_type() reports FunctionType for every wrapper, so decide from the
+        # wrapped object: real functions (e.g. script_if_tracing or compiled
+        # functions) and methods reject these writes, while other wrappers such as
+        # functools.lru_cache store them in their __dict__.
+        if isinstance(self.wrapper_obj, (types.FunctionType, types.MethodType)):
+            super().raise_if_readonly_slot(tx, name)
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)

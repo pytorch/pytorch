@@ -3029,6 +3029,109 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_setattr_readonly_function_closure(self):
+        def make_f():
+            a = 12
+
+            def f():
+                return a
+
+            return f
+
+        def try_readonly(f):
+            results = []
+            try:
+                f.__closure__ = f.__closure__
+            except AttributeError:
+                results.append("set")
+            try:
+                del f.__closure__
+            except AttributeError:
+                results.append("del")
+            try:
+                f.__globals__ = {}
+            except AttributeError:
+                results.append("globals")
+            try:
+                f.__builtins__ = {}
+            except AttributeError:
+                results.append("builtins")
+            return results
+
+        def nested(x):
+            return x + 1, try_readonly(make_f())
+
+        def sourced(x, f):
+            return x + 1, try_readonly(f)
+
+        x = torch.ones(1)
+        for fn, args in ((nested, (x,)), (sourced, (x, make_f()))):
+            ref = fn(*args)
+            res = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(ref, res)
+            self.assertEqual(res[1], ["set", "del", "globals", "builtins"])
+
+    def test_setattr_writable_function_attributes(self):
+        def make_g():
+            def g():
+                pass
+
+            return g
+
+        def fn(x, g):
+            g.foo = 1
+            g.__annotations__ = {"x": int}
+            return x + g.foo
+
+        x = torch.ones(1)
+        g_ref, g_res = make_g(), make_g()
+        ref = fn(x, g_ref)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, g_res)
+        self.assertEqual(ref, res)
+        self.assertEqual(g_res.foo, 1)
+        self.assertEqual(g_res.__annotations__, {"x": int})
+
+    def test_setattr_readonly_names_on_lru_cache_wrapper(self):
+        @functools.lru_cache
+        def g():
+            return 1
+
+        def fn(x):
+            try:
+                g.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
+
+        # The lru_cache wrapper is not a FunctionType, so eager allows the write.
+        # Replaying it onto the wrapper's __dict__ is tracked in #202350.
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(ref, res)
+        self.assertTrue(res[1])
+
+    def test_setattr_readonly_names_on_script_if_tracing_wrapper(self):
+        @torch.jit._script_if_tracing
+        def h(x):
+            return x
+
+        def fn(x):
+            try:
+                h.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
+
+        # The wrapper is a real function, so __closure__ stays read-only.
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(res[1])
+
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
     # and turns a failure to trace the comparison into a silent fall back to

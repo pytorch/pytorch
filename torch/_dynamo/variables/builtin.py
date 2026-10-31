@@ -3832,6 +3832,12 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        from .functions import BaseUserFunctionVariable
+
+        # Read-only function members (e.g. __closure__) must raise on every path,
+        # since functions with a source skip call_method below.
+        if isinstance(obj, BaseUserFunctionVariable) and name_var.is_python_constant():
+            obj.raise_if_readonly_slot(tx, name_var.as_python_constant())
         if isinstance(
             obj,
             (
