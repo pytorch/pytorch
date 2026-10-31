@@ -65,9 +65,6 @@ from ..device_interface import (
     get_registered_device_interfaces,
 )
 from ..exc import (
-    DATA_DEPENDENT_LINALG_EXPLANATION,
-    DATA_DEPENDENT_LINALG_GB_TYPE,
-    DATA_DEPENDENT_LINALG_HINTS,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -4327,12 +4324,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             self.value in DATA_DEPENDENT_LINALG_FUNCTIONS
             and tx.in_except_handler_region()
         ):
-            unimplemented(
-                gb_type=DATA_DEPENDENT_LINALG_GB_TYPE,
-                context=f"called {self.value.__name__} inside a try block",
-                explanation=DATA_DEPENDENT_LINALG_EXPLANATION,
-                hints=[*DATA_DEPENDENT_LINALG_HINTS],
-            )
+            tx.raise_data_dependent_linalg_graph_break()
 
         return tensor_variable
 

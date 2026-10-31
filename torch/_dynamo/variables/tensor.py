@@ -52,9 +52,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
-    DATA_DEPENDENT_LINALG_EXPLANATION,
-    DATA_DEPENDENT_LINALG_GB_TYPE,
-    DATA_DEPENDENT_LINALG_HINTS,
     format_user_stack,
     ObservedAttributeError,
     raise_observed_exception,
@@ -1305,12 +1302,7 @@ class TensorVariable(VariableTracker):
         # that drops the handler, since fake tracing cannot see that the
         # input is singular.
         if name in DATA_DEPENDENT_LINALG_METHODS and tx.in_except_handler_region():
-            unimplemented(
-                gb_type=DATA_DEPENDENT_LINALG_GB_TYPE,
-                context=f"called Tensor.{name} inside a try block",
-                explanation=DATA_DEPENDENT_LINALG_EXPLANATION,
-                hints=[*DATA_DEPENDENT_LINALG_HINTS],
-            )
+            tx.raise_data_dependent_linalg_graph_break()
 
         return result
 
