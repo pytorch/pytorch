@@ -853,8 +853,28 @@ class SymInt(
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
-    def __round__(self, ndigits: builtins.int | None = None) -> "SymInt":
-        return self
+    def __round__(self, ndigits: "IntLikeType | None" = None) -> "SymInt":
+        # Match int.__round__: ndigits None or non-negative is the identity,
+        # a negative ndigits rounds to a multiple of 10 ** -ndigits, half to
+        # even (round(25, -1) == 20, round(35, -1) == 40).
+        if ndigits is None:
+            return self
+        if not isinstance(ndigits, (builtins.int, SymInt)):
+            raise TypeError(
+                f"'{type(ndigits).__name__}' object cannot be interpreted as an integer"
+            )
+        # The sign of ndigits selects the code path, so a symbolic ndigits is
+        # specialized here (a guard, or a data-dependent error if unbacked)
+        # rather than traced symbolically.
+        ndigits = builtins.int(ndigits)
+        if ndigits >= 0:
+            return self
+        m = 10 ** (-ndigits)
+        q, r = self // m, self % m
+        # Round up iff 2 * r > m, or 2 * r == m and q is odd. As m is even,
+        # both cases collapse to 2 * r + q % 2 > m, which the floor division
+        # below evaluates to 0 or 1 without introducing a guard.
+        return (q + (2 * r + q % 2) // (m + 1)) * m
 
     def __truediv__(self, other: object) -> "SymFloat":
         if isinstance(other, (builtins.float, SymFloat)):
