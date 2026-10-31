@@ -891,7 +891,8 @@ def _build_installed_forward():
     of compiling, or runs eagerly for a frame the capture ran eagerly (its
     code is in the callback's eager_codes). load(allow_serve_time_compiles=True)
     flips the artifact's _ALLOW_SERVE_TIME_COMPILES = False to True to keep the
-    ordinary compiling callback instead.
+    ordinary compiling callback instead, wrapped so it compiles under
+    CUDAGRAPH_CONFIG.
     """
     import base64
     import importlib
@@ -902,6 +903,7 @@ def _build_installed_forward():
     import torch
     from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
     from torch._dynamo.eval_frame import (
+        _ConfigPatchedCallback,
         _RecompileRefusedError,
         _RefuseRecompileCallback,
         OptimizeContext,
@@ -1003,6 +1005,14 @@ def _build_installed_forward():
                 flagged = [e.eager_fallback and not e.bypassed for _, e in entries]
                 eager = [t for t, f in zip(targets, flagged) if f]
                 context.callback = _RefuseRecompileCallback(context.callback, eager)
+            else:
+                # A serve-time compile traces as the capture's calls did: Dynamo
+                # reads triton.cudagraphs while tracing (it specializes floats
+                # under it). Dynamo calls the callback only to compile, so a call
+                # a cached entry serves, and user code between graphs, run under
+                # the loading process's config.
+                patch = torch._inductor.config._make_closure_patcher(**CUDAGRAPH_CONFIG)
+                context.callback = _ConfigPatchedCallback(context.callback, patch)
             compiled = context(fn)
         with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
             package.install(package_state["backends"])

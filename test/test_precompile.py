@@ -6503,6 +6503,16 @@ def counting_capture_begin(self, *args, **kwargs):
 
 
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
+traces_off = 0
+
+
+@torch._dynamo.callback.on_compile_start
+def count_traces_off(args):
+    global traces_off
+    dynamo = args.callback_trigger == torch._dynamo.callback.CallbackTrigger.DYNAMO
+    traces_off += dynamo and not torch._inductor.config.triton.cudagraphs
+
+
 allow = saved["allow_serve_time_compiles"]
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 training = saved["expected_grad"] is not None
@@ -6510,6 +6520,7 @@ calls = model.calls.clone()
 with (
     contextlib.nullcontext() if training else torch.no_grad(),
     torch._inductor.config.patch(saved["config"]),
+    torch.compiler.set_stance(saved["stance"]),
 ):
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
@@ -6528,6 +6539,7 @@ recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
 compiles = torch._dynamo.utils.counters["frames"]["ok"]
 print("bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
+print("traces_off", traces_off, end=" ")
 print("recorded", recorded, "captured", captured)
 """
 
@@ -6576,6 +6588,8 @@ class TestPrecompileCudagraphs(TestCase):
         config=None,
         skips=None,
         bumps=0,
+        traces_off=None,
+        stance="default",
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
         # by the loading process while serving the artifact, under its env and
@@ -6588,6 +6602,7 @@ class TestPrecompileCudagraphs(TestCase):
             "expected_grad": expected_grad,
             "allow_serve_time_compiles": serve_time,
             "config": config or {},
+            "stance": stance,
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6606,6 +6621,9 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(served["bumps"], bumps)
         if skips is not None:
             self.assertEqual(served["skips"], skips)
+        if traces_off is not None:
+            # Dynamo frames the loading process traced with triton.cudagraphs off.
+            self.assertEqual(served["traces_off"], traces_off)
         return served["recorded"], served["captured"]
 
     @parametrize("how", ["mode", "options"])
@@ -6649,10 +6667,25 @@ class TestPrecompileCudagraphs(TestCase):
         miss = torch.randn(6, 8, device="cuda")
         with torch.no_grad():
             expected = fn(self.model, miss)
+        # Dynamo traces it under the capture's flag too: it reads
+        # triton.cudagraphs while tracing (it specializes floats under it).
         served = self._serve_in_fresh_process(
-            expected, x=miss, serve_time=True, skips=0
+            expected, x=miss, serve_time=True, skips=0, traces_off=0
         )
         self.assertGreater(served[0], 0)
+
+    @parametrize("stance", ["eager_then_compile", "aot_eager_then_compile"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_serve_time_compile_under_a_delayed_stance_keeps_the_config(self, stance):
+        # The stance replaces the compiling callback; the config patch stays.
+        fn = self.mod.calls_breaking_helper
+        self._capture_step(fn, mode="reduce-overhead")
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad():
+            expected = fn(self.model, miss)
+        self._serve_in_fresh_process(
+            expected, x=miss, serve_time=True, traces_off=0, stance=stance
+        )
 
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
         options = {"triton.cudagraphs": True}
