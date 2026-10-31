@@ -2000,7 +2000,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
   // Record start event before NCCL operations
   work->recordStart("gather");
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3)
   if (contiguous_output) {
     void* recvbuff =
         rank_ == root ? output_tensor_list.front().data_ptr() : nullptr;

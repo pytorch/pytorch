@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     parametrize,
     run_tests,
+    subtest,
     TEST_CUDA,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_ROCM,
@@ -58,6 +59,17 @@ try:
     HAS_NCCL_COLL_CONFIG = True
 except ImportError:
     HAS_NCCL_COLL_CONFIG = False
+
+TEST_NCCL4PY = HAS_NCCL_COLL_CONFIG and not torch.version.hip
+requires_nccl4py = unittest.skipUnless(TEST_NCCL4PY, "requires nccl4py 0.5+ and CUDA")
+requires_nccl4py_on_cuda = unittest.skipUnless(
+    HAS_NCCL_COLL_CONFIG or torch.version.hip, "requires nccl4py 0.5+ on CUDA"
+)
+
+
+def coll_config(**kwargs):
+    """NCCLCollConfig on CUDA; the equivalent dict on ROCm, which has no nccl4py."""
+    return NCCLCollConfig(**kwargs) if TEST_NCCL4PY else kwargs
 
 
 @instantiate_parametrized_tests
@@ -795,7 +807,7 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_requires_nccl_2_31(self) -> None:
-        if torch.version.hip is None and torch.cuda.nccl.version() >= (2, 31, 0):
+        if torch.cuda.nccl.version() >= (2, 31, 0):
             self.skipTest("NCCL 2.31+ supports collective configs")
         tensor = torch.ones(4, device=self.device)
         with self.assertRaisesRegex(RuntimeError, "requires NCCL 2.31 or later"):
@@ -804,13 +816,6 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
         dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
         self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
-    # Remove once ncclCollConfig is enabled on ROCm. NCCL2_HAS_COLL_CONFIG
-    # still excludes USE_ROCM; that enablement is a separate change.
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "per-collective ncclCollConfig is compiled out on ROCm; "
-        "enablement is tracked separately",
-    )
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
@@ -824,9 +829,7 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
 
 
 @instantiate_parametrized_tests
-@unittest.skipUnless(
-    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
-)
+@requires_nccl4py_on_cuda
 class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     def _collective(self, op, config, async_op=True, group=None):
         size = self.world_size
@@ -893,11 +896,14 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         ],
     )
     @parametrize("async_op", [False, True])
-    @parametrize("config_kind", ["object", "dict"])
+    @parametrize(
+        "config_kind", [subtest("object", decorators=[requires_nccl4py]), "dict"]
+    )
     def test_collectives(self, op, async_op, config_kind) -> None:
-        config = NCCLCollConfig(min_ctas=1, max_ctas=2, cta_policy=0)
         if config_kind == "dict":
             config = {"min_ctas": 1, "max_ctas": 2, "user_profiler_tag": 3}
+        else:
+            config = NCCLCollConfig(min_ctas=1, max_ctas=2, cta_policy=0)
         self._collective(op, config, async_op)
 
     @requires_nccl()
@@ -934,7 +940,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
                 for tensor in inputs
             ]
             args = (outputs, inputs, opts)
-        opts.config = NCCLCollConfig(min_ctas=1, max_ctas=2)
+        opts.config = coll_config(min_ctas=1, max_ctas=2)
         getattr(self.pg, op)(*args).wait()
         for output, tensor in zip(outputs, inputs):
             if op in ("allreduce_coalesced", "reduce_scatter_single_coalesced"):
@@ -967,7 +973,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     def test_invalid_config(self, config, exc, error) -> None:
         with self.assertRaisesRegex(exc, error):
             self._collective("all_reduce", config)
-        self._collective("all_reduce", NCCLCollConfig())
+        self._collective("all_reduce", coll_config())
 
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
@@ -975,7 +981,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     def test_invalid_algorithm(self) -> None:
         group = dist.new_group(pg_options=self.opts(), device_id=self.device)
         try:
-            config = NCCLCollConfig(alg_selection="invalid_algorithm")
+            config = coll_config(alg_selection="invalid_algorithm")
             with self.assertRaisesRegex(RuntimeError, "NCCL (AllReduce|error)"):
                 self._collective("all_reduce", config, group=group)
         finally:
@@ -990,7 +996,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         tensor = torch.full((size * 2,), float(self.rank), device=self.device)
         output = torch.empty_like(tensor)
         splits = [2] * size
-        dist.all_to_all_single(output, tensor, splits, splits, config=NCCLCollConfig())
+        dist.all_to_all_single(output, tensor, splits, splits, config=coll_config())
         expected = torch.arange(size, device=self.device).repeat_interleave(2)
         self.assertEqual(output, expected.float())
 
@@ -1002,9 +1008,9 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
                 tensor,
                 [splits[self.rank]] * size,
                 splits,
-                config=NCCLCollConfig(),
+                config=coll_config(),
             )
-        self._collective("all_reduce", NCCLCollConfig())
+        self._collective("all_reduce", coll_config())
 
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
@@ -1027,7 +1033,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         }[name]
         args = (tensor,) if name == "all_reduce" else (output, tensor)
         with dist._coalescing_manager(device=self.device if native_batch else None):
-            getattr(dist, name)(*args, config=NCCLCollConfig(max_ctas=2))
+            getattr(dist, name)(*args, config=coll_config(max_ctas=2))
         torch.cuda.synchronize(self.device)
         self.assertEqual(output, expected)
 
@@ -1040,7 +1046,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         tensors = [torch.ones(n, device=self.device) for n in (2, 4, 8)]
         with dist._coalescing_manager(device=self.device):
             for tensor in tensors:
-                dist.all_reduce(tensor, config=NCCLCollConfig(max_ctas=2))
+                dist.all_reduce(tensor, config=coll_config(max_ctas=2))
         torch.cuda.synchronize(self.device)
         for tensor in tensors:
             self.assertEqual(tensor, torch.full_like(tensor, size))
@@ -1066,9 +1072,7 @@ class ProcessGroupNCCL2CollectiveConfigNonblockingTest(
 
 
 @instantiate_parametrized_tests
-@unittest.skipUnless(
-    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
-)
+@requires_nccl4py_on_cuda
 class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl_version((2, 31, 0), "per-collective configuration")
     @parametrize(
@@ -1098,10 +1102,7 @@ class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
         from torch.fx.experimental.proxy_tensor import make_fx
 
         size = self.world_size
-        config = NCCLCollConfig(
-            min_ctas=1,
-            max_ctas=2,
-        )
+        config = coll_config(min_ctas=1, max_ctas=2)
         collective = getattr(dist, name)
 
         class Module(torch.nn.Module):
@@ -1158,7 +1159,7 @@ class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
     def test_config_mutation_recompiles(self):
         from torch._dynamo.testing import CompileCounterWithBackend
 
-        config = NCCLCollConfig(min_ctas=1, max_ctas=2, user_profiler_tag=1)
+        config = coll_config(min_ctas=1, max_ctas=2, user_profiler_tag=1)
 
         def fn(tensor):
             output = tensor.clone()
@@ -1169,7 +1170,10 @@ class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         tensor = torch.ones(4, device=self.device)
         self.assertEqual(compiled(tensor), tensor * self.world_size)
-        config.user_profiler_tag = 2
+        if isinstance(config, dict):
+            config["user_profiler_tag"] = 2
+        else:
+            config.user_profiler_tag = 2
         self.assertEqual(compiled(tensor), tensor * self.world_size)
         self.assertEqual(counter.frame_count, 2)
         torch._dynamo.reset()
