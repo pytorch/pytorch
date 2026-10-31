@@ -171,7 +171,7 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, in
   int64_t m0 = 0;
   math_t m1 = 0;
   math_t m2 = 0;
-  for (int64_t i = n * kVecSize; i < N; ++i) {
+  for (const auto i : c10::irange(n * kVecSize, N)) {
     math_t x = static_cast<math_t>(X[i]);
     const math_t delta = x - m1;
     ++m0;

@@ -318,7 +318,7 @@ inline void pad_remain_row_col_zero(
   auto vec_size = at::vec::Vectorized<scalar_t>::size();
   auto zero = at::vec::Vectorized<scalar_t>(0);
   if (psize > 0) {
-    for (int i = 0; i < rows; i++) {
+    for (const auto i : c10::irange(rows)) {
       int j = 0;
       for (; j < psize - (psize % vec_size); j += vec_size) {
         zero.store(value_ptr + i * ldi + cols + j);
@@ -329,7 +329,7 @@ inline void pad_remain_row_col_zero(
     }
   }
 
-  for (int i = rows; i < prows; i++) {
+  for (const auto i : c10::irange(rows, prows)) {
     int j = 0;
     for (; j < pcols - (pcols % vec_size); j += vec_size) {
       zero.store(value_ptr + i * ldi + j);
@@ -644,7 +644,7 @@ void cpu_flash_attention(
         // And apply scaling factor
         // qk <- qk * scaling + attn_mask
         if (has_attn_mask) {
-          for (int64_t row = 0; row < qBlockSize; ++row) {
+          for (const auto row : c10::irange(qBlockSize)) {
 #if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
               _scale_attn_mask_fusion_kernel(
                 qk_data + row * kvBlockSize,
@@ -677,7 +677,7 @@ void cpu_flash_attention(
         }
         // Update coefficients with Softmax
         accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
-        for (int64_t row = 0; row < qBlockSize; ++row) {
+        for (const auto row : c10::irange(qBlockSize)) {
           if (has_attn_mask) {
             // max per row
             tmp_max = at::vec::reduce_all<accum_t>(
@@ -764,7 +764,7 @@ void cpu_flash_attention(
 
       // dst <- dst / sum[row]
       // reorder MHA output with strides
-      for (int64_t row = 0; row < qBlockSize; ++row) {
+      for (const auto row : c10::irange(qBlockSize)) {
         // Row sums for full masked out rows are 0, we set them to 1
         // in order to avoid NaNs in the output and instead set fully
         // masked out rows to 0
@@ -934,7 +934,7 @@ void cpu_flash_attention_backward(
     at::Tensor dsum = at::empty({qSplitSize}, query.options().dtype(accumulate_dtype));
     accum_t* dsum_data = dsum.data_ptr<accum_t>();
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-      for (int64_t r = 0; r < repeat_factor; r++) {
+      for (const auto r : c10::irange(repeat_factor)) {
         int64_t j = kv_j * repeat_factor + r;
         // rowsum of grad_out * out
         for (int64_t m = 0; m < qSize; m += qSplitSize) {

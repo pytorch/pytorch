@@ -292,22 +292,22 @@ void cpu_max_pool(
   using opmath_t = at::opmath_type<scalar_t>;
   // parallel on dim N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
-    for (int64_t c = begin; c < end; c++) {
+    for (const auto c : c10::irange(begin, end)) {
       const scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_depth * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_depth * output_height * output_width;
 
-      for (int64_t od = 0; od < output_depth; od++) {
+      for (const auto od : c10::irange(output_depth)) {
         int64_t id0 = od * dD - padD;
         int64_t id1 = std::min(id0 + (kD - 1) * dilationD + 1, input_depth);
         while(id0 < 0) { id0 += dilationD; }
 
-        for (int64_t oh = 0; oh < output_height; oh++) {
+        for (const auto oh : c10::irange(output_height)) {
           int64_t ih0 = oh * dH - padH;
           int64_t ih1 = std::min(ih0 + (kH - 1) * dilationH + 1, input_height);
           while(ih0 < 0) { ih0 += dilationH; }
 
-          for (int64_t ow = 0; ow < output_width; ow++) {
+          for (const auto ow : c10::irange(output_width)) {
             int64_t iw0 = ow * dW - padW;
             int64_t iw1 = std::min(iw0 + (kW - 1) * dilationW + 1, input_width);
             while(iw0 < 0) { iw0 += dilationW; }
@@ -434,7 +434,7 @@ void cpu_max_pool_channels_last(
       max_ptr = max_arr.get();
     }
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t id0 = od * dD - padD;
       int64_t ih0 = oh * dH - padH;
       int64_t iw0 = ow * dW - padW;
@@ -513,9 +513,9 @@ void cpu_max_pool_backward(
       const scalar_t* grad_output_ptr = grad_output_data + c * output_depth * output_height * output_width;
       const int64_t * indices_ptr = indices_data + c * output_depth * output_height * output_width;
 
-      for (int64_t od = 0; od < output_depth; od++) {
-        for (int64_t oh = 0; oh < output_height; oh++) {
-          for (int64_t ow = 0; ow < output_width; ow++) {
+      for (const auto od : c10::irange(output_depth)) {
+        for (const auto oh : c10::irange(output_height)) {
+          for (const auto ow : c10::irange(output_width)) {
             // retrieve position of max
             int64_t index = od * output_height * output_width + oh * output_width + ow;
             int64_t maxindex = indices_ptr[index];
@@ -573,13 +573,13 @@ void cpu_max_pool_backward_channels_last(
       const scalar_t* grad_output_ptr = grad_output_data + n * output_depth * output_height * output_width * channels;
       const int64_t* indices_ptr = indices_data + n * output_depth * output_height * output_width * channels;
 
-      for (int64_t od = 0; od < output_depth; od++) {
-        for (int64_t oh = 0; oh < output_height; oh++) {
-          for (int64_t ow = 0; ow < output_width; ow++) {
+      for (const auto od : c10::irange(output_depth)) {
+        for (const auto oh : c10::irange(output_height)) {
+          for (const auto ow : c10::irange(output_width)) {
             const scalar_t* gout = grad_output_ptr + (od * output_height * output_width + oh * output_width + ow) * channels;
             const int64_t* ind = indices_ptr + (od * output_height * output_width + oh * output_width + ow) * channels;
             // TODO: gcc vectorization
-            for (int64_t c = 0; c < channels; c++) {
+            for (const auto c : c10::irange(channels)) {
               int64_t maxindex = ind[c];
               if (maxindex != -1) {
                 grad_input_ptr[maxindex * channels + c] += gout[c];

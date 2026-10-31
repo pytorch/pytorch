@@ -406,7 +406,7 @@ void argmax_kernel_impl(TensorIterator &iter) {
         scalar_t* self_data = (scalar_t*)self_data_bytes;
 
         arg_t acc = arg_t(lower_bound<scalar_t>(), 0);
-        for (int64_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           acc = op.reduce(acc, self_data[i], i);
         }
         result_data[0] = acc.second;
@@ -430,7 +430,7 @@ void argmin_kernel_impl(TensorIterator &iter) {
         scalar_t* self_data = (scalar_t*)self_data_bytes;
 
         arg_t acc = arg_t(upper_bound<scalar_t>(), 0);
-        for (int64_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           acc = op.reduce(acc, self_data[i], i);
         }
         result_data[0] = acc.second;

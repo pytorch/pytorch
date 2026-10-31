@@ -50,8 +50,8 @@ void unfolded2d_acc(
     int64_t output_width) {
   at::parallel_for(0, n_input_plane, 0, [&](int64_t start, int64_t end) {
     for (const auto nip : c10::irange(start, end)) {
-      for (int64_t kh = 0; kh < kH; kh++) {
-        for (int64_t kw = 0; kw < kW; kw++) {
+      for (const auto kh : c10::irange(kH)) {
+        for (const auto kw : c10::irange(kW)) {
           scalar_t* src = finput_data +
               nip * ((size_t)kH * kW * output_height * output_width) +
               kh * ((size_t)kW * output_height * output_width) +
@@ -59,7 +59,7 @@ void unfolded2d_acc(
           scalar_t* dst =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
-            for (int64_t y = 0; y < output_height; y++) {
+            for (const auto y : c10::irange(output_height)) {
               auto iy = y * dH - padH + kh;
               if (iy < 0 || iy >= input_height) {
               } else {
@@ -75,7 +75,7 @@ void unfolded2d_acc(
                       src + (size_t)y * output_width + lpad,
                       output_width - lpad - rpad);
                 } else {
-                  for (int64_t x = 0; x < output_width; x++) {
+                  for (const auto x : c10::irange(output_width)) {
                     auto ix = x * dW - padW + kw;
                     if (ix < 0 || ix >= input_width) {
                     } else {
@@ -87,7 +87,7 @@ void unfolded2d_acc(
               }
             }
           } else {
-            for (int64_t y = 0; y < output_height; y++) {
+            for (const auto y : c10::irange(output_height)) {
               auto iy = y * dH + kh;
               auto ix = 0 + kw;
               if (dW == 1) {
@@ -98,7 +98,7 @@ void unfolded2d_acc(
                     src + (size_t)y * output_width,
                     output_width);
               } else {
-                for (int64_t x = 0; x < output_width; x++) {
+                for (const auto x : c10::irange(output_width)) {
                   scalar_t* dst_slice =
                       dst + (size_t)iy * input_width + ix + x * dW;
                   *dst_slice = *dst_slice + src[(size_t)y * output_width + x];
@@ -128,14 +128,14 @@ void unfolded2d_acc_channels_last(
     int64_t output_height,
     int64_t output_width) {
 
-  for (int64_t y = 0; y < output_height; y++) {
-    for (int64_t x = 0; x < output_width; x++) {
+  for (const auto y : c10::irange(output_height)) {
+    for (const auto x : c10::irange(output_width)) {
       scalar_t* src = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
       scalar_t* dst = input_data;
 
       if (padW > 0 || padH > 0) {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH - padH + kh;
             int64_t ix = x * dW - padW + kw;
             if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
@@ -150,8 +150,8 @@ void unfolded2d_acc_channels_last(
           }
         }
       } else {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH + kh;
             int64_t ix = x * dW + kw;
             scalar_t* dst_slice = dst + iy * input_width * n_input_plane + ix * n_input_plane;
@@ -254,7 +254,7 @@ void unfolded2d_copy(
           const scalar_t* src =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
-            for (int64_t y = 0; y < output_height; y++) {
+            for (const auto y : c10::irange(output_height)) {
               auto iy = y * dH - padH + kh;
               if (iy < 0 || iy >= input_height) {
                 memset(
@@ -288,7 +288,7 @@ void unfolded2d_copy(
                           sizeof(scalar_t) * rpad);
                   }
                 } else {
-                  for (int64_t x = 0; x < output_width; x++) {
+                  for (const auto x : c10::irange(output_width)) {
                     auto ix = x * dW - padW + kw;
                     if (ix < 0 || ix >= input_width)
                       memset(
@@ -305,7 +305,7 @@ void unfolded2d_copy(
               }
             }
           } else {
-            for (int64_t y = 0; y < output_height; y++) {
+            for (const auto y : c10::irange(output_height)) {
               auto iy = y * dH + kh;
               auto ix = 0 + kw;
               if (dW == 1)
@@ -314,7 +314,7 @@ void unfolded2d_copy(
                     src + (size_t)iy * input_width + ix,
                     sizeof(scalar_t) * output_width);
               else {
-                for (int64_t x = 0; x < output_width; x++)
+                for (const auto x : c10::irange(output_width))
                   memcpy(
                       dst + (size_t)y * output_width + x,
                       src + (size_t)iy * input_width + ix + x * dW,
@@ -352,8 +352,8 @@ void unfolded2d_copy_channels_last(
       const scalar_t* src = input_data;
 
       if (padW > 0 || padH > 0) {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH - padH + kh;
             int64_t ix = x * dW - padW + kw;
             if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
@@ -368,8 +368,8 @@ void unfolded2d_copy_channels_last(
           }
         }
       } else {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH + kh;
             int64_t ix = x * dW + kw;
             memcpy(dst + kh * kW * n_input_plane + kw * n_input_plane,
