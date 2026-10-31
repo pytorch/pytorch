@@ -1050,7 +1050,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 if n.target is torch.ops.higher_order.with_effects
             )
             self.assertEqual(guarded_effect.args[1], my_add_functional._opoverload)
-            self.assertIn(aten.copy_.default, [n.target for n in guarded_gm.graph.nodes])
+            self.assertIn(
+                aten.copy_.default, [n.target for n in guarded_gm.graph.nodes]
+            )
 
         finally:
             if my_add_functional._opoverload in inplaceable_ops:
