@@ -738,7 +738,8 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
 // Inputs group_gemm_ck_tile handles; anything else falls through to the next grouped mm path.
 static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const auto dtype = mat_a.scalar_type();
-  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf)) { // no dtype mixing yet
+  const bool fp32_configs = dtype == at::kFloat && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
+  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf && !fp32_configs)) { // no dtype mixing yet
     return false;
   }
   const bool a_is_2d = mat_a.dim() == 2;
@@ -746,6 +747,13 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
   const int64_t group_count = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : mat_a.size(0));
   if (group_count > 1024) {
     return false;
+  }
+  // group_gemm_ck_tile stores sizes and leading dims in 32 bits; a 3D operand's group stride may be wider.
+  constexpr int64_t int32_max = std::numeric_limits<int32_t>::max();
+  for (const Tensor* t : {&mat_a, &mat_b}) {
+    if (t->size(-2) > int32_max || t->size(-1) > int32_max || t->stride(-2) > int32_max || t->stride(-1) > int32_max) {
+      return false;
+    }
   }
   // After group_gemm_ck_tile's layout canonicalization, the contiguous dim of A and B must be 16-byte aligned.
   const int64_t M = mat_a.size(-2), K = mat_a.size(-1), N = mat_b.size(-1);
@@ -790,13 +798,17 @@ std::optional<c10::ScalarType> out_dtype) {
   // Keep use_fast_path as false till ck kernel perf is optimal.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 #if defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  if (at::globalContext().rocmAllowGroupGemmCkTile() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})
-      && ck_tile_group_gemm_supported(mat_a, mat_b, offs)) {
+  const bool use_ck_tile = at::globalContext().rocmAllowGroupGemmCkTile() &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"}) && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
+  // ck_tile zeroes the 2D x 2D groups with K == 0 itself, so it skips the zero-filled allocation the other paths need.
+  Tensor out = use_ck_tile
+      ? at::empty(compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first, mat_a.options().dtype(out_dtype_))
+      : create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  if (use_ck_tile) {
     at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
   } else if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
@@ -804,6 +816,7 @@ std::optional<c10::ScalarType> out_dtype) {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
 #else
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
 #endif //USE_ROCM_CK_GEMM
 #endif //ifndef USE_ROCM

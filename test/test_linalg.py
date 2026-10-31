@@ -12152,6 +12152,7 @@ _GROUPED_MM_CASES = [
     subtest(((16, 256), (32, 256), [64, 128, 192, 256], True), name="2d_2d_regular"),
     subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
     subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
+    subtest(((16, 256), (32, 256), [0, 128, 128, 256], False), name="2d_2d_zero_size"),
     subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
     subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
     subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
@@ -12165,6 +12166,22 @@ _GROUPED_MM_CASES = [
     subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
     subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
     subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
+]
+
+# ROCm ck_tile picks the tile config with the lowest load cost, so only shapes with more output tiles than CUs select
+# the large ones. Together with _GROUPED_MM_CASES these select every gfx950 and gfx942 candidate config: 2d_3d cases
+# run forward (b row-major) and dX (b column-major) configs, 2d_2d cases dW configs. Contractions stay small, and the
+# eight-wave configs see 2, 3 and 5 K tiles.
+_GROUPED_MM_CK_TILE_CASES = [
+    subtest(((256, 64), (2, 1024, 64), [128, 256], False), name="ck_tile_2d_3d_n1024"),
+    subtest(((2048, 64), (2, 5120, 64), [1024, 2048], False), name="ck_tile_2d_3d_n5120"),
+    subtest(((768, 64), (2, 8192, 64), [384, 768], False), name="ck_tile_2d_3d_n8192"),
+    subtest(((1536, 64), (2, 2816, 64), [768, 1536], False), name="ck_tile_2d_3d_n2816"),
+    subtest(((1536, 64), (2, 2880, 64), [768, 1536], False), name="ck_tile_2d_3d_n2880"),
+    subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
+    subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
+    subtest(((2048, 256), (4096, 256), [96, 256], False), name="ck_tile_2d_2d_n4096"),
+    subtest(((2048, 256), (2880, 256), [96, 256], False), name="ck_tile_2d_2d_n2880"),
 ]
 
 
@@ -12245,8 +12262,10 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
-    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES)
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    # ck_tile sums K in one fp32 accumulator; on long K that has up to 2x the rounding error of hipBLASLt kernels that split K
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})
     def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
                                        backward, dtype):
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
@@ -12254,6 +12273,19 @@ class TestGroupedMM(TestCase):
         env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK_TILE"}[backend]
         with mock.patch.dict(os.environ, {env_var: "1"}):
             self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.bfloat16)
+    def test_grouped_gemm_ck_tile_large_stride_fallback(self, device, dtype):
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        # A stride ck_tile can't hold in int32 must fall back rather than error; the size-one dim avoids huge storage.
+        a = torch.randn(16, device=device, dtype=dtype).as_strided((1, 1, 16), (16, 2**32, 1))
+        b = self._make_grouped_mm_matrix((17, 16), True, device, dtype)
+        offs = torch.tensor([17], device=device, dtype=torch.int32)
+        with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
+            self.grouped_mm_helper(a, b, offs, backward=False)
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
