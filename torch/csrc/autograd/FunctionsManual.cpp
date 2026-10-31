@@ -1118,12 +1118,30 @@ Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   return grad.flip(dim).cumsum(dim).flip(dim);
 }
 
+// Empty dim means reduce over all axes. The returned vector must outlive
+// any IntArrayRef bound to it (IntArrayRef is a view, so it cannot own
+// a moved-from local).
+static std::vector<int64_t> logsumexp_all_dims_if_empty(
+    const Tensor& self,
+    IntArrayRef dim) {
+  if (!dim.empty() || self.dim() == 0) {
+    return {};
+  }
+  std::vector<int64_t> all(self.dim());
+  std::iota(all.begin(), all.end(), 0);
+  return all;
+}
+
 Tensor logsumexp_backward(
     Tensor grad,
     const Tensor& self,
     Tensor result,
     IntArrayRef dim,
     bool keepdim) {
+  auto dim_storage = logsumexp_all_dims_if_empty(self, dim);
+  if (!dim_storage.empty()) {
+    dim = dim_storage;
+  }
   if (!keepdim && self.dim() != 0) {
     grad = unsqueeze_multiple(grad, dim, self.dim());
     result = unsqueeze_multiple(result, dim, self.dim());
@@ -7530,6 +7548,10 @@ Tensor logsumexp_jvp(
     const Tensor& self_t,
     IntArrayRef dim,
     bool keepdim) {
+  auto dim_storage = logsumexp_all_dims_if_empty(self_p, dim);
+  if (!dim_storage.empty()) {
+    dim = dim_storage;
+  }
   // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {

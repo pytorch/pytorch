@@ -343,7 +343,7 @@ Example::
 logsumexp = _add_docstr(
     _special.special_logsumexp,
     r"""
-logsumexp(input, dim, keepdim=False, *, out=None)
+logsumexp(input, dim=None, keepdim=False, *, out=None)
 
 Alias for :func:`torch.logsumexp`.
 """.format(**multi_dim_common),
