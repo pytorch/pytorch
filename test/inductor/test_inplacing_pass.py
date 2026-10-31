@@ -177,7 +177,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         actual = torch.compile(f)(actual_x, src)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_x, expected_x)
-        self.assertNotEqual(actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr())
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(), actual_x.untyped_storage().data_ptr()
+        )
 
     def test_index_put_result_does_not_alias_mutated_input(self):
         def f(x, idx, val):
