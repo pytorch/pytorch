@@ -202,7 +202,6 @@
   "test/distributed/test_c10d_nccl2.py",
   "test/distributed/test_c10d_nccl4py.py",
   "test/distributed/test_c10d_nccl_single_rank.py",
-  "test/distributed/test_c10d_object_collectives.py",
   "test/distributed/test_c10d_ops_nccl.py",
   "test/distributed/test_c10d_p2p.py",
   "test/distributed/test_c10d_process_group.py",
