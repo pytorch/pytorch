@@ -5,10 +5,14 @@
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/DnnlExt.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <c10/core/ScalarType.h>
+#include <c10/xpu/XPUFunctions.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
+#include <cstdint>
+#include <numeric>
 
 namespace at::native::onednn {
 at::Tensor broadcast_bias2D(
@@ -715,6 +719,202 @@ sycl::event scaled_matmul(
   sycl::event matmul_fwd_event =
       dnnl::sycl_interop::execute(matmul_p, stream, args);
   return matmul_fwd_event;
+}
+
+static inline void set_quant_primitive_attr(
+    primitive_attr& pattr,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    const memory::dims& groups,
+    bool is_wei) {
+  const int arg = is_wei ? DNNL_ARG_WEIGHTS : DNNL_ARG_SRC;
+  pattr.set_scales(
+      arg, /* mask */ (1 << 0) + (1 << 1), groups, get_onednn_dtype(scale));
+  pattr.set_zero_points(
+      arg,
+      /* mask */ (1 << 0) + (1 << 1),
+      groups,
+      get_onednn_dtype(zero_point));
+}
+
+void matmul_int4(
+    Tensor& result,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const std::optional<Tensor>& mat1_scale,
+    const Tensor& mat2_scale,
+    const std::optional<Tensor>& mat1_zero_point,
+    const Tensor& mat2_zero_point,
+    int64_t group_size,
+    const std::optional<Tensor>& bias) {
+  bool quantized_act = mat1_scale.has_value();
+  TORCH_CHECK(
+      quantized_act == mat1_zero_point.has_value(),
+      "matmul_int4: mat1_scale and mat1_zero_point must be defined together");
+
+  auto a_sz = mat1.sizes();
+  auto c_sz = result.sizes();
+
+  const int m =
+      std::reduce(a_sz.begin(), a_sz.end() - 1, 1, std::multiplies<int64_t>());
+  const int n = *(c_sz.end() - 1);
+  const int k = *(a_sz.end() - 1);
+
+  const int64_t ldb = mat2.strides()[mat2.dim() - 2] * 8; // for int4 matmul
+  const int64_t lda = mat1.strides()[mat1.dim() - 2];
+  const int64_t ldc = result.strides()[result.dim() - 2];
+
+  bool with_bias = bias.has_value() && bias->defined();
+  bias_type_t b_type = with_bias ? bias_type_t::n : bias_type_t::none;
+  trans_type_t tt = trans_type_t::nt; // only support nt for int4 matmul
+
+  joint_dtypes_t jd;
+  if (mat1.scalar_type() == at::ScalarType::Half) {
+    jd = joint_dtypes_t::f16_int4;
+  } else if (mat1.scalar_type() == at::ScalarType::BFloat16) {
+    jd = joint_dtypes_t::bf16_int4;
+  } else if (mat1.scalar_type() == at::ScalarType::Char) {
+    jd = joint_dtypes_t::s8_int4;
+  } else if (mat1.scalar_type() == at::ScalarType::Byte) {
+    jd = joint_dtypes_t::u8_int4;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Unsupported data type for int4 matmul: ", mat1.scalar_type());
+  }
+  TORCH_CHECK(
+      quantized_act ==
+          (jd == joint_dtypes_t::s8_int4 || jd == joint_dtypes_t::u8_int4),
+      "matmul_int4: mat1_scale/mat1_zero_point must be provided if and only if mat1 is int8 or uint8");
+
+  auto f_attr = [&](primitive_attr& pattr) {
+    pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+    if (jd == joint_dtypes_t::f16_int4) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
+    } else if (jd == joint_dtypes_t::bf16_int4) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
+    }
+
+    set_quant_primitive_attr(
+        pattr, mat2_scale, mat2_zero_point, {group_size, 1}, /* is_wei */ true);
+    if (quantized_act) {
+      set_quant_primitive_attr(
+          pattr, *mat1_scale, *mat1_zero_point, {1, k}, /* is_wei */ false);
+    }
+
+#if ONEDNN_SUPPORT_DETERMINISTIC
+    if (at::globalContext().deterministicAlgorithms() ||
+        at::globalContext().deterministicMkldnn()) {
+      pattr.set_deterministic(true);
+    }
+#endif
+  };
+
+  auto device_id = c10::xpu::current_device();
+  auto& matmul_ext = matmul_primitive_create_and_cache(
+      jd,
+      tt,
+      b_type,
+      m,
+      n,
+      k,
+      lda,
+      ldb,
+      ldc,
+      device_id,
+      f_attr,
+      mat2_scale.scalar_type(),
+      get_onednn_dtype(result),
+      group_size);
+
+  auto& engine = GpuEngineManager::Instance().get_engine();
+
+  // set scale and zero point for matmul args
+  matmul_ext.set_attribute(
+      DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, mat2_scale.data_ptr(), [&]() {
+        return make_onednn_memory(
+            get_onednn_md(mat2_scale), engine, mat2_scale.data_ptr());
+      });
+
+  // set zp_md for asymmetric quantization
+  matmul_ext.set_attribute(
+      DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
+      mat2_zero_point.data_ptr(),
+      [&]() {
+        return make_onednn_memory(
+            get_onednn_md(mat2_zero_point), engine, mat2_zero_point.data_ptr());
+      });
+
+  if (quantized_act) {
+    matmul_ext.set_attribute(
+        DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, mat1_scale->data_ptr(), [&]() {
+          return make_onednn_memory(
+              get_onednn_md(*mat1_scale), engine, mat1_scale->data_ptr());
+        });
+
+    matmul_ext.set_attribute(
+        DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC,
+        mat1_zero_point->data_ptr(),
+        [&]() {
+          return make_onednn_memory(
+              get_onednn_md(*mat1_zero_point),
+              engine,
+              mat1_zero_point->data_ptr());
+        });
+  }
+
+  // set general args
+  std::vector<std::pair<int, void*>> arg_handles;
+  arg_handles.reserve(8);
+
+  arg_handles.emplace_back(DNNL_ARG_SRC, mat1.data_ptr());
+  arg_handles.emplace_back(DNNL_ARG_WEIGHTS, mat2.data_ptr());
+  arg_handles.emplace_back(DNNL_ARG_DST, result.data_ptr());
+
+  Tensor bias_contig;
+  if (with_bias) {
+    bias_contig = bias->contiguous();
+    arg_handles.emplace_back(DNNL_ARG_BIAS, bias_contig.data_ptr());
+  }
+
+  int scratchpad_size = matmul_ext.get_scratchpad_size();
+  Tensor scratchpad_tensor = at::empty(
+      {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
+  arg_handles.emplace_back(DNNL_ARG_SCRATCHPAD, scratchpad_tensor.data_ptr());
+
+  auto& strm = GpuStreamManager::Instance().get_stream();
+  auto qint4_matmul_event =
+      matmul_ext.execute(strm, engine, std::move(arg_handles));
+}
+
+void woq_matmul_int4(
+    Tensor& result, // torchao: [M, K], dtype: fp16,bf16
+    const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
+    const Tensor& mat2_, // torchao quantized weight, [N, K/8], dtype: uint4x8
+    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16,fp32
+    const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
+    int64_t group_size) {
+  size_t dims = result.dim();
+  TORCH_CHECK(
+      dims == 2, "INT4 matmul at XPU only works with 2D input, got ", dims);
+  TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
+
+  const int device_id = c10::xpu::current_device();
+  at::Device cur_device = at::Device(at::kXPU, device_id);
+  TORCH_CHECK(
+      cur_device == mat1_.device(),
+      "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
+
+  matmul_int4(
+      result,
+      mat1_,
+      mat2_,
+      /*mat1_scale=*/std::nullopt,
+      scale,
+      /*mat1_zero_point=*/std::nullopt,
+      zp,
+      group_size,
+      /*bias=*/std::nullopt);
 }
 
 } // namespace at::native::onednn
