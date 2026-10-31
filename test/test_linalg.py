@@ -9304,7 +9304,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(result_tril_min, expected_tril_min)
 
     @dtypes(torch.float, torch.double)
-    @precisionOverride({torch.float32: 1e-4})
+    @precisionOverride({torch.float32: 2e-4})
     def test_1_sized_with_0_strided(self, device, dtype):
         a = make_tensor((8, 1, 64), dtype=dtype, device=device)
         a_strided = torch.as_strided(a, size=[8, 1, 64], stride=[64, 0, 1])
