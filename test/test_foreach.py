@@ -1741,6 +1741,22 @@ class TestForeachDevice(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
+    def test_foreach_copy_mismatched_list_lengths(self, device):
+        one = [torch.ones(2, device=device)]
+        three = [torch.zeros(2, device=device) for _ in range(3)]
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 3"
+        ):
+            torch.ops.aten._foreach_copy(one, three, False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor lists must have the same number of tensors, got 3 and 1"
+        ):
+            torch.ops.aten._foreach_copy(three, one, False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor list must have at least one tensor."
+        ):
+            torch.ops.aten._foreach_copy([], [], False)
+
     @onlyAccelerator
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
