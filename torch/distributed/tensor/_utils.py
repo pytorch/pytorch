@@ -137,6 +137,68 @@ def compute_local_shape_and_global_offset(
         identifying how this shard fits into the global tensor in each dimension. If
         skip_offset is True, this will be an empty tuple.
 
+    .. note::
+        ``global_offset`` is where the local tensor starts in the global tensor. With
+        ``local_shape`` it describes the local tensor as one chunk: a single
+        rectangle of consecutive rows and columns of the global tensor. A
+        ``_StridedShard`` can leave a rank holding several separate chunks, and then
+        ``global_offset`` is only where the first one starts.
+
+        For example, take a tensor of shape ``(8, 2)``, with its elements labelled
+        ``a`` to ``p``, on a 2 x 2 mesh of 4 ranks::
+
+            row 0  [ a, b ]
+            row 1  [ c, d ]
+            row 2  [ e, f ]
+            row 3  [ g, h ]
+            row 4  [ i, j ]
+            row 5  [ k, l ]
+            row 6  [ m, n ]
+            row 7  [ o, p ]
+
+        Placement ``i`` applies to mesh dim ``i``. With ``[Shard(0), Shard(0)]``,
+        each row of the mesh holds one half of the tensor, and each rank holds
+        consecutive rows::
+
+                             mesh dim 1
+                             0                    1
+            mesh dim 0   0   rank 0: rows 0, 1    rank 1: rows 2, 3
+                         1   rank 2: rows 4, 5    rank 3: rows 6, 7
+
+        ``_StridedShard(0, split_factor=2)`` instead splits the rows into
+        ``split_factor`` = 2 groups, A (rows 0-3) and B (rows 4-7), and gives each
+        position along its mesh dim a share of every group. With
+        ``[_StridedShard(0, split_factor=2), Replicate()]``, the top row of the mesh
+        gets the first half of each group and the bottom row the second half, and
+        ``Replicate()`` gives both ranks in a row of the mesh the same copy::
+
+                             mesh dim 1
+                             0                          1
+            mesh dim 0   0   rank 0: rows 0, 1, 4, 5    rank 1: rows 0, 1, 4, 5
+                         1   rank 2: rows 2, 3, 6, 7    rank 3: rows 2, 3, 6, 7
+
+        Every rank now holds two separate chunks. Rank 0 has local tensor
+        ``[[a, b], [c, d], [i, j], [k, l]]``: rows 0, 1 and rows 4, 5. Its
+        ``local_shape`` ``(4, 2)`` and ``global_offset`` ``(0, 0)`` describe one
+        chunk of rows 0-3, ``[[a, b], [c, d], [e, f], [g, h]]``, instead. For
+        placements like this, use :func:`compute_local_shape_and_global_offsets`,
+        which returns the global index of every local row and column: for rank 0,
+        rows ``[0, 1, 4, 5]`` and columns ``[0, 1]``.
+
+        FSDP2 + TP uses ``[_StridedShard(0, split_factor=2), Shard(0)]``, and there
+        ``global_offset`` is enough. Instead of copying a row of the mesh's rows to
+        both its ranks, ``Shard(0)`` splits them in half between the two: rank 0
+        gets rows 0, 1 and rank 1 gets rows 4, 5::
+
+                             mesh dim 1
+                             0                    1
+            mesh dim 0   0   rank 0: rows 0, 1    rank 1: rows 4, 5
+                         1   rank 2: rows 2, 3    rank 3: rows 6, 7
+
+        The split falls between group A and group B, so each rank holds one chunk
+        again. Rank 1 has local tensor ``[[i, j], [k, l]]``, ``local_shape``
+        ``(2, 2)`` and ``global_offset`` ``(4, 0)``, which describe it correctly.
+
     """
     empty_offset = ()
     if not mesh._is_current_rank_part_of_mesh():
@@ -245,6 +307,29 @@ def _compute_local_shape_and_global_offset(
             raise AssertionError
         coordinate_lookup = my_coordinate
 
+    local_shape, shard_dim_to_global_offsets = _local_shape_and_global_offsets(
+        global_shape, mesh_shape, coordinate_lookup, placements, skip_offset
+    )
+    if skip_offset:
+        return tuple(local_shape), ()
+    global_offset = [0] * len(global_shape)
+    for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
+        global_offset[shard_dim] = _get_first_offset(global_offsets)
+    return tuple(local_shape), tuple(global_offset)
+
+
+def _local_shape_and_global_offsets(
+    global_shape: ShapeType,
+    mesh_shape: ShapeType,
+    coordinate_lookup: Callable[[int], RankType],
+    placements: Sequence[Placement],
+    skip_offset: bool,
+) -> tuple[list[int], dict[int, torch.Tensor | None]]:
+    """
+    Shard ``global_shape`` by ``placements`` for one mesh coordinate. Returns the local
+    shape, and for each sharded tensor dim, the global index of each local position
+    along it (None if ``skip_offset``).
+    """
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -280,12 +365,98 @@ def _compute_local_shape_and_global_offset(
         )
         local_shape[shard_dim] = shard_size
         shard_dim_to_global_offsets[shard_dim] = shard_offsets
-    if skip_offset:
-        return tuple(local_shape), ()
-    global_offset = [0] * len(global_shape)
-    for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
-        global_offset[shard_dim] = _get_first_offset(global_offsets)
-    return tuple(local_shape), tuple(global_offset)
+    return local_shape, shard_dim_to_global_offsets
+
+
+def compute_local_shape_and_global_offsets(
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
+) -> tuple[tuple[int, ...], list[torch.Tensor]]:
+    """
+    Compute the local tensor shape of a DTensor on its current global rank, and the
+    global index of every local position along each tensor dim.
+
+    :func:`compute_local_shape_and_global_offset` returns where the local tensor
+    starts in the global tensor, which describes it only if it is one chunk of
+    consecutive rows and columns. A ``_StridedShard`` can leave a rank holding
+    several separate chunks. ``global_offsets`` describes the local tensor either
+    way::
+
+        local_tensor[i, j] == global_tensor[global_offsets[0][i], global_offsets[1][j]]
+
+    Example: a tensor of shape ``(8, 2)``, with its elements labelled ``a`` to ``p``,
+    and placements ``[_StridedShard(0, split_factor=2), Replicate()]`` on a 2 x 2
+    mesh::
+
+        row 0  [ a, b ]
+        row 1  [ c, d ]
+        row 2  [ e, f ]
+        row 3  [ g, h ]
+        row 4  [ i, j ]
+        row 5  [ k, l ]
+        row 6  [ m, n ]
+        row 7  [ o, p ]
+
+                         mesh dim 1
+                         0                          1
+        mesh dim 0   0   rank 0: rows 0, 1, 4, 5    rank 1: rows 0, 1, 4, 5
+                     1   rank 2: rows 2, 3, 6, 7    rank 3: rows 2, 3, 6, 7
+
+    Rank 0 has local tensor ``[[a, b], [c, d], [i, j], [k, l]]``: rows 0, 1, 4, 5
+    and columns 0, 1 of the global tensor::
+
+        local_shape      (4, 2)
+        global_offsets   [tensor([0, 1, 4, 5]), tensor([0, 1])]
+
+    Args:
+        global_shape (ShapeType): The global shape of the DTensor.
+        mesh (:class:`DeviceMesh`): The device mesh this DTensor is distributed on.
+        placements (Sequence[:class:`Placement`]): The placements of the DTensor.
+
+    Return:
+        local_shape: the shape of the DTensor's _local_tensor on the current rank.
+        global_offsets: one 1-D int64 tensor per tensor dim, holding the global index
+        of each local position along that dim. Under ``LocalTensorMode`` these are
+        ``LocalTensor``s, whose lengths can differ between ranks. If the current
+        rank is not part of the mesh, ``local_shape`` is ``(0,)`` and this is empty.
+    """
+    coordinate = mesh.get_coordinate()
+    if coordinate is None:
+        return ((0,), [])
+    global_offsets = _compute_global_offsets(
+        global_shape, mesh.shape, coordinate, placements
+    )
+    return tuple(offsets.shape[0] for offsets in global_offsets), global_offsets
+
+
+@maybe_run_for_local_tensor
+def _compute_global_offsets(
+    global_shape: ShapeType,
+    mesh_shape: ShapeType,
+    my_coordinate: Sequence[int],
+    placements: Sequence[Placement],
+) -> list[torch.Tensor]:
+    """
+    The ``global_offsets`` of :func:`compute_local_shape_and_global_offsets` for the
+    mesh coordinate ``my_coordinate``. Under ``LocalTensorMode`` this runs once per
+    rank, because the number of indices can differ between ranks.
+    """
+    local_shape, shard_dim_to_global_offsets = _local_shape_and_global_offsets(
+        global_shape,
+        mesh_shape,
+        lambda mesh_dim: my_coordinate[mesh_dim],
+        placements,
+        skip_offset=False,
+    )
+    global_offsets = []
+    for dim, size in enumerate(global_shape):
+        offsets = shard_dim_to_global_offsets.get(dim)
+        if offsets is None:
+            offsets = torch.arange(size)
+        # A rank holding nothing along a dim gets a one-index placeholder.
+        global_offsets.append(offsets[: local_shape[dim]])
+    return global_offsets
 
 
 compute_global_tensor_info = torch._C._DTensor_compute_global_tensor_info
