@@ -319,7 +319,10 @@ Adam.__doc__ = (
             LR if you are not also specifying fused=True or capturable=True.
         betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
-            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
+            its square. If a tensor is provided, must be 1-element. Tensor betas
+            are not yet supported for all our implementations. Please use float
+            betas if you are not also specifying fused=True or capturable=True.
+            (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
@@ -935,8 +938,9 @@ def adam(
         _, foreach = _default_to_fused_or_foreach(
             params, differentiable, use_fused=False
         )
-        # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
-        if foreach and isinstance(lr, Tensor) and not capturable:
+        # Do not flip on foreach for the unsupported case where lr or a beta is a Tensor and capturable=False.
+        tensor_hparam = any(isinstance(h, Tensor) for h in (lr, beta1, beta2))
+        if foreach and tensor_hparam and not capturable:
             foreach = False
     if fused is None:
         fused = False
