@@ -514,6 +514,26 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
 
+def to_mx_swizzled_gfx1250(input_matrix, block_size: int = 32) -> torch.Tensor:
+    """Reorder (rows, K/block_size) scales into the gfx1250 SWIZZLE_128 order.
+
+    Groups of ``128 // block_size`` K-scales are stored together. block_size
+    is 32 for MX and 16 for NVFP4. This is not the gfx950 32x8 tile.
+    """
+    rows, kblocks = input_matrix.shape
+    dimk = 128 // block_size
+    padded_kblocks = ceil_div(kblocks, dimk) * dimk
+    padded = input_matrix
+    if padded_kblocks != kblocks:
+        padded = torch.zeros(
+            (rows, padded_kblocks),
+            device=input_matrix.device,
+            dtype=input_matrix.dtype,
+        )
+        padded[:, :kblocks] = input_matrix
+    return padded.view(rows, padded_kblocks // dimk, dimk).permute(1, 0, 2).flatten()
+
+
 def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
@@ -523,10 +543,8 @@ def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
 
     Args:
         input_matrix: Input tensor of shape (H, W)
-        swizzle_32_8: build the gfx950 32x8-tiled layout that hipBLASLt calls
-            BLK32_UE8M0_32_8 instead of the default one. Pass
-            `rocm_mx_swizzle(mat_dtype)` to follow whichever layout the current
-            device takes for the data these scales belong to.
+        swizzle_32_8: build the gfx950 32x8 tile. gfx1250 uses
+            `to_mx_swizzled_gfx1250` instead.
 
     Returns:
         Flattened tensor of 32*ceil_div(H,128) * 16*ceil_div(W,4) elements, or

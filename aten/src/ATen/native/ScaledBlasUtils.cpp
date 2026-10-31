@@ -8,6 +8,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/GroupedMMUtils.h>
@@ -336,12 +337,22 @@ void validate_scaled_mm_v2_inputs(
 
   // NVFP4 (BlockWise1x16) blockwise scale element count for a given outer
   // dim, shared by the single- and two-level NVFP4 recipes. XPU uses the
-  // unpadded shape; NVIDIA the L4-padded SWIZZLE_32_4_4 shape. ROCm doesn't
-  // support NVFP4, so only these two cases arise.
+  // unpadded shape. gfx1250 uses rows * round_up(K/16, 8). The remaining case is the padded
+  // SWIZZLE_32_4_4 shape.
+#if defined(USE_ROCM) && ROCM_VERSION >= 100000
+  const bool gfx1250_nvfp4 = !is_xpu && at::globalContext().hasROCM() &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx1250"});
+#else
+  const bool gfx1250_nvfp4 = false;
+#endif
   auto nvfp4_scale_elems = [&](const c10::SymInt& dim) {
-    return is_xpu ? dim * sym_ceil_div(K_unpacked, 16)
-                  : sym_round_up(dim, 128) *
-            sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    if (is_xpu) {
+      return dim * sym_ceil_div(K_unpacked, 16);
+    }
+    if (gfx1250_nvfp4) {
+      return dim * sym_round_up(sym_ceil_div(K_unpacked, 16), 8);
+    }
+    return sym_round_up(dim, 128) * sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
   };
 
   // Per-recipe scale checks. Shapes and dtypes mirror the per-recipe
@@ -368,15 +379,20 @@ void validate_scaled_mm_v2_inputs(
         "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
         swizzle_a.size(), " and ", swizzle_b.size());
     TORCH_CHECK_VALUE(
-        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
+        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8 ||
+            swizzle_a[0] == SwizzleType::SWIZZLE_128) &&
             swizzle_a[0] == swizzle_b[0],
-        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8, got swizzle_a=",
+        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128, got swizzle_a=",
         static_cast<int>(swizzle_a[0]), " and swizzle_b=", static_cast<int>(swizzle_b[0]));
   }
   const bool is_mx_32_8 = is_rocm_mx && swizzle_a[0] == SwizzleType::SWIZZLE_32_8;
+  const bool is_mx_128 = is_rocm_mx && swizzle_a[0] == SwizzleType::SWIZZLE_128;
   const bool is_nv_1x16 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
   const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
+  if ((is_nv_1x16 || is_nv_2lvl) && at::globalContext().hasROCM() && !gfx1250_nvfp4) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling is only supported on gfx1250 with ROCm 10.0 or above");
+  }
   // BlockWise1x128/128x128 combinations (DeepSeek-style) are deliberately
   // not validated here: they require SM90 and fail with NotImplementedError
   // from the kernel on other archs, which tests rely on.
@@ -420,15 +436,22 @@ void validate_scaled_mm_v2_inputs(
     // query the device, so a request for it on an unsupported arch reaches this
     // size check first whenever the two layouts' counts differ. Name the
     // requirement, in `check_mx_swizzle`'s words, so that case is not
-    // misdiagnosed as a plain size mismatch.
-    [[maybe_unused]] const char* scale_layout_hint = is_mx_32_8
+    // misdiagnosed as a plain size mismatch. gfx1250 supports the enum, so it
+    // does not get that hint.
+    [[maybe_unused]] const char* scale_layout_hint =
+        is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
-    if (is_mx_32_8) {
-      // 32x8-tiled scale layout (hipBLASLt BLK32_UE8M0_32_8).
+    if (is_mx_128) {
+      // gfx1250: rows * round_up(K/32, 4).
+      expected_a_elems = M * sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      expected_b_elems = N * sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      scale_layout = "SWIZZLE_128";
+    } else if (is_mx_32_8) {
+      // gfx950 32x8-tiled scale layout.
       expected_a_elems = sym_round_up(M, 32) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
       expected_b_elems = sym_round_up(N, 32) *
@@ -574,7 +597,24 @@ void validate_scaled_mm_v2_inputs(
           "scale_b must be swizzled to SWIZZLE_32_4_4 format");
     }
     // ROCm's MX swizzle pair was already validated above, ahead of the
-    // per-recipe size checks.
+    // per-recipe size checks. NVFP4 allows NO_SWIZZLE through so the kernel
+    // can reject it on gfx1250; the tensorwise slot stays unswizzled.
+    if (is_rocm && !is_xpu && (is_nv_1x16 || is_nv_2lvl)) {
+      TORCH_CHECK_VALUE(
+          swizzle_a.size() == num_args_a && swizzle_b.size() == num_args_b,
+          "swizzle_a/swizzle_b must match the number of scale recipes, got ",
+          swizzle_a.size(), " and ", swizzle_b.size());
+      TORCH_CHECK_VALUE(
+          (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_128) &&
+              swizzle_a[0] == swizzle_b[0],
+          "For ROCM NVFP4 gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_128, got swizzle_a=",
+          static_cast<int>(swizzle_a[0]), " and swizzle_b=", static_cast<int>(swizzle_b[0]));
+      if (num_args_a == 2) {
+        TORCH_CHECK_VALUE(
+            swizzle_a[1] == SwizzleType::NO_SWIZZLE && swizzle_b[1] == SwizzleType::NO_SWIZZLE,
+            "For ROCM NVFP4 gemm, the tensorwise scale swizzle must be NO_SWIZZLE");
+      }
+    }
   }
 }
 

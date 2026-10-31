@@ -5945,8 +5945,9 @@ def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> b
 
 def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     """
-    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
-    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    gfx950 takes SWIZZLE_32_8 as the 32x8 tile: MX FP4 from ROCm 7.13 and MX
+    FP8 from 7.14. gfx1250 requests SWIZZLE_128; its count is handled by
+    `_gfx1250_scale_swizzle`.
     """
     # is_available() is not stable across a process lifetime, so it must stay
     # outside the cache -- a False from before device init would otherwise be
@@ -5957,6 +5958,33 @@ def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     # was compiled against; torch.version.hip only tracks it on shipped ROCm.
     return _prefers_swizzle_32_8_cached(
         mat_dtype, getattr(torch.version, "rocm", None) or torch.version.hip
+    )
+
+
+@functools.lru_cache
+def _gfx1250_scale_swizzle_cached(rocm_version: str) -> tuple[bool, bool]:
+    """(mx, nvfp4) for gfx1250. nvfp4 implies mx, since ROCm 10 is past 7.14."""
+    try:
+        version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
+    except ValueError:
+        return False, False
+    arch = _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+    if not arch.startswith("gfx1250"):
+        return False, False
+    return version >= (7, 14), version >= (10, 0)
+
+
+def _gfx1250_scale_swizzle() -> tuple[bool, bool]:
+    """Whether gfx1250 accepts SWIZZLE_128 for MX and for NVFP4.
+
+    The MX count is rows * round_up(K/32, 4). The NVFP4 count is
+    rows * round_up(K/16, 8). Both equal the unswizzled count on some
+    legal shapes, so the caller must test them before NO_SWIZZLE.
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False, False
+    return _gfx1250_scale_swizzle_cached(
+        getattr(torch.version, "rocm", None) or torch.version.hip
     )
 
 
@@ -6013,6 +6041,19 @@ def _infer_scale_swizzle_impl(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        elif _gfx1250_scale_swizzle()[1]:
+            # gfx1250: rows * round_up(K/16, 8). Checked before the 128-padded
+            # count, which is equal for some aligned shapes.
+            expected_numel_a = mat_size[0] * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 8
+            )
+            expected_numel_b = mat_size[1] * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 8
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128
         else:
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
@@ -6041,6 +6082,20 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
+            # gfx1250 MX is rows * round_up(K/32, 4). On legal shapes that
+            # equals the unswizzled count below, and NO_SWIZZLE is rejected,
+            # so this match has to win the tie.
+            if _gfx1250_scale_swizzle()[0]:
+                expected_numel_a = mat_size[0] * _round_up(
+                    ceildiv(K_multiplier * mat_size[1], 32), 4
+                )
+                expected_numel_b = mat_size[1] * _round_up(
+                    ceildiv(K_multiplier * mat_size[0], 32), 4
+                )
+                if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                    scale_numel, expected_numel_b
+                ):
+                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128
             # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
             # because the two counts are equal whenever the paddings coincide
             # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the
