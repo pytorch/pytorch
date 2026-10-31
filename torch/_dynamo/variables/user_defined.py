@@ -4092,7 +4092,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and self.lookup_method_descriptor(type_attr) is not None
             ):
                 if self.cls_source:
-                    # A later accessor or method override must retrace this dispatch.
+                    # TYPE_MATCH cannot detect class edits such as
+                    # Mapping.__getattribute__ = custom_getattribute.
                     install_guard(
                         AttrSource(self.cls_source, "__getattribute__").make_guard(
                             GuardBuilder.FUNCTION_MATCH
