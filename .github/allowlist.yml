@@ -62,6 +62,9 @@ L2:
       events:
         - pull_request
         - nightly
+  - aws-neuron/private-torch-neuronx:
+      events:
+        - nightly
 
 L3:
   npu:
