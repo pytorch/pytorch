@@ -197,19 +197,31 @@ def maybe_handle_backward_generation(
             # Graphs for its backward only, so there is no generation to hand off.
             return
         compiled_graph_callable = compiled_graph.current_callable
-
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
-        )
-        # should already exist from forward
-        if manager is None:
-            raise AssertionError("CUDAGraph manager must not be None")
+        device_index = boxed_forward_device_index.value
 
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            # Looked up per call: an AOTAutograd cache hit post-compiles the
+            # backward before the forward has run and created the manager.
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                device_index, create_if_none_exists=False
+            )
+            if manager is None:
+                raise AssertionError("CUDAGraph manager must not be None")
+            manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
+
+
+def _handle_uncaptured_backward_generation(
+    compiled_graph: CompiledFxGraph, graph_kwargs: _CompileFxKwargs
+) -> None:
+    # A backward compiled without cudagraphs (override_cudagraphs(bwd=False), a
+    # region opting out for its backward) still has to tell the cudagraph tree
+    # that its captured forward's backward is running.
+    boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
+    if boxed_forward_device_index is not None:
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
 
 
 def prepare_cudagraph_post_compile(
@@ -902,6 +914,7 @@ class CompiledFxGraph(OutputCode):
             counters["inductor"]["cudagraph_skips"] += 1
             BoxedBool.disable(cudagraphs)
 
+        handed_to_cudagraphs = False
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
@@ -915,13 +928,14 @@ class CompiledFxGraph(OutputCode):
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             elif self.cudagraph_info is None:
-                # Compiled with cudagraphs off, so there is no capture metadata
-                # to replay with. A cache hit lands here when this graph's setting
-                # differs from the one the caller's box carries (a backward-specific
-                # or region-local opt-out).
-                counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
+                # Compiled with cudagraphs off: this graph never requested capture,
+                # so treat it like a fresh compile would. Only an AOTAutograd cache
+                # hit gets here, with a box that can be shared with the forward, so
+                # leave that box alone and continue with a local one.
+                log.debug("not capturing a graph that was compiled without cudagraphs")
+                cudagraphs = BoxedBool(False)
             else:
+                handed_to_cudagraphs = True
                 if is_backward:
                     if "boxed_forward_device_index" not in graph_kwargs:
                         raise AssertionError(
@@ -958,6 +972,10 @@ class CompiledFxGraph(OutputCode):
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
+        # The cudagraph post-compiles handle the backward generation themselves,
+        # including when they end up not capturing.
+        if not handed_to_cudagraphs and is_backward and policy is None:
+            _handle_uncaptured_backward_generation(self, graph_kwargs)
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens

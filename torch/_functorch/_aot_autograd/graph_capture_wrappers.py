@@ -96,6 +96,7 @@ from .utils import (
     _is_tangent,
     call_and_expect_output_descs,
     maybe_to_fresh_input,
+    shift_static_input_indices,
     simple_wraps,
     without_output_descs,
 )
@@ -1193,6 +1194,7 @@ def handle_effect_tokens_fn(
     *,
     meta: ViewAndMutationMeta,
     trace_joint: bool,
+    inner_meta: ViewAndMutationMeta,
 ) -> Any:
     num_tokens = len(meta.tokens)
 
@@ -1292,10 +1294,10 @@ def handle_effect_tokens_fn(
         args = [*additional_fwd_token_inputs, *args]
         args_descs = [*additional_fwd_token_inputs_descs, *args_descs]
 
-        if num_tokens > 0:
-            meta.static_input_indices = [
-                idx + num_tokens for idx in meta.static_input_indices
-            ]
+    # The token inputs shift every traced input, so the static input indices of
+    # the traced graph (inner_meta; the unwrapped inputs when there are
+    # tensor-subclass inputs) shift with them until the tokens are unlifted.
+    shift_static_input_indices(inner_meta, num_tokens)
     return inner_fn, args, args_descs
 
 

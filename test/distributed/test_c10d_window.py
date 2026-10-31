@@ -18,12 +18,19 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from torch.distributed.distributed_c10d import (
+    PutOptions,
+    SignalOptions,
+    WaitSignalOptions,
+    WindowAccessType,
+)
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
 WINDOW_BACKENDS = [
     ("nccl2", "cuda"),
+    ("nccl-lazy", "cuda"),
 ]
 
 
@@ -134,10 +141,92 @@ class AbstractWindowTest:
         with torch.cuda.use_mem_pool(pool):
             win_buf = torch.zeros(1, device=self.device)
         win = dist._new_window(win_buf)
-        win.signal((self.rank + 1) % self.world_size, False)
-        win.wait_signal((self.rank - 1) % self.world_size, False)
+        next_rank = (self.rank + 1) % self.world_size
+        prev_rank = (self.rank - 1) % self.world_size
+        opts = SignalOptions()
+        opts.timeout = timedelta(seconds=60)
+        opts.hints = {"unused": "1"}
+        win.signal(next_rank, False, opts=opts)
+        wait_opts = WaitSignalOptions()
+        wait_opts.timeout = timedelta(seconds=60)
+        win.wait_signal(prev_rank, False, opts=wait_opts)
         torch.cuda.synchronize()
         win.tensor_deregister()
+
+    def test_signal_shared_across_windows(self):
+        # Signal counts are per process group, so a put on one window
+        # satisfies a wait on another.
+        self._init_backend()
+        pool = self._make_pool()
+        self._probe_window_support(pool)
+        with torch.cuda.use_mem_pool(pool):
+            buf_a = torch.zeros(self.world_size, device=self.device)
+            buf_b = torch.zeros(1, device=self.device)
+        win_a = dist._new_window(buf_a)
+        win_b = dist._new_window(buf_b)
+        next_rank = (self.rank + 1) % self.world_size
+        prev_rank = (self.rank - 1) % self.world_size
+        src = buf_a[self.rank : self.rank + 1]
+        src.fill_(float(self.rank))
+        win_a.put(src, next_rank, self.rank, False)
+        win_b.wait_signal(prev_rank, False)
+        torch.cuda.synchronize()
+        self.assertEqual(buf_a[prev_rank].item(), prev_rank)
+        win_b.tensor_deregister()
+        win_a.tensor_deregister()
+
+    def test_symmetric_mem_pool_teardown(self):
+        # register_mem_pool(symm=True) gives the pool's existing and new
+        # segments symmetric windows; deregister_mem_pool tears them down.
+        self._init_backend()
+        # Probe before register_mem_pool: allocating from a symm=True pool
+        # raises, rather than skips, without a symmetric-memory transport.
+        # The probe's segment belongs to pool, so deregister_mem_pool(pool)
+        # also tears it down.
+        pool = self._make_pool()
+        self._probe_window_support(pool)
+        # A window outside the symm pool, to check put's source validation
+        # after deregister_mem_pool.
+        other_pool = self._make_pool()
+        self.backend.register_mem_pool(other_pool)
+        with torch.cuda.use_mem_pool(other_pool):
+            other_buf = torch.zeros(1, device=self.device)
+        other_win = dist._new_window(other_buf)
+        next_rank = (self.rank + 1) % self.world_size
+        prev_rank = (self.rank - 1) % self.world_size
+        # Allocations of at least 10 MiB get their own segments. This one
+        # exists before symm=True, so registration upgrades it.
+        with torch.cuda.use_mem_pool(pool):
+            old_seg = torch.full((3 << 20,), float(self.rank), device=self.device)
+        self.backend.register_mem_pool(pool, symm=True)
+        # Reuses the probe's segment.
+        with torch.cuda.use_mem_pool(pool):
+            win_buf = torch.zeros(2 * self.world_size, device=self.device)
+        win = dist._new_window(win_buf)
+        # A new segment, which symm=True registers as it is allocated.
+        with torch.cuda.use_mem_pool(pool):
+            new_seg = torch.full((3 << 20,), float(self.rank), device=self.device)
+        opts = PutOptions()
+        opts.timeout = timedelta(seconds=60)
+        win.put(old_seg[:1], next_rank, self.rank, False, opts=opts)
+        win.put(new_seg[:1], next_rank, self.world_size + self.rank, False)
+        win.wait_signal(prev_rank, False)
+        win.wait_signal(prev_rank, False)
+        torch.cuda.synchronize()
+        self.assertEqual(win_buf[prev_rank].item(), prev_rank)
+        self.assertEqual(win_buf[self.world_size + prev_rank].item(), prev_rank)
+        win.tensor_deregister()
+        del win, win_buf
+        self.backend.deregister_mem_pool(pool)
+        # put validates its source locally, so this raises on every rank
+        # without communicating.
+        unregistered = "not in a registered symmetric window"
+        with self.assertRaisesRegex(RuntimeError, unregistered):
+            other_win.put(new_seg[:1], next_rank, 0, False)
+        other_win.tensor_deregister()
+        self.backend.deregister_mem_pool(other_pool)
+        del old_seg, new_seg, pool, other_win, other_buf, other_pool
+        torch.cuda.synchronize()
 
     def test_put_dtypes_and_sizes(self):
         self._init_backend()
@@ -178,10 +267,8 @@ class AbstractWindowTest:
             win_buf = torch.ones(16, dtype=torch.float, device=self.device)
         win = dist._new_window(win_buf)
         dist.barrier()
-        from torch._C._distributed_c10d import WindowAccessType
-
         attr = win.get_attr((self.rank + 1) % self.world_size)
-        self.assertIsInstance(attr.access_type, WindowAccessType)
+        self.assertEqual(attr.access_type, WindowAccessType.SEPARATE)
         win.tensor_deregister()
 
     def test_register_errors(self):
@@ -289,7 +376,8 @@ def _make_window_test_class(backend_name, device_type):
 
     WindowTest.backend_name = backend_name
     WindowTest.device_type = device_type
-    WindowTest.__name__ = f"{backend_name.capitalize()}WindowTest"
+    class_name = backend_name.replace("-", " ").title().replace(" ", "")
+    WindowTest.__name__ = f"{class_name}WindowTest"
     WindowTest.__qualname__ = WindowTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend_name),
@@ -304,9 +392,10 @@ def _make_window_test_class(backend_name, device_type):
 
 
 for backend_name, device_type in WINDOW_BACKENDS:
-    globals()[f"{backend_name.capitalize()}WindowTest"] = _make_window_test_class(
-        backend_name, device_type
-    )
+    test_class = _make_window_test_class(backend_name, device_type)
+    globals()[test_class.__name__] = test_class
+# Unbound so the last class isn't collected a second time as `test_class`.
+del test_class
 
 
 if __name__ == "__main__":

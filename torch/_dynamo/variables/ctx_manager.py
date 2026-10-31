@@ -43,16 +43,19 @@ from ..utils import (
     is_safe_constant,
 )
 from .base import VariableTracker
+from .descriptors import MethodDescriptorVariable
 from .functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedMethodDescriptorVariable,
     WrappedNestedUserFunctionVariable,
     WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -147,10 +150,12 @@ class ContextWrappingVariable(VariableTracker):
         if not isinstance(
             args[0],
             (
+                MethodDescriptorVariable,
                 NestedUserFunctionVariable,
                 SkipFunctionVariable,
                 UserMethodVariable,
                 UserFunctionVariable,
+                WrappedMethodDescriptorVariable,
             ),
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
@@ -159,6 +164,10 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedNestedUserFunctionVariable(args[0], self)
         elif isinstance(args[0], SkipFunctionVariable):
             return WrappedSkipFunctionVariable(args[0], self)
+        elif isinstance(
+            args[0], (MethodDescriptorVariable, WrappedMethodDescriptorVariable)
+        ):
+            return WrappedMethodDescriptorVariable(args[0], self)
         elif isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
         elif isinstance(args[0], UserFunctionVariable):
@@ -732,6 +741,9 @@ class GradModeVariable(ContextWrappingVariable):
 
     def python_type(self) -> type:
         return torch.set_grad_enabled
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class InferenceModeVariable(ContextWrappingVariable):
