@@ -809,7 +809,6 @@
   "test/test_utils_config_module.py",
   "test/test_utils_filelock.py",
   "test/test_vulkan.py",
-  "test/test_weak.py",
   "test/test_xnnpack_integration.py",
   "test/test_xpu.py",
   "test/torch_np/numpy_tests/core/test_dlpack.py",
