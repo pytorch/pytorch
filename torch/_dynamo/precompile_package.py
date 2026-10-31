@@ -1731,8 +1731,8 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
-        context = torch._guards.TracingContext.try_get()
-        if context is not None and (a := context.cudagraph_annotation) is not None:
+        # The annotation compile_fx reads.
+        if (a := gm.meta.get("cudagraph_annotation")) is not None:
             self.cudagraph_overrides[backend_id] = (a.fwd, a.bwd)
 
     def add_graph_break_op(
@@ -2350,18 +2350,18 @@ class PrecompileSession(Generic[_P, _R]):
         # an override that decides a graph otherwise cannot be served. As compile_fx
         # applies one: fwd decides the forward, and bwd=False alone keeps a CUDA
         # graphed forward's backward out, if there is one.
-        flag = self._cudagraph_config.get("triton.cudagraphs", False)
         overrides = package.cudagraph_overrides
-        for backend_id in backends.keys() & overrides.keys():
+        inductor = self._backend_name == "inductor"
+        shipped: set[str] = backends.keys() & overrides.keys() if inductor else set()
+        flag = self._cudagraph_config.get("triton.cudagraphs", False)
+        for backend_id in shipped:
             fwd, bwd = overrides[backend_id]
             artifact = backends[backend_id]
             backward = isinstance(artifact, BundledAOTAutogradCacheArtifact) and (
                 artifact.content.compiled_bw is not None
             )
             forward = flag if fwd is None else fwd
-            if self._backend_name == "inductor" and (
-                forward != flag or (forward and backward and bwd is False)
-            ):
+            if forward != flag or (forward and backward and bwd is False):
                 raise PackageError(
                     f"a DynamoTracer capture cannot serve torch._dynamo."
                     f"override_cudagraphs(fwd={fwd}, bwd={bwd}) under "
