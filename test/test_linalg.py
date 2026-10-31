@@ -6798,6 +6798,35 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
 
     @onlyCPU
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu_operand_layouts(self, device, x_dtype):
+        m, k, n = 8, 32, 16
+
+        def genf(rows, cols, dtype=torch.int8):
+            info = torch.iinfo(dtype)
+            return torch.randint(
+                info.min, info.max, (rows, cols), dtype=dtype, device=device
+            )
+
+        def check(a, b):
+            self.assertEqual(torch._int_mm(a, b).float(), torch.mm(a.float(), b.float()))
+
+        cases = [
+            # size-1 dims whose arbitrary stride is not 1
+            (genf(1, 2 * k, x_dtype).as_strided((1, k), (0, 2)), genf(k, n)),
+            (genf(m, 3, x_dtype).as_strided((m, 1), (3, 0)), genf(1, n)),
+            (genf(m, k, x_dtype), genf(k, 3).as_strided((k, 1), (3, 0))),
+            (genf(m, 1, x_dtype), genf(1, 3 * n).as_strided((1, n), (0, 3))),
+            # no unit stride, broadcast, and overlapping operands
+            (genf(m, 2 * k, x_dtype)[:, ::2], genf(k, 2 * n)[:, ::2]),
+            (genf(k, 2 * m, x_dtype)[:, ::2].t(), genf(n, 2 * k)[:, ::2].t()),
+            (genf(1, k, x_dtype).expand(m, k), genf(1, n).expand(k, n)),
+            (genf(1, m + k, x_dtype).as_strided((m, k), (1, 1)), genf(k, n)),
+        ]
+        for a, b in cases:
+            self.assertNotWarn(partial(check, a, b), f"{a.stride()} @ {b.stride()}")
+
+    @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
