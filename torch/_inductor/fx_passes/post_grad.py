@@ -2278,6 +2278,14 @@ for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
         return input_
 
 
+def _reciprocal_sqrt_to_rsqrt_is_safe(match: Match) -> bool:
+    # fixes: https://github.com/intel/torch-xpu-ops/issues/5060
+    val = match.kwargs["x"].meta.get("val")
+    if isinstance(val, torch.Tensor) and val.device.type == "xpu":
+        return False
+    return True
+
+
 # reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity
 # (1 / sqrt(x) == rsqrt(x)) that saves one op per element in the generated kernel.
 @register_graph_pattern(
@@ -2287,6 +2295,7 @@ for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
+    extra_check=_reciprocal_sqrt_to_rsqrt_is_safe,
 )
 def reciprocal_sqrt_to_rsqrt(match: Match, x):
     """reciprocal(sqrt(x)) -> rsqrt(x)"""
