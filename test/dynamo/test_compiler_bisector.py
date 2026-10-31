@@ -6,6 +6,7 @@ from importlib import import_module
 
 import torch
 import torch._prims_common as utils
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
@@ -15,7 +16,7 @@ from torch.library import _scoped_library, Library
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_package
 
 
 aten = torch.ops.aten
@@ -371,11 +372,7 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
 
-    # Device-aware Triton gating awaits a Triton Capability in the device
-    # registry; this mirrors the existing gate convention in this file.
-    # MTIA remains covered: `except_for="cpu"` instantiates it whenever the
-    # backend is registered, like the old HAS_MTIA_AND_TRITON guard allowed.
-    @unittest.skipIf(not has_triton(), "requires Triton")
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
     @config.patch(
         {
             "test_configs.bisect_pre_grad_graph": True,
@@ -383,6 +380,14 @@ class TestCompilerBisectorDevice(TestCase):
         }
     )
     def test_bisect_pre_grad_graph(self, device):
+        # has_triton() is an any-device aggregate; gate on the instantiated
+        # device via the DeviceInterface registry. MTIA keeps no coverage
+        # here: the old HAS_GPU guard admitted it via HAS_MTIA_AND_TRITON,
+        # but instantiate_device_type_tests has no MTIA device-type base,
+        # so the PR description records the drop explicitly.
+        if not get_interface_for_device(device.split(":")[0]).is_triton_capable():
+            self.skipTest(f"requires Triton on {device}")
+
         def f(x):
             for _ in range(5):
                 x = x + 1
