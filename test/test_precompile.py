@@ -6439,6 +6439,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
 _CUDAGRAPH_MODULE = """
 import torch
+from torch._inductor.cudagraph_utils import CUDAGraphPolicy
 
 
 class Model(torch.nn.Module):
@@ -6487,6 +6488,11 @@ def bumps_a_buffer(model, x):
 
 def kernelless_backward(model, x):
     return x.sin().sum() + model.lin.weight.sum()
+
+
+class WrapsNoGraph(CUDAGraphPolicy):
+    def should_wrap(self, compiled_graph):
+        return False
 """
 
 _CUDAGRAPH_LOADER = """
@@ -6513,7 +6519,22 @@ def counting_capture_begin(self, *args, **kwargs):
 
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 allow = saved["allow_serve_time_compiles"]
+load_config = dict(saved["load_config"])
+if saved["policy"]:
+    load_config["cudagraph_policy"] = getattr(mod, saved["policy"])()
+
+
+def cudagraph_keys():
+    c = torch._inductor.config
+    return c.triton.cudagraphs, c.triton.cudagraph_trees, c.graph_partition
+
+
+load_patch = torch._inductor.config.patch(load_config)
+load_patch.__enter__()
+before = cudagraph_keys()
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
+# The artifact's config is patched around the post-compile, not set.
+kept = int(cudagraph_keys() == before)
 training = saved["expected_grad"] is not None
 calls = model.calls.clone()
 with (
@@ -6536,7 +6557,7 @@ for node in nodes:
 recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
 compiles = torch._dynamo.utils.counters["frames"]["ok"]
-print("bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
+print("kept", kept, "bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
 print("recorded", recorded, "captured", captured)
 """
 
@@ -6585,11 +6606,14 @@ class TestPrecompileCudagraphs(TestCase):
         config=None,
         skips=None,
         bumps=0,
+        load_config=None,
+        policy=None,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
-        # by the loading process while serving the artifact, under its env and
-        # the inductor config patch. bumps: how much the three calls raise
-        # model.calls.
+        # by the loading process while serving the artifact, under its env, the
+        # inductor config patch (load_config, and the module's CUDAGraphPolicy
+        # named by policy, from before load(); config around the calls). bumps:
+        # how much the three calls raise model.calls.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "x": self.x if x is None else x,
@@ -6597,6 +6621,8 @@ class TestPrecompileCudagraphs(TestCase):
             "expected_grad": expected_grad,
             "allow_serve_time_compiles": serve_time,
             "config": config or {},
+            "load_config": load_config or {},
+            "policy": policy,
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6611,6 +6637,7 @@ class TestPrecompileCudagraphs(TestCase):
         served = out.stdout.splitlines()[-1].split()
         served = dict(zip(served[::2], map(int, served[1::2])))
         # The calls compile in the loading process only when they may.
+        self.assertEqual(served["kept"], 1)
         self.assertEqual(served["compiles"] > 0, serve_time)
         self.assertEqual(served["bumps"], bumps)
         if skips is not None:
@@ -6654,7 +6681,8 @@ class TestPrecompileCudagraphs(TestCase):
         else:
             self._capture_step(fn, mode="reduce-overhead")
         # A shape no captured variant covers, so every graph serving it is
-        # compiled in the loading process, whose triton.cudagraphs is off.
+        # compiled in the loading process, whose triton.cudagraphs is off. With
+        # mode= the options carry the flag too; ambient=True needs CUDAGRAPH_CONFIG.
         miss = torch.randn(6, 8, device="cuda")
         with torch.no_grad():
             expected = fn(self.model, miss)
@@ -6711,16 +6739,42 @@ class TestPrecompileCudagraphs(TestCase):
     def test_an_eager_capture_records_no_cudagraph_config_to_contradict(self):
         m = self.mod
         for fn in (m.overrides_the_forward, m.overrides_the_backward):
-            _, meta = self._capture_step(fn, grad=True, backend="eager")
-            self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
-        _, meta = self._capture_step(m.turns_cudagraphs_on, grad=True, backend="eager")
+            self._check_eager_capture_serves_no_cudagraph(fn)
+        self._check_eager_capture_serves_no_cudagraph(m.turns_cudagraphs_on)
+
+    def _check_eager_capture_serves_no_cudagraph(self, fn):
+        y, meta = self._capture_step(fn, grad=True, backend="eager")
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
+        self.model.zero_grad(set_to_none=True)
+        fn(self.model, self.x).sum().backward()
+        grad = self.model.lin.weight.grad.clone()
+        served = self._serve_in_fresh_process(y, expected_grad=grad)
+        self.assertEqual(served, (0, 0))
 
     def test_an_inference_capture_keeping_out_a_backward_it_lacks_serves(self):
         fn = self.mod.overrides_the_backward
         y, _ = self._capture_step(fn, options={"triton.cudagraphs": True})
         recorded, _ = self._serve_in_fresh_process(y, skips=0)
         self.assertGreater(recorded, 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_training_artifact_serves_its_graphs_as_cudagraphs(self):
+        fn = self.mod.calls_breaking_helper
+        options = {"triton.cudagraphs": True}
+        y, meta = self._capture_step(fn, grad=True, options=options)
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        self.model.zero_grad(set_to_none=True)
+        fn(self.model, self.x).sum().backward()
+        grad = self.model.lin.weight.grad.clone()
+        recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+        # As torch.compile(mode="reduce-overhead") records for the same step.
+        self.assertEqual(recorded, 7)
+
+    def test_a_cudagraph_policy_set_in_the_loading_process_wraps_the_graphs(self):
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(self.mod.step, options=options)
+        served = self._serve_in_fresh_process(y, policy="WrapsNoGraph")
+        self.assertEqual(served, (0, 0))
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
@@ -6737,7 +6791,8 @@ class TestPrecompileCudagraphs(TestCase):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
         no_trees = {"triton.cudagraph_trees": False}
-        served = self._serve_in_fresh_process(y, config=no_trees, bumps=3, skips=0)
+        both = dict(config=no_trees, load_config=no_trees)
+        served = self._serve_in_fresh_process(y, bumps=3, skips=0, **both)
         self.assertGreater(served[0], 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
