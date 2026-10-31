@@ -215,7 +215,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
     int64_t expect_length) {
   std::vector<c10::Scalar> scalarList;
   TORCH_CHECK(
-      scalarList_.device() == c10::kCPU,
+      scalarList_.device() == c10::kCPU || scalarList_.is_meta(),
       "Expected scalars to be on CPU, got ",
       scalarList_.device(),
       " instead.");
@@ -235,7 +235,6 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       scalarList_.scalar_type(),
       "convert_tensor_to_scalar_list",
       [&]() {
-        const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
         TORCH_CHECK(
             (expect_length == scalarList_.size(0)),
             "Expected length of scalars to match input of length ",
@@ -244,8 +243,15 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
             scalarList_.size(0),
             " instead.");
         scalarList.reserve(scalarList_.size(0));
-        for (int64_t i = 0; i < scalarList_.size(0); i++) {
-          scalarList.emplace_back(scalar_data[i]);
+        if (scalarList_.is_meta()) {
+          for (int64_t i = 0; i < scalarList_.size(0); i++) {
+            scalarList.emplace_back(scalar_t{});
+          }
+        } else {
+          const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
+          for (int64_t i = 0; i < scalarList_.size(0); i++) {
+            scalarList.emplace_back(scalar_data[i]);
+          }
         }
       });
   return scalarList;

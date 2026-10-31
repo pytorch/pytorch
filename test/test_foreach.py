@@ -440,7 +440,18 @@ class TestForeachDevice(TestCase):
                         custom_values_err="Expected packed scalar Tensor to be of dimension 1. Got 0 instead.",
                         **kwargs,
                     )
-                    if device.split(":")[0] not in ("cpu", "meta"):
+                    if device.split(":")[0] == "meta":
+                        self._pointwise_test(
+                            op_,
+                            ref_,
+                            inputs,
+                            is_fastpath and not disable_fastpath,
+                            is_inplace,
+                            device=device,
+                            scalars=tensor_values.to(device),
+                            **kwargs,
+                        )
+                    elif device.split(":")[0] != "cpu":
                         self._pointwise_test(
                             op_,
                             ref_,
