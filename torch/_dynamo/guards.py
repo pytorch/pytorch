@@ -71,6 +71,7 @@ from torch._C._dynamo.guards import (
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
+    ORDERED_DICT_ORDER_MATCH,
     profile_guard_manager,
     RelationalGuard,
     RootGuardManager,
@@ -213,6 +214,7 @@ from .utils import (
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
+    InvalidOrderedDict,
     istype,
     key_is_id,
     key_to_id,
@@ -612,7 +614,11 @@ class GuardManagerWrapper:
             if has_unoptimized_relational_guard:
                 return tag_safe_roots, has_unoptimized_relational_guard
 
-            is_subtree_tag_safe = True
+            # move_to_end changes linked order without changing the dict tag.
+            is_subtree_tag_safe = not any(
+                isinstance(guard, ORDERED_DICT_ORDER_MATCH)
+                for guard in node.get_leaf_guards()
+            )
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -670,6 +676,9 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe = all(
                     isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
+                ) and not any(
+                    isinstance(guard, ORDERED_DICT_ORDER_MATCH)
+                    for guard in node.get_leaf_guards()
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
@@ -967,6 +976,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
+            "___ordered_dict_order": _ordered_dict_order,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___list_reverseiterator_len": list_reverseiterator_len,
             "___list_reverseiterator_backing_list": list_reverseiterator_backing_list,
@@ -1458,8 +1468,14 @@ def check_closure(value: object, metadata: Any) -> bool:
     return id(value) == metadata
 
 
-def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, ...]:
-    return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
+def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
+    if not issubclass(type(value), collections.OrderedDict):
+        return None
+    try:
+        value = cast(collections.OrderedDict[Any, Any], value)
+        return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        return None
 
 
 def _constant_subclass_base_value(value: object) -> Any:
@@ -1869,13 +1885,6 @@ class GuardBuilder(GuardBuilderBase):
         if source_name == "":
             return False
         value = self.get(source)
-        # DictGuardManager's empty fast path skips subclass attribute guards.
-        if (
-            issubclass(type(value), dict)
-            and type(value) is not dict
-            and not dict.__len__(value)
-        ):
-            return False
         return id(value) in self.key_order_guarded_dict_ids
 
     def get_guard_manager_type(
@@ -3787,21 +3796,17 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
-        eval_fn=lambda value, order: _ordered_dict_order(value) == order,
+        eval_fn=lambda value, order: order is not None
+        and _ordered_dict_order(value) == order,
     )
     def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
-        # Keep the container in the serialized guard state, even with a root leaf.
-        self.get_guard_manager(guard)
         order = _ordered_dict_order(self.get(guard))
+        if order is None:
+            raise AssertionError("Expected a valid OrderedDict snapshot")
         ref = self.arg_ref(guard)
-        get_value = eval(
-            f"lambda L: {ref}", _get_closure_vars() | {"G": self.runtime_global_scope}
-        )
-        code = [f"___ordered_dict_order_matches({ref})"]
-        # The root epilogue runs after source guards and cannot be skipped by
-        # ancestor dictionary-version shortcuts when only linked order changes.
-        self.guard_manager.root.add_ordered_dict_order_guard(
-            get_value, order, get_verbose_code_parts(code, guard), guard.user_stack
+        code = [f"___ordered_dict_order({ref}) == {order!r}"]
+        self.get_guard_manager(guard).add_ordered_dict_order_guard(
+            order, get_verbose_code_parts(code, guard), guard.user_stack
         )
         self._set_guard_export_info(guard, code)
 
@@ -5301,6 +5306,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name in ("__new__", "__init__", "__setitem__", "items")
             )
             order = _ordered_dict_order(obj)
+            if order is None:
+                # Native pickle may accept raw dict writes on an unguarded value.
+                return NotImplemented
             if not preserve_storage and order != tuple(range(dict.__len__(obj))):
                 raise torch._dynamo.exc.PackageError(
                     "Cannot preserve OrderedDict storage order with custom "
@@ -5353,14 +5361,18 @@ class GuardsStatePickler(FunctionPicklerBase):
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
             is_fake = is_fake_tensor(obj)
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
+            # For FakeTensors, record the real tensor's type. This is important
+            # for cross-compilation where we compile with fake tensors but run
+            # with real tensors. Only from_meta_and_device sets pytype; a fake
+            # Parameter without one carries the Parameter marker. Guards on a
+            # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                is_param = isinstance(obj, torch.nn.Parameter)
+                default = torch.nn.Parameter if is_param else torch.Tensor
+                pytype = obj.pytype or default
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
