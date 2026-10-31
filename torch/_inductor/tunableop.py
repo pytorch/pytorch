@@ -29,6 +29,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
+from .utils import clear_on_fresh_cache
 from .virtualized import V
 
 
@@ -255,8 +256,10 @@ class BenchmarkJob:
         tunable._record_borrowed_enable(self.record_borrowed)
         for name, value in settings.items():
             getattr(tunable, name)(value)
-        # benchmark_run_fn captures if either is set, and tuning cannot run
-        # under capture.
+        # TunableOp cannot tune under CUDA-graph capture, and benchmark_run_fn
+        # captures if either flag is set: benchmark_with_cudagraphs (per-choice)
+        # or config_cudagraph_benchmarking (snapshotted True on ROCm under
+        # max-autotune). Cleared here, the one place every job passes through.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
 
@@ -635,12 +638,7 @@ class _PretunedGemms:
         self.seen.clear()
 
 
-try:
-    from torch._inductor.utils import clear_on_fresh_cache
-
-    _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
-except Exception:
-    _pretuned_gemms = _PretunedGemms()
+_pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 
 # ExternKernelChoice names (winner.choice.name) the ladder covers. Matched by
 # string so a double import of the kernel modules cannot break the match.
@@ -650,19 +648,17 @@ except Exception:
 # since rebuilding its metas densely would tune a layout runtime never asks
 # for.
 _TUNABLEOP_GEMM_CHOICES = frozenset(
-    OrderedSet(
-        [
-            "mm",
-            "mm_dtype",
-            "addmm",
-            "addmm_dtype",
-            "bmm",
-            "bmm_dtype",
-            "baddbmm",
-            "_scaled_mm",
-            "_scaled_mm_v2",
-        ]
-    )
+    [
+        "mm",
+        "mm_dtype",
+        "addmm",
+        "addmm_dtype",
+        "bmm",
+        "bmm_dtype",
+        "baddbmm",
+        "_scaled_mm",
+        "_scaled_mm_v2",
+    ]
 )
 
 # Smallest dim worth its own tuning job. Applied to the dim, not to the symbol:
@@ -890,10 +886,10 @@ def maybe_range_pretune(winner) -> None:
         OrderedSet([sym_start, sym_hint, sym_hi])
         | OrderedSet([1 << k for k in range(1, 64) if sym_start < (1 << k) < sym_hi])
     )
-    # Ceiling in DIM space, since the symbol cap cannot see a multiplier: with
-    # the symbol alone bounded at 16384, 96*s reached 1572864. Anchored to the
-    # served dim so it can never truncate below what the model actually runs --
-    # a flat 16384 would have cut a GEMM served at 294912 down to 12288.
+    # Ceiling applies in DIM space, not symbol space: the symbol cap cannot see
+    # a multiplier, so an expression like 96*s clears it by two orders of
+    # magnitude. Floored at the served dim, so the ceiling can never truncate
+    # below the size the model actually runs.
     try:
         served_dim = _eval_at(dyn_expr, sym_hint)
     except Exception:  # unevaluatable at the hint
@@ -914,10 +910,9 @@ def maybe_range_pretune(winner) -> None:
         buckets.append(sym_val)
         dim_vals.append(dim_val)
     # The traced hint first, then largest first. The budget below is shared and
-    # spent in order: ascending order dropped the sizes nearest the shape
-    # actually served, and pure largest-first can spend it all on the biggest
-    # sizes -- the likeliest to fault -- before reaching the one size runtime is
-    # known to ask for.
+    # spent in this order, so whatever sorts last is what gets dropped: the hint
+    # leads because it is the one size runtime is known to ask for, and the rest
+    # descend so the largest -- the likeliest to fault -- cannot starve it.
     order = sorted(
         range(len(buckets)), key=lambda i: (buckets[i] != sym_hint, -dim_vals[i])
     )
@@ -1013,13 +1008,6 @@ def maybe_range_pretune(winner) -> None:
             sized_bmreq: Any = copy.copy(winner.bmreq)
             sized_bmreq.input_tensor_meta = [_meta_at(n, v) for n in winner.input_nodes]
             sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v)
-            # TunableOp cannot tune under CUDA-graph capture. copy.copy keeps
-            # both flags: benchmark_with_cudagraphs (set per-choice) and
-            # config_cudagraph_benchmarking (snapshotted True on ROCm under
-            # max-autotune), and benchmark_run_fn captures if either is set --
-            # every bucket would then silently record nothing.
-            sized_bmreq.benchmark_with_cudagraphs = False
-            sized_bmreq.config_cudagraph_benchmarking = False
             bmreqs.append(sized_bmreq)
     except Exception as e:  # bmreq build must not fail the compile
         log.warning(

@@ -457,8 +457,8 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(winner, sym=s), [])
 
     def test_a_failed_run_is_retried(self):
-        # Recording the memo key before the submissions made one fault
-        # permanent for the process; a GEMM that tuned nothing must retry.
+        # The memo key is recorded only once something was tuned, so a GEMM
+        # whose buckets all faulted is retried rather than skipped for good.
         tunableop._pretuned_gemms.cache_clear()
         try:
             s = sympy.Symbol("s_retry", positive=True, integer=True)
@@ -621,6 +621,30 @@ class TestTunableOpPretune(TestCase):
                 Scheduler.finalize_multi_template_buffers(sched)
         pretune.assert_called_once_with(winner)
         winner.output_node.assert_called_once()
+
+    def test_enabled_modes_bypass_the_fx_graph_cache(self):
+        # Both passes work while lowering -- tune records, reuse borrows and
+        # validates -- so a cache hit does neither and a rerun writes an empty
+        # results file. AOTAutogradCache routes through the same validator, so
+        # one bypass covers both caches.
+        from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
+
+        gm = torch.fx.symbolic_trace(torch.nn.Linear(4, 4))
+        with mock.patch("torch.cuda.is_available", return_value=True):
+            for mode, expect_bypass in (
+                ("off", False),
+                ("reuse", True),
+                ("tune", True),
+            ):
+                with self.subTest(mode=mode):
+                    with config.patch({"cuda.autotune_tunableop_mode": mode}):
+                        try:
+                            FxGraphCache._check_can_cache(gm, require_shape_env=False)
+                        except BypassFxGraphCache as e:
+                            bypassed = "TunableOp" in str(e)
+                        else:
+                            bypassed = False
+                    self.assertEqual(bypassed, expect_bypass)
 
 
 class TunableOpPretuneRealGpuTest(TestCase):
