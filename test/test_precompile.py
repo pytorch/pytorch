@@ -6456,6 +6456,11 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+def bumps_a_buffer(model, x):
+    model.calls.add_(1)
+    return model(x).sin()
+
+
 def kernelless_backward(model, x):
     return x.sin().sum() + model.lin.weight.sum()
 """
@@ -6665,6 +6670,15 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, captured = self._serve_in_fresh_process(y)
         self.assertEqual(recorded, 0)
         self.assertGreater(captured, 0)
+
+    def test_a_tree_artifact_mutating_a_buffer_serves_cudagraphs_without_trees(self):
+        # A buffer is a static input, whose mutation CUDA graph trees allow; the
+        # tree manager the artifact is served by must not re-read cudagraph_trees.
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
+        no_trees = {"triton.cudagraph_trees": False}
+        recorded, _ = self._serve_in_fresh_process(y, config=no_trees, bumps=3)
+        self.assertGreater(recorded, 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
         # Post-compile would take the partitioned wrapper in a loading process
