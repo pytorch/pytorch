@@ -244,7 +244,6 @@
   "test/distributed/test_p2p_ipc.py",
   "test/distributed/test_pg_wrapper.py",
   "test/distributed/test_serialization.py",
-  "test/distributed/test_shmem_triton.py",
   "test/distributed/test_symmetric_memory.py",
   "test/distributed/test_token_switch.py",
   "test/distributed/test_transport_bootstrap.py",
