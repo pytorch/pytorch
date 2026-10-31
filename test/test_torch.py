@@ -3300,6 +3300,42 @@ class TestTorchDeviceType(TestCase):
             dst.copy_(src.conj())
             self.assertEqual(dst, src.conj_physical())
 
+    # Broadcasting CPU<->CUDA copies take the temporary-staging path in
+    # Copy.cu. That path used to re-set src conj/neg bits after contiguous()
+    # had already materialized logical values, double-applying the transform.
+    # See #200613.
+    @onlyCUDA
+    @dtypes(torch.complex64, torch.complex128)
+    @parametrize("non_blocking", [False, True])
+    def test_copy_conj_neg_broadcast_staging(self, device, dtype, non_blocking):
+        z = torch.tensor([1 + 2j], dtype=dtype)
+        cases = [
+            ("conjugate", z.conj()),
+            ("negative", z.conj().imag),
+        ]
+        for name, src in cases:
+            expected = src.expand(2).contiguous()
+            dst = torch.zeros(2, dtype=src.dtype, device=device)
+            dst.copy_(src, non_blocking=non_blocking)
+            if non_blocking:
+                torch.cuda.current_stream().synchronize()
+            self.assertEqual(
+                dst.cpu(),
+                expected,
+                msg=f"{name} CPU->CUDA broadcast copy",
+            )
+
+            src_gpu = src.to(device)
+            dst_cpu = torch.zeros(2, dtype=src.dtype)
+            dst_cpu.copy_(src_gpu, non_blocking=non_blocking)
+            if non_blocking:
+                torch.cuda.current_stream().synchronize()
+            self.assertEqual(
+                dst_cpu,
+                expected,
+                msg=f"{name} CUDA->CPU broadcast copy",
+            )
+
     # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
     # shapes are deliberately larger than the 4 MB dispatch threshold, and
     # cover 1/2/4/8-byte elements plus non-multiple-of-32 extents.

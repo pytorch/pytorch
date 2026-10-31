@@ -760,12 +760,12 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
-    // propagate the correct conjugate bit
+    // Preserve destination conj/neg bits (dst_contig may be a fresh buffer).
+    // Do not re-apply the source bits: to()/expand_as()/contiguous() above may
+    // already have materialized the source's logical values and cleared those
+    // bits. Restoring them would conjugate/negate a second time. See #200613.
     dst_contig._set_conj(dst.is_conj());
-    src_contig._set_conj(iter.tensor(1).is_conj());
-
     dst_contig._set_neg(dst.is_neg());
-    src_contig._set_neg(iter.tensor(1).is_neg());
 
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
