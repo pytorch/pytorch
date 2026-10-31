@@ -2298,7 +2298,10 @@ class BenchmarkRunner:
                     else x,
                     fp64_outputs,
                 )
-            except Exception:
+            except Exception as e:
+                if isinstance(e, torch.cuda.OutOfMemoryError):
+                    log.exception("fp64 reference generation failed for %s", name)
+                    return record_status("OOM", dynamo_start_stats=start_stats)
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
@@ -2382,8 +2385,11 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
+                log.exception("Failed to compare eager outputs for %s", name)
+                if isinstance(e, torch.cuda.OutOfMemoryError):
+                    return record_status("OOM", dynamo_start_stats=start_stats)
                 is_same = False
 
             if not is_same:
@@ -2522,8 +2528,11 @@ class BenchmarkRunner:
                         iou_threshold=self.get_iou_threshold(name),
                     ):
                         run_passed = False
-                except Exception:
+                except Exception as e:
                     # Sometimes torch.allclose may throw RuntimeError
+                    log.exception("Failed to compare optimized outputs for %s", name)
+                    if isinstance(e, torch.cuda.OutOfMemoryError):
+                        return record_status("OOM", dynamo_start_stats=start_stats)
                     run_passed = False
 
                 if run_passed:
