@@ -6006,6 +6006,25 @@ if HAS_CUDA_AND_TRITON:
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("graph_partition", True)
+        @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
+        def test_graph_partition_forward_with_eagerly_lowered_skipped_backward(self):
+            # The backward is an expand with no kernel, so it runs without a CUDA
+            # graph, and it is lowered before the forward's first call creates the
+            # manager.
+            w = torch.rand([20], device="cuda", requires_grad=True)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.sin().sum() + w.sum()
+
+            for _ in range(3):
+                foo(torch.rand([20], device="cuda")).backward()
+
+            self.assertEqual(w.grad, torch.full_like(w, 3))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward_not_called(self):
             # tests saved tensor is handled correctly
             def foo(x, y):
