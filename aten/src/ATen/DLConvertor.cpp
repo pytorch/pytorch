@@ -62,7 +62,9 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     case ScalarType::BComplex32:
         TORCH_CHECK_BUFFER(false, "BComplex32 type is not supported by dlpack");
-        break;
+    case ScalarType::Float8_e5m3fnu:
+      TORCH_CHECK_BUFFER(
+          false, "Float8_e5m3fnu type is not supported by dlpack");
     case ScalarType::BFloat16:
       dtype.code = DLDataTypeCode::kDLBfloat;
       break;
@@ -93,14 +95,12 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QUInt4x2:
     case ScalarType::QUInt2x4:
       TORCH_CHECK_BUFFER(false, "QUInt/QInt types are not supported by dlpack");
-      break;
     case ScalarType::Bits1x8:
     case ScalarType::Bits2x4:
     case ScalarType::Bits4x2:
     case ScalarType::Bits8:
     case ScalarType::Bits16:
       TORCH_CHECK_BUFFER(false, "Bit types are not supported by dlpack");
-      break;
     case ScalarType::Undefined:
       TORCH_CHECK_BUFFER(false, "Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
