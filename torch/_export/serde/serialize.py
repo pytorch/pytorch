@@ -713,11 +713,12 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-# The torch modules that define what export puts into flat_apply calls: the
-# helper that calls custom autograd functions, and ModIndex, which
-# TransformGetItemToIndex uses. `import torch` does not import all of them, so
-# load imports these itself. The module comes from this table, never from the
-# loaded file.
+# The torch modules whose flat_apply functions a program can use without its
+# user importing anything: the helper that calls custom autograd functions, and
+# ModIndex, which TransformGetItemToIndex uses. `import torch` does not import
+# all of them, so load imports these itself. Other modules, such as
+# torch.distributed.tensor for DTensor, have to be imported first, like any
+# other. The module comes from this table, never from the loaded file.
 _FLAT_APPLY_MODULES = frozenset(
     {"torch.export.custom_ops", "torch._dynamo._trace_wrapped_higher_order_op"}
 )
@@ -732,13 +733,13 @@ def _find_imported(name: str) -> Any:
     before loading. Only top-level classes and functions are found, and the
     object must report the same qualified name, so aliases such as
     ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
-    Names in the main script are refused too, because it differs between
-    processes. A multiprocessing child imports the main script as
-    ``__mp_main__``.
+    Names in ``__main__`` modules are refused too, because a script differs
+    between processes. That includes ``__mp_main__``, the main script of a
+    multiprocessing child.
     """
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
-        raise SerializeError(f"{name} is in the main script's module")
+        raise SerializeError(f"{name} is in a __main__ module")
     if module_name in _FLAT_APPLY_MODULES:
         importlib.import_module(module_name)
     module = sys.modules.get(module_name)
