@@ -2097,7 +2097,7 @@ class TestSaveLoad(TestCase):
             self.assertEqual(loaded_ep.module()(x), m(x))
             save(loaded_ep, io.BytesIO())
 
-    @unittest.skipIf(IS_FBCODE, "Packaged fbcode test binaries cannot start Python")
+    @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
     def test_load_torch_python_ops_in_new_process(self):
         # These imports define the ops here. The new process below only imports torch.
         import torch.ao.quantization.fx._decomposed
@@ -2117,14 +2117,14 @@ class TestSaveLoad(TestCase):
             torch.randn(4),
         )
         ep = export(M(), inp)
-        ops = sorted(str(n.target) for n in ep.graph.nodes if n.op == "call_function")
+        ops = sorted({str(n.target) for n in ep.graph.nodes if n.op == "call_function"})
         with TemporaryFileName(suffix=".pt2") as path:
             save(ep, path)
             script = (
                 "import torch;"
                 f"ep = torch.export.load(r'{path}');"
-                "print(sorted(str(n.target) for n in ep.graph.nodes"
-                " if n.op == 'call_function'))"
+                "print(sorted({str(n.target) for n in ep.graph.nodes"
+                " if n.op == 'call_function'}))"
             )
             out = subprocess.check_output(
                 [sys.executable, "-c", script], cwd=os.path.dirname(path), text=True

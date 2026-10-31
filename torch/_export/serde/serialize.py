@@ -4,7 +4,6 @@ import copy
 import copyreg
 import dataclasses
 import heapq
-import importlib
 import inspect
 import io
 import json
@@ -2503,7 +2502,7 @@ class GraphModuleDeserializer(metaclass=Final):
             if serialized_target.startswith("torch.ops."):
                 namespace = serialized_target_names[1]
                 if namespace in _OP_NAMESPACE_MODULES:
-                    importlib.import_module(_OP_NAMESPACE_MODULES[namespace])
+                    torch.ops.import_module(_OP_NAMESPACE_MODULES[namespace])
         elif serialized_target.startswith("math"):
             module = math  # type: ignore[misc]
             serialized_target_names = serialized_target.split(".")[1:]
