@@ -6456,6 +6456,21 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+def overrides_the_backward(model, x):
+    with torch._dynamo.override_cudagraphs(bwd=False):
+        return step(model, x)
+
+
+def overrides_the_forward(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=False):
+        return step(model, x)
+
+
+def turns_cudagraphs_on(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=True):
+        return step(model, x)
+
+
 def bumps_a_buffer(model, x):
     model.calls.add_(1)
     return model(x).sin()
@@ -6661,6 +6676,34 @@ class TestPrecompileCudagraphs(TestCase):
         grad = self.model.lin.weight.grad.clone()
         recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
         self.assertEqual(recorded, 1)
+
+    @parametrize(
+        "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
+    )
+    @parametrize("flag", [False, True])
+    def test_a_capture_overriding_cudagraphs_is_refused_when_they_disagree(
+        self, fn, flag
+    ):
+        fn = getattr(self.mod, fn)
+        options = {"triton.cudagraphs": flag}
+        disagrees = flag != (fn is self.mod.turns_cudagraphs_on)
+        if disagrees:
+            with self.assertRaisesRegex(PrecompileError, "Set triton.cudagraphs"):
+                self._capture_step(fn, grad=True, options=options)
+        else:
+            y, _ = self._capture_step(fn, grad=True, options=options)
+            self.model.zero_grad(set_to_none=True)
+            fn(self.model, self.x).sum().backward()
+            grad = self.model.lin.weight.grad.clone()
+            self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+        # An eager capture records no CUDA graph config for an override to contradict.
+        self._capture_step(fn, grad=True, backend="eager")
+
+    def test_an_inference_capture_keeping_out_a_backward_it_lacks_serves(self):
+        fn = self.mod.overrides_the_backward
+        y, _ = self._capture_step(fn, options={"triton.cudagraphs": True})
+        recorded, _ = self._serve_in_fresh_process(y, skips=0)
+        self.assertGreater(recorded, 0)
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
