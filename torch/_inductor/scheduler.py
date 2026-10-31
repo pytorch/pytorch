@@ -882,6 +882,32 @@ class NestedReduction:
             scheduler_nodes, epilogue_node_set
         ):
             return None
+        # A pointwise producer emitted BEFORE the first reduction node in
+        # the final parent order runs inside the reduction loop and continues
+        # through memory, so its output is not a live sub-parent source; the
+        # epilogue reloads it. Treating it as live would require preserving
+        # loop-local CSE values across the reduction-loop close, which the
+        # resolver cannot do. A source store placed after the reduction (the
+        # normal sub-parent source pass) stays live so the epilogue shares
+        # that pass instead of splitting into an extra reduction loop.
+        _displaced_writes: OrderedSet[str] = OrderedSet()
+        for _pn in ordered_parent_nodes.nodes:
+            if _pn.is_reduction():
+                break
+            _displaced_writes.update(
+                _dep.name
+                for _dep in _pn.read_writes.writes
+                if isinstance(_dep, MemoryDep)
+            )
+        if _displaced_writes:
+            source_relations = tuple(
+                (
+                    relation
+                    if relation.source_accesses[0].name not in _displaced_writes
+                    else dataclasses.replace(relation, requires_live_source=False)
+                )
+                for relation in source_relations
+            )
         return StagedReductionPlan(
             parent_nodes=ordered_parent_nodes.nodes,
             parent_numel=numel,
