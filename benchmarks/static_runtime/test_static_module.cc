@@ -11,6 +11,7 @@
 
 #include "deep_wide_pt.h"
 #include "test_utils.h"
+#include <c10/util/irange.h>
 
 using namespace torch;
 using namespace torch::jit;
@@ -487,7 +488,7 @@ TEST(StaticRuntime, DeepWide) {
   torch::jit::StaticModule smod(mod);
 
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 2; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(2)) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
@@ -515,7 +516,7 @@ TEST(StaticRuntime, KWargsAPI_1) {
   torch::jit::StaticModule smod(module);
 
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 2; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(2)) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
@@ -556,7 +557,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
   torch::jit::StaticModule smod(module);
 
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 2; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(2)) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
@@ -637,7 +638,7 @@ TEST(StaticRuntime, CleanUpMemory) {
         torch::jit::StaticRuntime runtime(smod);
 
         for (int batch_size : {1, 8, 32}) {
-          for (int i = 0; i < 2; ++i) {
+          for ([[maybe_unused]] const auto _ : c10::irange(2)) {
             auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
             auto user_emb = torch::randn({batch_size, 1, embedding_size});
             auto wide = torch::randn({batch_size, num_features});
@@ -878,7 +879,7 @@ TEST(StaticRuntime, FusionPass) {
   const int embedding_size = 32;
   const int num_features = 50;
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 2; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(2)) {
       torch::jit::Module module = getDeepAndWideSciptModel();
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});

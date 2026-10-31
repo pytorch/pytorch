@@ -199,6 +199,7 @@ FAST_LINTERS = {
     "GHA",
     "NATIVEFUNCTIONS",
     "PYREFLY",
+    "RAW_VT_CONSTRUCTION",
     "RUFF",
     "SET_LINTER",
     "SHELLCHECK",
@@ -224,6 +225,7 @@ SLOW_LINTERS = {
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
     "SCOPED_LIBRARY",
+    "TEST_LINTER",
 }
 
 

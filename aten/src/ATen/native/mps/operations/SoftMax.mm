@@ -11,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_log_softmax_native.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
@@ -45,11 +46,11 @@ static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& para
 template <typename... Tensors>
 static void run_softmax(MPSStream* stream,
                         const std::string& kernel,
-                        const Tensor& self,
                         bool use_u32,
                         MTLSize grid,
                         MTLSize group,
                         const SoftmaxParams<uint64_t>& params,
+                        const Tensor& self,
                         const Tensors&... tensors) {
   auto encoder = stream->commandEncoder();
   auto pso =
@@ -57,21 +58,23 @@ static void run_softmax(MPSStream* stream,
   getMPSProfiler().beginProfileKernel(pso, kernel, {self}, stream);
   [encoder setComputePipelineState:pso];
   if (use_u32) {
-    mtl_setArgs(encoder, tensors..., narrow_params(params));
+    mtl_setArgs(encoder, self, tensors..., narrow_params(params));
   } else {
-    mtl_setArgs(encoder, tensors..., params);
+    mtl_setArgs(encoder, self, tensors..., params);
   }
   [encoder dispatchThreadgroups:grid threadsPerThreadgroup:group];
   getMPSProfiler().endProfileKernel(pso, stream);
 }
 
-static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float, const Tensor& out, bool log_softmax) {
-  const std::string kernel = log_softmax ? "log_softmax" : "softmax";
-  TORCH_CHECK(!half_to_float, kernel, " with half to float conversion is not supported on MPS");
+static void softmax_mps_impl(const std::string& kernel,
+                             const Tensor& self,
+                             int64_t dim,
+                             const Tensor& out,
+                             const std::optional<Tensor>& aux = std::nullopt) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self), kernel, " not implemented on MPS for ", self.scalar_type());
   if (self.numel() == 0) {
     return;
   }
-  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self), kernel, " not implemented on MPS for ", self.scalar_type());
 
   const auto self_ = self.dim() == 0 ? self.view(1) : self;
   const auto wrapped_dim = maybe_wrap_dim(dim, self_.dim());
@@ -133,21 +136,21 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
         constexpr auto rows_per_group = kSoftmaxThreads / c10::metal::simdgroup_size;
         const auto grid = MTLSizeMake(ceil_div(num_rows, uint64_t(rows_per_group)), 1, 1);
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
-        run_softmax(stream, kernel + "_row", self, use_u32, grid, group, params, self_, output);
+        run_softmax(stream, kernel + "_row", use_u32, grid, group, params, self_, aux, output);
       } else if (use_split) {
         const auto grid = MTLSizeMake(n_chunks, num_rows, 1);
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
-        run_softmax(stream, "softmax_partial", self, use_u32, grid, group, params, self_, partials);
-        run_softmax(stream, kernel + "_finalize", self, use_u32, grid, group, params, self_, output, partials);
+        run_softmax(stream, kernel + "_partial", use_u32, grid, group, params, self_, aux, partials);
+        run_softmax(stream, kernel + "_finalize", use_u32, grid, group, params, self_, aux, output, partials);
       } else if (use_strided_split) {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, strided_chunks);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
-        run_softmax(stream, "softmax_strided_partial", self, use_u32, grid, group, params, self_, partials);
-        run_softmax(stream, kernel + "_strided_finalize", self, use_u32, grid, group, params, self_, output, partials);
+        run_softmax(stream, kernel + "_strided_partial", use_u32, grid, group, params, self_, aux, partials);
+        run_softmax(stream, kernel + "_strided_finalize", use_u32, grid, group, params, self_, aux, output, partials);
       } else {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
-        run_softmax(stream, kernel, self, use_u32, grid, group, params, self_, output);
+        run_softmax(stream, kernel, use_u32, grid, group, params, self_, aux, output);
       }
     }
   });
@@ -158,72 +161,38 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
 
 TORCH_IMPL_FUNC(softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
-  softmax_mps_impl(self, dim, half_to_float, out, false);
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
+  softmax_mps_impl("softmax", self, dim, out);
 }
 
 TORCH_IMPL_FUNC(log_softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
-  softmax_mps_impl(self, dim, half_to_float, out, true);
+  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on MPS");
+  softmax_mps_impl("log_softmax", self, dim, out);
+}
+
+static void softmax_backward_mps_impl(const std::string& kernel,
+                                      const Tensor& grad,
+                                      const Tensor& output,
+                                      int64_t dim,
+                                      const Tensor& grad_input) {
+  TORCH_CHECK(grad_input.scalar_type() == grad.scalar_type() && output.scalar_type() == grad.scalar_type(),
+              kernel,
+              " with mixed dtypes is not supported on MPS");
+  const bool same_strides = grad.strides() == output.strides();
+  const auto grad_ = same_strides ? grad : grad.contiguous();
+  const auto output_ = same_strides ? output : output.contiguous();
+  softmax_mps_impl(kernel, grad_, dim, grad_input, output_);
+}
+
+TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  softmax_backward_mps_impl("log_softmax_backward", grad, output, dim, grad_input);
 }
 
 TORCH_IMPL_FUNC(softmax_backward_mps_out)
-(const Tensor& grad_, const Tensor& output_, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
-  if (output_.numel() == 0) {
-    return;
-  }
-
-  Tensor grad;
-  if (grad_.dim() == 0) {
-    grad = grad_.view(1);
-  } else
-    grad = grad_;
-
-  Tensor output;
-  if (output_.dim() == 0) {
-    output = output_.view(1);
-  } else
-    output = output_;
-
-  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
-  TORCH_CHECK(dim_ >= 0 && dim_ < grad.dim(), "Grad:dim must be non-negative and less than input dimensions");
-
-  using namespace mps;
-  using CachedGraph = MPSUnaryGradCachedGraph;
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    MPSShape* grad_shape = mps::getMPSShape(grad);
-    NSString* ns_shape_key = [[grad_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    std::string key = "softmax_backward_mps_out:" + getMPSTypeString(output) + ":" + [ns_shape_key UTF8String] + ":" +
-        std::to_string(dim_);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* softmaxTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(output), grad_shape);
-      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), grad_shape);
-
-      MPSGraphTensor* mulTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
-                                                            secondaryTensor:gradOutputTensor
-                                                                       name:nil];
-      MPSGraphTensor* mulSumTensor = [mpsGraph reductionSumWithTensor:mulTensor axis:(NSInteger)dim_ name:nil];
-      MPSGraphTensor* gradSubTensor = [mpsGraph subtractionWithPrimaryTensor:gradOutputTensor
-                                                             secondaryTensor:mulSumTensor
-                                                                        name:nil];
-      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
-                                                                  secondaryTensor:gradSubTensor
-                                                                             name:nil];
-
-      newCachedGraph->outputTensor_ = softmaxTensor;
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensor;
-    });
-
-    Placeholder softmaxPlaceholder = Placeholder(cachedGraph->outputTensor_, output, grad_shape);
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad, grad_shape);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    auto feeds = dictionaryFromPlaceholders(softmaxPlaceholder, gradOutputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  softmax_backward_mps_impl("softmax_backward", grad, output, dim, grad_input);
 }
 
 } // namespace at::native

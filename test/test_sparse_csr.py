@@ -6,8 +6,10 @@ import io
 import itertools
 import operator
 import random
+import types
 import unittest
 from contextlib import redirect_stderr
+from unittest.mock import patch
 
 import torch
 from torch.testing import FileCheck, make_tensor
@@ -19,6 +21,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -26,7 +29,6 @@ from torch.testing._internal.common_device_type import (
     ops,
     precisionOverride,
     skipCPUIfNoMklSparse,
-    skipCUDAIf,
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
@@ -1095,7 +1097,150 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
     return alpha * (a @ b) + beta * c
 
 
-class TestSparseCSR(TestCase):
+class TestSparseCSRCpuOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @largeTensorTest("20GB", "cpu")
+    def test_csr_nnz(self):
+        # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.
+        for nnz in [0, 2**31]:
+            rows, cols = 1, max(nnz, 1)
+            crow_indices = torch.tensor([0, nnz], dtype=torch.int64)
+            col_indices = torch.arange(nnz, dtype=torch.int64)
+            values = torch.ones(nnz, dtype=torch.int8)
+            a = torch.sparse_csr_tensor(crow_indices, col_indices, values, (rows, cols))
+            self.assertEqual(a._nnz(), nnz)
+
+    @skipCPUIfNoMklSparse
+    @dtypes(*floating_and_complex_types())
+    @sparse_compressed_nonblock_layouts()
+    def test_addmm_dense_result(self, device, dtype, layout):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
+
+        # Test 0-strided
+        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
+        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), float('nan'), device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="dense_result")
+
+        # Test transpose
+        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="dense_result")
+
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @precisionOverride({torch.bfloat16: 0.01})
+    def test_sparse_mm_reduce_sum(self, device, dtype):
+        def run_test(m, n, k, nnz, train):
+            sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+            dense = sparse.to_dense()
+
+            mat = torch.randn(k, n, dtype=dtype, device=device)
+            ref_mat = mat.clone()
+
+            if train:
+                sparse.requires_grad_()
+                mat.requires_grad_()
+                dense.requires_grad_()
+                ref_mat.requires_grad_()
+
+            ref_out = torch.mm(dense, ref_mat)
+            out = torch.sparse.mm(sparse, mat, 'sum')
+
+            self.assertEqual(out, ref_out)
+
+            if train:
+                ref_out.sum().backward()
+                out.sum().backward()
+
+                grad_input = sparse.grad
+                ref_grad_input = dense.grad
+                grad_mat = mat.grad
+                ref_grad_mat = ref_mat.grad
+
+                self.assertEqual(grad_input.to_dense(), ref_grad_input)
+                self.assertEqual(grad_mat, ref_grad_mat)
+
+        run_test(4, 5, 4, 10, False)
+        run_test(4, 4, 4, 16, True)
+
+    @skipIfTorchDynamo()
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
+    def test_sparse_mm_reduce(self, device, dtype):
+        def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
+            csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            mat = torch.randn(n, k, dtype=dtype, device=device)
+            ref_mat = mat.clone()
+            ref_values = csr.values().clone()
+
+            out_int32 = index_dtype == torch.int32
+            coo_indices = torch._convert_indices_from_csr_to_coo(
+                csr.crow_indices(),
+                csr.col_indices(),
+                out_int32=out_int32)
+            row, col = coo_indices[0], coo_indices[1]
+
+            def ref(row, col, val, mat):
+                out = torch.zeros([m, k], dtype=dtype, device=device)
+                weight = mat.index_select(0, col)
+                src = weight.mul(val.view(-1, 1))
+                index = row.view(-1, 1).expand_as(weight)
+                index = index.to(dtype=torch.int64)
+                # scatter_reduce expect index to be int64
+                out.scatter_reduce_(0, index, src, reduce=reduce_type, include_self=False)
+                return out
+
+            if train:
+                csr.requires_grad_()
+                mat.requires_grad_()
+                ref_values.requires_grad_()
+                ref_mat.requires_grad_()
+
+            ref_out = ref(row, col, ref_values, ref_mat)
+            out = torch.sparse.mm(csr, mat, reduce_type)
+            self.assertEqual(out, ref_out)
+
+            if train and dtype not in (torch.bfloat16, torch.float16):
+                ref_out.sum().backward()
+                out.sum().backward()
+
+                grad_values = csr.grad.values()
+                grad_weight = mat.grad
+                ref_grad_values = ref_values.grad
+                ref_grad_weight = ref_mat.grad
+                self.assertEqual(grad_values, ref_grad_values)
+                self.assertEqual(grad_weight, ref_grad_weight)
+
+        for train in [False, True]:
+            for index_dtype in [torch.int32, torch.int64]:
+                for reduce_type in ["sum", "mean", "amax", "amin"]:
+                    # by setting nnz < M, create empty rows
+                    run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 6, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 12, reduce_type, index_dtype, train)
+                    # we are doing blocking with 4x vector length in the kernel,
+                    # so need to test when K > 4x vector length
+                    run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
+
+
+class TestSparseCSRDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -1332,12 +1477,8 @@ class TestSparseCSR(TestCase):
                                                blocksize=tuple(2 * bi for bi in blocksize))
             _check_resize_b_as_a(b, a)
 
-            # different device, only check on cuda pass as we know we are testing in an environment
-            # that has multiple devices
-
-            # TODO: .cpu() does not seem to work correctly for sparse. Causes a call to `copy_` which
-            # complains about incompatible nnz between src and self?
-            if device_type == 'cuda' and (layout not in (torch.sparse_bsc, torch.sparse_bsr)):
+            # cross-device resize is not supported: the template must be on the same device
+            if device_type != 'cpu':
                 a_cpu = self.genSparseCompressedTensor(shape,
                                                        layout=layout,
                                                        device='cpu',
@@ -1345,7 +1486,9 @@ class TestSparseCSR(TestCase):
                                                        dtype=dtype,
                                                        nnz=nnz,
                                                        blocksize=blocksize)
-                _check_resize_b_as_a(b, a)
+                with self.assertRaisesRegex(
+                        RuntimeError, "Expected all tensors to be on the same device"):
+                    b.clone().resize_as_sparse_(a_cpu)
 
             # error on a strided
             a_strided = a.to_dense()
@@ -1557,6 +1700,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
                   *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     def test_csr_matvec(self, device, dtype):
 
         side = 100
@@ -1615,6 +1759,10 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
+                batched = self.genSparseCSRTensor((batch_size, m, k), nnz, dtype=dtype,
+                                                  device=device, index_dtype=index_dtype)
+                self.assertEqual(torch.baddbmm(c, batched, b), torch.baddbmm(c, batched.to_dense(), b))
+
     @onlyAccelerator
     @skipCUDAIfNoSparseGeneric
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1649,6 +1797,10 @@ class TestSparseCSR(TestCase):
                 b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+                batched = self.genSparseCSRTensor((batch_size, m, k), nnz, dtype=dtype,
+                                                  device=device, index_dtype=index_dtype)
+                self.assertEqual(torch.bmm(batched, b), torch.bmm(batched.to_dense(), b))
 
     def run_test_block_addmm_addmv(self,
                                    addmv_addmm,
@@ -1685,6 +1837,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
                   *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5,
                         torch.float16: 1e-3, torch.bfloat16: 1e-3})
@@ -1837,12 +1990,14 @@ class TestSparseCSR(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_triangular_solve(self, device, dtype, index_dtype, block_size, noncontiguous):
+        device_type = torch.device(device).type
+
         def run_test(a, b, upper, transpose, unitriangular, op_out):
-            if unitriangular and self.device_type == 'cpu':
+            if unitriangular and device_type == 'cpu':
                 # TODO: When unitriangular=True results are not correct on CPU
                 return
 
-            if not upper and self.device_type == 'cpu':
+            if not upper and device_type == 'cpu':
                 # TODO: When upper=False some generated inputs might crash on CPU
                 return
 
@@ -1873,7 +2028,7 @@ class TestSparseCSR(TestCase):
             if expected_X.isnan().any():
                 # TODO: zeros on the diagonal are not handled for CPU path
                 # there's no way to query this info from MKL
-                if self.device_type == 'cuda' and not TEST_WITH_ROCM:
+                if device_type != 'cpu' and not TEST_WITH_ROCM:
                     self.assertTrue(actual_X.isnan().any() or actual_X.isinf().any())
                 return
 
@@ -2007,6 +2162,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
                   *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -2026,6 +2182,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
                   *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
@@ -2063,6 +2220,7 @@ class TestSparseCSR(TestCase):
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
+    @dtypesIfXPU(*floating_types_and(torch.complex64, torch.bfloat16, torch.half, torch.complex128))
     @sparse_compressed_nonblock_layouts()
     def test_addmm_all_sparse_csr(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
@@ -2094,41 +2252,6 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="all_sparse")
 
-    @skipCPUIfNoMklSparse
-    @dtypes(*floating_and_complex_types())
-    @sparse_compressed_nonblock_layouts()
-    @skipCUDAIf(True, "_sparse_mm_reduce_impl only support SparseCsrCPU")
-    def test_addmm_dense_result(self, device, dtype, layout):
-        M = torch.randn(10, 25, device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
-
-        # Test 0-strided
-        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
-        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
-
-        # Test beta=0, M=nan
-        M = torch.full((10, 25), float('nan'), device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="dense_result")
-
-        # Test transpose
-        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
-            def maybe_transpose(cond, m):
-                if not cond:
-                    return m
-                return m.t().clone(memory_format=torch.contiguous_format).t()
-
-            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
-            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
-            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="dense_result")
-
-
     @parametrize("k", [0, 1, 8])
     @parametrize("n", [0, 1, 10])
     @parametrize("m", [0, 1, 25])
@@ -2140,6 +2263,7 @@ class TestSparseCSR(TestCase):
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
+    @dtypesIfXPU(*floating_types_and(torch.complex64, torch.bfloat16, torch.half, torch.complex128))
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
@@ -2528,6 +2652,7 @@ class TestSparseCSR(TestCase):
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     @toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1.6e-2),
@@ -2585,6 +2710,7 @@ class TestSparseCSR(TestCase):
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     @toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1.6e-2),
@@ -2673,104 +2799,6 @@ class TestSparseCSR(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
-
-    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.01})
-    @skipCUDAIf(True, "_sparse_mm_reduce_impl only support SparseCsrCPU")
-    def test_sparse_mm_reduce_sum(self, device, dtype):
-        def run_test(m, n, k, nnz, train):
-            sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
-            dense = sparse.to_dense()
-
-            mat = torch.randn(k, n, dtype=dtype, device=device)
-            ref_mat = mat.clone()
-
-            if train:
-                sparse.requires_grad_()
-                mat.requires_grad_()
-                dense.requires_grad_()
-                ref_mat.requires_grad_()
-
-            ref_out = torch.mm(dense, ref_mat)
-            out = torch.sparse.mm(sparse, mat, 'sum')
-
-            self.assertEqual(out, ref_out)
-
-            if train:
-                ref_out.sum().backward()
-                out.sum().backward()
-
-                grad_input = sparse.grad
-                ref_grad_input = dense.grad
-                grad_mat = mat.grad
-                ref_grad_mat = ref_mat.grad
-
-                self.assertEqual(grad_input.to_dense(), ref_grad_input)
-                self.assertEqual(grad_mat, ref_grad_mat)
-
-        run_test(4, 5, 4, 10, False)
-        run_test(4, 4, 4, 16, True)
-
-    @skipIfTorchDynamo()
-    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
-    @skipCUDAIf(True, "_sparse_mm_reduce_impl only support SparseCsrCPU")
-    def test_sparse_mm_reduce(self, device, dtype):
-        def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
-            csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-            mat = torch.randn(n, k, dtype=dtype, device=device)
-            ref_mat = mat.clone()
-            ref_values = csr.values().clone()
-
-            out_int32 = index_dtype == torch.int32
-            coo_indices = torch._convert_indices_from_csr_to_coo(
-                csr.crow_indices(),
-                csr.col_indices(),
-                out_int32=out_int32)
-            row, col = coo_indices[0], coo_indices[1]
-
-            def ref(row, col, val, mat):
-                out = torch.zeros([m, k], dtype=dtype, device=device)
-                weight = mat.index_select(0, col)
-                src = weight.mul(val.view(-1, 1))
-                index = row.view(-1, 1).expand_as(weight)
-                index = index.to(dtype=torch.int64)
-                # scatter_reduce expect index to be int64
-                out.scatter_reduce_(0, index, src, reduce=reduce_type, include_self=False)
-                return out
-
-            if train:
-                csr.requires_grad_()
-                mat.requires_grad_()
-                ref_values.requires_grad_()
-                ref_mat.requires_grad_()
-
-            ref_out = ref(row, col, ref_values, ref_mat)
-            out = torch.sparse.mm(csr, mat, reduce_type)
-            self.assertEqual(out, ref_out)
-
-            if train and dtype not in (torch.bfloat16, torch.float16):
-                ref_out.sum().backward()
-                out.sum().backward()
-
-                grad_values = csr.grad.values()
-                grad_weight = mat.grad
-                ref_grad_values = ref_values.grad
-                ref_grad_weight = ref_mat.grad
-                self.assertEqual(grad_values, ref_grad_values)
-                self.assertEqual(grad_weight, ref_grad_weight)
-
-        for train in [False, True]:
-            for index_dtype in [torch.int32, torch.int64]:
-                for reduce_type in ["sum", "mean", "amax", "amin"]:
-                    # by setting nnz < M, create empty rows
-                    run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
-                    run_test(3, 4, 11, 6, reduce_type, index_dtype, train)
-                    run_test(3, 4, 11, 12, reduce_type, index_dtype, train)
-                    # we are doing blocking with 4x vector length in the kernel,
-                    # so need to test when K > 4x vector length
-                    run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
-
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -3021,7 +3049,8 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
-        if op.name == "mv" and no_mkl_sparse and self.device_type == 'cpu':
+        device_type = torch.device(device).type
+        if op.name == "mv" and no_mkl_sparse and device_type == 'cpu':
             self.skipTest("MKL Sparse is not available")
 
         samples = list(op.sample_inputs(device, dtype, requires_grad=True))
@@ -4306,7 +4335,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_tune(self, op, device, dtype, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, _int_bsr_dense_addmm
-        from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm, tune__int_bsr_dense_addmm, get_meta)
+        from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm,
+                                                   tune__int_bsr_dense_addmm, get_meta, _get_device_name)
 
         if out_dtype == "unspecified":
             out_dtype = None
@@ -4346,7 +4376,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             def get_current_meta():
                 version = (0, version_dtype, sparsity)
                 meta_key = (M, K, N, *blocksize, False, True, True)
-                return get_meta(op, meta_key, version=version, exact=True)
+                # The tuner keys on the inputs' device; read it back the same way.
+                return get_meta(op, meta_key, _get_device_name(device), version=version, exact=True)
         else:
             raise NotImplementedError(op)
 
@@ -4372,11 +4403,11 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         def get_meta(M, K, N, sparsity=None):
             return bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha, dtype=dtype, sparsity=sparsity,
-                                        _version="test_triton_bsr_dense_addmm_meta")
+                                        _version="test_triton_bsr_dense_addmm_meta", device=device)
 
         def update_meta(M, K, N, value, sparsity=0.5):
             key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
-            bsr_dense_addmm_meta_update("bsr_dense_addmm", _get_device_name(),
+            bsr_dense_addmm_meta_update("bsr_dense_addmm", _get_device_name(device),
                                         ("test_triton_bsr_dense_addmm_meta", dtype, sparsity),
                                         key, value)
 
@@ -4428,28 +4459,122 @@ class TestSparseCompressedTritonKernels(TestCase):
         self.assertEqual(get_meta_with_checks(32, 32, 64, warn_count=1),
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
 
-@instantiate_parametrized_tests
-class TestSparseCSRGeneric(TestCase):
+
+class TestSparseTritonMetaDeviceName(TestCase):
+    """_get_device_name supplies the device component of the key under which
+    _operation_device_version_data stores tuned Triton parameters. It sits on the
+    miss path of an optimization lookup, so it must never raise, and it must key on
+    the device the inputs are on so that a lookup finds what a tuning run stored."""
+
     hw_classification = HardwareClassification.GENERIC
 
-    @largeTensorTest("20GB", "cpu")
-    def test_csr_nnz(self):
-        # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.
-        for nnz in [0, 2**31]:
-            rows, cols = 1, max(nnz, 1)
-            crow_indices = torch.tensor([0, nnz], dtype=torch.int64)
-            col_indices = torch.arange(nnz, dtype=torch.int64)
-            values = torch.ones(nnz, dtype=torch.int8)
-            a = torch.sparse_csr_tensor(crow_indices, col_indices, values, (rows, cols))
-            self.assertEqual(a._nnz(), nnz)
+    def _device_module(self, **attrs):
+        # privateuseone stands in for an accelerator that is neither cuda nor xpu.
+        # Patching the attribute avoids torch.utils.rename_privateuse1_backend,
+        # which is process-global and can only be called once.
+        return patch.object(
+            torch, "privateuseone", types.SimpleNamespace(**attrs), create=True
+        )
+
+    def test_device_module_without_get_device_name_is_unnamed(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with self._device_module(is_available=lambda: True):
+            self.assertEqual(_get_device_name("privateuseone"), "")
+        # torch.cpu, torch.mps and torch.mtia are in the same position today.
+        self.assertEqual(_get_device_name("cpu"), "")
+
+    def test_no_cuda_or_xpu_is_unnamed(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with patch.object(torch.cuda, "is_available", lambda: False), patch.object(
+            torch.xpu, "is_available", lambda: False
+        ):
+            self.assertEqual(_get_device_name(), "")
+
+    def test_explicit_device_is_used_instead_of_the_default(self):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        with self._device_module(get_device_name=lambda device: f"Fake {device}"):
+            self.assertEqual(_get_device_name("privateuseone"), "Fake privateuseone")
+            self.assertEqual(
+                _get_device_name(torch.device("privateuseone")), "Fake privateuseone"
+            )
+            self.assertNotEqual(_get_device_name(), "Fake privateuseone")
+
+    def test_tuned_parameters_are_found_through_the_input_device(self):
+        # Round trip: what update() stores under a device's name must be found
+        # again by a lookup that only knows the input tensor's device. Needs no
+        # accelerator, and no second one.
+        from torch.sparse._triton_ops import bsr_dense_addmm_meta
+        from torch.sparse._triton_ops_meta import _operation_device_version_data, update
+
+        device_name = "Fake privateuseone"
+        version = ("test_tuned_parameters_are_found_through_the_input_device",
+                   torch.float16, 0.5)
+        key = (256, 256, 256, 16, 16, True, False, True)
+        tuned = dict(GROUP_SIZE_ROW=2, SPLIT_N=8, num_stages=3, num_warps=5)
+
+        def get_meta(**kwargs):
+            f = io.StringIO()
+            with redirect_stderr(f):
+                return bsr_dense_addmm_meta(256, 256, 256, 16, 16, 0, 1, dtype=torch.float16,
+                                            sparsity=0.5, _version=version[0], **kwargs)
+
+        update("bsr_dense_addmm", device_name, version, key, tuple(tuned[k] for k in sorted(tuned)))
+        try:
+            with self._device_module(get_device_name=lambda device: device_name):
+                self.assertEqual(get_meta(device="privateuseone"), tuned)
+            # Without the device the caller-less default names the key instead, and
+            # that is never this one, so the entry must not be found.
+            self.assertNotEqual(get_meta(), tuned)
+        finally:
+            del _operation_device_version_data["bsr_dense_addmm", device_name, version]
+
+    def test_the_input_device_reaches_the_tuning_key(self):
+        # The device= arguments at these two call sites are the whole mechanism:
+        # without them the key comes from the caller-less default and a tuning run
+        # on any other device becomes unfindable. Nothing else in the suite
+        # exercises them, and no hardware configuration can -- the key is a device
+        # name and what differs here is the device type. The lookups are
+        # intercepted, so this needs no Triton and launches no kernel.
+        from torch.sparse import _triton_ops
+
+        class StopAtLookup(Exception):
+            pass
+
+        seen = []
+
+        def intercept(*args, device=None, **kwargs):
+            seen.append(device)
+            raise StopAtLookup
+
+        f = io.StringIO()
+        with redirect_stderr(f):
+            dense = torch.zeros(32, 16)
+            blocked = torch.zeros(32, 32)
+            blocked[:16, :16] = 1
+            bsr = blocked.to_sparse_bsr((16, 16))
+
+        with patch.object(_triton_ops, "scatter_mm_meta", intercept):
+            with self.assertRaises(StopAtLookup):
+                _triton_ops.bsr_scatter_mm_indices_data(bsr, dense)
+
+        with patch.object(_triton_ops, "bsr_dense_addmm_meta", intercept):
+            with self.assertRaises(StopAtLookup):
+                _triton_ops.bsr_dense_addmm(dense.clone(), bsr, dense)
+
+        self.assertEqual(seen, [bsr.device, bsr.device])
 
 
 instantiate_parametrized_tests(TestSparseCompressed)
 instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
 
-instantiate_device_type_tests(TestSparseCSR, globals())
-instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
+instantiate_device_type_tests(TestSparseCSRCpuOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSparseCSRDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSparseCSRCudaOnly, globals(), only_for="cuda")
+
+instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
 
 if __name__ == '__main__':
     run_tests()

@@ -708,7 +708,7 @@ Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 namespace {
 
 inline Tensor calc_ndtr(const Tensor& self) {
-  auto x_sqrt_2 = self * M_SQRT1_2;
+  auto x_sqrt_2 = self * c10::frac_sqrt_2<double>;
   return (1 + at::erf(x_sqrt_2)) * 0.5;
 }
 

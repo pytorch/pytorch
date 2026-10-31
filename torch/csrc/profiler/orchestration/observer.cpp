@@ -15,7 +15,6 @@ ExperimentalConfig::ExperimentalConfig(
     bool verbose,
     std::vector<std::string> performance_events,
     bool enable_cuda_sync_events,
-    bool adjust_profiler_step,
     bool disable_external_correlation,
     bool profile_all_threads,
     bool capture_overload_names,
@@ -27,7 +26,6 @@ ExperimentalConfig::ExperimentalConfig(
     : verbose{verbose},
       performance_events(std::move(performance_events)),
       enable_cuda_sync_events{enable_cuda_sync_events},
-      adjust_profiler_step{adjust_profiler_step},
       disable_external_correlation{disable_external_correlation},
       profile_all_threads{profile_all_threads},
       capture_overload_names{capture_overload_names},
@@ -113,7 +111,10 @@ ProfilerStateBase::~ProfilerStateBase() {
   if (handle_) {
     auto handle = handle_;
     removeCallback();
-    SOFT_ASSERT(false, "Leaked callback handle: ", handle);
+    // Not SOFT_ASSERT: this destructor runs during static destruction when a
+    // profiler is left running at exit, after libkineto's singleton is gone,
+    // and SOFT_ASSERT logs through libkineto::api().
+    TORCH_WARN("Leaked callback handle: ", handle);
   }
 }
 

@@ -19,15 +19,6 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() : _mtl_device(nil) {
-  // Check that MacOS 13.0+ version of MPS framework is available
-  // Create the MPSGraph and check method introduced in 14.0
-  // which is used by MPS backend.
-  id mpsCD = NSClassFromString(@"MPSGraph");
-
-  if ([mpsCD instancesRespondToSelector:@selector(HermiteanToRealFFTWithTensor:axes:descriptor:name:)] == NO) {
-    return;
-  }
-
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
@@ -44,11 +35,11 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
 }
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
-  auto is_os_version_at_least = [](int major, int minor) {
+  auto is_os_version_at_least = [](int major, int minor, int patch = 0) {
     @autoreleasepool {
       NSProcessInfo* processInfo = [[NSProcessInfo new] autorelease];
       return [processInfo
-          isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
+          isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = patch}];
     }
   };
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
@@ -58,6 +49,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_26_2_plus = is_os_version_at_least(26, 2);
   static bool _macos_26_4_plus = is_os_version_at_least(26, 4);
   static bool _macos_27_0_plus = is_os_version_at_least(27, 0);
+  static bool _macos_27_0_1_plus = is_os_version_at_least(27, 0, 1);
 
   switch (version) {
     case MacOSVersion::MACOS_15_0:
@@ -74,6 +66,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_26_4_plus;
     case MacOSVersion::MACOS_27_0:
       return _macos_27_0_plus;
+    case MacOSVersion::MACOS_27_0_1:
+      return _macos_27_0_1_plus;
     default:
       return false;
   }
@@ -169,6 +163,14 @@ bool has_mpp() {
   // https://github.com/pytorch/pytorch/issues/196582
   return is_macos_at_least(MacOSVersion::MACOS_26_2) && metal_language_version() >= MetalLanguageVersion::METAL_4_0 &&
       is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS);
+}
+
+bool has_metal_4_1() {
+#ifndef CAN_BUILD_METAL_41
+  return false;
+#else
+  return has_mpp() && is_macos_at_least(MacOSVersion::MACOS_27_0);
+#endif
 }
 
 } // namespace at::mps

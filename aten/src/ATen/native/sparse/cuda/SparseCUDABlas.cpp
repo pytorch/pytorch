@@ -37,8 +37,8 @@ template<typename T>
 void _csrmm2(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  T *alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
-  T *b, int64_t ldb, T *beta, T *c, int64_t ldc,
+  T *alpha, const T *csrvala, const int *csrrowptra, const int *csrcolinda,
+  const T *b, int64_t ldb, T *beta, T *c, int64_t ldc,
   cudaDataType cusparse_value_type)
 {
   if (csrvala == nullptr || b == nullptr || c == nullptr) return;
@@ -56,13 +56,14 @@ void _csrmm2(
   int64_t ma = m, ka = k;
   if (transa != 'n') std::swap(ma, ka);
 
+  // Descriptor creation requires non-const pointers; SpMM only reads A and B.
   cusparseSpMatDescr_t descA;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
     &descA,                     /* output */
     ma, ka, nnz,                /* rows, cols, number of non zero elements */
-    csrrowptra,                 /* row offsets of the sparse matrix, size = rows +1 */
-    csrcolinda,                 /* column indices of the sparse matrix, size = nnz */
-    csrvala,                    /* values of the sparse matrix, size = nnz */
+    const_cast<int*>(csrrowptra), /* row offsets of the sparse matrix, size = rows +1 */
+    const_cast<int*>(csrcolinda), /* column indices of the sparse matrix, size = nnz */
+    const_cast<T*>(csrvala),    /* values of the sparse matrix, size = nnz */
     CUSPARSE_INDEX_32I,         /* data type of row offsets index */
     CUSPARSE_INDEX_32I,         /* data type of col indices */
     CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col index */
@@ -76,7 +77,7 @@ void _csrmm2(
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
     &descB,               /* output */
     kb, nb, ldb,          /* rows, cols, leading dimension */
-    b,                    /* values */
+    const_cast<T*>(b),    /* values */
     cusparse_value_type,  /* data type of values */
     CUSPARSE_ORDER_COL    /* memory layout, ONLY column-major is supported now */
   ));
@@ -139,8 +140,8 @@ template<typename T>
 void csrmm2(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
-  T *b, int64_t ldb, T beta, T *c, int64_t ldc)
+  T alpha, const T *csrvala, const int *csrrowptra, const int *csrcolinda,
+  const T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
   static_assert(false&&sizeof(T), "cusparse csr MM only supports data type of float, double, cfloat and cdouble.");
 }
@@ -148,8 +149,8 @@ void csrmm2(
 template<> void csrmm2<float>(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  float alpha, float *csrvala, int *csrrowptra, int *csrcolinda,
-  float *b, int64_t ldb, float beta, float *c, int64_t ldc)
+  float alpha, const float *csrvala, const int *csrrowptra, const int *csrcolinda,
+  const float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
   _csrmm2(transa, transb, m, n, k, nnz, &alpha, csrvala, csrrowptra, csrcolinda, b, ldb, &beta, c, ldc, CUDA_R_32F);
 }
@@ -157,8 +158,8 @@ template<> void csrmm2<float>(
 template<> void csrmm2<double>(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  double alpha, double *csrvala, int *csrrowptra, int *csrcolinda,
-  double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+  double alpha, const double *csrvala, const int *csrrowptra, const int *csrcolinda,
+  const double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
   _csrmm2(transa, transb, m, n, k, nnz, &alpha, csrvala, csrrowptra, csrcolinda, b, ldb, &beta, c, ldc, CUDA_R_64F);
 }
@@ -166,15 +167,15 @@ template<> void csrmm2<double>(
 template<> void csrmm2<c10::complex<float>>(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  c10::complex<float> alpha, c10::complex<float> *csrvala, int *csrrowptra, int *csrcolinda,
-  c10::complex<float> *b, int64_t ldb, c10::complex<float> beta, c10::complex<float> *c, int64_t ldc)
+  c10::complex<float> alpha, const c10::complex<float> *csrvala, const int *csrrowptra, const int *csrcolinda,
+  const c10::complex<float> *b, int64_t ldb, c10::complex<float> beta, c10::complex<float> *c, int64_t ldc)
 {
   _csrmm2(transa, transb, m, n, k, nnz,
     reinterpret_cast<cuComplex*>(&alpha),
-    reinterpret_cast<cuComplex*>(csrvala),
+    reinterpret_cast<const cuComplex*>(csrvala),
     csrrowptra,
     csrcolinda,
-    reinterpret_cast<cuComplex*>(b),
+    reinterpret_cast<const cuComplex*>(b),
     ldb,
     reinterpret_cast<cuComplex*>(&beta),
     reinterpret_cast<cuComplex*>(c), ldc, CUDA_C_32F);
@@ -183,15 +184,15 @@ template<> void csrmm2<c10::complex<float>>(
 template<> void csrmm2<c10::complex<double>>(
   char transa, char transb,
   int64_t m, int64_t n, int64_t k, int64_t nnz,
-  c10::complex<double> alpha, c10::complex<double> *csrvala, int *csrrowptra, int *csrcolinda,
-  c10::complex<double> *b, int64_t ldb, c10::complex<double> beta, c10::complex<double> *c, int64_t ldc)
+  c10::complex<double> alpha, const c10::complex<double> *csrvala, const int *csrrowptra, const int *csrcolinda,
+  const c10::complex<double> *b, int64_t ldb, c10::complex<double> beta, c10::complex<double> *c, int64_t ldc)
 {
   _csrmm2(transa, transb, m, n, k, nnz,
     reinterpret_cast<cuDoubleComplex*>(&alpha),
-    reinterpret_cast<cuDoubleComplex*>(csrvala),
+    reinterpret_cast<const cuDoubleComplex*>(csrvala),
     csrrowptra,
     csrcolinda,
-    reinterpret_cast<cuDoubleComplex*>(b),
+    reinterpret_cast<const cuDoubleComplex*>(b),
     ldb,
     reinterpret_cast<cuDoubleComplex*>(&beta),
     reinterpret_cast<cuDoubleComplex*>(c), ldc, CUDA_C_64F);

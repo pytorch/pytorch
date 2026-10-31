@@ -40,13 +40,12 @@ docs/src/**/*
 docs/cpp/build
 docs/cpp/source/html/
 docs/cpp/source/latex/
-docs/source/compile/generated/
 docs/source/generated/
-docs/source/compile/generated/
 log
 usage_log.txt
 usage_log*
 test-reports/
+torchci-reports/
 test/*.bak
 test/**/*.bak
 test/.hypothesis/
@@ -64,6 +63,7 @@ test/cpp_extensions/**/install
 test/kernel.errors.txt
 third_party/build/
 third_party/nccl/
+third_party/nccl-extensions/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh

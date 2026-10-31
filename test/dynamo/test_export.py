@@ -36,7 +36,11 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_SLOW
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    TEST_WITH_SLOW,
+)
 
 
 @torch._dynamo.assume_constant_result
@@ -45,6 +49,8 @@ def dynamo_assume_constant_result_global_function():
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
@@ -1147,6 +1153,110 @@ def forward(self, x, y):
                 self.assertTrue(node.meta["source_fn_stack"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
                 self.assertTrue(node.meta["original_aten"] is not None)
+
+    def test_fx_stack_trace_cache_locations(self):
+        def inner(x):
+            return x.sin() + x.cos()
+
+        def outer(x):
+            a = inner(x)
+            b = inner(a)
+            for _ in range(3):
+                b = b.sin()
+            return b
+
+        graphs = []
+
+        def backend(gm, _inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        compiled = torch.compile(outer, backend=backend, fullgraph=True, dynamic=False)
+        for size in (3, 5, 3):
+            x = torch.arange(size, dtype=torch.float32)
+            self.assertEqual(compiled(x), outer(x))
+
+        self.assertEqual(len(graphs), 2)
+        for gm in graphs:
+            sin_nodes = [
+                node
+                for node in gm.graph.nodes
+                if node.op == "call_method" and node.target == "sin"
+            ]
+            cos_nodes = [
+                node
+                for node in gm.graph.nodes
+                if node.op == "call_method" and node.target == "cos"
+            ]
+            self.assertEqual(len(sin_nodes), 5)
+            self.assertEqual(len(cos_nodes), 2)
+            if sys.version_info >= (3, 11):
+                self.assertNotEqual(sin_nodes[0].stack_trace, cos_nodes[0].stack_trace)
+            self.assertNotEqual(sin_nodes[0].stack_trace, sin_nodes[1].stack_trace)
+            self.assertIs(sin_nodes[2].stack_trace, sin_nodes[3].stack_trace)
+            self.assertIs(sin_nodes[3].stack_trace, sin_nodes[4].stack_trace)
+
+    def test_fx_stack_trace_cache_distinct_callers(self):
+        def inner(x):
+            return x.sin()
+
+        def first(x):
+            return inner(x)
+
+        def second(x):
+            return inner(x)
+
+        def outer(x):
+            return first(x) + second(x)
+
+        graphs = []
+
+        def backend(gm, _inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        x = torch.arange(3, dtype=torch.float32)
+        self.assertEqual(
+            torch.compile(outer, backend=backend, fullgraph=True)(x), outer(x)
+        )
+        self.assertEqual(len(graphs), 1)
+        sin_nodes = [
+            node
+            for node in graphs[0].graph.nodes
+            if node.op == "call_method" and node.target == "sin"
+        ]
+        self.assertEqual(len(sin_nodes), 2)
+        self.assertIn("in first", sin_nodes[0].stack_trace)
+        self.assertIn("in second", sin_nodes[1].stack_trace)
+        self.assertNotEqual(sin_nodes[0].stack_trace, sin_nodes[1].stack_trace)
+
+    def test_fx_stack_trace_cache_multiline_source(self):
+        def fn(x):
+            for _ in range(2):
+                x = x.sin().add(
+                    x.cos(),
+                )
+            return x
+
+        graphs = []
+
+        def backend(gm, _inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        x = torch.arange(3, dtype=torch.float32)
+        self.assertEqual(torch.compile(fn, backend=backend, fullgraph=True)(x), fn(x))
+        self.assertEqual(len(graphs), 1)
+        add_nodes = [
+            node
+            for node in graphs[0].graph.nodes
+            if node.op == "call_method" and node.target == "add"
+        ]
+        self.assertEqual(len(add_nodes), 2)
+        self.assertIs(add_nodes[0].stack_trace, add_nodes[1].stack_trace)
+        self.assertIn("x.sin().add(", add_nodes[0].stack_trace)
+        if sys.version_info >= (3, 13):
+            self.assertIn("x.cos()", add_nodes[0].stack_trace)
 
     def test_export_preserves_nn_module_stack_for_get_attr(self):
         inp = torch.randn(4, 4)
@@ -4586,6 +4696,8 @@ def forward(self, x, b, y):
 
 
 class ExportTestsSubprocess(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_strict_export_under_pythonoptimize(self):
         env = dict(os.environ)
         env["PYTHONOPTIMIZE"] = "1"
@@ -4607,11 +4719,15 @@ torch.testing.assert_close(out_export, out_orig)
         self.assertEqual(
             result.returncode,
             0,
-            msg=lambda msg: f"{msg}\nstrict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
+            msg=lambda msg: (
+                f"{msg}\nstrict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+            ),
         )
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181344"
     )

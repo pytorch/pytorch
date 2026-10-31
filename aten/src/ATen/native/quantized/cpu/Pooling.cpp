@@ -60,8 +60,8 @@ void spatial_dilated_max_pooling(
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
       const T* i_p = iData + p * iW * iH;
-      for (int64_t row = 0; row < oH; ++row) {
-        for (int64_t col = 0; col < oW; ++col) {
+      for (const auto row : c10::irange(oH)) {
+        for (const auto col : c10::irange(oW)) {
           int64_t h_start = row * sH - pH;
           int64_t w_start = col * sW - pW;
           int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);

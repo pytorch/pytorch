@@ -64,10 +64,11 @@ from torch._dynamo.utils import counters
 from torch._prims_common import canonicalize_dim, is_integer_dtype
 from torch._subclasses.fake_tensor import (
     is_fake_tensor,
+    maybe_clear_fake_constant,
     maybe_get_fake_constant,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current, make_fx
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     ShapeEnv,
@@ -82,10 +83,11 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensor, FakeTensorMode
+from .._subclasses import FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
+from .fx_utils import rank_agnostic, rank_agnostic_device
 from .lowering import fallback_node_due_to_unsupported_type
 
 
@@ -429,6 +431,7 @@ class Match:
                         example_vals, _convert_to_fake_mode
                     )
                 replacement = trace_fn(replacement_fn, example_vals)
+            _use_current_device_node(replacement)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
@@ -539,7 +542,11 @@ class PatternExpr(ABC):
         try:
             return MatchContext([self], graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # Drop the traceback: the caller keeps the returned FailedMatch in a
+            # local, and its traceback would hold this frame and, via f_back, the
+            # whole calling stack (e.g. the autograd backward that triggered a
+            # lazy backward compile, with its real tensors) in a reference cycle.
+            return e.with_traceback(None)
 
     def has_multiple_users(self) -> bool:
         return False
@@ -944,13 +951,24 @@ def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
     return defaults
 
 
+_AUTO_FUNCTIONALIZED = (
+    torch.ops.higher_order.auto_functionalized,
+    torch.ops.higher_order.auto_functionalized_v2,
+)
+
+
 def _has_undeclared_non_default_kwarg(
-    target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
+    node: torch.fx.Node, declared: Mapping[str, Any]
 ) -> bool:
     # Patterns don't bind kwargs they don't declare, so matching a node that sets
     # one (e.g. add's alpha) would silently drop it from the replacement.
     # Patterns must declare any kwarg they accept (dtype, memory_format, ...).
-    undeclared = [(k, v) for k, v in kwargs.items() if k not in declared]
+    target = node.target
+    if target in _AUTO_FUNCTIONALIZED and node.args:
+        # functionalization passes every arg of the wrapped op as a kwarg,
+        # defaults included, so compare against the wrapped op's schema
+        target = node.args[0]
+    undeclared = [(k, v) for k, v in node.kwargs.items() if k not in declared]
     if not isinstance(target, torch._ops.OpOverload):
         # without a schema we can't tell which values are defaults
         return bool(undeclared)
@@ -1083,7 +1101,7 @@ class _TargetArgsExpr(_TargetExpr):
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         # raw kwargs, since normalization fills in every default
-        if _has_undeclared_non_default_kwarg(node.target, node.kwargs, self.kwargs):
+        if _has_undeclared_non_default_kwarg(node, self.kwargs):
             return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
         _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
@@ -1101,6 +1119,20 @@ class _TargetArgsExpr(_TargetExpr):
                 if not is_match(child_match):
                     return child_match
                 m.extend(child_match)
+            elif (
+                isinstance(pattern, torch.device)
+                and isinstance(child_node, torch.fx.Node)
+                and child_node.target is torch.ops.coor.current_device.default
+            ):
+                # Under compile-on-one-rank, patterns are traced on the compiling
+                # rank's device while the graph keeps a rank-agnostic device node.
+                if not _coor_device_index_is_current(pattern):
+                    return FailedMatch(
+                        "constant_args: {} {!r}!={pattern!r}",
+                        node,
+                        child_node,
+                        pattern=pattern,
+                    )
             elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
                 return FailedMatch(
                     "constant_args: {} {!r}!={pattern!r}",
@@ -1127,7 +1159,13 @@ class _TargetArgsExpr(_TargetExpr):
             return False
         if val.dtype != dtype or val.device != device or val.dim() != len(sizes):
             return False
-        return all(statically_known_true(a == b) for a, b in zip(val.shape, sizes))
+        # guard_or_false rather than statically_known_true: a rewrite can leave
+        # equal-at-runtime sizes that are not provably equal (e.g. s vs
+        # 2 * (s // 2) when the caller pads s to even outside the graph).
+        # Specializing (guarding) on backed symbols is allowed here; the only
+        # contract is to not specialize unbacked symbols, and guard_or_false
+        # returns False for those without installing a guard.
+        return all(guard_or_false(a == b) for a, b in zip(val.shape, sizes))
 
     def find_anchor_nodes(
         self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
@@ -1327,7 +1365,8 @@ class MultiOutputPattern(PatternExpr):
         try:
             return MatchContext(self.outputs, graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # See PatternExpr.match.
+            return e.with_traceback(None)
 
     def pattern_eq(self, other: object) -> bool:
         if not super().pattern_eq(other):
@@ -1676,6 +1715,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # look at the recompute tags of the original output node to
                     # propagate the tag from the output all the way to the input
                     args_set, _ = pytree.tree_flatten(args)
+                    args_set = [
+                        arg for arg in args_set if isinstance(arg, torch.fx.Node)
+                    ]
                     # args (named as args in the replace_with_graph).
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
@@ -2182,6 +2224,7 @@ def register_replacement(
                 match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
+                _use_current_device_node(match.replacement_graph)
                 match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
@@ -2385,13 +2428,11 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:  # noqa: ISINSTANCE_FAKE_TENSOR
-            # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
-            # hold onto their original constant value - and by stashing it here
-            # will cause a memory leak if the constant value is on GPU.
-            # Since this is just an optimization we can clear it out.
-            # for c++ need to add a setter
-            arg.constant = None
+        # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
+        # hold onto their original constant value - and by stashing it here
+        # will cause a memory leak if the constant value is on GPU.
+        # Since this is just an optimization we can clear it out.
+        maybe_clear_fake_constant(arg)
 
     _known_precompiled_patterns.append(
         _PrecompiledPattern(search_fn, example_inputs, trace_fn, scalar_workaround, pat)
@@ -3114,6 +3155,30 @@ def fx_to_pattern(
     return pattern
 
 
+def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
+    # trace_fns trace with CooR off, so a replacement bakes this rank's device.
+    # TODO: only the top-level graph is walked, so a replacement containing a HOP
+    # still bakes this rank's device inside the HOP's subgraph.
+    if not rank_agnostic():
+        return
+    graph = gm.graph
+    swapped = False
+
+    def swap(a: Any) -> Any:
+        nonlocal swapped
+        if not isinstance(a, torch.device):
+            return a
+        operand = rank_agnostic_device(graph, a)
+        swapped |= operand is not a
+        return operand
+
+    for n in list(graph.nodes):
+        n.args = torch.fx.node.map_aggregate(n.args, swap)
+        n.kwargs = torch.fx.node.map_aggregate(n.kwargs, swap)
+    if swapped:
+        gm.recompile()
+
+
 @torch.no_grad()
 def fwd_only(
     fn: Callable[..., Any],
@@ -3125,10 +3190,10 @@ def fwd_only(
     """Build a normalized inference graph, for use with fx_to_pattern"""
     from torch.compiler import config as compiler_config
 
-    # Patterns are device-agnostic templates traced with fixed example tensors; keep the
-    # compile-on-one-rank device handling out of pattern tracing so make_fx's single-device
-    # check only validates real user graphs, not these internal fixed-device templates.
     # TODO - look into using aot autograd, asserting no mutating ops here
+    # Traced on a fixed example device, which CooR's single-device check would reject.
+    # A replacement spliced into a rank-agnostic graph gets its device swapped back
+    # afterwards; see _use_current_device_node.
     with (
         # pyrefly: ignore [missing-attribute]
         compiler_config.patch(compile_on_one_rank=False),

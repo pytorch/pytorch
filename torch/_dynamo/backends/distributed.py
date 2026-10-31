@@ -21,7 +21,6 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
-from unittest import mock
 
 import torch
 from torch import fx
@@ -29,6 +28,10 @@ from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    is_fake_tensor,
+)
 from torch.fx.node import Node
 
 
@@ -278,9 +281,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         if not self.fake_mode:
             raise AssertionError("fake_mode must be set")
         for arg in args:
-            if isinstance(arg, torch.Tensor) and not isinstance(
-                arg, torch._subclasses.FakeTensor
-            ):
+            if isinstance(arg, torch.Tensor) and not is_fake_tensor(arg):
                 new_args.append(torch._dynamo.utils.to_fake_tensor(arg, self.fake_mode))
             else:
                 new_args.append(arg)
@@ -353,7 +354,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # Because parameters are not fake we patch fake tensor mode to allow non fake inputs
             with (
                 self.fake_mode,
-                mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
+                allow_non_fake_inputs_temporarily(self.fake_mode),
             ):
                 if has_tracing_context and invoked_aot_autograd:
                     tracing_ctx = torch._guards.TracingContext.try_get()
@@ -372,7 +373,11 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     if not all(
-                        (not isinstance(t, torch.Tensor) or type(t) is not torch.Tensor)
+                        (
+                            not isinstance(t, torch.Tensor)
+                            or is_fake_tensor(t)
+                            or type(t) is not torch.Tensor
+                        )
                         for t in (out if isinstance(out, (list, tuple)) else [out])
                     ):
                         raise AssertionError(

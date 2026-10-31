@@ -5,17 +5,16 @@ requires = [
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    # 1.0 is required for [[tool.dynamic-metadata]], the [tool.scikit-build.env]
-    # table, and native CMAKE_BUILD_TYPE env handling used below. CI pins the
-    # exact patch we test against in .ci/docker/requirements-ci.txt.
-    "scikit-build-core>=1.0",
+    # The floor usually names a minor release; this one needs the patch level
+    # too. CI pins the exact version we test against in
+    # .ci/docker/requirements-ci.txt.
+    "scikit-build-core>=1.1.1",
     # Imported by torchgen at build time (cmake/Codegen.cmake runs
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
     # scikit-build-core, but list it explicitly as a direct build-time
-    # dep. The CI Docker image ships 4.13.2 on Python <3.14, so do not
-    # raise the lower bound without bumping CI.
-    "typing-extensions>=4.13.0",
+    # dep. Keep the lower bound in sync with the wheel runtime requirement.
+    "typing-extensions>=4.15.0",
     # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
     # assembly loops at build time and does `import six`. NNPACK is on by
     # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
@@ -24,8 +23,8 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
-# Track the build-system.requires floor (scikit-build-core>=1.0) so the schema
-# and defaults are pinned to the version we build against.
+# Track the build-system.requires floor so the schema and defaults are pinned
+# to the version we build against.
 minimum-version = "build-system.requires"
 build-dir = "build"
 
@@ -111,9 +110,16 @@ provider = { path = "tools/metadata", module = "dependencies" }
 # top level. The exclude list is likewise the only mechanism dropping
 # plumbing (.ci, .claude, .spin) that no include pattern covers.
 #
-# The flatbuffers/ittapi entries drop unneeded language bindings, which
-# also contain symlinks (#157814) that sdist.resolve-symlinks="all" would
-# otherwise dereference into duplicated content.
+# The flatbuffers/ittapi/NVTX entries drop unneeded language bindings, which
+# also contain symlinks (#157814; NVTX's rust/ crate links to its c/ headers).
+# resolve-symlinks = "error" fails the sdist
+# build if a symlink is still among the included files, naming it, instead of
+# silently copying its target (the "all" default) or storing a link. Every
+# tracked symlink is therefore listed explicitly below (negated here, dropped
+# in exclude); none of them is needed to build from the sdist, and the one
+# whose content matters, docs/requirements.txt, is force-included from its
+# target instead.
+resolve-symlinks = "error"
 include = [
     "third_party/**",
     "aten/src/ATen/native/quantized/cpu/qnnpack/deps/**",
@@ -124,6 +130,7 @@ include = [
     "!**/__pycache__/**",
     "!**/*.pyc",
     "!third_party/nccl/**",
+    "!third_party/nccl-extensions/**",
     # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
     # it so a dirty checkout does not leak build output into the sdist. Anchored
     # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
@@ -134,6 +141,12 @@ include = [
     "!third_party/flatbuffers/kotlin/**",
     "!third_party/flatbuffers/docs/source/CONTRIBUTING.md",
     "!third_party/ittapi/rust/**",
+    "!third_party/NVTX/rust/**",
+    # Symlinks (see resolve-symlinks above).
+    "!third_party/XNNPACK/tools/xngen",
+    "!third_party/cudnn_frontend/.claude/**",
+    "!third_party/flash-attention/AGENTS.md",
+    "!third_party/flatbuffers/tests/ts/bazel_repository_test_dir/.npmrc",
 ]
 exclude = [
     "**/.github/**",
@@ -145,7 +158,21 @@ exclude = [
     "third_party/flatbuffers/kotlin/**",
     "third_party/flatbuffers/docs/source/CONTRIBUTING.md",
     "third_party/ittapi/rust/**",
+    "third_party/NVTX/rust/**",
+    # Symlinks (see resolve-symlinks above).
+    ".dockerignore",
+    "AGENTS.md",
+    "docs/requirements.txt",
+    "torch/distributed/AGENTS.md",
+    "third_party/XNNPACK/tools/xngen",
+    "third_party/cudnn_frontend/.claude/**",
+    "third_party/flash-attention/AGENTS.md",
+    "third_party/flatbuffers/tests/ts/bazel_repository_test_dir/.npmrc",
 ]
+
+[tool.scikit-build.sdist.force-include]
+# docs/requirements.txt is a symlink into the excluded .ci tree; ship its target.
+".ci/docker/requirements-docs.txt" = "docs/requirements.txt"
 
 [tool.scikit-build.install]
 # scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
@@ -299,14 +326,20 @@ exclude = [
 
 [tool.scikit-build.editable]
 # Editable installs use redirect mode: Python files come from the source tree,
-# CMake-built artifacts from the build tree. Auto-rebuild-on-import is left OFF:
-# scikit-build-core's redirect finder otherwise re-runs cmake/ninja on every
-# import (~7x, ~25s per `import torch` with no source change, plus build chatter
-# on captured stderr). Rebuild explicitly instead; rebuild-on-import can be
-# opted into per-install with SKBUILD_EDITABLE_REBUILD=true (or
-# -C editable.rebuild=true).
+# CMake-built artifacts from a persistent install tree, rebuild-dir, under
+# build/. Installing straight into that tree keeps the artifacts out of the
+# editable wheel, which otherwise had to be zipped and unpacked once per install
+# (several GB and minutes on a debug build, #196619). The tree is keyed by wheel
+# tag so editable installs for several interpreters can share one checkout.
+# Auto-rebuild-on-import is left OFF: scikit-build-core's redirect finder
+# otherwise re-runs cmake/ninja on every import (~7x, ~25s per `import torch`
+# with no source change, plus build chatter on captured stderr). Rebuild
+# explicitly instead; rebuild-on-import can be opted into per-install with
+# SKBUILD_EDITABLE_REBUILD=true (or -C editable.rebuild=true), and
+# `torch.__loader__.rebuild()` refreshes the tree on demand.
 mode = "redirect"
 rebuild = false
+rebuild-dir = "build/install/{wheel_tag}"
 
 [dependency-groups]
 dev = [
@@ -314,7 +347,7 @@ dev = [
     # in PyTorch root until the project fully migrates to pyproject.toml
     # after which this can be removed as it is already specified in the
     # [build-system] section
-    "scikit-build-core>=1.0",
+    "scikit-build-core>=1.1.1",
     "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
     "spin",
     "cmake>=3.27",
@@ -348,7 +381,7 @@ dev = [
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 # License info:
 #   - The main Pytorch project license is BSD-3-Clause.
 #   - Explicit license-files list; audit in test/test_license.py (issue #183434).
@@ -374,6 +407,7 @@ license-files = [
     "third_party/cudnn_frontend/LICENSE.txt",
     "third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0",
     "third_party/cutlass/LICENSE.txt",
+    "third_party/dynolog_headers/LICENSE",
     "third_party/fbgemm/LICENSE",
     "third_party/fbgemm/external/asmjit/LICENSE.md",
     "third_party/fbgemm/external/composable_kernel/LICENSE",
@@ -395,8 +429,6 @@ license-files = [
     "third_party/ideep/mkl-dnn/LICENSE",
     "third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD",
     "third_party/ideep/mkl-dnn/third_party/opencl/LICENSE",
-    "third_party/kineto/LICENSE",
-    "third_party/kineto/libkineto/third_party/dynolog_headers/LICENSE",
     "third_party/llvm-openmp/LICENSE.txt",
     "third_party/mimalloc/LICENSE",
     "third_party/miniz-3.0.2/LICENSE",
@@ -404,6 +436,8 @@ license-files = [
     "third_party/mslk/external/composable_kernel/LICENSE",
     "third_party/mslk/external/cutlass/LICENSE.txt",
     "third_party/mslk/mslk/attention/flash_attn/LICENSE",
+    "third_party/nccl_ep/LICENSE.txt",
+    "third_party/nccl_ep/ThirdPartyNotices.txt",
     "third_party/nlohmann/LICENSE.MIT",
     "third_party/onnx/LICENSE",
     "third_party/perfetto/LICENSE",
@@ -417,6 +451,7 @@ license-files = [
     "third_party/tensorpipe/third_party/libnop/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
+    "torch/csrc/profiler/kineto/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -433,7 +468,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -458,7 +492,8 @@ nccl2 = "torch.distributed.distributed_c10d:_register_builtin_nccl2_backend"
 "nccl-lazy" = "torch.distributed.distributed_c10d:_register_builtin_nccl_lazy_backend"
 ucc = "torch.distributed.distributed_c10d:_register_builtin_ucc_backend"
 xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
-nccl4py = "torch.distributed.nccl4py_backend:_register_nccl4py_backend"
+nccl4py = "torch.distributed._nccl4py:_register_nccl4py_backend"
+fake = "torch.distributed._backends.fake:_register_fake_backend"
 
 [project.urls]
 Homepage = "https://pytorch.org"
@@ -497,6 +532,11 @@ first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
 
 [tool.ruff]
+# Ruff takes its target version from requires-python, which is now >=3.11. That
+# turns on UP035/UP036/UP044/UP017 and rewrites ~160 files that still carry the
+# Python 3.10 compatibility code. Keep linting for 3.10 until that code is
+# removed (see the "Remove Python 3.10 support code" cleanups), then delete this.
+target-version = "py310"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 extend-exclude = ["third_party", "test/cpython"]
@@ -513,6 +553,7 @@ quote-style = "double"
 external = [
     # lintrunner grep-linter codes (see .lintrunner.toml) suppressed via `# noqa:`.
     "ISINSTANCE_FAKE_TENSOR",
+    "RVT001",
     # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
     "P204",

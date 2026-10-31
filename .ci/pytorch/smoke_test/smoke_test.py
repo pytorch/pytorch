@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -224,6 +226,164 @@ def find_pypi_package_version(package: str) -> str | None:
     return None
 
 
+def find_torch_cuda_toolkit_metadata_version() -> str | None:
+    from importlib import metadata
+
+    try:
+        requirements = metadata.distribution("torch").requires or []
+    except metadata.PackageNotFoundError:
+        return None
+
+    for requirement in requirements:
+        package, _, _ = requirement.partition(";")
+        if not package.strip().lower().startswith("cuda-toolkit"):
+            continue
+        match = re.search(r"==\s*(\d+\.\d+\.\d+)", package)
+        if match:
+            return match.group(1)
+    return None
+
+
+def get_matrix_python_versions() -> set[str] | None:
+    """Python versions in FULL_PYTHON_VERSIONS of generate_binary_build_matrix.py.
+
+    The free-threaded "t" suffix is dropped since "3.14t" shares the "3.14" classifier.
+    Returns None if the script is not available (e.g. wheel tested outside a checkout).
+    """
+    matrix_script = (
+        PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    )
+    if not matrix_script.exists():
+        return None
+    for node in ast.parse(matrix_script.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "FULL_PYTHON_VERSIONS"
+            for t in node.targets
+        ):
+            return {v.removesuffix("t") for v in ast.literal_eval(node.value)}
+    raise RuntimeError(f"FULL_PYTHON_VERSIONS not found in {matrix_script}")
+
+
+def check_python_metadata() -> None:
+    """Validate Requires-Python and Python version Classifiers in torch wheel METADATA.
+
+    They must agree with each other, include the running interpreter and, when
+    generate_binary_build_matrix.py is available, match its FULL_PYTHON_VERSIONS 1:1.
+    """
+    from importlib import metadata
+
+    try:
+        torch_metadata = metadata.metadata("torch")
+    except metadata.PackageNotFoundError:
+        print("torch distribution metadata not found, skipping Python metadata check")
+        return
+
+    requires_python = torch_metadata.get("Requires-Python", "")
+    match = re.fullmatch(r">=\s*3\.(\d+)", requires_python.strip())
+    if match is None:
+        raise RuntimeError(
+            f"Unexpected Requires-Python in torch wheel metadata: {requires_python!r}, "
+            "expected '>=3.X'"
+        )
+    min_version = f"3.{match.group(1)}"
+
+    classifier_versions = {
+        c.rsplit("::", 1)[1].strip()
+        for c in torch_metadata.get_all("Classifier", [])
+        if re.fullmatch(r"Programming Language :: Python :: 3\.\d+", c)
+    }
+    if not classifier_versions:
+        raise RuntimeError("No Python version Classifier in torch wheel metadata")
+
+    def sort_key(version: str) -> int:
+        return int(version.split(".")[1])
+
+    errors = []
+    if min(classifier_versions, key=sort_key) != min_version:
+        errors.append(
+            f"Requires-Python is {requires_python!r} but the lowest Python Classifier "
+            f"is {min(classifier_versions, key=sort_key)}"
+        )
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if current not in classifier_versions:
+        errors.append(f"Running Python {current} has no matching Classifier")
+    matrix_versions = get_matrix_python_versions()
+    if matrix_versions is None:
+        print("generate_binary_build_matrix.py not found, skipping build matrix check")
+    elif classifier_versions != matrix_versions:
+        not_in_metadata = sorted(matrix_versions - classifier_versions, key=sort_key)
+        not_in_matrix = sorted(classifier_versions - matrix_versions, key=sort_key)
+        errors.append(
+            "Python Classifiers do not match FULL_PYTHON_VERSIONS in "
+            f"generate_binary_build_matrix.py: missing from metadata {not_in_metadata}, "
+            f"missing from matrix {not_in_matrix}"
+        )
+    if errors:
+        raise RuntimeError(
+            "torch wheel Python metadata check failed:\n  " + "\n  ".join(errors)
+        )
+    print(
+        f"Python metadata check passed: Requires-Python {requires_python}, "
+        f"Classifiers {sorted(classifier_versions, key=sort_key)}"
+    )
+
+
+def get_expected_cuda_toolkit_version_windows(cuda_version: str) -> str | None:
+    bat_file = (
+        PYTORCH_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    )
+    if not bat_file.exists():
+        print(f"Warning: {bat_file} not found, skipping CUDA toolkit version check")
+        return None
+
+    cuda_ver_nodot = cuda_version.replace(".", "")
+    pattern = (
+        rf":cuda{re.escape(cuda_ver_nodot)}\s*"
+        r"[\s\S]*?set CUDA_INSTALL_EXE=cuda_(\d+\.\d+\.\d+)"
+        r"(?:_[0-9.]+)?_windows\.exe"
+    )
+    match = re.search(pattern, bat_file.read_text())
+    if match:
+        return match.group(1)
+    return None
+
+
+# CUPTI DLL names vary between CTK patch releases. Verify that the runtime CTK
+# matches the build CTK; future CTK versions fix this naming mismatch.
+def check_cuda_toolkit_version(
+    cuda_version: str, cuda_toolkit_metadata_version: str | None
+) -> None:
+    if sys.platform != "win32":
+        print(
+            f"CUDA toolkit patch version check not required / supported on platform {sys.platform}"
+        )
+        return
+    expected = get_expected_cuda_toolkit_version_windows(cuda_version)
+    source = "cuda_install.bat"
+
+    if cuda_toolkit_metadata_version is None:
+        raise RuntimeError(
+            "Can't find cuda-toolkit requirement in torch wheel metadata "
+            f"for CUDA {cuda_version}"
+        )
+    if expected is None:
+        print(
+            f"Warning: Could not determine expected CUDA toolkit version for CUDA "
+            f"{cuda_version} from {source}, skipping validation"
+        )
+        return
+    if cuda_toolkit_metadata_version != expected:
+        raise RuntimeError(
+            f"CUDA toolkit version mismatch for CUDA {cuda_version}. "
+            f"Wheel metadata: {cuda_toolkit_metadata_version} "
+            f"Expected: {expected} (from {source})"
+        )
+    print(
+        f"CUDA toolkit version check passed: {cuda_toolkit_metadata_version} "
+        f"matches expected {expected} from {source}"
+    )
+
+
 def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     """Parse expected cuDNN version from generate_binary_build_matrix.py for Linux.
 
@@ -241,7 +401,7 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     # Match the full cudnn package version like nvidia-cudnn-cu12==9.10.2.21
     # and extract major.minor.patch (dropping the build number)
     pattern = (
-        rf'"{re.escape(cuda_version)}":\s*\(\s*'
+        rf'"{re.escape(cuda_version)}":\s*\{{\s*"linux":\s*\(\s*'
         r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
     )
     match = re.search(pattern, content)
@@ -348,11 +508,11 @@ def smoke_test_cuda(
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-    # torch.compile is not supported on Python 3.15+ yet (it raises at runtime),
-    # so skip the compile smoke test there instead of failing the wheel test.
+    # torch.compile is not supported on Python 3.16+ yet, so skip the compile
+    # smoke test there instead of failing the wheel test.
     if (
         torch_compile_check == "enabled"
-        and sys.version_info < (3, 15)
+        and sys.version_info < (3, 16)
         and target_os
         in [
             "linux",
@@ -361,7 +521,13 @@ def smoke_test_cuda(
             "darwin",
         ]
     ):
-        smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            compile_device = "cuda"
+        elif torch.xpu.is_available():
+            compile_device = "xpu"
+        else:
+            compile_device = "cpu"
+        smoke_test_compile(compile_device)
         smoke_test_compile_dynamic_indirect_indexing()
 
     if torch.cuda.is_available():
@@ -399,8 +565,22 @@ def smoke_test_cuda(
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
 
-        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
-        if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
+        if (
+            pypi_pkg_check == "enabled"
+            and sys.platform == "win32"
+            and platform.machine().lower() in ("amd64", "x86_64")
+        ):
+            cuda_toolkit_metadata_version = find_torch_cuda_toolkit_metadata_version()
+            check_cuda_toolkit_version(gpu_arch_ver, cuda_toolkit_metadata_version)
+            compare_pypi_to_torch_versions(
+                "cuda-toolkit",
+                find_pypi_package_version("cuda-toolkit"),
+                cuda_toolkit_metadata_version,
+            )
+            compare_pypi_to_torch_versions(
+                "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+            )
+        if pypi_pkg_check == "enabled" and (sys.platform in ["linux", "linux2"]):
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
             )
@@ -499,6 +679,9 @@ def test_sdpa(device="cpu", dtype=torch.float16) -> None:
 
 def smoke_test_compile(device: str = "cpu") -> None:
     supported_dtypes = [torch.float16, torch.float32, torch.float64]
+    # Intel client GPUs (e.g. Arc) have no native fp64.
+    if device == "xpu" and not torch.xpu.get_device_properties().has_fp64:
+        supported_dtypes.remove(torch.float64)
 
     def foo(x: torch.Tensor) -> torch.Tensor:
         return torch.sin(x) + torch.cos(x)
@@ -664,7 +847,7 @@ def parse_args():
     )
     parser.add_argument(
         "--pypi-pkg-check",
-        help="Check pypi package versions cudnn and nccl",
+        help="Check pypi package versions cuda-toolkit, cudnn, and nccl",
         type=str,
         choices=["enabled", "disabled"],
         default="enabled",
@@ -705,6 +888,7 @@ def main() -> None:
 
     check_wheel_platform_tag()
     check_mac_wheel_minos()
+    check_python_metadata()
 
 
 if __name__ == "__main__":

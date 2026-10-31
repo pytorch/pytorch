@@ -52,6 +52,23 @@ def checkout_nccl() -> None:
         _checkout_by_tag("https://github.com/NVIDIA/nccl", release_tag)
 
 
+def checkout_nccl_ep() -> None:
+    revision = _read_file(third_party_path / "nccl_ep" / "pin.txt")
+    print(f"-- Checkout nccl-extensions revision: {revision}")
+    source_dir = third_party_path / "nccl-extensions"
+    if not source_dir.exists():
+        check_call(
+            [
+                "git",
+                "clone",
+                "--no-checkout",
+                "https://github.com/NVIDIA/nccl-extensions.git",
+                str(source_dir),
+            ]
+        )
+        check_call(["git", "checkout", "--detach", revision], cwd=source_dir)
+
+
 def checkout_eigen() -> None:
     eigen_tag = _read_file(third_party_path / "eigen_pin.txt")
     print(f"-- Checkout Eigen release tag: {eigen_tag}")
@@ -66,6 +83,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         # If no arguments are given checkout all optional dependency
         checkout_nccl()
+        checkout_nccl_ep()
         checkout_eigen()
     else:
         # Otherwise just call top-level function of choice
