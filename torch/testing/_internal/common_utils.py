@@ -3456,26 +3456,31 @@ try:
             kwargs.pop('min_satisfying_examples')
         return hypothesis.settings(*args, **kwargs)
 
+    # hypothesis 6.83.2 added the `differing_executors` health check,
+    # which raises FailedHealthCheck when a @given test method is called from a different `self` instance.
+    _hypothesis_health_checks = [hypothesis.HealthCheck.too_slow]
+    if getattr(hypothesis.HealthCheck, "differing_executors", None) is not None:
+        _hypothesis_health_checks.append(hypothesis.HealthCheck.differing_executors)
 
     hypothesis.settings.register_profile(
         "pytorch_ci",
         settings(
             derandomize=True,
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
+            suppress_health_check=_hypothesis_health_checks,
             database=None,
             max_examples=50,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "dev",
         settings(
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
+            suppress_health_check=_hypothesis_health_checks,
             database=None,
             max_examples=10,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "debug",
         settings(
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
+            suppress_health_check=_hypothesis_health_checks,
             database=None,
             max_examples=1000,
             verbosity=hypothesis.Verbosity.verbose))
