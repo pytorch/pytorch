@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     isRocmArchAnyOf,
     lazy_skip_if,
+    MI300_ARCH,
     MI350_ARCH,
     parametrize,
     requires_accelerator,
@@ -1534,6 +1535,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(pad, torch.zeros_like(pad))
 
 
+skip_if_no_rocm_async_mm = lazy_skip_if(
+    lambda: TEST_WITH_ROCM and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH),
+    "ROCm native async-TP kernel (AsyncMM.hip) is only built for gfx942/gfx950",
+)
+
+
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
 # MultiProcContinuousTest will skip all the following tests if a test fails (
@@ -1624,9 +1631,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
     @skipIf(
-        SM100OrLater,
+        SM100OrLater and not TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/162917",
     )
+    @skip_if_no_rocm_async_mm
     @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
@@ -1685,6 +1693,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 
     @skipIf(not TEST_WITH_ROCM, "Native graph capture is only validated on ROCm")
     @skip_if_lt_x_gpu(2)
+    @skip_if_no_rocm_async_mm
     @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native_graph_capture(self) -> None:
         self._init_process()
@@ -1932,7 +1941,7 @@ class AsyncTPTest(MultiProcContinuousTest):
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
     @skipIf(
-        SM100OrLater,
+        SM100OrLater and not TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/162940",
     )
     def test_fused_scaled_matmul_reduce_scatter(
