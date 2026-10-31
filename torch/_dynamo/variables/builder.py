@@ -143,6 +143,7 @@ from ..source import (
     DictSubclassGetItemSource,
     DynamicScalarSource,
     FloatTensorSource,
+    FrozenDictItemsSource,
     GetItemSource,
     GlobalSource,
     GradSource,
@@ -182,6 +183,7 @@ from ..utils import (
     dict_keys,
     enumerate_items_with_dict_position,
     find_bound_builtin_method_descriptor,
+    frozendict_items,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
@@ -249,8 +251,10 @@ from .descriptors import (
     WrapperDescriptorVariable,
 )
 from .dicts import (
+    _contains_nan,
     ConstDictVariable,
     DictKeysVariable,
+    FrozenDictVariable,
     MappingProxyVariable,
     OrderedDictVariable,
 )
@@ -1281,6 +1285,9 @@ class VariableBuilder:
             (types.MappingProxyType, cls.wrap_mapping_proxy),
         ]
 
+        if torch._has_frozendict:
+            entries.append((torch._frozendict, cls.wrap_frozendict))
+
         if trace_numpy and np:
             # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
@@ -1337,6 +1344,38 @@ class VariableBuilder:
             source=self.source,
             mutation_type=AttributeMutationExisting(),
         )
+
+    def wrap_frozendict(self, value: Any) -> VariableTracker:
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        snapshot = FrozenDictItemsSource(self.source)
+        install_guard(snapshot.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        items = {}
+        for i, (key, value_item) in enumerate(frozendict_items(value)):
+            if FrozenDictVariable._has_unsafe_hash(key):
+                unimplemented(
+                    gb_type="Preexisting frozendict key with user-defined hash",
+                    context=type(key).__name__,
+                    explanation="Dynamo cannot recover the stored key hash without calling a potentially changed or side-effecting hash function.",
+                    hints=["Construct the frozendict inside the compiled function."],
+                )
+            pair_source = ListGetItemSource(snapshot, i)
+            key_source = GetItemSource(pair_source, 0)
+            install_guard(
+                key_source.make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                    if ConstantVariable.is_literal(key) and not _contains_nan(key)
+                    else GuardBuilder.ID_MATCH
+                )
+            )
+            # Preserve sources and aliases for arbitrary keys. HashableTracker
+            # specializes numeric keys even when scalar specialization is disabled.
+            key_var = VariableBuilder(self.tx, key_source)(key)
+            value_var = LazyVariableTracker.create(
+                value_item, GetItemSource(pair_source, 1), tx=self.tx
+            )
+            items[key_var] = value_var
+        result = FrozenDictVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -2702,8 +2741,8 @@ class VariableBuilder:
                 dict_source = MappingProxyMappingSource(self.source)
                 owner = gc.get_referents(value)[0]
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
-                if not isinstance(dict_vt, ConstDictVariable):
-                    raise AssertionError(f"Expected a dict, got {dict_vt}")
+                if not isinstance(dict_vt, (ConstDictVariable, FrozenDictVariable)):
+                    raise AssertionError(f"Expected a dictionary, got {dict_vt}")
                 return DictKeysVariable(
                     dict_vt, source=self.source, is_ordered=type(value) is odict_keys
                 )
@@ -6021,6 +6060,22 @@ class SourcelessBuilder:
         return ConstantVariable.create(value=value)
 
     @staticmethod
+    def wrap_frozendict(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+        items = {}
+        for key, item in frozendict_items(value):
+            if FrozenDictVariable._has_unsafe_hash(key):
+                unimplemented(
+                    gb_type="Preexisting frozendict key with user-defined hash",
+                    context=type(key).__name__,
+                    explanation="Dynamo cannot recover the stored key hash without calling a potentially changed or side-effecting hash function.",
+                    hints=["Construct the frozendict inside the compiled function."],
+                )
+            items[SourcelessBuilder.create(tx, key)] = SourcelessBuilder.create(
+                tx, item
+            )
+        return FrozenDictVariable(items)
+
+    @staticmethod
     def make_type_handlers() -> dict[
         type, Callable[["InstructionTranslatorBase", Any], VariableTracker]
     ]:
@@ -6040,6 +6095,8 @@ class SourcelessBuilder:
             {create(tx, k): create(tx, v) for k, v in value.items()},
             mutation_type=ValueMutationNew(),
         )
+        if torch._has_frozendict:
+            handlers[torch._frozendict] = SourcelessBuilder.wrap_frozendict
         handlers[list] = lambda tx, value: ListVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )

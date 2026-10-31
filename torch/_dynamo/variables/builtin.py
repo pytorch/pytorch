@@ -79,6 +79,7 @@ from ..utils import (
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
+    lazily_unpack,
     no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -104,7 +105,9 @@ from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
     DictKeysVariable,
-    pydict_checkexact,
+    pyanydict_checkexact,
+    pyfrozendict_check,
+    pyfrozendict_checkexact,
 )
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
@@ -2582,6 +2585,27 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
 
+    def call__frozendict_fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        seed: VariableTracker,
+        iterable: VariableTracker,
+        value: VariableTracker,
+        /,
+    ) -> VariableTracker:
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        storage.dict_update(tx, [seed], {}, container_name="frozendict")
+        if pyanydict_checkexact(iterable) or pyanyset_checkexact(iterable):
+            if isinstance(iterable, ConstDictVariable):
+                iterable.install_dict_keys_match_guard()
+            for key in iterable.items:
+                storage.items[key] = value
+        else:
+            for key in lazily_unpack(tx, iterable):
+                hashed = storage._lookup_key(tx, key, container_name="frozendict")
+                storage.items[hashed] = value
+        return variables.FrozenDictVariable.create(storage)
+
     def call_set(
         self,
         tx: "InstructionTranslatorBase",
@@ -3543,6 +3567,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if len(args) == 1 and pyfrozendict_check(args[0]):
+            # dict() preserves stored hashes when copying a frozendict.
+            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            result.dict_update(tx, args, kwargs)
+            return result
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     def fromkeys(
@@ -3554,7 +3583,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "dict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
-        if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+        if pyanydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
                 args[0].install_dict_keys_match_guard()
                 if args[0].source:
@@ -3633,6 +3662,92 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             [user_cls, *args],
             {},
         )
+
+
+class FrozenDictBuiltinVariable(BaseBuiltinVariable):
+    if torch._has_frozendict:
+        _fn = torch._frozendict
+
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "frozendict", len(args), 0, 1)
+        if len(args) == 1 and pyfrozendict_checkexact(args[0]) and not kwargs:
+            return args[0]
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        storage.dict_update(tx, args, kwargs, container_name="frozendict")
+        return variables.FrozenDictVariable.create(storage)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__class_getitem__":
+            no_keywords(tx, "frozendict.__class_getitem__", kwargs)
+            check_positional(tx, name, len(args), 1, 1)
+            # Bypass builtin classification for typing semantics.  # noqa: RVT001
+            return variables.TypingVariable(self._fn).mp_subscript_impl(tx, args[0])
+        if name == "__new__":
+            if not args:
+                raise_type_error(tx, "frozendict.__new__(): not enough arguments")
+            if not args[0].is_python_constant() or not isinstance(
+                cls := args[0].as_python_constant(), type
+            ):
+                raise_type_error(
+                    tx,
+                    "frozendict.__new__(X): X is not a type object "
+                    f"({args[0].python_type_name()})",
+                )
+            if not issubclass(cls, self._fn):
+                raise_type_error(
+                    tx,
+                    f"frozendict.__new__({cls.__name__}): {cls.__name__} "
+                    "is not a subtype of frozendict",
+                )
+            if cls is not self._fn:
+                unimplemented(
+                    gb_type="frozendict subclass allocation",
+                    context="frozendict.__new__",
+                    explanation="Dynamo does not yet support allocating frozendict subclasses.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            result = self.call_function(tx, args[1:], kwargs)
+            if not isinstance(result, variables.FrozenDictVariable):
+                raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
+            return variables.FrozenDictVariable.create(result.storage)
+        if name == "fromkeys":
+            unimplemented(
+                gb_type="frozendict fromkeys",
+                context=name,
+                explanation="Dynamo does not yet support frozendict.fromkeys.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
+            check_positional(tx, name, len(args), 1, sys.maxsize)
+            if not pyfrozendict_check(args[0]):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{name}' for 'frozendict' objects doesn't apply "
+                    f"to a '{args[0].python_type_name()}' object",
+                )
+            if not isinstance(args[0], variables.FrozenDictVariable):
+                unimplemented(
+                    gb_type="frozendict subclass methods",
+                    context=str(type(args[0])),
+                    explanation="Dynamo cannot access this dictionary's stored keys and values.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            return args[0].call_method(tx, name, args[1:], kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):
@@ -4114,7 +4229,14 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(
                         obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
                     )
-                elif not isinstance(obj, variables.UnspecializedNNModuleVariable) and (
+                # Frozendict keys and length are guarded through its items snapshot.
+                elif not isinstance(
+                    obj,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.FrozenDictVariable,
+                    ),
+                ) and (
                     obj.tp_as_sequence.sq_length is not None
                     or obj.tp_as_mapping.mp_length is not None
                 ):

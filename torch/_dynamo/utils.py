@@ -3561,6 +3561,12 @@ def iter_contains(
     return found
 
 
+def frozendict_items(value: Any) -> list[tuple[Any, Any]]:
+    if torch._has_frozendict:
+        return list(torch._frozendict.items(value))
+    raise AssertionError("frozendict is unavailable")
+
+
 def key_is_id(
     k: object,
 ) -> TypeIs[torch.Tensor | torch.nn.Module | MethodWrapperType]:
