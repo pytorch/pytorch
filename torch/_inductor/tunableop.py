@@ -844,8 +844,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     layout_device = getattr(winner.layout, "device", None)
     if layout_device is None or layout_device.type != "cuda":
         return
-    # ExternKernelCaller always sets self.choice; match on that rather than
-    # winner.name, so the _dtype and v2 variants route correctly.
     choice_name = winner.choice.name
     if not is_tunableop_gemm(choice_name):
         return
@@ -868,8 +866,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     try:
         # Bias-first ops take [bias, mat1, mat2]; every other GEMM choice takes
         # mat1/mat2 first (scaled variants trail scale/bias tensors after).
-        # Resolved from the choice, not the caller name, so _dtype / v2 / bias
-        # variants route correctly.
         bias_first = choice_name in ("addmm", "addmm_dtype", "baddbmm")
         a, b = (nodes[1], nodes[2]) if bias_first else (nodes[0], nodes[1])
         a_sz = a.get_size()
