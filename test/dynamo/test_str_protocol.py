@@ -139,10 +139,12 @@ class TpStrUserDefinedTests(TestCase):
         def fn(x, obj):
             return str(obj)
 
+        # object_repr's address is a placeholder under Dynamo.
         obj = Plain()
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, obj), compiled(x, obj))
+        expected = f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        self.assertEqual(compiled(x, obj), expected)
 
     def test_user_defined_repr_fallback_for_str(self):
         class MyObj:
@@ -170,7 +172,8 @@ class TpStrUserDefinedTests(TestCase):
         obj = Plain()
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, obj), compiled(x, obj))
+        expected = f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        self.assertEqual(compiled(x, obj), expected)
 
     def test_object_dunder_str_ignores_user_defined_str(self):
         class MyObj:
@@ -184,8 +187,7 @@ class TpStrUserDefinedTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         out = compiled(x, obj)
-        self.assertEqual(fn(x, obj), out)
-        self.assertEqual(out, repr(obj))
+        self.assertEqual(out, f"<{__name__}.{MyObj.__qualname__} object at 0x...>")
         self.assertNotEqual(out, str(obj))
 
     def test_object_dunder_str_uses_user_defined_repr(self):
