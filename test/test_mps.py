@@ -9039,9 +9039,8 @@ class TestMPS(TestCaseMPS):
         helper(do_add=False)
 
     def test_scatter_reduce_nan(self):
-        # amax/amin/prod go through a compare-and-swap loop; comparing floats
-        # rather than bit patterns made that loop never terminate once a NaN was
-        # stored, which hung the GPU rather than returning a wrong answer.
+        # amax/amin/prod go through a compare-and-swap loop, which has to terminate
+        # and keep the NaN once one is stored.
         src_cpu = torch.tensor([float('nan'), -1.39, 2.37, float('nan'), -8.15, 5.01, 1.36])
         idx_cpu = torch.tensor([0, 2, 4, 1, 4, 0, 3])
         for reduce_str in ["amax", "amin", "prod", "sum", "mean"]:

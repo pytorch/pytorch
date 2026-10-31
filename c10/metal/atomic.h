@@ -9,10 +9,6 @@ struct AtomicType {};
 template <typename T>
 using AtomicType_t = typename AtomicType<T>::type;
 
-// Not for floating-point atomics: atomic_compare_exchange on
-// ::metal::atomic<float> may compare its operands as floats, in which case a
-// stored NaN never compares equal to itself and this loop spins forever,
-// hanging the GPU. Use atomic_binary_op_bitwise_helper for those.
 template <typename AT, typename T>
 static inline void atomic_binary_op_helper(
     device ::metal::atomic<AT>* data,
@@ -32,9 +28,10 @@ static inline void atomic_binary_op_helper(
       ::metal::memory_order_relaxed));
 }
 
-// Exchanges the bit patterns through atomic<uint>, so a stored NaN compares
-// equal to itself. The uint-backed overload further down does the same for half
-// and bfloat.
+// Exchanges the bit patterns through atomic<uint>, so termination doesn't
+// depend on how atomic_compare_exchange on ::metal::atomic<float> treats a
+// stored NaN. The uint-backed overload further down does the same for half and
+// bfloat.
 static inline void atomic_binary_op_bitwise_helper(
     device ::metal::atomic<float>* data,
     long offset,
