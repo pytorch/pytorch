@@ -15,6 +15,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import cast
 from unittest import TestCase
@@ -2049,6 +2050,44 @@ class IntegrationTest(TestCase):
         )
         self.assertEqual(rdzv_info1.bootstrap_store_info.master_port, 123)
         self.assertEqual(rdzv_info2.bootstrap_store_info.master_port, 123)
+
+    def test_share_tcp_store_scale_up_publishes_master_addr(self):
+        self._store = dist.TCPStore(
+            "127.0.0.1", 0, is_master=True, timeout=timedelta(seconds=5)
+        )
+        handler1 = self._create_handler(
+            local_addr="127.0.0.1", min_nodes=1, max_nodes=2, last_call_timeout="1"
+        )
+        handler2 = self._create_handler(
+            local_addr="127.0.0.2", min_nodes=1, max_nodes=2
+        )
+
+        rdzv_info1 = handler1.next_rendezvous()
+        self.assertEqual(rdzv_info1.world_size, 1)
+
+        # Keep round 1 open until handler2 joins instead of closing it on the
+        # short last call that round 0 needed.
+        handler1._settings = replace(
+            handler1._settings, timeout=RendezvousTimeout(join=timedelta(seconds=5))
+        )
+
+        handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
+        handler2_thread.start()
+        _wait_for(lambda: handler1.num_nodes_waiting() > 0)
+
+        rdzv_info1 = handler1.next_rendezvous()
+        rdzv_info2 = handler2_thread.join()
+
+        self.assertIsNotNone(rdzv_info2)
+        self.assertEqual(rdzv_info1.rank, 0)
+        self.assertEqual(rdzv_info2.rank, 1)
+        self.assertEqual(
+            rdzv_info2.bootstrap_store_info, rdzv_info1.bootstrap_store_info
+        )
+        self.assertEqual(
+            rdzv_info1.bootstrap_store_info.master_port,
+            handler1._shared_tcp_store_server.port,
+        )
 
 
 class _InMemoryRendezvousBackend(RendezvousBackend):
