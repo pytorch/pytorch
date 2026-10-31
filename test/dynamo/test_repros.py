@@ -977,9 +977,10 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
-    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @make_logging_test(dynamo=logging.DEBUG)
-    def test_lru_cache_warning_issued_during_tracing(self, records):
+    def test_lru_cache_warning_issued_during_tracing(self, records, device=None):
         prev_default = torch._C._get_default_device()
         try:
             torch.set_default_device(torch.accelerator.current_accelerator())
@@ -990,7 +991,7 @@ class LRUCacheWarningTests(LoggingTestCase):
                 x = x.cos().sin()
                 return x
 
-            result = f(torch.randn(1024))
+            result = f(torch.randn(1024, device=self.device_type))
             self.assertIsInstance(result, torch.Tensor)
         finally:
             if prev_default == "cpu":
@@ -9311,6 +9312,177 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_getattr_return(self):
+        _WrapperDescriptor = type(type.__call__)
+        _MethodWrapper = type(all.__call__)
+        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
+
+        _NonUserDefinedCallables = (
+            _WrapperDescriptor,
+            _MethodWrapper,
+            _ClassMethodWrapper,
+            types.BuiltinFunctionType,
+        )
+
+        def _signature_get_user_defined_method(cls, method_name):
+            try:
+                meth = getattr(cls, method_name)
+            except AttributeError:
+                return
+            else:
+                if not isinstance(meth, _NonUserDefinedCallables):
+                    # Once '__signature__' will be added to 'C'-level
+                    # callables, this check won't be necessary
+                    return meth
+
+        def fn(x):
+            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
+            if s is None:
+                return torch.cos(x)
+
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_dependent_error_log_no_print(self):
+        # This is a regression test case for
+        # https://github.com/pytorch/pytorch/pull/149831
+        from io import StringIO
+
+        capturedOutput = StringIO()
+        sys.stderr = capturedOutput
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def func(a):
+            if a.sum() > 0:
+                return a + 1
+            return a + 2
+
+        a = torch.rand(10, 10)
+        try:
+            func(a)
+        except Exception:
+            pass
+        sys.stderr = sys.__stderr__
+
+        # Make sure we don't _print_ out the graph module.
+        output = capturedOutput.getvalue()
+        self.assertNotIn("class GraphModule", output)
+
+    def test_deepcopy_constant_tensor_in_aot_bwd(self):
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * torch.tensor(2) * grad_out.shape[0]
+
+        def f(x):
+            return Fn.apply(x)
+
+        x = torch.randn(8, requires_grad=True)
+        out = f(x)  # should not raise
+        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
+        expected = torch.autograd.grad(out.sum(), inputs=(x,))
+        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
+        self.assertEqual(expected, actual)
+
+    def test_module_attribute_error(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            return torch._bar(x)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            try:
+                return torch._bar(x)
+            except AttributeError:
+                return x + 1
+
+        with self.assertRaises(AttributeError):
+            f1(torch.ones(3))
+
+        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
+
+    def test_filter_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+
+        def call_foobar(x):
+            warnings.warn("foobar")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            return call_foobar(x)
+
+        with warnings.catch_warnings(record=True) as w:
+            f(x)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "foobar")
+
+    def test_filter_safe_grad_warning(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
+    def test_filter_user_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+
+        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
+        def mute_warn(y):
+            return y.grad
+
+        mute_warn(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -10149,121 +10321,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
-    def test_getattr_return(self):
-        _WrapperDescriptor = type(type.__call__)
-        _MethodWrapper = type(all.__call__)
-        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
-
-        _NonUserDefinedCallables = (
-            _WrapperDescriptor,
-            _MethodWrapper,
-            _ClassMethodWrapper,
-            types.BuiltinFunctionType,
-        )
-
-        def _signature_get_user_defined_method(cls, method_name):
-            try:
-                meth = getattr(cls, method_name)
-            except AttributeError:
-                return
-            else:
-                if not isinstance(meth, _NonUserDefinedCallables):
-                    # Once '__signature__' will be added to 'C'-level
-                    # callables, this check won't be necessary
-                    return meth
-
-        def fn(x):
-            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
-            if s is None:
-                return torch.cos(x)
-
-            return torch.sin(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_dependent_error_log_no_print(self):
-        # This is a regression test case for
-        # https://github.com/pytorch/pytorch/pull/149831
-        from io import StringIO
-
-        capturedOutput = StringIO()
-        sys.stderr = capturedOutput
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def func(a):
-            if a.sum() > 0:
-                return a + 1
-            return a + 2
-
-        a = torch.rand(10, 10)
-        try:
-            func(a)
-        except Exception:
-            pass
-        sys.stderr = sys.__stderr__
-
-        # Make sure we don't _print_ out the graph module.
-        output = capturedOutput.getvalue()
-        self.assertNotIn("class GraphModule", output)
-
-    def test_deepcopy_constant_tensor_in_aot_bwd(self):
-        class Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x + 1
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                return grad_out * torch.tensor(2) * grad_out.shape[0]
-
-        def f(x):
-            return Fn.apply(x)
-
-        x = torch.randn(8, requires_grad=True)
-        out = f(x)  # should not raise
-        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
-        expected = torch.autograd.grad(out.sum(), inputs=(x,))
-        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
-        self.assertEqual(expected, actual)
-
-    def test_module_attribute_error(self):
-        @torch.compile(backend="eager")
-        def f1(x):
-            return torch._bar(x)
-
-        @torch.compile(backend="eager")
-        def f2(x):
-            try:
-                return torch._bar(x)
-            except AttributeError:
-                return x + 1
-
-        with self.assertRaises(AttributeError):
-            f1(torch.ones(3))
-
-        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
-
-    def test_named_tuple_vt_clone(self):
-        # https://github.com/pytorch/pytorch/issues/157945
-        class SVDCompressor(nn.Module):
-            def __init__(self, k=10):
-                super().__init__()
-                self.k = k
-
-            def forward(self, x):
-                U, S = torch.linalg.svd(x)[:2]
-                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
-                return reduced
-
-        input = torch.randn(4, 8, 6)
-        model = SVDCompressor(k=5)
-
-        out1 = model(input.clone())
-        out2 = torch.compile(model, backend="eager")(input.clone())
-        self.assertEqual(out1, out2)
-
     @onlyAccelerator
     def test_zero_dim_param_mixed_device_grad(self, device):
         # cpu 0-dim params with cuda grads
@@ -10288,62 +10345,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
-
-    def test_filter_warnings(self):
-        x = torch.ones(2, 2, requires_grad=True)
-
-        def call_foobar(x):
-            warnings.warn("foobar")
-
-        @torch.compile(backend="eager")
-        def f(x):
-            call_foobar(x)
-            call_foobar(x)
-            call_foobar(x)
-            call_foobar(x)
-            return call_foobar(x)
-
-        with warnings.catch_warnings(record=True) as w:
-            f(x)
-            self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "foobar")
-
-    def test_filter_safe_grad_warning(self):
-        x = torch.ones(2, 2, requires_grad=True)
-        y = x * 5  # non-leaf, .grad should warn
-        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
-
-        def unsafe_grad(y):
-            return y.grad
-
-        with warnings.catch_warnings(record=True) as w:
-            unsafe_grad(y)  # should still warn, different callsite
-            self.assertEqual(len(w), 1)
-            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
-
-            unsafe_grad(y)  # should not warn
-            self.assertEqual(len(w), 1)
-
-    def test_filter_user_warnings(self):
-        x = torch.ones(2, 2, requires_grad=True)
-        y = x * 5  # non-leaf, .grad should warn
-
-        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
-        def mute_warn(y):
-            return y.grad
-
-        mute_warn(y)  # filters out warning
-
-        def unsafe_grad(y):
-            return y.grad
-
-        with warnings.catch_warnings(record=True) as w:
-            unsafe_grad(y)  # should still warn, different callsite
-            self.assertEqual(len(w), 1)
-            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
-
-            unsafe_grad(y)  # should not warn
-            self.assertEqual(len(w), 1)
 
     def test_partial_export(self):
         class Foo(torch.nn.Module):
@@ -10931,7 +10932,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(ReproTests)
-
+instantiate_device_type_tests(
+    LRUCacheWarningTests, globals(), except_for="cpu", allow_xpu=True, allow_mps=True
+)
 devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
     ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
