@@ -490,6 +490,15 @@ class TestCommon(TestCase):
         actual = torch.expm1(x.to(device)).cpu().double()
         self.assertEqual(actual, expected, atol=0, rtol=3e-7)
 
+    @dtypes(torch.float32)
+    @parametrize("op", ["elu", "celu", "selu"])
+    def test_elu_small(self, device, dtype, op):
+        fn = getattr(torch.nn.functional, op)
+        x = -torch.logspace(-8, 1.3, 500, dtype=dtype)
+        expected = fn(x.double())
+        actual = fn(x.to(device)).cpu().double()
+        self.assertEqual(actual, expected, atol=0, rtol=3e-7)
+
     # Tests that the cpu and gpu results are consistent
     @onlyAccelerator
     @skipIfMPS
