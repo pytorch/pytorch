@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import collections
+import contextlib
 import dataclasses
 import doctest
 import functools
@@ -29,13 +30,15 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, known_failure_skip_if, skipIfRocm, skipIfRocmArch,
+    skipIfRocmVersionAtLeast, skipIfRocmVersionInRange,
 )
+from torch.testing._internal.rerun_code_skip import mark_rerun_code_skip, rerun_code_skip_reason
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes, skipCUDAIfRocm)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
@@ -808,6 +811,155 @@ class TestJunitXml(TestCase):
         self._assert_matches_golden("pytest_sanitized", normalized)
 
 
+@contextlib.contextmanager
+def _rerun_code_skips_on_rocm(enabled):
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(unittest.mock.patch("torch.testing._internal.common_utils.RUN_CODE_SKIPS", enabled))
+        for module in ("common_utils", "common_device_type"):
+            stack.enter_context(unittest.mock.patch(f"torch.testing._internal.{module}.TEST_WITH_ROCM", True))
+        yield
+
+
+def _returns_ran(self):
+    return "ran"
+
+
+class TestRerunCodeSkip(TestCase):
+    def test_reason_survives_outer_wrappers(self):
+        marked = mark_rerun_code_skip(_returns_ran, "known failure", lambda: True)
+
+        @functools.wraps(marked)
+        def outer(self):
+            return marked(self)
+
+        self.assertEqual(rerun_code_skip_reason(outer, None), "known failure")
+        self.assertEqual(outer(None), "ran")
+
+    def test_condition_is_checked_when_read(self):
+        failing = False
+        marked = mark_rerun_code_skip(_returns_ran, "known failure", lambda: failing)
+        self.assertIsNone(rerun_code_skip_reason(marked, None))
+        failing = True
+        self.assertEqual(rerun_code_skip_reason(marked, None), "known failure")
+
+    def test_stacked_marks(self):
+        inner = mark_rerun_code_skip(_returns_ran, "inner failure", lambda: True)
+        outer = mark_rerun_code_skip(inner, "outer failure", lambda: False)
+        self.assertEqual(rerun_code_skip_reason(outer, None), "inner failure")
+
+    def test_class_reason(self):
+        class TestFoo(TestCase):
+            def test_a(self):
+                pass
+
+        self.assertIs(mark_rerun_code_skip(TestFoo, "known failure", lambda: True), TestFoo)
+        self.assertEqual(rerun_code_skip_reason(TestFoo.test_a, TestFoo), "known failure")
+
+    @parametrize("rerun", [False, True])
+    def test_known_failure_skip_if(self, rerun):
+        with _rerun_code_skips_on_rocm(rerun):
+            decorated = known_failure_skip_if(lambda: True, "known failure")(_returns_ran)
+            if rerun:
+                self.assertEqual(decorated(None), "ran")
+            else:
+                with self.assertRaisesRegex(unittest.SkipTest, "^known failure$"):
+                    decorated(None)
+        self.assertEqual(rerun_code_skip_reason(decorated, None), "known failure" if rerun else None)
+
+    def test_rocm_skips_are_not_marked(self):
+        with _rerun_code_skips_on_rocm(True):
+            skip_if_rocm = [
+                skipIfRocm(_returns_ran),
+                skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/1")(_returns_ran),
+            ]
+            for fn in skip_if_rocm:
+                with self.assertRaisesRegex(unittest.SkipTest, "^skipIfRocm: "):
+                    fn(None)
+            others = [
+                skipCUDAIfRocm(_returns_ran),
+                skipIfRocmArch(("gfx942",))(_returns_ran),
+                skipIfRocmVersionAtLeast([7, 0])(_returns_ran),
+                skipIfRocmVersionInRange([7, 0], [7, 1], "regression")(_returns_ran),
+            ]
+        for fn in skip_if_rocm + others:
+            self.assertIsNone(rerun_code_skip_reason(fn, None))
+
+
+def _junit_outcome(case: ET.Element) -> tuple[str, str | None]:
+    if case.find("failure") is not None:
+        outcome = "failed"
+    elif case.find("skipped") is not None:
+        outcome = "skipped"
+    else:
+        outcome = "passed"
+    code_skip = case.find("properties/property[@name='code_skip']")
+    return outcome, None if code_skip is None else code_skip.get("value")
+
+
+# Collection doesn't depend on the test config or device; run it once, as TestJunitXml does.
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "code skip collection doesn't depend on the device")
+class TestRerunCodeSkipCollection(TestCase):
+    def _run_suite(self, rerun: bool, extra_args: tuple[str, ...] = ()) -> dict[str, list[tuple[str, str | None]]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            xml_path = Path(tmp) / "report.xml"
+            # Run the file directly, as run_test.py does, so its decorators apply before pytest loads conftest.
+            args = [
+                sys.executable, "junit_xml_testdata/rerun_code_skip_suite.py", "--use-pytest",
+                f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", *extra_args,
+            ]
+            env = dict(_JUNIT_CHILD_ENV)
+            if rerun:
+                issue = "https://github.com/pytorch/pytorch/issues/1"
+                disabled = Path(tmp) / "disabled.json"
+                disabled.write_text(json.dumps({
+                    "test_listed (__main__.TestCodeSkipSuite)": [issue, []],
+                    "test_code_skip_disabled_elsewhere (__main__.TestCodeSkipSuite)": [issue, ["win"]],
+                }))
+                args += ["--rerun-disabled-tests", f"--import-disabled-tests={disabled}", "--flake-finder", "--flake-runs=2"]
+                env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
+            proc = subprocess.run(
+                args, cwd=_JUNIT_TESTDATA.parent, env=env, capture_output=True, text=True, timeout=300
+            )
+            self.assertTrue(xml_path.exists(), f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}")
+            root = ET.parse(xml_path)
+        outcomes = collections.defaultdict(list)
+        for case in root.iter("testcase"):
+            outcomes[case.get("name")].append(_junit_outcome(case))
+        return dict(outcomes)
+
+    def test_rerun_mode_runs_known_failures(self):
+        self.assertEqual(self._run_suite(rerun=True), {
+            "test_code_skip_passes": [("passed", "known failure")] * 2,
+            "test_code_skip_fails": [("failed", "known failure")] * 2,
+            "test_code_skip_capability_skip": [("skipped", "known failure")] * 2,
+            "test_code_skip_disabled_elsewhere": [("skipped", None)] * 2,
+            "test_listed": [("passed", None)] * 2,
+            "test_in_known_failure_class": [("passed", "class known failure")] * 2,
+        })
+
+    def test_exitfirst_drops_known_failures(self):
+        self.assertEqual(self._run_suite(rerun=True, extra_args=("-x",)), {
+            "test_code_skip_disabled_elsewhere": [("skipped", None)] * 2,
+            "test_listed": [("passed", None)] * 2,
+        })
+
+    def test_normal_mode_skips_known_failures(self):
+        self.assertEqual(self._run_suite(rerun=False), {
+            "test_code_skip_passes": [("skipped", None)],
+            "test_code_skip_fails": [("skipped", None)],
+            "test_code_skip_capability_skip": [("skipped", None)],
+            "test_code_skip_disabled_elsewhere": [("skipped", None)],
+            "test_known_failure_elsewhere": [("passed", None)],
+            "test_listed": [("passed", None)],
+            "test_not_listed": [("passed", None)],
+            "test_in_known_failure_class": [("skipped", None)],
+        })
+
+
 class TestPeriodicDecorator(TestCase):
     @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
@@ -969,6 +1121,7 @@ if __name__ == "__main__":
         self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 
+instantiate_parametrized_tests(TestRerunCodeSkip)
 instantiate_parametrized_tests(TestPeriodicDecorator)
 
 

@@ -325,7 +325,7 @@ def pytest_report_teststatus(report, config):
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_collection_modifyitems(items: list[Any]) -> None:
+def pytest_collection_modifyitems(config: Config, items: list[Any]) -> None:
     """
     This hook is used when rerunning disabled tests to get rid of all skipped tests
     instead of running and skipping them N times. This avoids flooding the console
@@ -351,21 +351,36 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
                 test_class = m["test_class"]
                 disabled_tests[test_class].add(test_name)
 
-    # When rerunning disabled test, ignore all test cases that are not disabled
+    from torch.testing._internal.rerun_code_skip import rerun_code_skip_reason
+
+    # When rerunning disabled test, ignore all test cases that are not disabled,
+    # except known-failure code skips, which are kept and report their reason.
+    # Runs that stop at the first failure (-x, e.g. distributed tests) drop them
+    # too, since a known failure would end the run before the disabled tests.
+    keep_code_skips = not config.option.maxfail
     filtered_items = []
 
     for item in items:
         test_name = item.name
         test_class = item.parent.name
 
+        code_skip = None
         if (
             test_class not in disabled_tests
             or test_name not in disabled_tests[test_class]
         ):
-            continue
+            if keep_code_skips:
+                code_skip = rerun_code_skip_reason(
+                    getattr(item, "obj", None), getattr(item, "cls", None)
+                )
+            if code_skip is None:
+                continue
 
         cpy = copy.copy(item)
         cpy._initrequest()
+        if code_skip is not None:
+            # A new list: copy.copy shares user_properties with every flake-finder copy
+            cpy.user_properties = [*cpy.user_properties, ("code_skip", code_skip)]
 
         filtered_items.append(cpy)
 

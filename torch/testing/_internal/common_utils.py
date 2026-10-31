@@ -92,6 +92,11 @@ from torch.testing._comparison import (
     TensorLikePair,
 )
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.rerun_code_skip import (
+    mark_rerun_code_skip,
+    rerun_code_skip_reason,
+    RUN_CODE_SKIPS,
+)
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
@@ -2054,6 +2059,12 @@ def lazy_skip_if(condition_fn, reason):
         return wrapper
     return decorator
 
+def known_failure_skip_if(condition_fn, reason):
+    """lazy_skip_if for a known failure, which rerun-disabled-tests runs instead."""
+    if not RUN_CODE_SKIPS:
+        return lazy_skip_if(condition_fn, reason)
+    return partial(mark_rerun_code_skip, reason=reason, condition=condition_fn)
+
 requires_accelerator = lazy_skip_if(
     lambda: not torch.accelerator.is_available(),
     "requires accelerator",
@@ -3572,10 +3583,13 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
-            # Probably test has disable issue but not for this platform
-            skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
-                " disabled tests are run"
-            raise unittest.SkipTest(skip_msg)
+            # Probably test has disable issue but not for this platform. Known-failure
+            # code skips without any disable issue still run; see rerun_code_skip.py.
+            is_code_skip = rerun_code_skip_reason(getattr(test, test._testMethodName), type(test)) is not None
+            if not is_code_skip or any(matches_test(x) for x in disabled_tests_dict):
+                skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
+                    " disabled tests are run"
+                raise unittest.SkipTest(skip_msg)
 
     if TEST_SKIP_FAST:
         if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
