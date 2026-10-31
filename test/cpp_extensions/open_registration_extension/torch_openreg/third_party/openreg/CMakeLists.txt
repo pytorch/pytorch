@@ -15,6 +15,12 @@ add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
 
 target_include_directories(${LIBRARY_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+# shm_open/shm_unlink live in librt on older glibc (< 2.17).
+# Modern glibc and macOS include them in libc; linking rt is harmless there.
+if(UNIX AND NOT APPLE)
+  target_link_libraries(${LIBRARY_NAME} PRIVATE rt)
+endif()
+
 install(TARGETS ${LIBRARY_NAME}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
