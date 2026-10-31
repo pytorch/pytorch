@@ -384,6 +384,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
     AtenTensorHandle src,
     int32_t non_blocking);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// torch._foreach_copy_(dst, src, non_blocking) on non-empty lists of equal
+// length, with its semantics, including which lists the device kernel fuses.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__foreach_copy_(
+    const AtenTensorHandle* dst,
+    int64_t dst_len,
+    const AtenTensorHandle* src,
+    int64_t src_len,
+    int32_t non_blocking);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle a,
@@ -635,6 +646,79 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// CUDA graph capture: thin wrappers over at::cuda::MemPool and
+// at::cuda::CUDAGraph, with that C++ API's contract rather than
+// torch.cuda.graph's: no warm-up, synchronization or tensor lifetime
+// management. capture_begin and capture_end use the current stream, which
+// must be on the pool's device; replay uses the current stream of the
+// capture's device. A graph captures once. capture_begin fails on ROCm, which
+// isn't supported yet, see https://github.com/ROCm/rocm-systems/issues/12677,
+// and create_cuda_mem_pool fails under the cudaMallocAsync allocator backend,
+// where CUDAGraph ignores the pool and allows one capture at a time.
+// Callers must:
+// - capture on a cudaStreamNonBlocking stream that no other thread uses while
+//   the capture is open;
+// - call capture_end exactly once for each capture_begin that succeeded, on
+//   its thread and stream, before deleting the graph, also when the captured
+//   work failed;
+// - use a pool and its graphs from one thread at a time, capture into a pool
+//   one graph at a time, and use a new pool once every graph that began a
+//   capture into it is deleted;
+// - not delete a pool while the thread has a capture open, on any stream or
+//   device, or while any thread has a global-mode capture open, which makes
+//   freeing the pool's memory abort; delete_cuda_mem_pool rejects only the
+//   case where the thread's current stream on the pool's device captures;
+// - not overlap replays of graphs sharing a pool, and use a replay's outputs
+//   before replaying another graph of the pool, unless replaying in capture
+//   order;
+// - not replay a graph that uses random numbers while other replays or eager
+//   random number work run on the same device: a replay advances the
+//   device's generator without taking its lock;
+// - order earlier work on the capture stream before a replay on another
+//   stream, and wait for a graph's replays before deleting it.
+struct CUDAMemPoolOpaque;
+using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
+
+struct CUDAGraphOpaque;
+using CUDAGraphHandle = CUDAGraphOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_mem_pool(
+    int32_t device_index,
+    CUDAMemPoolHandle* ret_pool // returns new reference
+);
+
+// Graphs captured into the pool keep its memory until they are deleted.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool);
+
+// keep_graph and num_rng_states are at::cuda::CUDAGraph's constructor
+// arguments, which torch.cuda.CUDAGraph defaults to false and 8. With
+// keep_graph, the captured graph is kept and the first replay instantiates it.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_graph(
+    int32_t keep_graph,
+    int64_t num_rng_states,
+    CUDAGraphHandle* ret_graph // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_graph(CUDAGraphHandle graph);
+
+// capture_mode is a cudaStreamCaptureMode. cudaStreamCaptureModeThreadLocal
+// restricts only the capturing thread, so other inference threads keep
+// running; cudaStreamCaptureModeGlobal also restricts them.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_begin(
+    CUDAGraphHandle graph,
+    CUDAMemPoolHandle pool,
+    int32_t capture_mode);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_graph_replay(CUDAGraphHandle graph);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #endif // USE_CUDA
 
