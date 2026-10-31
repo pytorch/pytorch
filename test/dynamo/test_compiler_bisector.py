@@ -11,7 +11,7 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
-from torch.library import _scoped_library, Library
+from torch.library import _scoped_library
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -28,21 +28,14 @@ i32 = torch.int32
 
 @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
 class TestCompilerBisector(TestCase):
-    test_ns = "_test_bisector"
+    bisector_ns = "_test_bisector"
 
     def tearDown(self):
-        if hasattr(torch.ops, self.test_ns):
-            delattr(torch.ops, self.test_ns)
-        if hasattr(self, "lib"):
-            self.lib._destroy()
+        if hasattr(torch.ops, self.bisector_ns):
+            delattr(torch.ops, self.bisector_ns)
 
     def get_op(self, name):
-        return getattr(getattr(torch.ops, self.test_ns), name).default
-
-    def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
-        self.lib = lib
-        return lib
+        return getattr(getattr(torch.ops, self.bisector_ns), name).default
 
     def test_bad_decomp(self):
         import_module("torch._inductor.compile_fx")
@@ -195,7 +188,7 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
     def test_crossref(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+        with _scoped_library(self.bisector_ns, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
             op = self.get_op("foo")
 
