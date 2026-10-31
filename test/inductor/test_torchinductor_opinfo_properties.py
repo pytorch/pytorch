@@ -557,7 +557,6 @@ EAGER_EQUIV_XFAILS = {
     "inductor_numerics": {
         "remainder": {ALL},
         "sigmoid": {fp32},
-        "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -623,7 +622,6 @@ ROCM_EAGER_EQUIV_XFAILS = {
     },
     "inductor_numerics": {
         "sigmoid": {fp32},
-        "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
         "log_softmax": {fp32},
     },

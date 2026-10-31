@@ -673,8 +673,8 @@ def promote_constants(
     return out
 
 
-def _add_with_alpha_fma(a, b, alpha):
-    """Compute a + alpha * b using FMA for CUDA floating-point precision."""
+def _add_sub_with_alpha_fma(a, b, alpha, operation):
+    """Match eager's fused add/sub-with-alpha on CUDA floating-point inputs."""
     dtype = get_promoted_dtype(
         a,
         b,
@@ -690,6 +690,8 @@ def _add_with_alpha_fma(a, b, alpha):
             alpha_expr = ops.index_expr(alpha, dtype)
         else:
             alpha_expr = ops.constant(alpha, dtype)
+        if operation == "sub":
+            alpha_expr = ops.neg(alpha_expr)
         return ops.fma(b_val, alpha_expr, a_val)
 
     return Pointwise.create(
@@ -774,7 +776,7 @@ def make_pointwise(
     override_device: torch.device | None = None,
     override_fn_when_input_bool: Callable[..., Any] | None = None,
     allow_alpha: bool = False,
-    use_fma_for_alpha: bool = False,
+    use_fma_for_alpha: Literal["add", "sub"] | None = None,
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
     force_output_cast: bool = False,
@@ -803,8 +805,8 @@ def make_pointwise(
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # Use FMA for add-with-alpha on Triton GPU floating-point.
-                # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
+                # Eager CUDA/ROCm fuses add/sub-with-alpha. Emit the FMA
+                # explicitly rather than relying on compiler contraction.
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
                     inp_device = inputs[0].get_device()
                     if (
@@ -812,7 +814,9 @@ def make_pointwise(
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
-                        return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+                        return _add_sub_with_alpha_fma(
+                            inputs[0], inputs[1], alpha, use_fma_for_alpha
+                        )
 
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
@@ -1204,7 +1208,7 @@ def register_pointwise(
     override_return_dtype=None,
     override_fn_when_input_bool=None,
     allow_alpha=False,
-    use_fma_for_alpha=False,
+    use_fma_for_alpha=None,
     triton_fallback=None,
     round_scalars_to_tensor_dtype=False,
 ):
@@ -8375,7 +8379,7 @@ reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 add = register_pointwise(
     aten.add,
     allow_alpha=True,
-    use_fma_for_alpha=True,
+    use_fma_for_alpha="add",
     override_fn_when_input_bool="logical_or",
     round_scalars_to_tensor_dtype=True,
 )
@@ -8656,7 +8660,12 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+sub = register_pointwise(
+    aten.sub,
+    allow_alpha=True,
+    use_fma_for_alpha="sub",
+    round_scalars_to_tensor_dtype=True,
+)
 
 
 @register_lowering(aten.addcmul, broadcast=True)
