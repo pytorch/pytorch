@@ -363,10 +363,10 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(winner2, sym=s2), [])
 
     def test_memo_distinguishes_output_stride(self):
-        # winner.layout is a Layout, which has no get_stride. When the signature
-        # probed for one and fell back, every output stride read as (), so two
-        # GEMMs differing only in output layout shared a memo key and the second
-        # was silently skipped.
+        # The bucket key carries the rebuilt output meta, so two GEMMs that
+        # differ only in output layout must not share it. Regression: the key
+        # was once built by probing winner.layout for a get_stride it does not
+        # have, so every output stride read as () and the second was skipped.
         s = sympy.Symbol("s_outstride", positive=True, integer=True)
         m, k, n = s, 256, 512
         inputs = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
@@ -556,16 +556,58 @@ class TestTunableOpPretune(TestCase):
         finally:
             tunableop._pretuned_gemms.cache_clear()
 
-    def test_memo_distinguishes_declared_range(self):
-        # A narrower declared range builds a different ladder for the same
-        # operands, so the second compile must not be skipped.
+    def test_a_narrower_range_reuses_tuned_buckets(self):
+        # The narrow ladder's rungs are a subset of the wide one's, and the
+        # memo is per bucket, so there is nothing left to tune. Keying the
+        # whole GEMM re-ran all of them because the range was part of the key.
         tunableop._pretuned_gemms.cache_clear()
         try:
             s = sympy.Symbol("s_range", positive=True, integer=True)
-            first = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
-            self.assertTrue(first)
-            second = _run(self._mm_winner("mm", s), sym=s, declared=(2, 4096))
-            self.assertTrue(second, "a different declared range is a new ladder")
+            wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
+            self.assertTrue(wide)
+            narrow = _run(self._mm_winner("mm", s), sym=s, declared=(2, 4096))
+            self.assertEqual(narrow, [], "already-tuned rungs must not re-run")
+        finally:
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_a_wider_range_tunes_only_the_new_buckets(self):
+        tunableop._pretuned_gemms.cache_clear()
+        try:
+            s = sympy.Symbol("s_widen", positive=True, integer=True)
+            self.assertTrue(_run(self._mm_winner("mm", s), sym=s, declared=(2, 4096)))
+            wide = _run(self._mm_winner("mm", s), sym=s, declared=(2, 2**31 - 1))
+            dims = {b.input_tensor_meta[0].sizes[0] for b in wide}
+            self.assertTrue(dims, "the rungs above the old ceiling are new")
+            self.assertTrue(all(d > 4096 for d in dims), f"re-tuned old rungs: {dims}")
+        finally:
+            tunableop._pretuned_gemms.cache_clear()
+
+    def test_a_partial_run_retries_the_untuned_buckets(self):
+        # The budget is shared across buckets, so a run can tune a few rungs
+        # and stop. Keying the whole GEMM marked it done after the first "ok",
+        # and every identical later layer skipped the rungs that never ran.
+        tunableop._pretuned_gemms.cache_clear()
+        try:
+            s = sympy.Symbol("s_partial", positive=True, integer=True)
+            calls = []
+
+            def _one_then_fail(job, timeout=None):
+                calls.append(job.bmreq)
+                return mock.Mock(
+                    status="ok" if len(calls) == 1 else "timeout", time=1.0
+                )
+
+            with _ladder(s):
+                with mock.patch(
+                    "torch._inductor.tunableop.submit", side_effect=_one_then_fail
+                ):
+                    tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+            tuned_dim = calls[0].input_tensor_meta[0].sizes[0]
+
+            second = _run(self._mm_winner("mm", s), sym=s)
+            self.assertTrue(second, "the untuned rungs must be retried")
+            retried = {b.input_tensor_meta[0].sizes[0] for b in second}
+            self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
         finally:
             tunableop._pretuned_gemms.cache_clear()
 
