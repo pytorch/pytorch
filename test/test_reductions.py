@@ -1703,6 +1703,18 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(out[0].item(), 0)
         self.assertEqual(out[-1].item(), 2)
 
+    @onlyCUDA
+    def test_reduction_expanded_input_split_32bit(self, device):
+        # A reduced dim > INT32_MAX on a stride-0 (expanded) input makes every
+        # operand extent 0. with_32bit_indexing splits the size-2 dim down to
+        # size 1 and must then pick the reduced dim, not the size-1 dim (which
+        # used to hit an INTERNAL ASSERT in TensorIteratorBase::split).
+        x = torch.ones(1, 2, device=device, dtype=torch.float64).expand(2**31, 2)
+        expected = torch.full((2,), 2.0**31, device=device, dtype=torch.float64)
+        self.assertEqual(x.sum(0), expected)
+        self.assertEqual(x.amax(0), torch.ones(2, device=device, dtype=torch.float64))
+        self.assertEqual(x.t().sum(1), expected)
+
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @skipIfMPS
     def test_nansum(self, device, dtype):
