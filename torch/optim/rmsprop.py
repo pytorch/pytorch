@@ -53,7 +53,7 @@ class RMSprop(Optimizer):
             raise ValueError(f"Invalid momentum value: {momentum}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        if not 0.0 <= alpha:
+        if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"Invalid alpha value: {alpha}")
 
         defaults = {
