@@ -406,6 +406,49 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, mapping), fn(x, mapping))
         self.assertEqual(counter.frame_count, 1 if override == "getattr" else 2)
 
+    @parametrize("name", ["value", "property_value", "method", "get"])
+    def test_dict_subclass_getattribute_guard(self, name):
+        class Mapping(dict):
+            @property
+            def property_value(self):
+                return 3
+
+            def method(self, key):
+                return 3
+
+        def fn(x, mapping):
+            value = getattr(mapping, name)
+            return x + (value("a") if name in ("method", "get") else value)
+
+        mapping = Mapping(a=3)
+        mapping.value = 3
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+
+        def getattribute(self, attr):
+            if attr == name:
+                return (lambda key: 40) if name in ("method", "get") else 40
+            return object.__getattribute__(self, attr)
+
+        Mapping.__getattribute__ = getattribute
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    def test_empty_dict_iteration_identity_guard(self, mapping_type):
+        def fn(x, mapping):
+            return x + 1, id(mapping), tuple(mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        mappings = [mapping_type(), mapping_type()]
+        for mapping in mappings:
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("base_type", [dict, OrderedDict, defaultdict])
     @parametrize("binding", ["unbound", "descriptor", "stored"])
     def test_dict_descriptor_arity_on_subclass(self, base_type, binding):
