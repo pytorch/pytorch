@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import dataclasses
 import multiprocessing
 import os
 import unittest
@@ -93,6 +94,45 @@ def _native_worker(rank, connection, progress_thread):
     connection.close()
 
 
+def _reregister_worker(rank, connection):
+    # A smaller registration at the same address stays loaded after the owner
+    # deregisters it; NIXL would resolve reads of the new registration to it.
+    with new_transport("nixl", "cpu", timeout=5) as transport:
+        connection.send_bytes(transport.bind())
+        transport.connect(_receive(connection))
+        tensor = torch.zeros(1 << 18, dtype=torch.float32)
+        if rank == 0:
+            memory = transport.register_memory(tensor)
+            for value in range(1, 3):
+                remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+                transport.read(memory.to_mutable_view(0, 4096), remote)
+                torch.testing.assert_close(
+                    tensor[:1024], torch.full((1024,), value * 1.0)
+                )
+                connection.send_bytes(b"read")
+            # The reset must not break transfers in the other direction.
+            tensor.fill_(3)
+            connection.send_bytes(memory.to_remote_buffer().serialize())
+            if _receive(connection) != b"read":
+                raise AssertionError("unexpected control-plane message")
+        else:
+            memory = transport.register_memory(tensor[: 1 << 17])
+            for value in range(1, 3):
+                tensor.fill_(value)
+                connection.send_bytes(memory.to_remote_buffer().serialize())
+                if _receive(connection) != b"read":
+                    raise AssertionError("unexpected control-plane message")
+                transport.unregister_memory(memory)
+                memory = transport.register_memory(tensor)
+            remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+            transport.read(memory.to_mutable_view(0, 4096), remote)
+            torch.testing.assert_close(tensor[:1024], torch.full((1024,), 3.0))
+            connection.send_bytes(b"read")
+        transport.unregister_memory(memory)
+        asyncio.run(transport.close_async(timeout=5))
+    connection.close()
+
+
 def _multi_peer_worker(rank, connections):
     # Rank 0 reads from ranks 1 and 2 through one endpoint.
     with new_transport("nixl", "cpu", timeout=5) as transport:
@@ -155,6 +195,33 @@ def _connect_rank_worker(rank, port):
         asyncio.run(transport.close_async(timeout=5))
 
 
+def _dropped_peer_worker(rank, connection):
+    # A load failing partway drops the peer's metadata but keeps its UCX
+    # connection, which then refuses reloads, so the transport closes.
+    with new_transport("nixl", "cpu", timeout=5) as transport:
+        connection.send_bytes(transport.bind())
+        transport.connect(_receive(connection))
+        memory = transport.register_memory(torch.zeros(1024))
+        if rank == 0:
+            remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+            truncated = dataclasses.replace(remote, metadata=remote.metadata[:-8])
+            try:
+                transport.read(memory.to_mutable_view(), truncated)
+            except transport._backend.nixlNotFoundError:
+                pass
+            else:
+                raise AssertionError("truncated metadata loaded")
+            if transport.connected():
+                raise AssertionError("transport stayed open with a dropped peer")
+            connection.send_bytes(b"done")
+        else:
+            connection.send_bytes(memory.to_remote_buffer().serialize())
+            if _receive(connection) != b"done":
+                raise AssertionError("unexpected control-plane message")
+        asyncio.run(transport.close_async(timeout=5))
+    connection.close()
+
+
 def _run_worker(worker, *args):
     # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
     # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
@@ -188,6 +255,14 @@ class TestNIXLNative(TestCase):
     def test_three_process_cpu_connect_rank(self):
         store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
         self._spawn(_connect_rank_worker, [(store.port,)] * 3, [])
+
+    def test_two_process_cpu_reregistered_memory(self):
+        connections = multiprocessing.Pipe()
+        self._spawn(_reregister_worker, [(c,) for c in connections], connections)
+
+    def test_two_process_cpu_dropped_peer_closes(self):
+        connections = multiprocessing.Pipe()
+        self._spawn(_dropped_peer_worker, [(c,) for c in connections], connections)
 
     def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")
