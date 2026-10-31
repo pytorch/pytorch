@@ -382,6 +382,205 @@ def _compile_subgraph_to_metal(
     )
 
 
+def _generate_cooperative_shader(
+    metal_dtype: str,
+    d_qk: int,
+    d_v: int,
+    block_m: int,
+    full_kv_params: str,
+    captured_params: str,
+    scalar_params_str: str,
+    unpack_code: str,
+    score_code: str,
+    mask_code: str,
+    has_full_blocks: bool,
+    scale: float,
+    lse_param: str = "",
+    lse_write_code: str = "",
+    max_param: str = "",
+    max_write_code: str = "",
+) -> str:
+    """Share eight query rows across 128 threads.
+
+    Each thread computes QK scores for one key, then accumulates one or more
+    output features. Softmax reductions and accumulators use FP32.
+    """
+
+    def block_body(partial: bool) -> str:
+        masking = mask_code if partial else ""
+        return f"""
+        for (int tile_start = kv_start; tile_start < kv_end; tile_start += BLOCK_N) {{
+            int tile_size = min(BLOCK_N, kv_end - tile_start);
+            int n_idx = tile_start + int(tid);
+            float dots[BLOCK_M];
+            #pragma unroll
+            for (int r = 0; r < BLOCK_M; r++) dots[r] = 0.0f;
+            if (int(tid) < tile_size) {{
+                long koff = b_kv * stride_kz + hkv_idx * stride_kh + (long)n_idx * stride_kn;
+                // Vector arithmetic without pointer alignment assumptions.
+                for (int d = 0; d + 3 < D_QK; d += 4) {{
+                    float4 key = float4(K[koff + (long)d * stride_kk],
+                        K[koff + (long)(d+1) * stride_kk],
+                        K[koff + (long)(d+2) * stride_kk],
+                        K[koff + (long)(d+3) * stride_kk]);
+                    #pragma unroll
+                    for (int r = 0; r < BLOCK_M; r++) {{
+                        float4 query = float4(Q_tg[r * D_QK + d], Q_tg[r * D_QK + d+1],
+                            Q_tg[r * D_QK + d+2], Q_tg[r * D_QK + d+3]);
+                        dots[r] += dot(query, key);
+                    }}
+                }}
+                for (int d = (D_QK / 4) * 4; d < D_QK; d++) {{
+                    float key = float(K[koff + (long)d * stride_kk]);
+                    #pragma unroll
+                    for (int r = 0; r < BLOCK_M; r++)
+                        dots[r] += Q_tg[r * D_QK + d] * key;
+                }}
+            }}
+            float scores[BLOCK_M];
+            for (int r = 0; r < BLOCK_M; r++) {{
+                int m_idx = m_base + r;
+                float score_val = -INFINITY;
+                if (m_idx < N_Q && int(tid) < tile_size) {{
+                    score_val = dots[r] * SCALE_VAL;
+{score_code}
+                    bool mask_result = true;
+{masking}
+                    if (!mask_result) score_val = -INFINITY;
+                }}
+                // Match the existing path's exclusion of -inf/NaN scores.
+                scores[r] = score_val > -INFINITY ? score_val : -INFINITY;
+                float maximum = simd_max(scores[r]);
+                if (lane == 0) partial[r * NUM_SIMDGROUPS + simd] = maximum;
+            }}
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            float new_max[BLOCK_M], alpha[BLOCK_M];
+            for (int r = 0; r < BLOCK_M; r++) {{
+                float tile_max = -INFINITY;
+                for (int i = 0; i < NUM_SIMDGROUPS; i++) tile_max = max(tile_max, partial[r * NUM_SIMDGROUPS + i]);
+                new_max[r] = max(maxima[r], tile_max);
+                alpha[r] = maxima[r] > -INFINITY
+                    ? metal::precise::exp(maxima[r] - new_max[r]) : 0.0f;
+                for (int f = 0; f < FEATURES_PER_THREAD; f++) accum[r][f] *= alpha[r];
+            }}
+            // Tile-level online softmax: rescale once per key tile, not key.
+            // All readers finish before reusing partial for sum reductions.
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            for (int r = 0; r < BLOCK_M; r++) {{
+                float p = scores[r] > -INFINITY
+                    ? metal::precise::exp(scores[r] - new_max[r]) : 0.0f;
+                weights[r * BLOCK_N + tid] = p;
+                float total = simd_sum(p);
+                if (lane == 0) partial[r * NUM_SIMDGROUPS + simd] = total;
+            }}
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            for (int r = 0; r < BLOCK_M; r++) {{
+                float tile_sum = 0.0f;
+                for (int i = 0; i < NUM_SIMDGROUPS; i++) tile_sum += partial[r * NUM_SIMDGROUPS + i];
+                sums[r] = sums[r] * alpha[r] + tile_sum;
+                maxima[r] = new_max[r];
+            }}
+            // Lanes switch from key ownership to output-feature ownership.
+            for (int f = 0; f < FEATURES_PER_THREAD; f++) {{
+                int feature = int(tid) + f * BLOCK_N;
+                if (feature < D_V) {{
+                    long voff = b_kv * stride_vz + hkv_idx * stride_vh + (long)feature * stride_vk;
+                    for (int n = 0; n < tile_size; n++) {{
+                        float value = float(V[voff + (long)(tile_start + n) * stride_vn]);
+                        #pragma unroll
+                        for (int r = 0; r < BLOCK_M; r++)
+                            accum[r][f] += weights[r * BLOCK_N + n] * value;
+                    }}
+                }}
+            }}
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }}
+"""
+
+    def sparse_loop(full: bool) -> str:
+        prefix = "full_" if full else ""
+        return f"""
+    {{
+        int count = {prefix}kv_num_blocks[sparse_idx_z * {prefix}kv_nb_stride_z
+            + sparse_idx_hq * {prefix}kv_nb_stride_h + sparse_q_idx * {prefix}kv_nb_stride_q];
+        long index_base = sparse_idx_z * {prefix}kv_idx_stride_z
+            + sparse_idx_hq * {prefix}kv_idx_stride_h + (long)sparse_q_idx * {prefix}kv_idx_stride_q;
+        for (int blk = 0; blk < count; blk++) {{
+            int index = {prefix}kv_indices[index_base + (long)blk * {prefix}kv_idx_stride_b];
+            int kv_start = index * (int)SPARSE_KV_BLOCK_SIZE;
+            int kv_end = min(kv_start + (int)SPARSE_KV_BLOCK_SIZE, (int)N_KV);
+{block_body(not full)}
+        }}
+    }}
+"""
+
+    return f"""
+// Cooperative MPS FlexAttention: sparse traversal + generated mods.
+#include <metal_stdlib>
+#include <c10/metal/utils.h>
+using namespace metal;
+constant int BLOCK_M = {block_m}, BLOCK_N = 128;
+constant int NUM_SIMDGROUPS = BLOCK_N / 32;
+constant int FEATURES_PER_THREAD = {(d_v + 127) // 128};
+constant int D_QK = {d_qk}, D_V = {d_v};
+constant float SCALE_VAL = {scale!r}f;
+kernel void flex_attn_fwd(
+    device {metal_dtype}* out [[buffer(0)]],
+    constant {metal_dtype}* Q [[buffer(1)]],
+    constant {metal_dtype}* K [[buffer(2)]],
+    constant {metal_dtype}* V [[buffer(3)]],
+    constant int* kv_num_blocks [[buffer(4)]],
+    constant int* kv_indices [[buffer(5)]],
+{full_kv_params}{captured_params}{lse_param}{max_param}{scalar_params_str},
+    uint3 tgpos [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint simd [[simdgroup_index_in_threadgroup]]) {{
+{unpack_code}
+    int m_base = int(tgpos.x) * BLOCK_M, h_idx = int(tgpos.y), b_idx = int(tgpos.z);
+    int b_kv = b_idx % (int)Bkv;
+    int hkv_idx = h_idx / (int)gqa_shared_heads;
+    int sparse_q_idx = m_base / (int)SPARSE_Q_BLOCK_SIZE;
+    long sparse_idx_z = b_idx % SPARSE_Z, sparse_idx_hq = h_idx % SPARSE_HQ;
+    threadgroup float Q_tg[BLOCK_M * D_QK];
+    threadgroup float weights[BLOCK_M * BLOCK_N];
+    threadgroup float partial[BLOCK_M * NUM_SIMDGROUPS];
+    for (int i = int(tid); i < BLOCK_M * D_QK; i += BLOCK_N) {{
+        int r = i / D_QK, d = i % D_QK;
+        Q_tg[i] = m_base + r < N_Q
+            ? float(Q[b_idx * stride_qz + h_idx * stride_qh
+                + (long)(m_base + r) * stride_qm + (long)d * stride_qk]) : 0.0f;
+    }}
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float maxima[BLOCK_M], sums[BLOCK_M], accum[BLOCK_M][FEATURES_PER_THREAD];
+    for (int r = 0; r < BLOCK_M; r++) {{
+        maxima[r] = -INFINITY;
+        sums[r] = 0.0f;
+        for (int f = 0; f < FEATURES_PER_THREAD; f++) accum[r][f] = 0.0f;
+    }}
+{sparse_loop(False)}
+{sparse_loop(True) if has_full_blocks else ""}
+    for (int r = 0; r < BLOCK_M; r++) {{
+        int m_idx = m_base + r;
+        if (m_idx < N_Q) {{
+            float row_max = maxima[r], row_sum = sums[r];
+            if (tid == 0) {{
+{lse_write_code}{max_write_code}
+            }}
+            for (int f = 0; f < FEATURES_PER_THREAD; f++) {{
+                int feature = int(tid) + f * BLOCK_N;
+                if (feature < D_V) {{
+                    long offset = b_idx * stride_oz + h_idx * stride_oh
+                        + (long)m_idx * stride_om + (long)feature * stride_ok;
+                    out[offset] = {metal_dtype}(row_sum > 0.0f ? accum[r][f] / row_sum : 0.0f);
+                }}
+            }}
+        }}
+    }}
+}}
+"""
+
+
 def _generate_mma_shader(
     metal_dtype,
     d_qk,
@@ -610,6 +809,7 @@ def _generate_metal_shader(
     write_lse: bool = False,
     write_max: bool = False,
     captures_fit_int32: bool = True,
+    use_cooperative: bool = False,
 ) -> str:
     """Generate the complete Metal shader source for flex attention.
 
@@ -779,6 +979,26 @@ def _generate_metal_shader(
         f"    {int_ctype if name in capsym_set else 'long'} {name} = _params[{i}];"
         for i, name in enumerate(scalar_names)
     )
+
+    if use_cooperative:
+        return _generate_cooperative_shader(
+            metal_dtype,
+            d_qk,
+            d_v,
+            block_m,
+            full_kv_params,
+            captured_params,
+            scalar_params_str,
+            unpack_code,
+            score_code,
+            mask_code,
+            has_full_blocks,
+            scale,
+            lse_param=lse_param,
+            lse_write_code=lse_write_code,
+            max_param=max_param,
+            max_write_code=max_write_code,
+        )
 
     if use_mma:
         return _generate_mma_shader(
@@ -976,6 +1196,7 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         grid: tuple[Any, ...],
         block_m: int,
         num_mutated_outputs: int = 0,
+        num_threads: int | None = None,
     ):
         super().__init__(
             layout=layout,
@@ -986,6 +1207,9 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         self.scalar_args = scalar_args
         self.grid = grid
         self.block_m = block_m
+        # Query rows per tile and threads per group are independent quantities.
+        # Preserve the old one-thread-per-query launch for existing callers.
+        self.num_threads = block_m if num_threads is None else num_threads
         # The last num_mutated_outputs inputs (logsumexp, max_scores) are written
         # in place by the kernel.
         self.mutation_outputs = [
@@ -1043,6 +1267,6 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         wrapper.writeline(
             f"{lib_name}.flex_attn_fwd("
             f"{args_str}, "
-            f"threads=[{grid_x} * {self.block_m}, {grid_y}, {grid_z}], "
-            f"group_size=[{self.block_m}, 1, 1])"
+            f"threads=[{grid_x} * {self.num_threads}, {grid_y}, {grid_z}], "
+            f"group_size=[{self.num_threads}, 1, 1])"
         )
