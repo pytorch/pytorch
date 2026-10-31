@@ -478,12 +478,19 @@ class GemmBlockSparseMicrokernelTester {
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
+          const float refValue = acc[mIndex * n() + nIndex];
+          // Bias is added after the dot product, so a result near zero is the
+          // difference of two much larger values and retains their rounding
+          // error. Scale the tolerance by the larger pre-addition magnitude
+          // rather than the cancelled result, which carries no precision.
+          const float magnitude =
+              std::max(std::abs(refValue), std::abs(refValue - bias[nIndex]));
           ASSERT_NEAR(
               c[mIndex * cStride() + nIndex],
-              acc[mIndex * n() + nIndex],
-              std::abs(acc[mIndex * n() + nIndex]) * 1.0e-3f)
+              refValue,
+              magnitude * 1.0e-3f)
               << "at " << mIndex << ", " << nIndex
-              << ": reference = " << acc[mIndex * n() + nIndex]
+              << ": reference = " << refValue
               << ", optimized = " << c[mIndex * cStride() + nIndex]
               << ", Mr x Nr = " << mr() << " x " << nr()
               << ", M x N x K = " << m() << " x " << n() << " x " << k();
