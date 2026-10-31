@@ -187,6 +187,11 @@ void ProcessGroup::release_resources() {
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();
+  // Hooks may hold weak references to this group (NanCheckHook,
+  // CompletionCallbackHook), which defer deletion until they are dropped.
+  // No strong reference is left, so no op can fire them concurrently.
+  preHooks_.clear();
+  postHooks_.clear();
 }
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
