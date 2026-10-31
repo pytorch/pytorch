@@ -782,17 +782,17 @@ class TestTunableOpPretune(TestCase):
         pretune.assert_called_once_with(winner)
         winner.output_node.assert_called_once()
 
-    def test_tune_mode_bypasses_the_fx_graph_cache(self):
-        # Tuning happens while lowering, so a cache hit records nothing and a
-        # rerun writes an empty results file. AOTAutogradCache routes through
-        # the same validator, so one bypass covers both caches.
+    def test_enabled_modes_bypass_the_fx_graph_cache(self):
+        # Both passes work while lowering -- tune records, reuse borrows and
+        # validates -- so a cache hit does neither and a rerun writes an empty
+        # results file. AOTAutogradCache routes through the same validator.
         from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 
         gm = torch.fx.symbolic_trace(torch.nn.Linear(4, 4))
         with mock.patch("torch.cuda.is_available", return_value=True):
             for mode, expect_bypass in (
                 ("off", False),
-                ("reuse", False),
+                ("reuse", True),
                 ("tune", True),
             ):
                 with self.subTest(mode=mode):
@@ -817,7 +817,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     InductorTestCase enters fresh_cache(), which isolates the cache directory
     per test and clears _pretuned_gemms with it. That also means the compile
     always starts cold, so this does not exercise the tune-mode cache bypass;
-    test_tune_mode_bypasses_the_fx_graph_cache covers that directly.
+    test_enabled_modes_bypass_the_fx_graph_cache covers that directly.
     """
 
     hw_classification = HardwareClassification.CUDA

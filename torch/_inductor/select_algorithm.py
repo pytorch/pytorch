@@ -3863,8 +3863,71 @@ class ExternKernelCaller(ChoiceCaller):
     def benchmark(self, *args, out):
         if self.bmreq is None:
             raise AssertionError("self.bmreq must not be None")
+
+        from . import tunableop
+
+        # is_enabled() reports only that the process has CUDA and a mode set;
+        # submit() pins the worker to the current CUDA device, so a CPU extern
+        # candidate must not be routed there. Route only GEMMs TunableOp tunes
+        # (same set the ladder uses): other extern kernels -- convolutions,
+        # grouped/sparse GEMMs, custom-op fallbacks -- would tune GEMMs they
+        # call internally into the results file, and their bmreqs build inputs
+        # (rand_strided, zero-filled integer tensors) that mis-time them.
+        if (
+            tunableop.is_enabled()
+            and out.is_cuda
+            and tunableop.is_tunableop_gemm(self.choice.name)
+        ):
+            # Extern kernels are otherwise benchmarked inline, assuming they do not
+            # crash (see benchmark_in_sub_process); hipBLASLt tuning can abort the
+            # process or hang, so run this candidate in the TunableOp worker. In
+            # reuse mode that is also where a borrow is validated and recorded, so
+            # the time returned already reflects whichever won.
+            outcome = tunableop.submit(
+                tunableop.BenchmarkJob(
+                    self.bmreq,
+                    tuning=tunableop.is_tune_mode(),
+                    nearest_match=tunableop.is_reuse_mode(),
+                    record_borrowed=tunableop.is_reuse_mode(),
+                    # The worker is a separate process, so the mask has to travel
+                    # with the job; the context manager below only covers the
+                    # inline fallback path.
+                    dyn_dims_mask=self.tunable_dyn_dims_mask,
+                )
+            )
+            if outcome.status == "ok":
+                return outcome.time
+            # Time the untuned kernel inline rather than dropping the candidate.
+            # TunableOp must be off while doing so: PYTORCH_TUNABLEOP_ENABLED=1
+            # or a user enable(True) would otherwise tune hipBLASLt inline in
+            # the parent -- exactly the abort or hang the worker contains.
+            # Restored afterwards so later compiles see the caller's setting.
+            tunable = torch.cuda.tunable
+            was_enabled = tunable.is_enabled()
+            was_tuning = tunable.tuning_is_enabled()
+            log.warning(
+                "TunableOp benchmark of %s hit %s; timing the default kernel instead.",
+                self.name,
+                outcome.status,
+            )
+            try:
+                tunable.enable(False)
+                tunable.tuning_enable(False)
+                return self._benchmark_inline(args, out)
+            finally:
+                tunable.enable(was_enabled)
+                tunable.tuning_enable(was_tuning)
+
+        return self._benchmark_inline(args, out)
+
+    def _benchmark_inline(self, args, out):
+        # Bind to a local: entering the dynamic_dims_mask context below drops
+        # the narrowing on self.bmreq, since a context manager could reassign it.
+        bmreq = self.bmreq
+        if bmreq is None:
+            raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
-        self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         mask = self.tunable_dyn_dims_mask
         # TunableOp only exists in CUDA/ROCm builds; gate on the output device
         # so a non-empty mask on a CPU op does not hit a missing _C binding.
@@ -3872,8 +3935,8 @@ class ExternKernelCaller(ChoiceCaller):
             with torch.cuda.tunable.dynamic_dims_mask(
                 M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
             ):
-                return self.bmreq.benchmark(*args, out=out)
-        return self.bmreq.benchmark(*args, out=out)
+                return bmreq.benchmark(*args, out=out)
+        return bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
         """
