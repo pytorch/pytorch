@@ -1956,6 +1956,38 @@ Tensor asarray(
     tensor = tensor_fromDLPack(obj);
   }
 
+  // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
+  // buffer protocol so dtype, device, and shape come from the producer.
+  if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
+    // Resolved outside the try so a broken install propagates instead of
+    // silently falling back.
+    auto from_dlpack =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack");
+    // Without copy=False, the producer is allowed to export a copy.
+    auto copy_arg =
+        force_alias ? py::object(py::bool_(false)) : py::object(py::none());
+    try {
+      tensor = from_dlpack(py::handle(obj), py::arg("copy") = copy_arg)
+                   .cast<Tensor>();
+    } catch (const py::error_already_set& e) {
+      if (!e.matches(PyExc_Exception)) {
+        throw;
+      }
+      // Only buffers and, with NumPy, __cuda_array_interface__ objects have
+      // another path (below, and in internal_new_from_data); anything else
+      // would reach the same from_dlpack call in internal_new_from_data.
+      bool has_other_path = PyObject_CheckBuffer(obj) != 0;
+#ifdef USE_NUMPY
+      has_other_path = has_other_path ||
+          PyObject_HasAttrString(obj, "__cuda_array_interface__");
+#endif
+      if (!has_other_path) {
+        throw;
+      }
+    }
+  }
+
   // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
     // When no dtype is given, infer it from the buffer's declared format
@@ -2015,9 +2047,9 @@ Tensor asarray(
       tensor.set_requires_grad(return_requires_grad);
     }
   } else {
-    // Undefined tensor means it does not implement neither DLPack nor
-    // the buffer protocol. Last case is a sequence, in which case we must
-    // copy (copy can't be false).
+    // Undefined tensor means neither DLPack nor the buffer protocol produced
+    // one. Last case is a sequence, in which case we must copy (copy can't be
+    // false).
     TORCH_CHECK_VALUE(
         !force_alias, "can't alias arbitrary sequence into a tensor.");
 
