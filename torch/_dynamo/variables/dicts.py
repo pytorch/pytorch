@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
+import torch
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -629,6 +630,39 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        if (
+            isinstance(self, ConstDictVariable)
+            and self.source
+            and isinstance(item, variables.LazyConstantVariable)
+            and isinstance(item.source, ConstDictKeySource)
+            and isinstance(item.source.base, AttrSource)
+            and item.source.base.member in ("_forward_hooks", "_forward_pre_hooks")
+            and not tx.output.side_effects.is_modified(self)
+        ):
+            flags = tx.output.resolve_source_value(self.source)
+            for flags_name in (
+                "_global_forward_hooks_with_kwargs",
+                "_global_forward_hooks_always_called",
+            ):
+                if flags is getattr(torch.nn.modules.module, flags_name):
+                    key = _get_literal_key(item)
+                    if type(key) is not int:
+                        break
+                    item.python_type()
+                    self.install_dict_keys_match_guard()
+                    if self.items:
+                        # Global keys alone do not guard their relationship to
+                        # changing local IDs, including user-edited registries.
+                        install_guard(
+                            item.source.base.base.make_guard(
+                                functools.partial(
+                                    GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                                    hooks_name=item.source.base.member,
+                                    flags_name=flags_name,
+                                )
+                            )
+                        )
+                    return ConstantVariable.create(key in flags)
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
@@ -838,6 +872,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # NB - Guard on all the keys of the other dict to ensure
                 # correctness.
                 other.install_dict_order_guard(tx)
+                if isinstance(other, NNModuleHooksDictVariable):
+                    for key in other.items:
+                        key.vt.realize()
                 self.items.update(other.items)
             elif (
                 isinstance(
@@ -1409,29 +1446,60 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
-    # Avoid specializing hook IDs during normal module dispatch.
+    # Defer hook-ID guards so equivalent modules can reuse normal hook dispatch.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
+    def is_python_constant(self) -> bool:
+        # Inspecting nonempty keys here would realize and specialize lazy IDs.
+        return not self.items
+
     def install_dict_keys_match_guard(self) -> None:
-        pass
+        # Truth and view length need a guard without specializing hook IDs.
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
-    def install_dict_order_guard(
-        self,
-        tx: "InstructionTranslatorBase | None" = None,
-        *,
-        view: "DictViewVariable | None" = None,
-    ) -> None:
-        if view is None or view.kv != "values":
-            ConstDictVariable.install_dict_keys_match_guard(self)
-        super().install_dict_order_guard(tx, view=view)
+    def _new_dict(
+        self, items: dict[HashableTracker, VariableTracker]
+    ) -> "OrderedDictVariable":
+        # A detached copy uses stored hashes for lookups, so its keys must be guarded.
+        for key in items:
+            key.vt.realize()
+        return OrderedDictVariable(items, mutation_type=ValueMutationNew())
 
-    def install_dict_contains_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: HashableTracker,
-        *,
-        key_present: bool | None = None,
-    ) -> None:
-        pass
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        if not self.items and isinstance(item, variables.LazyConstantVariable):
+            item.python_type()
+            if self.source:
+                install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return ConstantVariable.create(False)
+        source = item.source
+        if (
+            isinstance(source, ConstDictKeySource)
+            and isinstance(source.base, AttrSource)
+            and isinstance(self.source, AttrSource)
+            and source.base.base == self.source.base
+            and not tx.output.side_effects.is_modified(self)
+        ):
+            key = _get_literal_key(item)
+            keys = [_get_literal_key(k.vt) for k in self.items]
+            if type(key) is int and all(type(k) is int for k in keys):
+                item.python_type()
+                for stored_key in self.items:
+                    stored_key.vt.python_type()
+                # Normal hook dispatch tests an ID against the same module's
+                # kwargs/always-call flags. Guard that relationship, not the ID.
+                install_guard(
+                    self.source.base.make_guard(
+                        functools.partial(
+                            GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                            hooks_name=source.base.member,
+                            flags_name=self.source.member,
+                        )
+                    )
+                )
+                return ConstantVariable.create(key in keys)
+        return super().sq_contains_impl(tx, item)
 
 
 class DictViewVariable(VariableTracker):

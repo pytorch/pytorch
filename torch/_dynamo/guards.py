@@ -969,6 +969,7 @@ def _get_closure_vars() -> dict[str, object]:
         _CLOSURE_VARS = {
             "___check_type_id": check_type_id,
             "___check_obj_id": check_obj_id,
+            "___check_hook_membership": _nn_module_hook_membership,
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
@@ -1476,6 +1477,17 @@ def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
         return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
     except InvalidOrderedDict:
         return None
+
+
+def _nn_module_hook_membership(
+    module: Any, hooks_name: str, flags_name: str
+) -> tuple[bool, ...]:
+    # Local hook IDs can also be tested against a global flag registry.
+    flags_owner = (
+        torch.nn.modules.module if flags_name.startswith("_global_") else module
+    )
+    flags = getattr(flags_owner, flags_name)
+    return tuple(key in flags for key in dict.keys(getattr(module, hooks_name)))
 
 
 def _constant_subclass_base_value(value: object) -> Any:
@@ -3809,6 +3821,53 @@ class GuardBuilder(GuardBuilderBase):
             order, get_verbose_code_parts(code, guard), guard.user_stack
         )
         self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "hooks_name"),
+            _guard_create_fn_keyword(guard, "flags_name"),
+            _nn_module_hook_membership(
+                value,
+                _guard_create_fn_keyword(guard, "hooks_name"),
+                _guard_create_fn_keyword(guard, "flags_name"),
+            ),
+        ),
+        eval_fn=lambda value, metadata: _nn_module_hook_membership(
+            value, metadata[0], metadata[1]
+        )
+        == metadata[2],
+    )
+    def NN_MODULE_HOOKS_DICT_CONTAINS(
+        self, guard: Guard, hooks_name: str, flags_name: str
+    ) -> None:
+        membership = _nn_module_hook_membership(self.get(guard), hooks_name, flags_name)
+        code = (
+            f"___check_hook_membership({self.arg_ref(guard)}, "
+            f"{hooks_name!r}, {flags_name!r}) == {membership!r}"
+        )
+        if code in self.already_added_code_parts:
+            return
+        # Keep local hook dictionaries available when rebuilding serialized guards.
+        names = (
+            (hooks_name,)
+            if flags_name.startswith("_global_")
+            else (hooks_name, flags_name)
+        )
+        for name in names:
+            self.get_guard_manager_from_source(
+                AttrSource(guard.originating_source, name)
+            )
+
+        def guard_fn(module: Any) -> bool:
+            return (
+                _nn_module_hook_membership(module, hooks_name, flags_name) == membership
+            )
+
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts([code], guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, [code])
+        self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
