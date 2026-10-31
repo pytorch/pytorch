@@ -2,6 +2,7 @@
 
 """Tests for CUDA graph utilities: kernel annotations and graph introspection."""
 
+import types
 import unittest
 import unittest.mock
 
@@ -1761,6 +1762,23 @@ class TestIsAvailable(TestCase):
         finally:
             torch.version.hip = orig
             importlib.reload(u)
+
+    def test_hip_python_runtime_error_string(self):
+        import torch.cuda._utils as u
+
+        class HipError:
+            value = 1
+
+            def __str__(self):
+                return "hipErrorInvalidValue"
+
+        runtime = types.SimpleNamespace(
+            cudaGetErrorString=unittest.mock.Mock(return_value=(b"invalid argument",)),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "HIP operation: hipErrorInvalidValue.*invalid argument"
+        ):
+            u._check_cuda_runtime_bindings((HipError(),), runtime, msg="HIP operation")
 
     def test_probe_accepts_invalid_value(self):
         # A driver that has the API rejects the null node with cudaErrorInvalidValue.
