@@ -12584,6 +12584,66 @@ class TestCudaOptims(TestCase):
     # to apply the new OptimizerInfo structure.
 
     @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA graphs are required")
+    @parametrize("foreach", [None, True])
+    @parametrize("beta_shape", [(), (1,)])
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
+        dtypes=[torch.float16, torch.bfloat16, torch.float32, torch.complex64],
+    )
+    def test_graph_optims_tensor_betas(
+        self, device, dtype, optim_info, foreach, beta_shape, amsgrad
+    ):
+        params = [
+            torch.randn(shape, device=device, dtype=dtype) for shape in ((3, 4), ())
+        ]
+        reference_params = [p.clone() for p in params]
+        for p, reference in zip(params, reference_params):
+            p.grad = torch.randn_like(p)
+            reference.grad = p.grad.clone()
+        betas = tuple(
+            torch.tensor(b, device=device).reshape(beta_shape) for b in (0.9, 0.99)
+        )
+        optimizer = optim_info.optim_cls(
+            params, betas=betas, capturable=True, foreach=foreach, amsgrad=amsgrad
+        )
+        reference_optimizer = optim_info.optim_cls(
+            reference_params,
+            betas=betas,
+            capturable=True,
+            foreach=True,
+            amsgrad=amsgrad,
+        )
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            for _ in range(3):
+                optimizer.step()
+                reference_optimizer.step()
+        torch.cuda.current_stream().wait_stream(stream)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            optimizer.step()
+        for beta_values in ((0.9, 0.99), (0.8, 0.95), (0.5, 0.8)):
+            for beta, value in zip(betas, beta_values):
+                beta.fill_(value)
+            for p, reference in zip(params, reference_params):
+                p.grad.copy_(torch.randn_like(p))
+                reference.grad.copy_(p.grad)
+            graph.replay()
+            reference_optimizer.step()
+            self.assertEqual(params, reference_params)
+            for p, reference in zip(params, reference_params):
+                for key in ("exp_avg", "exp_avg_sq", "max_exp_avg_sq"):
+                    if key in optimizer.state[p]:
+                        self.assertEqual(
+                            optimizer.state[p][key],
+                            reference_optimizer.state[reference][key],
+                        )
+
+    @onlyCUDA
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >=5.3 required for graphs"
     )
