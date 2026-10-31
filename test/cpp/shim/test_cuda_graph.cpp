@@ -232,17 +232,19 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
       kThreadLocal,
       pool,
       at::cuda::getStreamFromPool(false, 1));
-  // A replay runs on the current stream of the capture's device.
-  c10::cuda::CUDAGuard device_guard(0);
-  auto replay_stream = at::cuda::getStreamFromPool(false, 1);
-  at::cuda::setCurrentCUDAStream(replay_stream);
-  ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
-  replay_stream.synchronize();
-  auto first = y.clone();
-  ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
-  replay_stream.synchronize();
-  EXPECT_FALSE(y.equal(first));
-  at::cuda::setCurrentCUDAStream(at::cuda::getDefaultCUDAStream(1));
+  {
+    // A replay runs on the current stream of the capture's device.
+    c10::cuda::CUDAGuard device_guard(0);
+    auto replay_stream = at::cuda::getStreamFromPool(false, 1);
+    c10::cuda::CUDAMultiStreamGuard stream_guard(
+        c10::ArrayRef<c10::cuda::CUDAStream>(replay_stream));
+    ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
+    replay_stream.synchronize();
+    auto first = y.clone();
+    ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
+    replay_stream.synchronize();
+    EXPECT_FALSE(y.equal(first));
+  }
   ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
   graph_ = nullptr;
   EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
@@ -288,7 +290,40 @@ TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
   EXPECT_EQ(graph, nullptr);
 }
 
-// Run with PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync.
+TEST(AOTIForeachCopyCudaTest, CopiesDeviceTensors) {
+  if (c10::cuda::device_count() == 0) {
+    GTEST_SKIP() << "CUDA is not available";
+  }
+  auto longs = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
+  // One dtype and layout, which the CUDA kernel fuses, then mixed lists,
+  // which it copies one by one.
+  for (bool fused : {true, false}) {
+    std::vector<at::Tensor> dst = {
+        at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
+    std::vector<at::Tensor> src = {
+        at::randn({4}, at::kCUDA), at::randn({3, 2}, at::kCUDA)};
+    if (!fused) {
+      dst[1] = at::empty({2, 3}, at::kCUDA).t();
+      dst.push_back(at::empty({5}, longs));
+      src.push_back(at::randint(100, {5}, longs));
+    }
+    std::vector<AtenTensorHandle> dst_handles;
+    std::vector<AtenTensorHandle> src_handles;
+    for (size_t i = 0; i < dst.size(); ++i) {
+      dst_handles.push_back(reinterpret_cast<AtenTensorHandle>(&dst[i]));
+      src_handles.push_back(reinterpret_cast<AtenTensorHandle>(&src[i]));
+    }
+    auto n = static_cast<int64_t>(dst.size());
+    ASSERT_EQ(
+        aoti_torch__foreach_copy_(
+            dst_handles.data(), n, src_handles.data(), n, 0),
+        AOTI_TORCH_SUCCESS);
+    for (size_t i = 0; i < dst.size(); ++i) {
+      EXPECT_TRUE(dst[i].equal(src[i]));
+    }
+  }
+}
+
 TEST(AOTIForeachCopyCudaTest, CopiesFromPinnedMemoryAsynchronously) {
   if (c10::cuda::device_count() == 0) {
     GTEST_SKIP() << "CUDA is not available";
@@ -313,6 +348,7 @@ TEST(AOTIForeachCopyCudaTest, CopiesFromPinnedMemoryAsynchronously) {
   }
 }
 
+// Run with PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync.
 TEST(AOTICudaGraphAsyncTest, RejectsTheCudaMallocAsyncBackend) {
   if (c10::cuda::device_count() == 0 || !uses_cuda_malloc_async()) {
     GTEST_SKIP() << "Needs the cudaMallocAsync allocator backend";

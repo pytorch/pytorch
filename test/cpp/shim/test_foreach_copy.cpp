@@ -18,8 +18,7 @@ std::vector<AtenTensorHandle> handles(std::vector<at::Tensor>& tensors) {
 }
 
 TEST(AOTIForeachCopyTest, CopiesEachTensor) {
-  // Lists of one dtype and layout, which the CUDA kernel fuses, then mixed
-  // ones, which it doesn't.
+  // Lists of one dtype and layout, then mixed ones.
   for (bool uniform : {true, false}) {
     std::vector<at::Tensor> dst = {at::empty({4}), at::empty({3, 2})};
     std::vector<at::Tensor> src = {at::randn({4}), at::randn({3, 2})};
