@@ -1114,6 +1114,40 @@ class TestOptimRenewed(TestCase):
                         optimizers[1].state[params[1]][key],
                     )
 
+    @onlyCUDA
+    @parametrize("tensor_lr", [False, True])
+    @parametrize("first_step_dtype", [torch.float32, torch.float64])
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_step_dtype_mismatch(
+        self, device, dtype, optim_info, tensor_lr, first_step_dtype
+    ):
+        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
+        for param in params:
+            param.grad = torch.full_like(param, 0.25)
+        lr = torch.tensor(0.01, device=device, dtype=torch.float32) if tensor_lr else 0.01
+        optimizer = optim_info.optim_cls(params, fused=True, lr=lr)
+        optimizer.step()
+        step_dtypes = (
+            (torch.float32, torch.float64)
+            if first_step_dtype == torch.float32
+            else (torch.float64, torch.float32)
+        )
+        for param, step_dtype in zip(params, step_dtypes, strict=True):
+            optimizer.state[param]["step"] = optimizer.state[param]["step"].to(step_dtype)
+        expected = [param.clone() for param in params]
+        with self.assertRaisesRegex(
+            RuntimeError, "Fused optimizer step tensors must have the same dtype"
+        ):
+            optimizer.step()
+        self.assertEqual(params, expected)
+
     @onlyCPU
     @optims(
         [

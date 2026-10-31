@@ -195,15 +195,6 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #define AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_STEP_TYPES(TYPE, NAME, ...)       \
-  AT_DISPATCH_SWITCH(                                 \
-      TYPE,                                           \
-      NAME,                                           \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                \
-          at::ScalarType::Float, step_t, __VA_ARGS__) \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(            \
-              at::ScalarType::Double, step_t, __VA_ARGS__))
-
 #define AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(...)   \
   AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)  \

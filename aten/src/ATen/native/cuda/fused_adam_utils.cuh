@@ -5,8 +5,10 @@
 #include <ATen/native/FusedAdam.h>
 #include <c10/util/MakeNested.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
+#include <ATen/native/cuda/FusedOptimizerUtils.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
+#include <algorithm>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -578,6 +580,15 @@ void _fused_adam_cuda_impl_common(
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
+  const auto step_dtype = state_steps[0].scalar_type();
+  TORCH_CHECK(
+      std::all_of(
+          state_steps.begin(),
+          state_steps.end(),
+          [step_dtype](const at::Tensor& step) {
+            return step.scalar_type() == step_dtype;
+          }),
+      "Fused optimizer step tensors must have the same dtype");
   constexpr int depth = amsgrad ? 5 : 4;
   constexpr bool is_adamw = (mode == ADAM_MODE::ADAMW);
   constexpr const char* validate_msg =
@@ -619,7 +630,7 @@ void _fused_adam_cuda_impl_common(
         exp_avgs[0].scalar_type(),
         mp_name,
         AT_WRAP([&]() {
-          AT_DISPATCH_STEP_TYPES(
+          AT_DISPATCH_FUSED_OPTIMIZER_STEP_TYPES(
               state_steps[0].scalar_type(), "fused_adam_step_cuda", [&]() {
                 multi_tensor_apply_for_fused_optimizer<depth>(
                     tensor_lists,
@@ -650,7 +661,7 @@ void _fused_adam_cuda_impl_common(
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, params[0].scalar_type(), kernel_name, [&]() {
-          AT_DISPATCH_STEP_TYPES(
+          AT_DISPATCH_FUSED_OPTIMIZER_STEP_TYPES(
               state_steps[0].scalar_type(), "fused_adam_step_cuda", [&]() {
                 multi_tensor_apply_for_fused_optimizer<depth>(
                     tensor_lists,

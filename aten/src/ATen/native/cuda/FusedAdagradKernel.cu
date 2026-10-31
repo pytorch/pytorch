@@ -20,6 +20,15 @@ void _fused_adagrad_kernel_cuda_(
   TORCH_CHECK(
       at::native::check_fast_path_restrictions({params, grads, state_sums}),
       "params, grads, and state_sums must have same dtype, device, and layout");
+  const auto step_dtype = state_steps[0].scalar_type();
+  TORCH_CHECK(
+      std::all_of(
+          state_steps.begin(),
+          state_steps.end(),
+          [step_dtype](const at::Tensor& step) {
+            return step.scalar_type() == step_dtype;
+          }),
+      "Fused optimizer step tensors must have the same dtype");
   _fused_adagrad_cuda_impl_(
       params,
       grads,
@@ -82,6 +91,15 @@ void _fused_adagrad_kernel_cuda_(
   TORCH_CHECK(
       at::native::check_fast_path_restrictions({params, grads, state_sums}),
       "params and grads must have same dtype, device, and layout");
+  const auto step_dtype = state_steps[0].scalar_type();
+  TORCH_CHECK(
+      std::all_of(
+          state_steps.begin(),
+          state_steps.end(),
+          [step_dtype](const at::Tensor& step) {
+            return step.scalar_type() == step_dtype;
+          }),
+      "Fused optimizer step tensors must have the same dtype");
   _fused_adagrad_cuda_impl_(
       params,
       grads,
