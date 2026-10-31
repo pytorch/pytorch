@@ -6005,6 +6005,26 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+        def test_static_input_mutation_records_after_trees_are_turned_off(self):
+            # A tree wrapper allows mutating a buffer (a static input) whatever
+            # triton.cudagraph_trees says when it runs: a precompile artifact's
+            # wrappers are built under its capture's config.
+            mod = torch.nn.Linear(8, 8).cuda()
+            mod.register_buffer("calls", torch.zeros(8, device="cuda"))
+
+            def bumps(x):
+                mod.calls.add_(1)
+                return mod(x).sin()
+
+            foo = torch.compile(bumps, mode="reduce-overhead")
+            foo(torch.rand([4, 8], device="cuda"))
+            with config.patch("triton.cudagraph_trees", False):
+                for _ in range(3):
+                    foo(torch.rand([4, 8], device="cuda"))
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+            self.assertEqual(mod.calls, torch.full_like(mod.calls, 4))
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
         def test_graph_partition_forward_with_eagerly_lowered_skipped_backward(self):

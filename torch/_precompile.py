@@ -4315,8 +4315,11 @@ def load(
     ``torch._inductor.config`` says, unless the loading process sets
     ``cudagraph_policy``, which wraps them again; the rest of the CUDA graph
     config is the loading process's. A serve-time compile
-    (``allow_serve_time_compiles``) takes the capture's ``mode`` or ``options``
-    and ``CUDAGRAPH_CONFIG`` over the loading process's config.
+    (``allow_serve_time_compiles``) is lowered by Inductor under the capture's
+    ``mode`` or ``options`` and ``CUDAGRAPH_CONFIG`` over the loading process's
+    config, but Dynamo traces it under the loading process's own
+    ``triton.cudagraphs``, which decides whether a Python float that changed
+    since capture is specialized; set it as the capture did to trace alike.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build
