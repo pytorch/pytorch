@@ -1498,32 +1498,53 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         _, name = self._init_nccl("1")
         self.assertEqual(name, "nccl2")
         sub = dist.new_group([1], backend="nccl-legacy")
+        prefix = os.environ["TORCH_FR_DUMP_TEMP_FILE"]
+        if self.rank == 1:
+            server = _WorkerServer("", 0)
+            self.addCleanup(server.shutdown)
+            url = f"http://localhost:{server.port}/handler/fr_dump_file?backend=nccl"
+            initiated = "Flight Recorder dump initiated for rank 1"
+            # Before both, whose rank 1 would hide a group-local rank from sub.
+            self.assertEqual(requests.post(url, timeout=60).text, initiated)
+            # The handler rewrites the same file asynchronously, so remove it
+            # once written and wait for it to parse again below.
+            self._wait_for_dump(prefix + "1")
+            os.remove(prefix + "1")
         both = dist.new_group([0, 1], backend="nccl-legacy")
+        # shrink_group needs an initialized parent; NCCL 2.27 added shrink.
+        can_shrink = torch.cuda.nccl.version() >= (2, 27)
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"), group=both)
         if self.rank != 1:
+            if can_shrink:
+                # The excluded rank releases both, as rank 1's shrink does.
+                dist.destroy_process_group(both)
             return
         dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"), group=sub)
         torch.cuda.synchronize()
-        # A stateless group has no global rank list, so its group-local rank 0
-        # must not replace the subgroup's global one.
+        # None of these map group rank 0 to global rank 1, so none may replace
+        # it: a stateless group has no list; a merged group keeps both's, where
+        # 0 is global rank 0; a shrunk group is renumbered; and a split builds
+        # its list from its parent's.
         stateless = dist.ProcessGroupNCCL(dist.HashStore(), 0, 1)
-        # A merged group gets rank 0 but keeps both's list, where 0 is global
-        # rank 0.
         merged = both.merge_remote_group(dist.HashStore(), 1)
+        # Splitting needs an initialized parent.
+        merged.allreduce([torch.ones(8, device=f"cuda:{self.rank}")]).wait()
+        unregistered = [stateless, merged, merged.split_group([0])]
+        if can_shrink:
+            shrunk = dist.shrink_group([0], group=both)
+            unregistered.append(shrunk.split_group([0]))
 
-        server = _WorkerServer("", 0)
-        self.addCleanup(server.shutdown)
-        res = requests.post(
-            f"http://localhost:{server.port}/handler/fr_dump_file?backend=nccl",
-            timeout=60,
-        )
+        res = requests.post(url, timeout=60)
         self.assertEqual(res.status_code, 200, msg=res.text)
-        self.assertEqual(res.text, "Flight Recorder dump initiated for rank 1")
-        prefix = os.environ["TORCH_FR_DUMP_TEMP_FILE"]
+        self.assertEqual(res.text, initiated)
         dump = self._wait_for_dump(prefix + "1")
-        self.assertIn("nccl:all_reduce", [e["profiling_name"] for e in dump["entries"]])
+        self.assertIn(
+            ("nccl:all_reduce", sub.group_name),
+            [(e["profiling_name"], e["process_group"][0]) for e in dump["entries"]],
+        )
         self.assertFalse(os.path.exists(prefix + "0"))
-        stateless.shutdown()
-        merged.shutdown()
+        for pg in reversed(unregistered):
+            pg.shutdown()
 
     def test_stock_nccl_recording_off(self):
         import requests
