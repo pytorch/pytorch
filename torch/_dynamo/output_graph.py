@@ -2992,9 +2992,6 @@ class OutputGraph(OutputGraphCommon):
                     ),
                 )
 
-            if self.cudagraph_annotation is not None:
-                gm.meta["cudagraph_annotation"] = self.cudagraph_annotation
-
             if self.package is not None:
                 gm._backend_id = name  # pyrefly: ignore[bad-argument-type]
                 self.package.add_backend_graph(name, gm)
@@ -3007,6 +3004,9 @@ class OutputGraph(OutputGraphCommon):
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
             gm.meta["backend_id"] = name
+
+            if self.cudagraph_annotation is not None:
+                gm.meta["cudagraph_annotation"] = self.cudagraph_annotation
 
             graph_code_log.debug(
                 "%s",
