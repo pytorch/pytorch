@@ -529,14 +529,10 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "error")
 
 
-# Per-process record of tuned ladder BUCKETS: (kernel name, worker scope,
-# rebuilt input metas, rebuilt output meta). A transformer with N identical
-# layers would otherwise run every bucket N times, and again on every
-# recompile; TunableOp turns repeat signatures into lookups, but each
-# submission still pickles a job, materializes full-size tensors in the worker
-# and runs the benchmark loop. Per bucket rather than per GEMM so a run that
-# ran out of budget part-way does not mark the untuned rungs done. Cleared with
-# the other inductor caches (fresh_cache).
+# Per-process record of tuned ladder BUCKETS, keyed per bucket so a run that
+# stops part-way leaves the untuned rungs for the next one. Without it a model
+# with N identical layers resubmits every bucket N times, and each submission
+# pickles a job and materializes full-size tensors. Cleared with fresh_cache.
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
@@ -553,15 +549,13 @@ class _PretunedGemms:
 
 _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 
-# Attempts a faulting bucket gets across the whole process before it is left
-# alone. One retry covers a transient fault; more would let a reproducible hang
-# charge the per-GEMM budget once per layer.
+# Attempts a faulting bucket gets per process. One retry covers a transient
+# fault; more lets a reproducible hang charge the budget once per layer.
 _TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
 
-# ExternKernelChoice names (winner.choice.name) the ladder covers. Matched by
-# string so a double import of the kernel modules cannot break the match.
-# _int_mm / sparse semi-structured variants are not hipBLASLt-tunable.
-# bias_addmm is excluded because it rewrites its own bias (inp[0]) before
+# ExternKernelChoice names the ladder covers, matched by string so a double
+# import cannot break the match. _int_mm and the sparse variants are not
+# hipBLASLt-tunable. bias_addmm rewrites its own bias (inp[0]) before
 # dispatching, so the meta the ladder rebuilds is not what aten receives.
 # addmm_dtype is ROCm-only: on CUDA its reduced-input/float-output case stays on
 # the cublasLt path, which hard-errors while TunableOp is enabled ("Tunable GEMM
@@ -797,13 +791,10 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         if _has(sz, s):
             dims.add("B")
             dyn_expr = sz
-    # Exactly one axis. dyn_expr holds whichever axis was seen last, and the
-    # ceiling below is computed from it alone, so a symbol spanning two axes
-    # caps one and lets the other run away: with M = 1000*s and N = s, an
-    # N-derived ceiling of 16384 permits M = 16,384,000 and an MxN output to
-    # match. Such buckets also differ from each other in two dims, which is
-    # precisely what the nearest matcher refuses to borrow across, so there is
-    # nothing to gain by tuning them.
+    # Exactly one axis. The ceiling is computed from dyn_expr alone, so a
+    # symbol spanning two axes caps one and lets the other run away (M=1000*s
+    # with N=s reaches M=16,384,000). Those buckets also differ in two dims,
+    # which the nearest matcher will not borrow across anyway.
     if "K" in dims or len(dims) != 1 or dyn_expr is None:
         return
 
@@ -885,13 +876,10 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     try:
         operands = [*winner.input_nodes, winner.layout]
         if bias_first:
-            # The bias is exempt: no TunableOp Signature() carries it -- all of
-            # them key on trans/M/N/K/ld (plus batch), with ldc taken from the
-            # result (GemmCommon.h) -- and addmm/baddbmm copy the bias into the
-            # result before the GEMM. mm_args expands a broadcast bias to the
-            # output shape, so demanding density here would reject almost every
-            # addmm/baddbmm while protecting a field the signature does not have.
-            # _meta_at rebuilds it dense, which is the layout runtime asks for.
+            # The bias is exempt: no Signature() carries it (GemmCommon.h keys
+            # trans/M/N/K/ld and batch), and mm_args expands a broadcast bias,
+            # so requiring density here would reject almost every addmm and
+            # baddbmm. _meta_at rebuilds it dense.
             operands = operands[1:]
         if not all(_is_densely_packed(n) for n in operands):
             log.info(
@@ -932,9 +920,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         )
         return
 
-    if not bmreqs:
-        return
-
     # Drop buckets no GPU could materialize (see _TUNABLEOP_MAX_LADDER_BYTES).
     kept: list[Any] = []
     kept_dims: list[int] = []
@@ -958,18 +943,14 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not bmreqs:
         return
 
-    # Per-bucket memo. Identical layers and recompiles re-enter with the same
-    # metas for most rungs, so only the rungs actually tuned may be skipped:
-    # keying the whole GEMM meant one successful bucket marked the rest done,
-    # and a recompile at a new hint resubmitted rungs that had not changed.
-    # Scoped by (device, resolved filename) so a compile targeting another
-    # device or results file does not skip. kwargs are in the key because they
-    # can reach the TunableOp signature -- _scaled_mm's use_fast_accum is part
-    # of ScaledGemmParams::Signature().
-    scope = (
-        (winner.layout.device.type, winner.layout.device.index),
-        torch.cuda.tunable.get_filename(),
-    )
+    # Keyed on everything the recorded entry depends on: the rebuilt metas,
+    # the device and results file the worker is keyed on, and the extern
+    # kwargs that reach the TunableOp signature (_scaled_mm's use_fast_accum).
+    # The filename is resolved as submit() resolves it; get_filename() reads
+    # "" until something sets it, which would key the first GEMM apart.
+    with _worker_lock:
+        filename = _resolve_and_pin_filename_locked(winner.layout.device.index)
+    scope = ((winner.layout.device.type, winner.layout.device.index), filename)
     kwargs_sig = tuple(sorted((k, repr(v)) for k, v in winner.kwargs.items()))
     keys = [
         (
@@ -1009,11 +990,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             )
             break
         bucket_start = time.monotonic()
-        # The whole remaining budget, deliberately. TuningProcess.get() kills
-        # the worker on timeout, so a per-bucket slot below the 15-40s
-        # cold-start cost makes the restart cold, time out and be killed again.
-        # Letting the first bucket have the budget absorbs the cold start
-        # instead of fighting it.
+        # The whole remaining budget, deliberately: a per-bucket slot below
+        # the 15-40s cold-start cost would make the restart cold, time out and
+        # be killed again.
         outcome = submit(BenchmarkJob(bmreq, tuning=True), timeout=remaining)
         # The only record of what a bucket costs when it SUCCEEDS: the other
         # logs here report failures only, and that curve is what a per-bucket
