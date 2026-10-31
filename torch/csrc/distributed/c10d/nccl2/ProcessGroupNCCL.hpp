@@ -665,6 +665,17 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};
+  // Serializes abortNcclComm() with the user thread's error check, the
+  // watchdog's async-error probe and the split/shrink failure cleanup. Other
+  // nccl_comm_ users stay unlocked, as before, and can race any abort
+  // (watchdog TearDown/CleanUpOnly, abort(), blocking-wait failure,
+  // handleWatchdogFailure on the user thread), e.g. collective issue paths,
+  // suspend/resume, getMemoryStats, mem-pool registration, getCommPtr and
+  // window comms. Also unlocked: the parent abort inside waitForNcclChildComm
+  // and the split/shrink window until its catch block takes the lock;
+  // revokeNcclComm() (revoke_mutex_ only); finalize() racing abort().
+  // abort(), finalize() and the destructor stop the watchdog first.
+  std::mutex nccl_comm_mutex_;
   at::Device device_;
   int comm_size_{};
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
