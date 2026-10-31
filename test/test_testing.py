@@ -34,12 +34,13 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyAccelerator, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
 import operator
 import string
@@ -360,7 +361,7 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @onlyCUDA
+    @onlyAccelerator
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
@@ -396,7 +397,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @onlyCUDA
+    @onlyAccelerator
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
@@ -441,7 +442,7 @@ if __name__ == '__main__':
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @onlyCUDA
+    @onlyAccelerator
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
@@ -507,7 +508,7 @@ if __name__ == '__main__':
             for op in op_db
             if len(
                 op.supported_dtypes("cpu").symmetric_difference(
-                    op.supported_dtypes("cuda")
+                    op.supported_dtypes(GPU_TYPE)
                 )
             )
             > 0
@@ -516,10 +517,10 @@ if __name__ == '__main__':
     )
     def test_supported_dtypes(self, device, op):
         self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
-        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertEqual(op.supported_dtypes(f"{GPU_TYPE}"), op.supported_dtypes(f"{GPU_TYPE}:0"))
         self.assertEqual(
-            op.supported_dtypes(torch.device("cuda")),
-            op.supported_dtypes(torch.device("cuda", index=1)),
+            op.supported_dtypes(torch.device(GPU_TYPE)),
+            op.supported_dtypes(torch.device(GPU_TYPE, index=1)),
         )
 
     def test_setup_and_teardown_run_for_device_specific_tests(self, device):
@@ -556,7 +557,7 @@ if __name__ == '__main__':
         self.assertIn(expected_error_text, stderr)
 
 
-instantiate_device_type_tests(TestTesting, globals())
+instantiate_device_type_tests(TestTesting, globals(), allow_xpu=True)
 
 
 class TestFrameworkUtils(TestCase):
@@ -3022,7 +3023,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
 
 instantiate_parametrized_tests(TestTestParametrization)
-instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
+instantiate_device_type_tests(TestTestParametrizationDeviceType, globals(), allow_xpu=True)
 
 
 class TestImports(TestCase):
@@ -3072,7 +3073,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
-                           "torch.distributed.examples",  # requires CUDA and torchvision
+                           "torch.distributed.examples",  # requires Accelerator and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
@@ -3452,7 +3453,7 @@ class TestHardwareClassifications(TestCase):
         self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
 
 
-instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestImports)
 
 
