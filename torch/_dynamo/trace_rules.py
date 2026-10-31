@@ -3141,9 +3141,9 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
     # import, so the map (built lazily on first lookup) is probed here whenever
     # it is (re)built. A backend that registers after the map already exists is
     # routed in place by _register_privateuse1_backend(), called from
-    # torch._register_device_module and rename_privateuse1_backend, without
-    # rebuilding the map (a rebuild would drop substitute_in_graph polyfill
-    # entries). When no backend is registered this adds nothing.
+    # torch._register_device_module, without rebuilding the map (a rebuild
+    # would drop substitute_in_graph polyfill entries). When no backend is
+    # registered this adds nothing.
     _probe_privateuse1_rule_map(d)
     return d
 
@@ -3171,9 +3171,9 @@ def _register_privateuse1_backend() -> None:
     # A privateuse1 backend registers torch.<name> after Dynamo is loaded;
     # route its stream/synchronize/exchange_device functions in the existing
     # rule map in place and clear the handler cache so the backend's handlers
-    # are probed on the next compile. Called from torch._register_device_module
-    # and rename_privateuse1_backend; when the backend registered before the
-    # first map build, the build itself picks it up.
+    # are probed on the next compile. Called from torch._register_device_module;
+    # when the backend registered before the first map build, the build itself
+    # picks it up.
     _probe_privateuse1_rule_map(get_torch_obj_rule_map())
     TorchInGraphFunctionVariable._get_handlers.cache_clear()
 

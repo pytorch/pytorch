@@ -340,52 +340,65 @@ class TestPrivateUse1Routing(TestCase):
         finally:
             torch.openreg.set_device(prev_device)
 
+    def test_exchange_device_invalid_index(self):
+        # Mirror torch.cuda's _exchange_device: a negative index reports no
+        # exchange via the -1 convention and must not switch the device; a
+        # positive out-of-range index raises rather than leaving the device in
+        # an invalid state.
+        prev = torch.openreg.current_device()
+        self.assertEqual(torch.openreg._exchange_device(-1), -1)
+        self.assertEqual(torch.openreg.current_device(), prev)
+        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
+            torch.openreg._exchange_device(torch.openreg.device_count() + 10)
+        self.assertEqual(torch.openreg.current_device(), prev)
+
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        iface = get_interface_for_device("openreg")
+        self.assertEqual(iface.exchange_device(-1), -1)
+        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
+            iface.exchange_device(torch.openreg.device_count() + 10)
+
     def test_maybe_exchange_device_invalid_index(self):
-        # Negative indices must not switch the device: report no exchange via
-        # the -1 convention (matching torch.cuda). Positive out-of-range
-        # indices raise in the C++ backend, like torch.cuda does.
+        # Mirror torch.cuda's _maybe_exchange_device: a negative index reports
+        # no exchange via the -1 convention and must not switch the device; a
+        # positive out-of-range index is an unusable target, so the current
+        # device is returned without switching (never raises).
         prev = torch.openreg.current_device()
         self.assertEqual(torch.openreg._maybe_exchange_device(-1), -1)
         self.assertEqual(torch.openreg.current_device(), prev)
-        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
-            torch.openreg._maybe_exchange_device(torch.openreg.device_count() + 10)
+        self.assertEqual(
+            torch.openreg._maybe_exchange_device(torch.openreg.device_count() + 10),
+            prev,
+        )
         self.assertEqual(torch.openreg.current_device(), prev)
 
         from torch._dynamo.device_interface import get_interface_for_device
 
         iface = get_interface_for_device("openreg")
         self.assertEqual(iface.maybe_exchange_device(-1), -1)
-        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
-            iface.maybe_exchange_device(torch.openreg.device_count() + 10)
-
-    def test_rename_reroutes_late_backend(self):
-        # Renaming a backend after the rule map was built re-routes it in place
-        # through the rename hook (torch.utils.rename_privateuse1_backend), the
-        # same path a backend author hits when registering under a new name.
-        from torch._dynamo import trace_rules
-        from torch._dynamo.variables import PolyfilledFunctionVariable
-        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
-
-        fns = (
-            torch.openreg.current_stream,
-            torch.openreg.synchronize,
-            torch.openreg._exchange_device,
-            torch.openreg._maybe_exchange_device,
+        self.assertEqual(
+            iface.maybe_exchange_device(torch.openreg.device_count() + 10), prev
         )
-        rule_map = trace_rules.get_torch_obj_rule_map()
-        for fn in fns:
-            del rule_map[fn]
-        try:
-            torch.utils.rename_privateuse1_backend("openreg")
-            for fn in fns:
-                self.assertIn(fn, rule_map)
-                self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
-            # The re-routing must not rebuild the map: the polyfill entry (and
-            # everything else) survives.
-            self.assertIs(rule_map[builtins.all], PolyfilledFunctionVariable)
-        finally:
-            for fn in fns:
-                rule_map[fn] = TorchInGraphFunctionVariable
+        self.assertEqual(torch.openreg.current_device(), prev)
+
+    def test_exchange_negative_index_cleanup_hook(self):
+        # The exchange cleanup hook restores set_device(prev); prev is -1 when
+        # the exchange was called with a negative index, so set_device(-1) must
+        # be a no-op (it would otherwise raise and break the compiled call).
+        cnt = CompileCounterWithBackend("eager")
+        prev_device = torch.openreg.current_device()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def compiled_fn():
+            torch.openreg._exchange_device(-1)
+
+        compiled_fn()
+        self.assertEqual(torch.openreg.current_device(), prev_device)
+        # The current_device guard is unchanged (no switch happened), so the
+        # second call reuses the compiled graph.
+        compiled_fn()
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_aliased_exchange_device_functions(self):
         # A backend may define _maybe_exchange_device = _exchange_device (or

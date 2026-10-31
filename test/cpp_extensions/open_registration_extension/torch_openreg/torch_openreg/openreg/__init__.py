@@ -69,13 +69,10 @@ def synchronize(device=None):
 
 
 def _exchange_device(device_index):
-    return torch_openreg._C._exchangeDevice(device_index)
-
-
-def _maybe_exchange_device(device_index):
-    # Negative indices report no exchange via the -1 convention (matching
-    # torch.cuda); positive out-of-range indices raise, like the C++ backend's
-    # maybe_exchange_device and set_device do.
+    # Mirror torch.cuda: a negative index reports no exchange via the -1
+    # convention; an out-of-range index raises, like torch.cuda's
+    # cudaSetDevice does (and unlike the C++ ExchangeDevice, which would
+    # silently set the tracked device to the invalid index).
     if device_index < 0:
         return -1
     count = device_count()
@@ -84,6 +81,21 @@ def _maybe_exchange_device(device_index):
             "The device index is out of range. It must be in [0, "
             f"{count}), but got {device_index}."
         )
+    return torch_openreg._C._exchangeDevice(device_index)
+
+
+def _maybe_exchange_device(device_index):
+    # Mirror torch.cuda's _maybe_exchange_device: a negative index reports no
+    # exchange via the -1 convention; an out-of-range index is treated as an
+    # unusable target and the current device is returned without switching
+    # (torch.cuda defers the switch when the target has no primary context).
+    # Unlike _exchange_device, never raise here: the "maybe" contract treats
+    # an unusable target as "no exchange".
+    if device_index < 0:
+        return -1
+    count = device_count()
+    if device_index >= count:
+        return current_device()
     return torch_openreg._C._exchangeDevice(device_index)
 
 

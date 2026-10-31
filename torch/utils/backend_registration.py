@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 
-import sys
-
 import torch
 from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
 from torch.overrides import handle_torch_function, has_torch_function_unary
@@ -140,17 +138,31 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         Wait for all kernels on the device to complete; Dynamo emits
         ``torch.ops.streams.synchronize_device`` for it.
     (3) ``_exchange_device(device_index: int) -> int``
-        Switch the current device and return the previous one.
+        Switch the current device and return the previous one. A negative
+        index returns -1 without switching; an out-of-range index must fail
+        rather than leave the device in an invalid state (torch.cuda raises).
     (4) ``_maybe_exchange_device(device_index: int) -> int``
-        Switch the current device and return the previous one, but only when
-        the requested index is valid.
+        Switch to the requested device unless the target is not usable, in
+        which case return the current device without switching (matching
+        torch.cuda's MaybeExchangeDevice, which defers when the target has no
+        primary context). A negative index returns -1 without switching.
 
     If either exchange function is present, BackendModule must also define
     ``current_device() -> int`` and ``set_device(int)``: the exchange handler
     guards on the current device at trace time and registers a cleanup hook
-    that restores the previous device when tracing finishes. At runtime the
-    emitted exchange node switches the device and leaves it switched, matching
-    eager semantics.
+    that restores the previous device when tracing finishes. Both exchange
+    functions must return -1 for a negative index, and ``set_device(-1)`` must
+    be a no-op: the cleanup hook calls ``set_device(prev)`` and ``prev`` is -1
+    when the exchange was called with a negative index.
+
+    The runtime behavior of the emitted exchange node depends on the backend.
+    Under the eager backend it runs at runtime and switches the device, leaving
+    it switched (matching eager semantics). Under aot_eager and inductor the
+    node is a plain Python callable, so AOTAutograd executes it once during
+    compilation, after the cleanup hooks have already run: the switch happens
+    at compile time, is not undone, and is absent from the compiled graph, and
+    the current_device guard captures the post-switch device. This matches the
+    existing torch.cuda behavior.
 
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
@@ -169,13 +181,6 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
     _rename_profiler_activity(backend_name)
     _rename_device_type(backend_name)
-    # A privateuse1 backend may register its device module before or after this
-    # rename; whichever order was used, route its stream/synchronize/
-    # exchange_device functions in Dynamo's existing rule map in place. No-op
-    # when Dynamo is not loaded yet (entry-point backends rename during torch
-    # import, before the rule map exists; the map-build probe picks them up).
-    if "torch._dynamo.trace_rules" in sys.modules:
-        torch._dynamo.trace_rules._register_privateuse1_backend()
 
 
 def _check_register_once(module, attr) -> None:
