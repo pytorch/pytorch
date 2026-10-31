@@ -1172,6 +1172,7 @@ class SequentialLR(LRScheduler):
         # Perform the initial step for only the scheduler meant to run at step 0.
         self._initial_step()
 
+    @override
     def _initial_step(self) -> None:
         """Initialize the child active at step zero without advancing the schedule."""
         idx = bisect_right(self._milestones, 0)
@@ -1548,6 +1549,7 @@ class ChainedScheduler(LRScheduler):
         # their initialization.
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
+    @override
     def _initial_step(self) -> None:
         """Initialize each child without advancing the chained schedule."""
         for scheduler in self._schedulers:
