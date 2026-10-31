@@ -7035,7 +7035,8 @@ def avg_pool2d_backward(
 
     grad_loader = grad_output.make_loader()
 
-    had_padding = padding[0] or padding[1] or ceil_mode1 or ceil_mode2
+    has_ceil_pad = ceil_mode1 or ceil_mode2
+    had_padding = padding[0] or padding[1] or has_ceil_pad
 
     *_, pooled_height, pooled_width = grad_output.get_size()
     new_size = list(x.get_size())
@@ -7064,11 +7065,7 @@ def avg_pool2d_backward(
             divisor_override,
         )
 
-    def compute_pool_size_without_padding(ph, pw):
-        """
-        This computes the scaling factor that we will divide an element
-        by when `count_include_pad=False`
-        """
+    def compute_pool_size(ph, pw):
         stride_h = ops.constant(stride[0], torch.int32)
         stride_w = ops.constant(stride[1], torch.int32)
         pad_h = ops.constant(padding[0], torch.int32)
@@ -7085,10 +7082,11 @@ def avg_pool2d_backward(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
+        if not count_include_pad:
+            hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+            wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
+            hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
+            wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -7118,10 +7116,10 @@ def avg_pool2d_backward(
 
                 if divisor_override is not None:
                     scale = divisor_override
-                elif count_include_pad or not had_padding:
+                elif not had_padding or (count_include_pad and not has_ceil_pad):
                     scale = kernel_size[0] * kernel_size[1]
                 else:
-                    scale = compute_pool_size_without_padding(ph, pw)
+                    scale = compute_pool_size(ph, pw)
 
                 part = ops.truediv(
                     grad_loader(
@@ -7218,7 +7216,8 @@ def avg_pool3d_backward(
     )
 
     grad_loader = grad_output.make_loader()
-    had_padding = any(padding) or ceil_mode_d or ceil_mode_h or ceil_mode_w
+    has_ceil_pad = ceil_mode_d or ceil_mode_h or ceil_mode_w
+    had_padding = any(padding) or has_ceil_pad
 
     *_, pooled_depth, pooled_height, pooled_width = grad_output.get_size()
     new_size = list(x.get_size())
@@ -7246,7 +7245,7 @@ def avg_pool3d_backward(
             divisor_override,
         )
 
-    def compute_pool_size_without_padding(pd, ph, pw):
+    def compute_pool_size(pd, ph, pw):
         stride_d, stride_h, stride_w = (ops.constant(s, torch.int32) for s in stride)
         pad_d, pad_h, pad_w = (ops.constant(p, torch.int32) for p in padding)
         kernel_d, kernel_h, kernel_w = (
@@ -7270,14 +7269,15 @@ def avg_pool3d_backward(
                 [pad_d, pad_h, pad_w],
             )
         )
-        dstart, hstart, wstart = (
-            ops.maximum(start, ops.constant(0, torch.int32))
-            for start in [dstart, hstart, wstart]
-        )
-        dend, hend, wend = (
-            ops.minimum(end, ops.index_expr(dim, torch.int32))
-            for end, dim in zip([dend, hend, wend], [depth, height, width])
-        )
+        if not count_include_pad:
+            dstart, hstart, wstart = (
+                ops.maximum(start, ops.constant(0, torch.int32))
+                for start in [dstart, hstart, wstart]
+            )
+            dend, hend, wend = (
+                ops.minimum(end, ops.index_expr(dim, torch.int32))
+                for end, dim in zip([dend, hend, wend], [depth, height, width])
+            )
         divide_factor = ops.mul(
             ops.mul(ops.sub(dend, dstart), ops.sub(hend, hstart)), ops.sub(wend, wstart)
         )
@@ -7322,10 +7322,10 @@ def avg_pool3d_backward(
 
                     if divisor_override is not None:
                         scale = divisor_override
-                    elif count_include_pad or not had_padding:
+                    elif not had_padding or (count_include_pad and not has_ceil_pad):
                         scale = kernel_size[0] * kernel_size[1] * kernel_size[2]
                     else:
-                        scale = compute_pool_size_without_padding(pd, ph, pw)
+                        scale = compute_pool_size(pd, ph, pw)
 
                     part = ops.truediv(
                         grad_loader(

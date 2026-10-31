@@ -96,6 +96,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -23620,6 +23621,80 @@ if RUN_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
+
+
+class TestAvgPoolBackward(InductorTestCase):
+    def setUp(self):
+        if not (RUN_CPU if self.device_type == "cpu" else RUN_GPU):
+            self.skipTest("Inductor compiler unavailable for this device")
+        super().setUp()
+
+    def check_pool(self, fn, compiled_fn, shape, device):
+        x = torch.randn(shape, device=device, requires_grad=True)
+        compiled_x = x.detach().clone().requires_grad_()
+        expected = fn(x)
+        actual = compiled_fn(compiled_x)
+        grad = torch.arange(
+            1, expected.numel() + 1, device=device, dtype=expected.dtype
+        ).reshape(expected.shape)
+        expected.backward(grad)
+        actual.backward(grad)
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_x.grad, x.grad)
+
+    @parametrize("ndim", [1, 2, 3])
+    @parametrize("padding", [0, 1])
+    def test_ceil_mode(self, device, ndim, padding):
+        pool = (F.avg_pool1d, F.avg_pool2d, F.avg_pool3d)[ndim - 1]
+
+        def fn(x):
+            return pool(x, 3, stride=2, padding=padding, ceil_mode=True)
+
+        self.check_pool(
+            fn, torch.compile(fn, fullgraph=True), (1, 1) + (6,) * ndim, device
+        )
+
+    @parametrize("ndim", [2, 3])
+    @parametrize(
+        "ceil_mode,count_include_pad,divisor",
+        [
+            subtest((True, True, None), name="mixed_axes"),
+            subtest((True, False, None), name="exclude_padding"),
+            subtest((False, True, None), name="floor_mode"),
+            subtest((True, True, 2), name="divisor_override"),
+        ],
+    )
+    def test_divisor(self, device, ndim, ceil_mode, count_include_pad, divisor):
+        pool = (F.avg_pool2d, F.avg_pool3d)[ndim - 2]
+
+        def fn(x):
+            return pool(
+                x,
+                3,
+                stride=2,
+                padding=1,
+                ceil_mode=ceil_mode,
+                count_include_pad=count_include_pad,
+                divisor_override=divisor,
+            )
+
+        shape = (1, 1) + tuple(range(5, 5 + ndim))
+        self.check_pool(fn, torch.compile(fn, fullgraph=True), shape, device)
+
+    @parametrize("ndim", [1, 2, 3])
+    def test_dynamic_ceil_mode(self, device, ndim):
+        pool = (F.avg_pool1d, F.avg_pool2d, F.avg_pool3d)[ndim - 1]
+
+        def fn(x):
+            return pool(x, 3, stride=2, padding=1, ceil_mode=True)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        for size in (6, 8, 7):
+            shape = (1, 1) + (size,) * ndim
+            self.check_pool(fn, compiled_fn, shape, device)
+
+
+instantiate_device_type_tests(TestAvgPoolBackward, globals(), only_for=("cpu", "cuda"))
 
 
 def _strip_tmp_path(code: str) -> str:
