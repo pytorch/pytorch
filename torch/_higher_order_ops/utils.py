@@ -1195,6 +1195,108 @@ def get_graph_output_example_values(gm: torch.fx.GraphModule) -> list[Any]:
     return [_get_example_value(n) for n in pytree.tree_flatten(output_node.args[0])[0]]
 
 
+def _walk_graph_module_values(value: Any) -> Iterable[torch.fx.GraphModule]:
+    if isinstance(value, torch.fx.GraphModule):
+        yield value
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _walk_graph_module_values(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _walk_graph_module_values(item)
+
+
+def _iter_nested_graph_modules(
+    gm: torch.fx.GraphModule, node: torch.fx.Node
+) -> Iterable[torch.fx.GraphModule]:
+    # Child graphs reach a node as a get_attr submodule or as a (possibly
+    # container-nested) HOP arg/kwarg, same pattern as effect scanning.
+    if node.op == "get_attr":
+        attr = getattr(gm, node.target, None)
+        if isinstance(attr, torch.fx.GraphModule):
+            yield attr
+    for arg in (*node.args, *node.kwargs.values()):
+        yield from _walk_graph_module_values(arg)
+
+
+def _record_mutated_storage(
+    arg_val: Any,
+    inp_storage_map: dict[StorageWeakRef, int],
+    mutated_inputs: list[int],
+) -> None:
+    if not isinstance(arg_val, torch.Tensor):
+        return
+    storage = _tensor_storage(arg_val)
+    if storage in inp_storage_map:
+        mutated_inputs.append(inp_storage_map[storage])
+
+
+def _collect_mutated_input_indices(
+    gm: torch.fx.GraphModule,
+    inp_storage_map: dict[StorageWeakRef, int],
+    seen: set[int] | None = None,
+) -> list[int]:
+    """Indices into ``gm`` placeholders whose storages are written.
+
+    Scans OpOverload ``is_write`` args, ``auto_functionalized_v2`` ``_all_bases``,
+    and recurses into nested HOP / get_attr GraphModules so nested ``cond``
+    mutations are visible to the outer schema (#201742).
+    """
+    if seen is None:
+        seen = set()
+    if id(gm) in seen:
+        return []
+    seen.add(id(gm))
+
+    mutated_inputs: list[int] = []
+    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if isinstance(node.target, OpOverload):
+                for i, arg_schema in enumerate(node.target._schema.arguments):
+                    if not arg_schema.is_write:
+                        continue
+                    if i < len(node.args):
+                        arg_node = node.args[i]
+                    elif arg_schema.name in node.kwargs:
+                        arg_node = node.kwargs[arg_schema.name]
+                    else:
+                        continue
+                    arg_val = _get_example_value(arg_node)
+                    if not isinstance(arg_val, torch.Tensor):
+                        raise AssertionError(
+                            f"Expected arg_val to be a Tensor, got {type(arg_val)}"
+                        )
+                    _record_mutated_storage(arg_val, inp_storage_map, mutated_inputs)
+            elif node.target is auto_functionalized_v2:
+                # Bases mutated through the wrapped op (functionalized graphs).
+                for base in node.kwargs.get("_all_bases", ()) or ():
+                    _record_mutated_storage(
+                        _get_example_value(base), inp_storage_map, mutated_inputs
+                    )
+
+        for sub_gm in _iter_nested_graph_modules(gm, node):
+            sub_placeholders = [
+                _get_example_value(n)
+                for n in sub_gm.graph.find_nodes(op="placeholder")
+                if isinstance(n, torch.fx.Node) and "val" in n.meta
+            ]
+            sub_inp_storage_map = {
+                _tensor_storage(inp): i
+                for i, inp in enumerate(sub_placeholders)
+                if isinstance(inp, torch.Tensor)
+            }
+            for idx in _collect_mutated_input_indices(
+                sub_gm, sub_inp_storage_map, seen
+            ):
+                if idx < len(sub_placeholders):
+                    _record_mutated_storage(
+                        sub_placeholders[idx], inp_storage_map, mutated_inputs
+                    )
+
+    return mutated_inputs
+
+
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
 ) -> tuple[
@@ -1238,20 +1340,9 @@ def check_input_alias_and_mutation_return_outputs(
         for i, inp in enumerate(fake_args)
         if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
     }
-    mutated_inputs = []
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and isinstance(
-            node.target, torch._ops.OpOverload
-        ):
-            for arg_node, arg_schema in zip(node.args, node.target._schema.arguments):
-                if arg_schema.is_write:
-                    arg_val = _get_example_value(arg_node)
-                    if not isinstance(arg_val, torch.Tensor):
-                        raise AssertionError(
-                            f"Expected arg_val to be a Tensor, got {type(arg_val)}"
-                        )
-                    if _tensor_storage(arg_val) in inp_storage_map:
-                        mutated_inputs.append(inp_storage_map[_tensor_storage(arg_val)])
+    mutated_inputs = list(
+        dict.fromkeys(_collect_mutated_input_indices(gm, inp_storage_map))
+    )
 
     return (
         inp_inp_alias_map,
