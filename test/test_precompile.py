@@ -5011,6 +5011,11 @@ class TestPrecompileDynamoCapture(TestCase):
         with torch._inductor.config.patch(cudagraph_policy=object()):
             with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
                 self._capture(single, options=on)
+        # It is read on every compile, so one set after capture() began refuses too.
+        with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
+            with self._capture(single, options=on) as cap:
+                with torch._inductor.config.patch(cudagraph_policy=object()):
+                    cap(self.model, self.x2)
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
@@ -6751,16 +6756,19 @@ class TestPrecompileCudagraphs(TestCase):
                 self.mod.step, options={"triton.cudagraphs": False}
             )
         self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
-        self.assertEqual(self._serve_in_fresh_process(y), (0, 0))
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
+        self.assertEqual(self._serve_in_fresh_process(y, env), (0, 0))
 
     def test_a_graph_options_kept_out_of_cudagraphs_serves_without_one(self):
         # The capture decides a graph cannot run as a CUDA graph and that decision
         # ships with the graph, though CUDAGRAPH_CONFIG turns CUDA graphs on.
         force_off = {"force_disable_cudagraph_TESTING_ONLY": True}
-        options = {"triton.cudagraphs": True, **force_off}
+        # Unpartitioned, so the loading process's skip is counted.
+        options = {"triton.cudagraphs": True, "graph_partition": False, **force_off}
         y, meta = self._capture_step(self.mod.step, options=options)
         self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
-        self.assertEqual(self._serve_in_fresh_process(y), (0, 0))
+        # The loading process post-compiles it with CUDA graphs on and skips it.
+        self.assertEqual(self._serve_in_fresh_process(y, skips=1), (0, 0))
 
     def test_an_artifact_captured_without_cudagraphs_serves_none(self):
         y, meta = self._capture_step(self.mod.step)

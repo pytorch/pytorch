@@ -158,6 +158,22 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
+def _check_cudagraph_policy(cudagraph_config: Mapping[str, bool]) -> None:
+    # Read on every compile: it decides how the capture wraps each graph (and can
+    # turn off the box a forward shares with its backward), while a loaded artifact
+    # wraps them by CUDAGRAPH_CONFIG.
+    import torch._inductor.config as inductor_config
+
+    if cudagraph_config.get("triton.cudagraphs") and inductor_config.cudagraph_policy:
+        raise PackageError(
+            "a DynamoTracer capture cannot record "
+            "torch._inductor.config.cudagraph_policy: it decides how the capture "
+            "wraps each graph, while a loaded artifact wraps them by "
+            "CUDAGRAPH_CONFIG. Unset it while capturing and set it in the loading "
+            "process."
+        )
+
+
 @contextlib.contextmanager
 def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
@@ -1965,15 +1981,7 @@ class PrecompileSession(Generic[_P, _R]):
             if not isinstance(backend, str):
                 config = self._cudagraph_config
                 config.update((k, v) for k, v in backend.config.items() if k in config)
-            policy = inductor_config.cudagraph_policy
-            if self._cudagraph_config["triton.cudagraphs"] and policy is not None:
-                raise PackageError(
-                    "a DynamoTracer capture cannot record "
-                    "torch._inductor.config.cudagraph_policy: it decides how the "
-                    "capture wraps each graph, while a loaded artifact wraps them "
-                    "by CUDAGRAPH_CONFIG. Unset it while capturing and set it in "
-                    "the loading process."
-                )
+            _check_cudagraph_policy(self._cudagraph_config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2097,6 +2105,7 @@ class PrecompileSession(Generic[_P, _R]):
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
                 torch._inductor.config.patch(self._cudagraph_config),
             ):
+                _check_cudagraph_policy(self._cudagraph_config)
                 return self._compiled(*args, **kwargs)
         except Exception as e:
             message = f"{type(e).__name__}: {e}"
