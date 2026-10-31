@@ -40,6 +40,7 @@ Invariants:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -285,7 +286,10 @@ def contained(text: str) -> list[str]:
 
 def permalink(repo: str, sha: str, finding: dict) -> str:
     """A blob link to the finding's line in the posting repo, which GitHub
-    renders as the code. The path is percent-encoded, so it cannot carry `@`."""
+    renders as the code. The path is percent-encoded, so it cannot carry `@`.
+    A deleted file has no blob at `sha`, so its link is the diff line instead."""
+    if finding.get("removed"):
+        return finding["removed"]
     path = urllib.parse.quote(unescape_path(finding["path"]), safe="/")
     return f"https://github.com/{repo}/blob/{sha}/{path}#L{finding['line']}"
 
@@ -396,7 +400,7 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
         {
             "path": unescape_path(f["path"]),
             "line": f["line"],
-            "side": "RIGHT",
+            "side": "LEFT" if f.get("removed") else "RIGHT",
             "body": comment_body(f),
         }
         for f in blocking_findings(verdict, findings)
@@ -522,6 +526,33 @@ def with_discussions(gh: GitHub, pr: int, author: str, findings: list[dict]):
     return note_discussions(findings, comments, reviews, gh.replies_seen)
 
 
+def with_removed(gh: GitHub, pr: int, findings: list[dict]) -> list[dict]:
+    """`findings`, each on a file the PR deletes marked `removed` with a link to
+    its diff line. The sanitizer anchors those on the deleted file's own lines,
+    which GitHub takes on the diff's LEFT side. Unchanged if the files could not
+    be listed: GitHub then refuses the inline comments (all of them, with the 422
+    the review falls back on) and they go into the body."""
+    if not findings:
+        return findings
+    try:
+        files = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/files")
+    except OutOfTime:
+        raise
+    except GitHubError as exc:
+        warn(f"could not list the PR's files: {exc}")
+        return findings
+    removed = {f.get("filename") for f in files if f.get("status") == "removed"}
+    out = []
+    for f in findings:
+        path = unescape_path(f["path"])
+        if path in removed:
+            digest = hashlib.sha256(path.encode()).hexdigest()
+            files_view = f"https://github.com/{gh.repo}/pull/{pr}/files"
+            f = {**f, "removed": f"{files_view}#diff-{digest}L{f['line']}"}
+        out.append(f)
+    return out
+
+
 def note_discussions(findings: list[dict], comments, reviews: set[int], replied):
     discussed = [
         c
@@ -536,6 +567,7 @@ def note_discussions(findings: list[dict], comments, reviews: set[int], replied)
             c
             for c in discussed
             if c.get("path") == unescape_path(f["path"])
+            and c.get("side", "RIGHT") == ("LEFT" if f.get("removed") else "RIGHT")
             and abs(c["line"] - f["line"]) <= NEARBY
         ]
         url = (near[0].get("html_url") or "") if near else ""
@@ -1128,7 +1160,8 @@ RETRACTED = object()
 def publish(gh, pr, sha, author, verdict, summary, findings):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
-    findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
+    findings = with_removed(gh, pr, findings[:MAX_FINDINGS])
+    findings = with_discussions(gh, pr, author, findings)
     new = post(gh, pr, sha, verdict, summary, findings)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):

@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -84,8 +85,10 @@ class FakeGitHub(GitHub):
         reviews=(),
         refuse_inline=False,
         comments=None,
+        files=(),
     ):
         super().__init__("token", "o/r")
+        self.files = list(files)
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
@@ -114,6 +117,8 @@ class FakeGitHub(GitHub):
             return {}
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
             return [dict(c) for c in self.comments] if page(path) == 1 else []
+        if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+            return self.files if page(path) == 1 else []
         if method == "DELETE" and path.startswith("/repos/o/r/pulls/comments/"):
             cid = int(path.split("/")[-1])
             if not any(c["id"] == cid for c in self.comments):
@@ -293,6 +298,85 @@ class TestWhatIsPosted(unittest.TestCase):
         (c,) = body["comments"]
         self.assertEqual((c["path"], c["line"], c["side"]), ("torch/x.py", 3, "RIGHT"))
         self.assertIn("Off by one.", c["body"])
+
+    def test_a_finding_on_a_deleted_file_is_posted_on_the_left_side(self):
+        findings = [
+            {"path": "gone.py", "line": 7, "severity": "major", "message": "Used."},
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "Off."},
+            {"path": "gone.py", "line": 9, "severity": "minor", "message": "Nit."},
+        ]
+        files = [
+            {"filename": "gone.py", "status": "removed"},
+            {"filename": "torch/x.py", "status": "modified"},
+        ]
+        gh = FakeGitHub(files=files)
+        go(gh, row(findings=findings))
+        (body,) = gh.posted()
+        sides = {(c["path"], c["line"]): c["side"] for c in body["comments"]}
+        self.assertEqual(sides, {("gone.py", 7): "LEFT", ("torch/x.py", 3): "RIGHT"})
+        # The folded one links the diff line: the file has no blob at the head.
+        digest = hashlib.sha256(b"gone.py").hexdigest()
+        link = f"https://github.com/o/r/pull/1/files#diff-{digest}L9"
+        self.assertIn(link, body["body"])
+        self.assertNotIn(f"/blob/{SHA}/gone.py", body["body"])
+
+    def test_a_deleted_file_is_matched_and_linked_by_its_real_name(self):
+        # Findings carry neutralize_path's escaped form; GitHub knows the real one.
+        real = "torch/_inductor/@x.py"
+        finding = {
+            "path": neutralize_path(real),
+            "line": 4,
+            "severity": "major",
+            "message": "Used.",
+        }
+        self.assertNotEqual(finding["path"], real)
+        gh = FakeGitHub(files=[{"filename": real, "status": "removed"}])
+        go(gh, row(findings=[finding]))
+        (body,) = gh.posted()
+        (c,) = body["comments"]
+        self.assertEqual((c["path"], c["side"]), (real, "LEFT"))
+        digest = hashlib.sha256(real.encode()).hexdigest()
+        self.assertEqual(
+            post_review.permalink(
+                "o/r", SHA, post_review.with_removed(gh, 1, [finding])[0]
+            ),
+            f"https://github.com/o/r/pull/1/files#diff-{digest}L4",
+        )
+
+    def test_running_out_of_time_listing_files_stops_the_step(self):
+        class SlowFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise post_review.OutOfTime()
+                return super().request(method, path, body)
+
+        gh = SlowFiles()
+        with self.assertRaises(post_review.OutOfTime):
+            post_review.with_removed(gh, 1, [{"path": "a.py", "line": 1}])
+
+    def test_a_discussion_on_the_other_side_is_not_this_finding(self):
+        # A replied-to LEFT thread from when the file was deleted says nothing
+        # about a RIGHT finding at the same number once the file is back.
+        left = {**comment(50, 5, line=3), "side": "LEFT"}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[left, comment(51, 9, author="t", reply_to=50)],
+        )
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual((c["line"], c["side"]), (3, "RIGHT"))
+
+    def test_an_unlisted_file_set_posts_on_the_right_as_before(self):
+        class NoFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NoFiles(files=[{"filename": "torch/x.py", "status": "removed"}])
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual(c["side"], "RIGHT")
 
     def test_inline_path_is_the_real_file_name(self):
         path = neutralize_path("node_modules/@babel/x_y.py")
@@ -1172,6 +1256,24 @@ class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
         self.assertEqual(body["event"], "REQUEST_CHANGES")
         # The discussion stays.
         self.assertEqual(deleted(gh), [])
+
+    def test_a_deleted_files_finding_joins_its_left_side_discussion(self):
+        # A re-review of a delete-only PR, after the author replied on the left.
+        root = {**comment(50, 5, line=3, path="gone.py"), "side": "LEFT"}
+        finding = {"path": "gone.py", "line": 3, "severity": "major", "message": "U."}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[root, comment(51, 8, author="tristan", reply_to=50)],
+            files=[{"filename": "gone.py", "status": "removed"}],
+        )
+        go(gh, row(findings=[finding]))
+        body = gh.posted()[0]
+        self.assertNotIn("comments", body)
+        self.assertIn(
+            "An earlier comment near this line has replies: "
+            "https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
+            body["body"],
+        )
 
     def test_other_findings_stay_inline_and_are_counted(self):
         findings = [

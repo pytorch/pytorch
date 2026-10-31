@@ -108,12 +108,102 @@ class TestDiffParsing(unittest.TestCase):
         self.assertEqual(touched["src/app.py"], {10, 11, 12, 13, 14})
         self.assertEqual(touched["README.md"], {1, 2})
 
-    def test_ignores_deleted_files(self):
+    def test_records_a_deleted_files_removed_lines(self):
+        # A PR that only deletes files would otherwise have no anchor at all.
         deletion = (
             "diff --git a/gone.py b/gone.py\n"
             "--- a/gone.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n"
         )
-        self.assertEqual(parse_diff(deletion), {})
+        self.assertEqual(parse_diff(deletion), {"gone.py": {1, 2}})
+
+    def test_a_blocking_finding_on_a_deleted_file_is_published(self):
+        deletion = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-x\n-y\n-z\n"
+        )
+        payload = ok_payload(
+            findings=[
+                {
+                    "path": "gone.py",
+                    "line": 2,
+                    "severity": "major",
+                    "message": "Still used.",
+                }
+            ]
+        )
+        result = build(payload, parse_diff(deletion))
+        self.assertEqual(result["verdict"], "changes_requested")
+        self.assertEqual([f["line"] for f in result["findings"]], [2])
+
+    def test_a_deletion_does_not_leak_into_the_next_file(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n"
+            "diff --git a/k.py b/k.py\n--- a/k.py\n+++ b/k.py\n"
+            "@@ -5,3 +5,2 @@\n-old\n kept\n kept2\n"
+        )
+        self.assertEqual(parse_diff(diff), {"gone.py": {1, 2}, "k.py": {5, 6}})
+
+    def test_a_malformed_hunk_in_a_deletion_anchors_nothing(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ bogus @@\n-x\n-y\n"
+        )
+        self.assertEqual(parse_diff(diff), {"gone.py": set()})
+
+    def test_lines_removed_from_a_kept_file_are_not_anchors(self):
+        # Only a deleted file is anchored on its old side; a modified file keeps
+        # new-side numbers, which is what the publish step posts on the right.
+        diff = (
+            "diff --git a/k.py b/k.py\n--- a/k.py\n+++ b/k.py\n"
+            "@@ -5,2 +5,1 @@\n-gone\n kept\n"
+        )
+        self.assertEqual(parse_diff(diff), {"k.py": {5}})
+
+    def test_a_type_change_keeps_only_the_new_side(self):
+        diff = (
+            "diff --git a/t b/t\ndeleted file mode 120000\n"
+            "--- a/t\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-a\n-b\n-c\n"
+            "diff --git a/t b/t\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/t\n@@ -0,0 +1 @@\n+x\n"
+        )
+        self.assertEqual(parse_diff(diff), {"t": {1}})
+
+    def test_a_type_change_to_an_empty_or_binary_file_has_no_anchor(self):
+        # git emits no `---`/`+++` for an empty or binary new file.
+        for created in (
+            "index 0000000..e69de29\n",
+            "index 0000000..bdc955b\nBinary files /dev/null and b/t differ\n",
+        ):
+            diff = (
+                "diff --git a/t b/t\ndeleted file mode 120000\n"
+                "--- a/t\n+++ /dev/null\n@@ -1 +0,0 @@\n-target\n"
+                "\\ No newline at end of file\n"
+                "diff --git a/t b/t\nnew file mode 100644\n" + created
+            )
+            self.assertEqual(parse_diff(diff), {}, created)
+
+    def test_a_rename_with_a_colliding_header_keeps_the_deletion(self):
+        # Deleting `x b/y` and renaming `x` to `y b/x b/y` give both stanzas the
+        # header `diff --git a/x b/y b/x b/y`; only a creation drops anchors.
+        header = "diff --git a/x b/y b/x b/y\n"
+        diff = (
+            header + "deleted file mode 100644\n"
+            "--- a/x b/y\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-p\n-q\n"
+            + header
+            + "similarity index 100%\n"
+            "rename from x\nrename to y b/x b/y\n"
+        )
+        self.assertEqual(parse_diff(diff), {"x b/y": {1, 2}})
+
+    def test_a_forged_deletion_header_inside_a_hunk_anchors_nothing(self):
+        # Modifying lines that read `-- victim.py` / `++ /dev/null` puts an
+        # adjacent `--- `/`+++ /dev/null` pair inside a real hunk body.
+        forged = (
+            "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+            "@@ -1,4 +1,2 @@\n--- victim.py\n-+++ /dev/null\n+x\n+y\n-z\n-w\n"
+        )
+        self.assertEqual(parse_diff(forged), {"a.py": {1, 2}})
 
 
 class TestCharset(unittest.TestCase):
@@ -775,7 +865,7 @@ class TestRoundThreeRegressions(unittest.TestCase):
             "diff --git a/g.py b/g.py\ndeleted file mode 100644\n"
             "--- a/g.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n"
         )
-        self.assertEqual(parse_diff(removed), {})
+        self.assertEqual(parse_diff(removed), {"g.py": {1, 2}})
 
     def test_no_newline_marker_spends_no_budget(self):
         diff = (
