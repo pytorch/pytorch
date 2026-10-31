@@ -257,6 +257,10 @@ class Vectorized<float> {
   float reduce_max() const {
     return svmaxv_f32(ptrue, values);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<float> or_nan_if(VecBool<float> mask) const {
+    return svsel_f32(mask, ALL_F32_TRUE_MASK, values);
+  }
   Vectorized<float> abs() const {
     return svabs_f32_x(ptrue, values);
   }

@@ -101,7 +101,7 @@ probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the al
 `global.anthropic.claude-sonnet-5` at medium thinking, preserving the Claude Code triage model.
 Sol remains available through the `model` dispatch input. Distributed triage uses the same default:
 
-1. **plan** (`pi-triage-plan.yml`; Bedrock, `issues: read`,
+1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
    egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
    `get_issue_comments`, `search_issues`, fixed to this repository) and submits a plan
@@ -110,7 +110,7 @@ Sol remains available through the `model` dispatch input. Distributed triage use
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
    dropped), only adds labels, posts only `templates.json` comments the bot has not already
    posted, closes only usage questions and expected numerical behavior, and adds
-   `bot-triaged`. It then hands the issue to `claude-distributed-triage.yml`.
+   `bot-triaged`. It then hands the issue to `distributed-triage-pi.yml`.
 
 Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
 triage bot acted (their labels and human comments from before its first label event) and
@@ -120,3 +120,13 @@ can process batches. Issue transfers become `triage review`. A `request_reproduc
 redacts download/storage links from the current issue body using a fixed policy and posts
 the self-contained-reproduction template. Other issue text is preserved; the model cannot
 supply replacement prose.
+
+## Distributed triage
+
+`.github/workflows/distributed-triage-pi.yml` runs the `distributed-triage` skill on issues
+in the `oncall: distributed` queue: after `issue-triage-pi.yml` hands one off, and when the
+daily sweep (`claude-distributed-triage-cron.yml`) dispatches it. It uses the same
+`pi-triage-plan.yml` model job; `scripts/issue_triage_pi/apply_distributed_plan.py` applies
+the plan and adds the `ptd-bot-triaged` marker that the sweep checks. A model-free `record`
+job appends the result to the daily manifest. Dispatch with `mode: dry-run` to see the
+effects without writing.

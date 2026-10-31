@@ -1,13 +1,165 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import operator
 import sys
+from unittest import mock
 
 import torch
 import torch._dynamo
+from torch._dynamo.comptime import comptime
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
-from torch.testing._internal.common_utils import HardwareClassification
+from torch._dynamo.variables.base import SourceLocation, VariableTracker
+from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.lazy import (
+    ComputedLazyCache,
+    LazyCache,
+    LazyVariableTracker,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
+
+
+_constant_vt_capture: list[VariableTracker] = []
+
+
+def _capture_constant_vt(ctx) -> None:
+    tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+    flag_vt = tx.symbolic_locals.get("flag")
+    if flag_vt is None:
+        raise AssertionError("flag VariableTracker was not found")
+    _constant_vt_capture.append(flag_vt)
+
+
+@instantiate_parametrized_tests
+class CachedConstantSourceLocationTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "value",
+        (None, True, False, NotImplemented),
+        name_fn=lambda value: repr(value).lower(),
+    )
+    def test_cached_singleton_source_location_cow(self, value):
+        prototype = ConstantVariable.create(value)
+        self.assertIs(prototype, ConstantVariable.create(value))
+        self.assertEqual(prototype.get_id(None), id(value))
+        self.assertIsNone(prototype.source)
+        self.assertIsNone(prototype.source_location)
+        self.assertIsNone(prototype.mutation_type)
+        self.assertIsNone(prototype.dict_vt)
+
+        location = SourceLocation("constant.py", 1)
+        located = prototype.with_source_location(location)
+        self.assertIsNot(located, prototype)
+        self.assertEqual(located.source_location, location)
+        self.assertIsNone(prototype.source_location)
+
+        source = ConstantSource("constant")
+        sourceful = ConstantVariable.create(value, source=source)
+        self.assertIsNot(sourceful, prototype)
+        self.assertEqual(sourceful.source, source)
+        self.assertIs(
+            ConstantVariable.create(value, source_location=location).source_location,
+            location,
+        )
+
+    def test_cached_true_source_location_across_compilations(self):
+        _constant_vt_capture.clear()
+        self.addCleanup(_constant_vt_capture.clear)
+        namespace = {
+            "_capture_constant_vt": _capture_constant_vt,
+            "comptime": comptime,
+        }
+        exec(
+            compile(
+                "def first(x):\n"
+                "    flag = True\n"
+                "    comptime(_capture_constant_vt)\n"
+                "    return x + 1, flag\n",
+                "first_file.py",
+                "exec",
+            ),
+            namespace,
+        )
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(namespace["first"], backend="eager", fullgraph=True)(x),
+            (x + 1, True),
+        )
+
+        torch._dynamo.reset()
+        exec(
+            compile(
+                "def second(x):\n"
+                "    flag = True\n"
+                "    comptime(_capture_constant_vt)\n"
+                "    return x + 2, flag\n",
+                "second_file.py",
+                "exec",
+            ),
+            namespace,
+        )
+        self.assertEqual(
+            torch.compile(namespace["second"], backend="eager", fullgraph=True)(x),
+            (x + 2, True),
+        )
+
+        self.assertEqual(len(_constant_vt_capture), 2)
+        first_vt, second_vt = _constant_vt_capture
+        self.assertIsNot(first_vt, second_vt)
+        self.assertEqual(first_vt.source_location.filename, "first_file.py")
+        self.assertEqual(second_vt.source_location.filename, "second_file.py")
+        self.assertIsNone(ConstantVariable.create(True).source_location)
+
+    @parametrize(
+        "cache_kind,attach_before_realize",
+        (
+            ("lazy", True),
+            ("lazy", False),
+            ("computed", True),
+            ("computed", False),
+        ),
+        name_fn=lambda cache_kind, attach_before_realize: (
+            f"{cache_kind}_{'before' if attach_before_realize else 'after'}"
+        ),
+    )
+    def test_lazy_source_location_cow(self, cache_kind, attach_before_realize):
+        prototype = ConstantVariable.create(True)
+        location = SourceLocation("lazy.py", 1)
+        if cache_kind == "lazy":
+            cache = LazyCache(object(), object())
+        else:
+            cache = ComputedLazyCache(True, [], [], operator.add, 1)
+        lazy = LazyVariableTracker(cache)
+
+        if attach_before_realize:
+            self.assertIs(lazy.with_source_location(location), lazy)
+
+        from torch._dynamo import variables
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        with (
+            mock.patch.object(
+                InstructionTranslator, "current_tx", return_value=object()
+            ),
+            mock.patch.object(variables.builder, "VariableBuilder") as variable_builder,
+        ):
+            variable_builder.return_value.return_value = prototype
+            realized = lazy.realize()
+
+        if not attach_before_realize:
+            self.assertIs(realized, prototype)
+            self.assertIs(lazy.with_source_location(location), lazy)
+
+        self.assertIsNot(lazy.realize(), prototype)
+        self.assertEqual(lazy.realize().source_location, location)
+        self.assertIsNone(prototype.source_location)
 
 
 class LazyConstantVariableTests(TestCase):

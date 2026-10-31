@@ -269,20 +269,27 @@ struct ShiftedTrivialOffsetCalculator {
   }
 };
 
-template <int tws, typename func_t, typename array_t>
+template <
+    int tws,
+    int nt = num_threads(),
+    bool reverted_idx = false,
+    typename loader_t = memory::LoadWithoutCast,
+    typename storer_t = memory::StoreWithoutCast,
+    typename func_t,
+    typename array_t>
 __device__ inline void unrolled_remainder(func_t f, array_t data, int remaining, uint32_t shift) {
   using traits = function_traits<func_t>;
   auto input_calc = ShiftedTrivialOffsetCalculator<traits::arity>{shift};
   auto output_calc = ShiftedTrivialOffsetCalculator<1>{shift};
-  auto policy = memory::policies::unroll<
+  auto policy = memory::policies::unroll_base<
+      nt,
       array_t,
       decltype(input_calc),
       decltype(output_calc),
-      memory::LoadWithoutCast,
-      memory::StoreWithoutCast,
-      tws>(
-      data, remaining, input_calc, output_calc, memory::LoadWithoutCast(), memory::StoreWithoutCast());
-  elementwise_kernel_helper(f, policy);
+      loader_t,
+      storer_t,
+      tws>(data, remaining, input_calc, output_calc, loader_t(), storer_t());
+  elementwise_kernel_helper<reverted_idx>(f, policy);
 }
 
 template <int vec_size, int tws, typename func_t, typename array_t>
@@ -470,47 +477,39 @@ template <
     int vec_size,
     typename func_t,
     typename array_t,
-    typename inp_calc_t,
-    typename out_calc_t,
-    typename loader_t,
-    typename storer_t,
     typename OutputType,
     typename... InputTypes>
 C10_LAUNCH_BOUNDS_1(vectorized_templated_config::num_threads())
 __global__ void vectorized_templated_elementwise_kernel(
     int N,
     func_t f,
-    array_t data,
-    inp_calc_t inp_calc,
-    out_calc_t out_calc,
-    loader_t loader,
-    storer_t storer) {
-  int remaining = N -
-      vectorized_templated_config::block_work_size() *
-          (gridDim.x - blockIdx.x - 1);
+    array_t data) {
+  constexpr int nt = vectorized_templated_config::num_threads();
+  constexpr int tws = vectorized_templated_config::elems_per_thread();
+  constexpr int bws = vectorized_templated_config::block_work_size();
   constexpr bool reverted_idx = true;
+  using loader_t = memory::LoadWithStaticCast<InputTypes...>;
+  using storer_t = memory::StoreWithStaticCast<OutputType>;
+  // Blocks run in reverse, so block 0 handles the remainder.
+  const int idx = gridDim.x - blockIdx.x - 1;
+  int remaining = N - bws * idx;
 
-  if (remaining <
-      vectorized_templated_config::block_work_size()) { // if this block handles
-                                                        // the reminder,
-    // just do a naive unrolled loop
-    auto policy = memory::policies::unroll_base<
-        vectorized_templated_config::num_threads(),
-        array_t,
-        inp_calc_t,
-        out_calc_t,
-        loader_t,
-        storer_t,
-        vectorized_templated_config::elems_per_thread()>(
-        data, remaining, inp_calc, out_calc, loader, storer);
-    elementwise_kernel_helper<reverted_idx>(f, policy);
+  // The remainder loads and stores the dtypes known at compile time. As in
+  // vectorized_elementwise_kernel_impl, use a narrower unroll (not narrower
+  // than 4) when it fits.
+  if (remaining <= 4 * nt) {
+    unrolled_remainder<4, nt, reverted_idx, loader_t, storer_t>(
+        f, data, remaining, (bws - 4 * nt) * idx);
+  } else if (remaining < bws) {
+    unrolled_remainder<tws, nt, reverted_idx, loader_t, storer_t>(
+        f, data, remaining, 0);
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
     auto policy = memory::policies::vectorized_templated<
         vec_size,
         array_t,
-        vectorized_templated_config::elems_per_thread(),
-        vectorized_templated_config::num_threads(),
+        tws,
+        nt,
         OutputType,
         InputTypes...>(data);
     elementwise_kernel_helper<reverted_idx>(f, policy);
@@ -527,20 +526,12 @@ __global__ void vectorized_templated_elementwise_kernel(
 template <
     typename func_t,
     typename array_t,
-    typename inp_calc_t,
-    typename out_calc_t,
-    typename loader_t,
-    typename storer_t,
     typename OutputType,
     typename... InputTypes>
 static inline void launch_vectorized_templated_kernel(
     int64_t N,
     const func_t& f,
-    array_t data,
-    inp_calc_t ic,
-    out_calc_t oc,
-    loader_t l,
-    storer_t s) {
+    array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + vectorized_templated_config::block_work_size() - 1) /
       vectorized_templated_config::block_work_size();
@@ -552,14 +543,10 @@ static inline void launch_vectorized_templated_kernel(
           8,
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           OutputType,
           InputTypes...>
           <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
-              N, f, data, ic, oc, l, s);
+              N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 4:
@@ -567,14 +554,10 @@ static inline void launch_vectorized_templated_kernel(
           4,
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           OutputType,
           InputTypes...>
           <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
-              N, f, data, ic, oc, l, s);
+              N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 2:
@@ -582,14 +565,10 @@ static inline void launch_vectorized_templated_kernel(
           2,
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           OutputType,
           InputTypes...>
           <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
-              N, f, data, ic, oc, l, s);
+              N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     default:
@@ -943,24 +922,14 @@ bool check_binary_rt_types_for_specialization(TensorIteratorBase& iter) {
 
 template <int arg_index>
 struct type_specialized_kernel_launcher {
-  template <
-      typename func_t,
-      typename array_t,
-      typename inp_calc_t,
-      typename out_calc_t,
-      typename loader_t,
-      typename storer_t>
+  template <typename func_t, typename array_t>
   static void apply(
       ScalarType ret_t,
       ScalarType arg0_t,
       ScalarType arg1_t,
       int64_t numel,
       func_t f,
-      array_t data,
-      inp_calc_t input_offset_calculator,
-      out_calc_t output_offset_calculator,
-      loader_t loader,
-      storer_t storer) {
+      array_t data) {
     constexpr ScalarType sret_t = rt_binary_specializations[arg_index][0];
     constexpr ScalarType sarg0_t = rt_binary_specializations[arg_index][1];
     constexpr ScalarType sarg1_t = rt_binary_specializations[arg_index][2];
@@ -971,20 +940,9 @@ struct type_specialized_kernel_launcher {
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           cret_t,
           carg0_t,
-          carg1_t>(
-          numel,
-          f,
-          data,
-          input_offset_calculator,
-          output_offset_calculator,
-          loader,
-          storer);
+          carg1_t>(numel, f, data);
     }
   }
 };
@@ -1098,12 +1056,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         // If we got here, we know we are in one of the specialized cases. We
         // need to translate the runtime type to a statically known type. This
         // is effectively hoisting to the host the switch over runtime type in
-        // the kernel in fetch_and_cast. Loader, storer, offset calculators are
-        // only needed for the reminder loop.
-        auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
-        auto output_offset_calculator = TrivialOffsetCalculator<1>();
-        auto loader = memory::LoadWithCast<traits::arity>(iter);
-        auto storer = memory::StoreWithCast<1>(iter);
+        // the kernel in fetch_and_cast.
         memory::detail::static_unroll<
             type_specialized_kernel_launcher,
             rt_binary_specializations.size()>::
@@ -1113,11 +1066,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
                 iter.input_dtype(1),
                 numel,
                 f,
-                data,
-                input_offset_calculator,
-                output_offset_calculator,
-                loader,
-                storer);
+                data);
         return;
       }
     }

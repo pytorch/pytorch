@@ -10,6 +10,9 @@ import torch
 from torch import Tensor
 from torch._C import ScriptObject
 from torch._C._autograd import DeviceType
+from torch.distributed._backends.fake import (  # Runtime alias for BC
+    FakeProcessGroup as FakeProcessGroup,
+)
 from torch.distributed.distributed_c10d import GroupName
 from torch.futures import Future
 
@@ -842,33 +845,9 @@ class ProcessGroup:
     @property
     def group_desc(self) -> str: ...
 
-class FakeProcessGroup(Backend):
-    class Options(Backend.Options):
-        fake_option: int
-        error_on_collective: bool
-        simulate_uniform_ranks: bool
-
-        def __init__(self) -> None: ...
-
-    @staticmethod
-    def _create_internal(
-        rank: int,
-        world_size: int,
-        options: FakeProcessGroup.Options | None = ...,
-    ) -> FakeProcessGroup: ...
-    # getOptions() returns null when the group was built without options, and
-    # callers (test_device_mesh) branch on that, so this must stay optional.
-    # Backend.options is not, which makes the narrowing a real LSP violation
-    # rather than a stub inaccuracy: this property is bound to a different C++
-    # method than the base one, and widening it to match would misdescribe
-    # behavior three assertIsNone checks already pin.
-    @property
-    # pyrefly: ignore  # bad-override
-    def options(self) -> FakeProcessGroup.Options | None: ...
-
 class FakeWork(Work):
     seq_id: int
-    def __init__(self) -> None: ...
+    def __init__(self, result: list[Tensor] = ...) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
 

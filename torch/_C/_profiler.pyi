@@ -323,6 +323,7 @@ class _CuspyModule:
         render: tuple | None = None,
         counters: tuple | None = None,
         compression_level: int = 1,
+        metadata: list[tuple[str, str]] = ...,
     ) -> bytes: ...
 
 _cuspy: _CuspyModule

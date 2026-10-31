@@ -85,6 +85,12 @@ struct EighParams {
   bool upper; // UPLO: true read upper triangle, false read lower
 };
 
+struct EigParams {
+  int64_t n;
+  bool compute_eigenvectors;
+  bool stage_h;
+};
+
 // Per-thread small-matrix inverse kernel: up to this size one thread inverts a
 // whole matrix from registers. LU.metal instantiates exact sizes 1..4 and
 // static_asserts the list against this constant. Strides are in elements.

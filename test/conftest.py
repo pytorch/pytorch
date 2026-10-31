@@ -196,6 +196,16 @@ def pytest_unconfigure(config: Config) -> None:
 
 
 class _NodeReporterReruns(_NodeReporter):
+    """Writes captured output without pytest's per-stream header and omits it
+    when empty, so tests that print nothing don't each get <system-out> and
+    <system-err> elements (pytest.ini sets junit_logging_reruns = all). Also
+    escapes skip reasons, which pytest<8 leaves unescaped.
+
+    pytest constructs these reporters and LogXMLReruns.node_reporter only
+    reassigns __class__, so this class may override methods but must not add
+    state or change how instance data is represented.
+    """
+
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
@@ -262,21 +272,11 @@ class LogXMLReruns(LogXML):
                 report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
-        nodeid: str | TestReport = getattr(report, "nodeid", report)
-        # Local hack to handle xdist report order.
-        workernode = getattr(report, "node", None)
-
-        key = nodeid, workernode
-
-        if key in self.node_reporters:
-            # TODO: breaks for --dist=each
-            return self.node_reporters[key]
-
-        reporter = _NodeReporterReruns(nodeid, self)
-
-        self.node_reporters[key] = reporter
-        self.node_reporters_ordered.append(reporter)
-
+        # The reporter key type varies across pytest versions, so let pytest build it.
+        reporter = super().node_reporter(report)
+        if not issubclass(_NodeReporterReruns, type(reporter)):
+            raise AssertionError(f"unexpected node reporter type {type(reporter)}")
+        reporter.__class__ = _NodeReporterReruns
         return reporter
 
 

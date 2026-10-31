@@ -247,7 +247,9 @@ class Vectorized16 {
     // returns an integer mask where all zero elements are translated to 1-bit
     // and others are translated to 0-bit
     __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
-    return _mm256_movemask_epi8(cmp);
+    __m128i packed = _mm_packs_epi16(
+        _mm256_castsi256_si128(cmp), _mm256_extracti128_si256(cmp, 1));
+    return _mm_movemask_epi8(packed);
   }
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
     if (count == size())
