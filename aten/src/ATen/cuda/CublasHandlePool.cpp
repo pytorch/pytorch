@@ -43,6 +43,17 @@
  * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (device, stream)
  * pair, rather than just per-device like the cublas handle pool.
  *
+ * The reason is device state each handle owns: the synchronizer flags that
+ * hipblaslt's single-kernel split-K solutions signal and spin on. Two launches
+ * on one handle that overlap on different streams can leave a workgroup
+ * spinning forever. A thread that exits returns its handles to the pool while
+ * work it queued may still be running, so the pool makes the stream that takes
+ * a handle next wait for that work. It cannot when that work was queued on a
+ * stream c10 does not own (such as a torch.cuda.ExternalStream or an
+ * AOTInductor caller's own stream) or on a capturing stream, or when recording
+ * the event fails; such a handle goes back unordered (see
+ * DeviceThreadHandlePool).
+ *
  * The workspace pools are separate for ROCm. When workspace caching is enabled on CUDA,
  * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to unify the workspace pools.
  */

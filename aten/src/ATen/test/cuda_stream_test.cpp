@@ -223,6 +223,28 @@ TEST(TestStream, StreamPoolTest) {
   ASSERT_TRUE(hasDuplicates);
 }
 
+// Pool streams are recognized by address, unlike the default stream and
+// external streams.
+TEST(TestStream, IsStreamFromPoolTest) {
+  if (!at::cuda::is_available()) return;
+  at::cuda::CUDAGuard device_guard(0);
+  const cudaStream_t pool_stream = at::cuda::getStreamFromPool(true, 0);
+  ASSERT_TRUE(c10::cuda::detail::isStreamFromPool(pool_stream, 0));
+  ASSERT_FALSE(
+      c10::cuda::detail::isStreamFromPool(
+          at::cuda::getDefaultCUDAStream(0), 0));
+
+  cudaStream_t external = nullptr;
+  ASSERT_EQ(
+      cudaStreamCreateWithFlags(&external, cudaStreamNonBlocking), cudaSuccess);
+  ASSERT_FALSE(c10::cuda::detail::isStreamFromPool(external, 0));
+  ASSERT_EQ(cudaStreamDestroy(external), cudaSuccess);
+
+  if (at::cuda::getNumGPUs() >= 2) {
+    ASSERT_FALSE(c10::cuda::detail::isStreamFromPool(pool_stream, 1));
+  }
+}
+
 // Multi-GPU
 TEST(TestStream, MultiGPUTest) {
   if (!at::cuda::is_available()) return;

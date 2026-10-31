@@ -215,6 +215,18 @@ getStreamFromPool(const int priority, DeviceIndex device = -1);
 C10_CUDA_API CUDAStream
 getStreamFromExternal(cudaStream_t ext_stream, DeviceIndex device_index);
 
+namespace detail {
+/**
+ * Internal to PyTorch, not a stable API. Returns whether `stream` is one of the
+ * streams that getStreamFromPool hands out for `device_index`. c10 never
+ * destroys these, whereas the owner of an external stream may destroy it at
+ * any time.
+ */
+C10_CUDA_API bool isStreamFromPool(
+    cudaStream_t stream,
+    DeviceIndex device_index);
+} // namespace detail
+
 /**
  * Get the default CUDA stream, for the passed CUDA device, or for the
  * current device if no device index is passed.  The default stream is
