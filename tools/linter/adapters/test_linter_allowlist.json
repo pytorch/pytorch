@@ -627,7 +627,6 @@
   "test/optim/test_swa_utils.py",
   "test/package/test_analyze.py",
   "test/package/test_dependency_api.py",
-  "test/package/test_digraph.py",
   "test/package/test_directory_reader.py",
   "test/package/test_glob_group.py",
   "test/package/test_load_bc_packages.py",
