@@ -1389,7 +1389,7 @@ class Tensor(torch._C.TensorBase):
 
     def dim_order(self, *, ambiguity_check: bool | list[torch.memory_format] = False):
         """
-        dim_order(ambiguity_check=False) -> tuple
+        dim_order(*, ambiguity_check=False) -> tuple
 
         Returns the uniquely determined tuple of int describing the dim order or
         physical layout of :attr:`self`.
@@ -1404,7 +1404,7 @@ class Tensor(torch._C.TensorBase):
         If `ambiguity_check` is False, it will return one of legal dim order(s) without checking its uniqueness.
         Otherwise, it will raise TypeError.
 
-        Args:
+        Keyword args:
             ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
 
         Examples::

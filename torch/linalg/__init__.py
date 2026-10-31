@@ -3037,7 +3037,7 @@ Examples::
 vander = _add_docstr(
     _linalg.linalg_vander,
     r"""
-vander(x, N=None) -> Tensor
+vander(x, *, N=None) -> Tensor
 
 Generates a Vandermonde matrix.
 
@@ -3063,7 +3063,7 @@ the output has the same batch dimensions.
 Differences with `numpy.vander`:
 
 - Unlike `numpy.vander`, this function returns the powers of :attr:`x` in ascending order.
-  To get them in the reverse order call ``linalg.vander(x, N).flip(-1)``.
+  To get them in the reverse order call ``linalg.vander(x, N=N).flip(-1)``.
 
 Args:
     x (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions

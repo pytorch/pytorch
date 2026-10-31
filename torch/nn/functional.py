@@ -2090,7 +2090,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 gelu = _add_docstr(
     torch._C._nn.gelu,
     r"""
-gelu(input, approximate = 'none') -> Tensor
+gelu(input, *, approximate = 'none') -> Tensor
 
 When the approximate argument is 'none', it applies element-wise the function
 :math:`\text{GELU}(x) = x * \Phi(x)`
