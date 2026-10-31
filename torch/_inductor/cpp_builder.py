@@ -527,6 +527,14 @@ def convert_cubin_to_obj(
     return obj_file
 
 
+# Hand-written assembly has no .note.GNU-stack section unless it declares one.
+# Without it, GNU ld assumes on some targets (e.g. x86-64) that the object needs
+# an executable stack, and marks the whole shared library as needing one
+# (PT_GNU_STACK with PF_X). glibc 2.41+ refuses to dlopen such a library, so
+# every .S file that gets linked into an AOTI .so on Linux must end with this.
+GNU_STACK_NOTE_ASM = '\t.section\t.note.GNU-stack,"",@progbits\n'
+
+
 def batch_convert_cubins_to_obj(
     cubins: list[tuple[str, str]],
     output_dir: str,
@@ -567,6 +575,8 @@ def batch_convert_cubins_to_obj(
                 f".set __{kernel_name}_size, "
                 f"__{kernel_name}_end - __{kernel_name}_start\n"
             )
+        if _IS_LINUX:
+            f.write(GNU_STACK_NOTE_ASM)
 
     subprocess.run(
         _compiler_command(cpp_compiler, "-c", asm_path, "-o", obj_path),
