@@ -35,21 +35,24 @@ Reduction geometry (all static, derived from the epilogue tiled_copy)
 ---------------------------------------------------------------------
 ``_fragment_geometry`` recovers the (m, n) offset of every register slot from
 the partitioned layouts and *validates* each assumption the folds below make
-(one contiguous N run of ``cols`` columns per row for N groups, exactly one row
-per thread for M groups, warps tiling the CTA rows in lane-sized blocks for the
+(per row, one contiguous N run per thread or equal runs interleaved across
+column lanes as in SM90 WGMMA fragments, for N groups; whole rows per thread
+for M groups; warps tiling each epilogue subtile in lane-sized blocks for the
 cross-warp stitch), so an unsupported tile/warp layout fails at compile time
 instead of silently reducing the wrong elements.
 
-* axis=1 (N groups), ``group <= cols``: fold inside the thread's fragment
-  (left-to-right, broadcast within the group), then one leader lane stores.
-* axis=1, ``group > cols``: fold each fragment, then combine the
-  ``group // cols`` consecutive epi-N subtiles of a group in ascending order
+* axis=1 (N groups), ``group <= run_n``: fold inside the thread's fragment
+  (left-to-right, broadcast within the group), butterfly across the column
+  lanes sharing the group when runs interleave, then one leader lane stores.
+* axis=1, ``group > run_n``: fold each fragment, then combine the
+  ``group // run_n`` consecutive epi-N subtiles of a group in ascending order
   at the last subtile of the group.
-* axis=0 (M groups), ``group <= lanes_m``: butterfly across the group's row
-  lanes (halving offsets), so every lane holds the group value.
-* axis=0, ``group > lanes_m``: butterfly within each warp, then stitch
-  ``group // lanes_m`` warps through smem in ascending warp order behind the
-  epilogue barrier.
+* axis=0 (M groups), ``group <= lanes_m * rows``: fold the group's rows inside
+  each thread (SM90 threads own rows r and r + 8), then butterfly across the
+  group's row lanes (halving offsets), so every lane holds the group value.
+  The in-pass feed has no in-thread fold and needs one row per thread.
+* axis=0, wider groups: reduce within each warp, then stitch the group's
+  warps through smem in ascending warp order behind the epilogue barrier.
 
 Every fold order is fixed and data-independent, so results are bitwise
 reproducible run to run. Two semantic notes:
@@ -153,6 +156,13 @@ if TYPE_CHECKING:
 # per-thread geometry instead of assuming this value.
 GROUPED_FRAGMENT_WIDTH = 32
 
+# SM90 WGMMA epilogue fragments: a warp covers 16 rows as 8 row lanes that each
+# own rows r and r + 8, and each row as 4 column lanes that own 2-column runs
+# every 8 columns. Lane shuffles alone therefore reduce at most 8 rows. SM120
+# reuses this epilogue with m16n8 warp-MMA fragments of the same row layout.
+SM90_WARP_ROWS = 16
+SM90_ROW_LANES = 8
+
 
 def nan_propagating_max(a, b):
     """Combine maxima while preserving PyTorch's NaN propagation semantics."""
@@ -200,10 +210,14 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
         if axis == 0 or getattr(config, "device_capacity", None) != 10:
             return False
         axis = 1 - axis
+    if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH:
+        return False
+    if config.device_capacity == 9:
+        return _sm90_grouped_reduce_supported(config, axis, group)
     if axis == 1 and config.device_capacity == 12:
         return False
     tile = config.tile_m if axis == 0 else config.tile_n
-    if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH or tile % group:
+    if tile % group:
         return False
 
     fragment_width = GROUPED_FRAGMENT_WIDTH
@@ -230,6 +244,35 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
         and config.cluster_m == 2
         and group < tile
     )
+
+
+def _sm90_epi_tile_m(config) -> int:
+    """Rows per epilogue subtile, mirroring GemmSm90's atom layout and epi tile."""
+    tile_m = config.tile_m
+    split_n = tile_m == 320 or (tile_m == 192 and config.tile_n > 128)
+    if config.pingpong or split_n or tile_m < 128:
+        return math.gcd(64, tile_m)
+    return 128 if tile_m % 128 == 0 else math.gcd(192, tile_m)
+
+
+def _sm90_grouped_reduce_supported(config, axis: int, group: int) -> bool:
+    """SM90 legality derived from the WGMMA epilogue layout.
+
+    N groups: in-thread fold of the 2-column runs plus a butterfly over the 4
+    column lanes reduce one 32-column epi subtile (64 for 8-bit outputs);
+    wider groups combine consecutive epi-N subtiles, so they must be multiples
+    of 64 to tile either subtile width. M groups: a thread's rows r / r + 8
+    plus a butterfly over the 8 row lanes cover one warp's 16 rows; wider
+    groups stitch whole warps through smem inside one epilogue subtile. In-pass
+    feeds are narrower still, see ``GroupedLocalReduceFeed.supports_config``.
+    """
+    if axis == 1:
+        if group <= GROUPED_FRAGMENT_WIDTH:
+            return GROUPED_FRAGMENT_WIDTH % group == 0
+        return group % (2 * GROUPED_FRAGMENT_WIDTH) == 0 and config.tile_n % group == 0
+    if group <= SM90_WARP_ROWS:
+        return SM90_WARP_ROWS % group == 0
+    return group % SM90_WARP_ROWS == 0 and _sm90_epi_tile_m(config) % group == 0
 
 
 def max_grouped_reduce_group(configs, axis: int) -> int | None:
@@ -334,17 +377,22 @@ class _GroupGeometry(NamedTuple):
 
     Only the fields the device paths read; every other layout property is
     checked in :func:`_fragment_geometry` and never travels. ``axis`` is the
-    physical kernel axis after swap-at-trace. ``cols`` is the N run one thread
-    owns per row of an epi subtile, ``chunks`` the per-(row, aligned run) flat
-    fragment indices in ascending column order (the axis-1 fold unit),
-    ``fragments_per_group`` > 1 means a group spans that many consecutive epi-N
-    subtiles, and ``group_warps`` > 1 that an M group spans that many warps.
+    physical kernel axis after swap-at-trace. ``run_n`` is the N extent one
+    fragment fold covers per row of an epi subtile: the thread's contiguous
+    run, or the whole run the warp's column lanes cover together when columns
+    interleave across lanes (SM90 WGMMA fragments). ``chunks`` are the
+    per-(row, group) flat fragment indices in ascending column order (the
+    axis-1 fold unit), ``lanes_per_group`` > 1 the column lanes that then
+    combine one group, ``fragments_per_group`` > 1 means a group spans that many
+    consecutive epi-N subtiles, and ``group_warps`` > 1 that an M group spans
+    that many warps.
     """
 
     axis: int
-    cols: int
+    run_n: int
     chunk: int
     chunks: tuple
+    lanes_per_group: int
     row_chunks: tuple
     fragments_per_group: int
     lanes_m: int
@@ -381,6 +429,52 @@ def _row_chunks(by_row, cols, group):
     return chunk, chunks
 
 
+def _interleaved_row_chunks(by_row, cols, lanes_n, group):
+    """Fold chunks for rows whose columns interleave across column lanes.
+
+    Each row must hold equal ``width``-column runs every ``width * lanes_n``
+    columns (SM90: 2-column runs every 8 columns over 4 lanes), so lane ``j``
+    of a row owns the runs at ``j * width`` and an aligned block of lanes
+    covers whole groups. Returns the per-thread chunk size, chunks, and the
+    number of column lanes that combine one group.
+    """
+    first = sorted(n for n, _ in next(iter(by_row.values())))
+    width = next((k for k in range(1, cols) if first[k] != k), cols)
+    stride = width * lanes_n
+    # A partial last run leaves ``expected`` shorter than ``cols``.
+    expected = [j * stride + r for j in range(cols // width) for r in range(width)]
+    for m_off, entries in by_row.items():
+        owned = sorted(n for n, _ in entries)
+        if owned != expected:
+            raise NotImplementedError(
+                "grouped N reduce needs each thread to own equal column runs interleaved "
+                f"across {lanes_n} column lanes; row {m_off} owns {owned}"
+            )
+    if group % width:
+        raise NotImplementedError(
+            f"grouped N reduce: group {group} must be a multiple of the per-lane run {width}"
+        )
+    chunks = tuple(
+        tuple(i for n, i in sorted(entries) if n // group == g)
+        for entries in by_row.values()
+        for g in sorted(OrderedSet([n // group for n, _ in entries]))
+    )
+    chunk = len(chunks[0])
+    lane_span = min(group, cols * lanes_n)
+    lanes_per_group = lane_span // chunk
+    if (
+        any(len(c) != chunk for c in chunks)
+        or lane_span % chunk
+        or lanes_n % lanes_per_group
+        or lanes_per_group & (lanes_per_group - 1)
+    ):
+        raise NotImplementedError(
+            f"grouped N reduce: group {group} must cover a power-of-two block of the "
+            f"{lanes_n} column lanes"
+        )
+    return chunk, chunks, lanes_per_group
+
+
 def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, group):
     """Derive and validate the static fragment geometry a grouped reduce needs.
 
@@ -414,9 +508,26 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
         by_col.setdefault(n_off, []).append((m_off, i))
     rows = len(by_row)
     cols = len(next(iter(by_row.values())))
-    chunk, chunks = _row_chunks(by_row, cols, group) if axis == 1 else (1, ())
     epi_n = cute.size(frags[0].layout.shape[4])
     lane_layout_MN, warp_layout_MN = _get_lane_warp_layouts(tiled_copy, reference_src)
+    run_n, lanes_per_group = cols, 1
+    chunk, chunks = 1, ()
+    if axis == 1:
+        # The first row picks the layout family; each helper validates every row.
+        first_row = sorted(n for n, _ in next(iter(by_row.values())))
+        if first_row == list(range(cols)):
+            chunk, chunks = _row_chunks(by_row, cols, group)
+        else:
+            lanes_n = cute.size(lane_layout_MN, mode=[1])
+            run_n = cols * lanes_n
+            if run_n != cute.size(epi_tile[1]):
+                raise NotImplementedError(
+                    f"grouped N reduce needs one warp's {lanes_n} column lanes to cover "
+                    f"the {cute.size(epi_tile[1])}-column epi subtile (they cover {run_n})"
+                )
+            chunk, chunks, lanes_per_group = _interleaved_row_chunks(
+                by_row, cols, lanes_n, group
+            )
     lanes_m = cute.size(lane_layout_MN, mode=[0])
     warps_m = cute.size(warp_layout_MN, mode=[0])
     tile = tile_M if axis == 0 else tile_N
@@ -427,19 +538,19 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
     fragments_per_group, group_warps = 1, 1
     row_chunks = ()
     if axis == 1:
-        if group > cols:
+        if group > run_n:
             n_step = cute.crd2idx((0, 0, 0, 0, 1), frags[1].layout) if epi_n > 1 else 0
-            if n_step != cols:
+            if n_step != run_n:
                 raise NotImplementedError(
                     "grouped N reduce larger than one fragment needs consecutive epi-N "
-                    f"subtiles to be adjacent column runs (step {n_step} != {cols})"
+                    f"subtiles to be adjacent column runs (step {n_step} != {run_n})"
                 )
-            if group % cols or (cols * epi_n) % group:
+            if group % run_n or (run_n * epi_n) % group:
                 raise NotImplementedError(
-                    f"grouped N reduce: group {group} must be a multiple of the thread N run "
-                    f"({cols}) and divide its per-thread N coverage ({cols * epi_n})"
+                    f"grouped N reduce: group {group} must be a multiple of the subtile N run "
+                    f"({run_n}) and divide its per-thread N coverage ({run_n * epi_n})"
                 )
-            fragments_per_group = group // cols
+            fragments_per_group = group // run_n
     else:
         if lanes_m % min(group, lanes_m):
             raise NotImplementedError(
@@ -471,16 +582,21 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
                     f"grouped M reduce: group {group} must be a multiple of the per-warp "
                     f"M coverage ({rows_per_warp}) within the {warps_m} M warps"
                 )
-            if tile_M // rows_per_warp != warps_m:
+            # The stitch runs per epilogue subtile (SM90 tiles M in 64/128-row
+            # subtiles), so a group must not straddle two of them.
+            epi_M = cute.size(epi_tile[0])
+            if epi_M // rows_per_warp != warps_m or epi_M % group:
                 raise NotImplementedError(
-                    f"grouped M reduce across warps needs the {warps_m} M warps to tile the "
-                    f"{tile_M} CTA rows in {rows_per_warp}-row blocks"
+                    f"grouped M reduce across warps needs the {warps_m} M warps to tile "
+                    f"each {epi_M}-row epilogue subtile in {rows_per_warp}-row blocks, "
+                    f"and group {group} to divide it"
                 )
     return _GroupGeometry(
         axis=axis,
-        cols=cols,
+        run_n=run_n,
         chunk=chunk,
         chunks=chunks,
+        lanes_per_group=lanes_per_group,
         row_chunks=row_chunks,
         fragments_per_group=fragments_per_group,
         lanes_m=lanes_m,
@@ -872,24 +988,53 @@ class GroupedReduceBase(EpiOp):
         return -1
 
     # --- Cross-warp smem (axis-0 groups wider than one warp) ---------------
-    def _uses_smem(self, gemm=None):
+    def _uses_smem(self, rows_per_warp, gemm=None):
         """Whether physical-M groups may need cross-warp shared memory.
 
-        Stage computation runs before the GEMM instance receives its swap flag,
-        so it conservatively reserves the buffer for any wide group. The traced
-        instance keeps the buffer only when its physical axis is M.
+        ``rows_per_warp`` is the M extent one warp covers in an epilogue subtile
+        (32 TMEM lanes on SM100, 16 WGMMA rows on SM90), capped at the SM100
+        width so the reservation never shrinks. Stage computation runs before
+        the GEMM instance receives its swap flag, so it conservatively reserves
+        the buffer for any wide group. The traced instance keeps the buffer
+        only when its physical axis is M.
         """
-        if self.group <= GROUPED_FRAGMENT_WIDTH:
+        # Caller axis 1 reaches physical M only through SM100 swap-at-trace.
+        warp_rows = (
+            GROUPED_FRAGMENT_WIDTH
+            if self.axis == 1
+            else min(rows_per_warp, GROUPED_FRAGMENT_WIDTH)
+        )
+        if self.group <= warp_rows:
             return False
         return gemm is None or self.physical_axis(gemm) == 0
+
+    @staticmethod
+    def _epi_rows_per_warp(epi_tile, warp_shape_mnk):
+        epi_m = epi_tile[0] if isinstance(epi_tile[0], int) else cute.size(epi_tile[0])
+        return epi_m // warp_shape_mnk[0]
+
+    def _gemm_uses_smem(self, gemm):
+        # Traced SM100 epi tiles are CuTe layouts, and every SM100 warp covers
+        # GROUPED_FRAGMENT_WIDTH rows, so only SM90/SM120 derive the extent.
+        rows_per_warp = (
+            GROUPED_FRAGMENT_WIDTH
+            if gemm.arch == 100
+            else self._epi_rows_per_warp(gemm.epi_tile, gemm.epi_smem_warp_shape_mnk())
+        )
+        return self._uses_smem(rows_per_warp, gemm)
 
     def _smem_warps(self, warps_m):
         return max(warps_m - 1, 0)
 
     def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
-        if not self._uses_smem():
-            return EpiSmemBytes()
         warps_m = warp_shape_mnk[0] if warp_shape_mnk is not None else 1
+        rows_per_warp = (
+            GROUPED_FRAGMENT_WIDTH
+            if warp_shape_mnk is None
+            else self._epi_rows_per_warp(epi_tile, warp_shape_mnk)
+        )
+        if not self._uses_smem(rows_per_warp):
+            return EpiSmemBytes()
         planes = self._smem_warps(warps_m)
         return EpiSmemBytes(
             unstaged=cta_tile_shape_mnk[1] * planes * (Float32.width // 8)
@@ -900,7 +1045,7 @@ class GroupedReduceBase(EpiOp):
         return (gemm.cta_tile_shape_mnk[1], planes) if planes else None
 
     def smem_struct_field(self, gemm, params):
-        shape = self._smem_shape(gemm) if self._uses_smem(gemm) else None
+        shape = self._smem_shape(gemm) if self._gemm_uses_smem(gemm) else None
         if shape is None:
             return None
         size = shape[0] * shape[1]
@@ -910,7 +1055,7 @@ class GroupedReduceBase(EpiOp):
         )
 
     def get_smem_tensor(self, gemm, params, storage_epi):
-        shape = self._smem_shape(gemm) if self._uses_smem(gemm) else None
+        shape = self._smem_shape(gemm) if self._gemm_uses_smem(gemm) else None
         if shape is None:
             return None
         return getattr(storage_epi, f"s_{self.name}").get_tensor(
@@ -1095,7 +1240,7 @@ class GroupedReduceBase(EpiOp):
         # groups) - except after a temporal combine, which lands on the LAST
         # fragment of the group.
         leader_off = const_expr(
-            self.group - state.geom.cols if self._is_temporal(state.geom) else 0
+            self.group - state.geom.run_n if self._is_temporal(state.geom) else 0
         )
         tile_idx = tile_coord_mnkl[1] if const_expr(axis == 1) else tile_coord_mnkl[0]
         for i in cutlass.range(cute.size(coord), unroll_full=True):
@@ -1183,6 +1328,22 @@ class GroupedLocalReduce(GroupedReduceBase):
                 rows = rows // 2
 
     @cute.jit
+    def _butterfly_cols(self, frag, geom):
+        """Combine one group's column lanes (halving butterfly) after the
+        in-thread fold, leaving the group value in every participating lane."""
+        combine_fn = const_expr(self.combine_fn)
+        for i in cutlass.range(cute.size(frag), unroll_full=True):
+            lanes = const_expr(geom.lanes_per_group // 2)
+            while lanes > 0:
+                frag[i] = combine_fn(
+                    frag[i],
+                    cute.arch.shuffle_sync_bfly(
+                        frag[i], offset=cute.crd2idx((0, lanes), geom.lane_layout_MN)
+                    ),
+                )
+                lanes = lanes // 2
+
+    @cute.jit
     def _combine_subtiles(self, state, epi_coord, geom):
         """Combine the ``fragments_per_group`` epi-N subtiles of one group in
         ascending order (called at the group's last subtile)."""
@@ -1260,6 +1421,8 @@ class GroupedLocalReduce(GroupedReduceBase):
                     if const_expr((epi_coord[1] + 1) % geom.fragments_per_group != 0):
                         return
                     frag = self._combine_subtiles(state, epi_coord, geom)
+                if const_expr(geom.lanes_per_group > 1):
+                    self._butterfly_cols(frag, geom)
             else:
                 if const_expr(
                     not self.fragment_reduced
@@ -1312,11 +1475,36 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
             name, axis=axis, group=group, combine=combine, finalize=finalize
         )
 
+    def supports_config(self, config) -> bool:
+        """The per-element butterfly reduces row lanes only, so on SM90/SM120 a
+        group must not reach both rows (r, r + 8) one thread owns."""
+        if config.device_capacity in (9, 12) and self.group > SM90_ROW_LANES:
+            return False
+        return super().supports_config(config)
+
+    def config_support_error(self, configs) -> str:
+        if self.group > SM90_ROW_LANES and all(
+            config.device_capacity in (9, 12) for config in configs
+        ):
+            return (
+                "grouped feed-main on SM90/SM120 supports axis-0 groups <= "
+                f"{SM90_ROW_LANES}; got group={self.group}"
+            )
+        return super().config_support_error(configs)
+
     @cute.jit
     def reduce_broadcast(self, value, geom):
         """Group reduction of one register value, broadcast to the group's row
         lanes. The primitive the apply port calls per element, and the entry
         point for a hand-written mixin (loop it over the fragment)."""
+        if const_expr(
+            self.group > geom.lanes_m
+            or any(len(chunk) > 1 for chunk in geom.row_chunks)
+        ):
+            raise NotImplementedError(
+                f"grouped feed-main group {self.group} must lie in distinct row lanes "
+                f"of one warp ({geom.lanes_m} lanes, one row per thread per group)"
+            )
         combine_fn = const_expr(self.combine_fn)
         rows = const_expr(self.group // 2)
         while rows > 0:
@@ -1490,6 +1678,8 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
         )
         if const_expr(geom.chunk > 1):
             self._fold_fragment(frag, geom)
+        if const_expr(geom.lanes_per_group > 1):
+            self._butterfly_cols(frag, geom)
         value = frag.load()
         result = self.finalize(
             value,
