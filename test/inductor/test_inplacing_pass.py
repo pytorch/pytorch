@@ -269,6 +269,21 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertTrue(_result_escapes_graph(alias_scatter, {}))
         self.assertFalse(_result_escapes_graph(alias_scatter, {}, {0}))
 
+    def test_foreach_result_does_not_escape_graph_input_alias(self):
+        def f(x, y):
+            updated = aten._foreach_add.List([x], [y])
+            x.copy_(updated[0])
+            return updated[0]
+
+        x = torch.randn(8, device=device)
+        y = torch.randn(8, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add.List, targets)
+        self.assertNotIn(aten._foreach_add_.List, targets)
+        self.assertIn(aten.copy_.default, targets)
+
     def test_scatter_result_does_not_alias_mutated_input(self):
         def f(x, src):
             out = aten.slice_scatter.default(x, src, 0, 1, 4)
