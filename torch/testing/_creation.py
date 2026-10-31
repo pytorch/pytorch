@@ -5,7 +5,6 @@ This module contains tensor creation utilities.
 import collections.abc
 import functools
 import math
-import warnings
 from typing import cast
 
 import torch
@@ -85,12 +84,6 @@ def make_tensor(
         high (Optional[Number]): Sets the upper limit (exclusive) of the given range. If a number is provided it is
             clamped to the greatest representable finite value of the given dtype. When ``None`` (default) this value
             is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
-
-            .. deprecated:: 2.1
-
-                Passing ``low==high`` to :func:`~torch.testing.make_tensor` for floating or complex types is deprecated
-                since 2.1 and will be removed in 2.3. Use :func:`torch.full` instead.
-
         requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
         noncontiguous (Optional[bool]): If `True`, the returned tensor will be noncontiguous. This argument is
             ignored if the constructed tensor has fewer than two elements. Mutually exclusive with ``memory_format``.
@@ -147,14 +140,6 @@ def make_tensor(
         if any(isinstance(value, float) and math.isnan(value) for value in [low, high]):
             raise ValueError(
                 f"`low` and `high` cannot be NaN, but got {low=} and {high=}"
-            )
-        elif low == high and dtype in _FLOATING_OR_COMPLEX_TYPES:
-            warnings.warn(
-                "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types "
-                "is deprecated since 2.1 and will be removed in 2.3. "
-                "Use `torch.full(...)` instead.",
-                FutureWarning,
-                stacklevel=3,
             )
         elif low >= high:
             raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")
