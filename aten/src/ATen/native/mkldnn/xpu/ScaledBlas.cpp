@@ -16,6 +16,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_scaled_addmm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_scaled_mm_v2_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
@@ -260,6 +261,12 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       scale_b.strides());
 }
 
+// out = alpha * (A @ B) + beta * out, applied as oneDNN post-ops.
+struct ScaledGemmEpilogue {
+  float alpha = 1.0f;
+  float beta = 0.0f;
+};
+
 Tensor& _scaled_gemm(
     const Tensor& mat1,
     const Tensor& mat2,
@@ -270,7 +277,8 @@ Tensor& _scaled_gemm(
     const std::optional<Tensor>& bias,
     const bool use_fast_accum,
     Tensor& out,
-    const std::optional<Tensor>& alpha = std::nullopt) {
+    const std::optional<Tensor>& alpha = std::nullopt,
+    const ScaledGemmEpilogue& epilogue = {}) {
   // Note: XPU does not support fast_accum for now, we will warn and always pass
   // false to the call.
   if (use_fast_accum) {
@@ -290,7 +298,9 @@ Tensor& _scaled_gemm(
       bias,
       scale_result,
       false /* use_fast_accum */,
-      alpha);
+      alpha,
+      epilogue.alpha,
+      epilogue.beta);
 
   return out;
 }
@@ -581,7 +591,8 @@ Tensor& _scaled_tensorwise_tensorwise(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   // Restrictions:
   // A, B are FP8, scales are fp32
 
@@ -610,7 +621,9 @@ Tensor& _scaled_tensorwise_tensorwise(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -623,7 +636,8 @@ Tensor& _scaled_rowwise_rowwise(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   // Restrictions:
   // A, B are FP8, scales are fp32, shape M/N for A/B
   TORCH_CHECK_VALUE(
@@ -673,7 +687,9 @@ Tensor& _scaled_rowwise_rowwise(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -686,7 +702,8 @@ Tensor& _scaled_block1x128_block1x128(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   //   scale_a: [M, K//128]
   //   scale_b: [N, K//128]
 
@@ -740,7 +757,9 @@ Tensor& _scaled_block1x128_block1x128(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -753,7 +772,8 @@ Tensor& _scaled_block128x128_block1x128(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   //   scale_a: [K//128, M//128]
   //   scale_b: [N, K//128]
   TORCH_CHECK_VALUE(
@@ -808,7 +828,9 @@ Tensor& _scaled_block128x128_block1x128(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -821,7 +843,8 @@ Tensor& _scaled_block1x128_block128x128(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   //   scale_a: [M, K//128]
   //   scale_b: [K//128, N//128]
   TORCH_CHECK_VALUE(
@@ -874,7 +897,9 @@ Tensor& _scaled_block1x128_block128x128(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -887,7 +912,8 @@ Tensor& _scaled_mxfp8_mxfp8(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   // Restrictions:
   // A, B are FP8, scales are e8m0, scale_a: [M, K//32], scale_b: [N, K//32].
   // Unlike CUDA, oneDNN does not swizzle scales; it needs real row-major 2D
@@ -942,7 +968,9 @@ Tensor& _scaled_mxfp8_mxfp8(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -955,7 +983,8 @@ Tensor& _scaled_mxfp4_mxfp4(
     const std::optional<Tensor>& bias,
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
-    Tensor& out) {
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
   // Restrictions:
   // A, B are FP4, scales are e8m0, scale_a: [M, K//32], scale_b: [N, K//32].
   // Unlike CUDA, oneDNN does not swizzle scales; it needs real row-major 2D
@@ -1013,7 +1042,9 @@ Tensor& _scaled_mxfp4_mxfp4(
       scaling_choice_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      epilogue);
 
   return out;
 }
@@ -1028,7 +1059,8 @@ Tensor& _scaled_nvfp4_nvfp4(
     const bool use_fast_accum,
     Tensor& out,
     const std::optional<Tensor>& global_scale_a = std::nullopt,
-    const std::optional<Tensor>& global_scale_b = std::nullopt) {
+    const std::optional<Tensor>& global_scale_b = std::nullopt,
+    const ScaledGemmEpilogue& epilogue = {}) {
   // Restrictions:
   // A, B are FP4, block scales are float8_e4m3fn, scale_a: [M, K//16],
   // scale_b: [N, K//16]. Two-level scaling additionally takes per-tensor fp32
@@ -1115,7 +1147,8 @@ Tensor& _scaled_nvfp4_nvfp4(
       bias,
       use_fast_accum,
       out,
-      alpha);
+      alpha,
+      epilogue);
 
   return out;
 }
@@ -1159,31 +1192,40 @@ Tensor& _scaled_nvfp4_nvfp4(
 // Note: The `contraction_dim` is not actually used in this kernel for now,
 // but is accepted to keep the XPU/CUDA signatures aligned. Shape inference +
 // output allocation happens in TORCH_META_FUNC(_scaled_mm_v2).
-TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
-(const Tensor& mat_a,
- const Tensor& mat_b,
- const at::ITensorListRef& scale_a_list,
- IntArrayRef scale_recipe_a,
- IntArrayRef swizzle_a,
- const at::ITensorListRef& scale_b_list,
- IntArrayRef scale_recipe_b,
- IntArrayRef swizzle_b,
- at::OptionalTensorRef bias,
- std::optional<c10::ScalarType> out_dtype,
- IntArrayRef contraction_dim,
- bool use_fast_accum,
- const Tensor& out) {
+// When `accumulator` is set (scaled_addmm), computes
+// out = alpha * (A @ B) + beta * accumulator.
+static void _scaled_mm_xpu_v2_impl(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const at::ITensorListRef& scale_a_list,
+    IntArrayRef scale_recipe_a,
+    IntArrayRef swizzle_a,
+    const at::ITensorListRef& scale_b_list,
+    IntArrayRef scale_recipe_b,
+    IntArrayRef swizzle_b,
+    at::OptionalTensorRef bias,
+    bool use_fast_accum,
+    const Tensor& out,
+    const std::optional<Tensor>& accumulator = std::nullopt,
+    const Scalar& beta = 0,
+    const Scalar& alpha = 1) {
   // Materialize the scale lists so the existing acceptance helpers (which
   // take ArrayRef<Tensor>) work unchanged.
   std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
   std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
+  // Reject empty scale lists before accessing scale_a[0] and scale_b[0].
+  TORCH_CHECK_VALUE(
+      !scale_a.empty() && !scale_b.empty(),
+      "scale_a and scale_b must each contain at least one tensor");
   ArrayRef<Tensor> scale_a_ref(scale_a);
   ArrayRef<Tensor> scale_b_ref(scale_b);
 
   // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm
   // kernels do not support this case). The output has already been sized by
   // the structured-op meta function; we only need to zero-fill when K=0.
-  if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0) {
+  // // scaled_addmm handles empty matrices below to preserve beta * accumulator.
+  if (!accumulator.has_value() &&
+      (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0)) {
     if (mat_a.size(1) == 0) {
       const_cast<Tensor&>(out).zero_();
     }
@@ -1214,6 +1256,9 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
     }
     if (scale_b.size() > 1) {
       targs.emplace_back(scale_b[1], "scale_b_global", 7);
+    }
+    if (accumulator.has_value()) {
+      targs.emplace_back(*accumulator, "input", 8);
     }
     checkAllSameGPU(__func__, targs);
   }
@@ -1341,6 +1386,34 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       " and scale_b[0].stride()=",
       scale_b[0].strides());
 
+  ScaledGemmEpilogue epilogue;
+  if (accumulator.has_value()) {
+    TORCH_CHECK_VALUE(
+        reinterpret_cast<uintptr_t>(accumulator->const_data_ptr()) % 16 == 0,
+        "input data pointer must be 16-byte aligned");
+    TORCH_CHECK_VALUE(
+        !accumulator->is_neg(), "input must not be a negative view");
+    TORCH_CHECK(
+        accumulator->scalar_type() == out.scalar_type() &&
+            accumulator->stride(0) == out.stride(0),
+        "scaled_addmm: input and output must have the same dtype and leading dimension");
+    epilogue.alpha = alpha.to<float>();
+    epilogue.beta = beta.to<float>();
+    if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0 ||
+        epilogue.alpha == 0.0f) {
+      if (epilogue.beta == 0.0f) {
+        out_mut.zero_();
+      } else {
+        at::mul_out(out_mut, *accumulator, beta);
+      }
+      return;
+    }
+    // oneDNN sum post-op accumulates into dst.
+    if (epilogue.beta != 0.0f && !out.is_same(*accumulator)) {
+      out_mut.copy_(*accumulator);
+    }
+  }
+
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
     _scaled_tensorwise_tensorwise(
         mat_a,
@@ -1350,7 +1423,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {
     _scaled_rowwise_rowwise(
         mat_a,
@@ -1360,7 +1434,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_128x128_1x128) {
     _scaled_block128x128_block1x128(
         mat_a,
@@ -1370,7 +1445,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128) {
     _scaled_block1x128_block128x128(
         mat_a,
@@ -1380,7 +1456,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
     _scaled_block1x128_block1x128(
         mat_a,
@@ -1390,7 +1467,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
     _scaled_mxfp8_mxfp8(
         mat_a,
@@ -1400,7 +1478,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4) {
     _scaled_mxfp4_mxfp4(
         mat_a,
@@ -1410,7 +1489,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
     _scaled_nvfp4_nvfp4(
         mat_a,
@@ -1422,7 +1502,8 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         use_fast_accum,
         out_mut,
         scale_a[1],
-        scale_b[1]);
+        scale_b[1],
+        epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
     _scaled_nvfp4_nvfp4(
         mat_a,
@@ -1432,11 +1513,74 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
         bias_opt,
         out_dtype_,
         use_fast_accum,
-        out_mut);
+        out_mut,
+        std::nullopt,
+        std::nullopt,
+        epilogue);
   } else {
     TORCH_CHECK_VALUE(
         false, "Invalid state - found an implementation, but not really");
   }
+}
+
+TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
+(const Tensor& mat_a,
+ const Tensor& mat_b,
+ const at::ITensorListRef& scale_a_list,
+ IntArrayRef scale_recipe_a,
+ IntArrayRef swizzle_a,
+ const at::ITensorListRef& scale_b_list,
+ IntArrayRef scale_recipe_b,
+ IntArrayRef swizzle_b,
+ at::OptionalTensorRef bias,
+ std::optional<c10::ScalarType> out_dtype,
+ IntArrayRef contraction_dim,
+ bool use_fast_accum,
+ const Tensor& out) {
+  _scaled_mm_xpu_v2_impl(
+      mat_a,
+      mat_b,
+      scale_a_list,
+      scale_recipe_a,
+      swizzle_a,
+      scale_b_list,
+      scale_recipe_b,
+      swizzle_b,
+      bias,
+      use_fast_accum,
+      out);
+}
+
+TORCH_IMPL_FUNC(_scaled_addmm_xpu_out)
+(const Tensor& self,
+ const Tensor& mat1,
+ const Tensor& mat2,
+ const at::ITensorListRef& scale_a_list,
+ IntArrayRef recipe_a,
+ IntArrayRef swizzle_a,
+ const at::ITensorListRef& scale_b_list,
+ IntArrayRef recipe_b,
+ IntArrayRef swizzle_b,
+ IntArrayRef contraction_dim,
+ const Scalar& beta,
+ const Scalar& alpha,
+ bool use_fast_accum,
+ const Tensor& out) {
+  _scaled_mm_xpu_v2_impl(
+      mat1,
+      mat2,
+      scale_a_list,
+      recipe_a,
+      swizzle_a,
+      scale_b_list,
+      recipe_b,
+      swizzle_b,
+      at::OptionalTensorRef(),
+      use_fast_accum,
+      out,
+      self,
+      beta,
+      alpha);
 }
 
 } // namespace at::native

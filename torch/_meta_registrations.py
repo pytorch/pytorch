@@ -7582,7 +7582,8 @@ def meta_scaled_mm_v2(
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
 
 
-@register_meta([aten._scaled_addmm.default])
+@register_meta([aten._scaled_addmm.default, aten._scaled_addmm.out])
+@out_wrapper(exact_dtype=True)
 def meta_scaled_addmm(
     self: torch.Tensor,
     mat1: torch.Tensor,
@@ -7646,6 +7647,12 @@ def meta_scaled_addmm(
         lambda: "input must have canonical contiguous row-major strides",
     )
     return result
+
+
+@register_meta(aten._scaled_addmm_.default)
+def meta_scaled_addmm_(self, *args, **kwargs):
+    meta_scaled_addmm(self, *args, **kwargs)
+    return self
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
