@@ -1678,6 +1678,14 @@ capability.
 **FlightRecorder NCCL JSON** ``/fr_trace_nccl_json``
   Same data as ``/fr_trace_nccl`` but rendered as raw formatted JSON per rank.
 
+**FlightRecorder nccl2** ``/fr_trace?backend=nccl2``
+  Same as ``/fr_trace`` for the ``nccl2`` backend's recorder. Other recorders
+  (e.g. ``backend=nccl``) can be selected the same way.
+
+**FlightRecorder nccl2 JSON** ``/fr_trace_json?backend=nccl2``
+  Same data as ``/fr_trace?backend=nccl2`` but rendered as raw formatted JSON
+  per rank.
+
 **TorchComms FlightRecorder** ``/torchcomms_fr_trace``
   Fetches TorchComms flight recorder data from ``torchcomms_fr_trace_json``
   (with ``onlyactive=true``) on all workers. Renders the same structured tables
@@ -1744,9 +1752,11 @@ curl -X POST \
   "http://worker-host:port/handler/pyspy_dump?nonblocking=1&native=1"  # @lint-ignore
 ```
 
-**``fr_trace_json``** — CPU flight-recorder trace (application/json). Returns
-the flight-recorder ring buffer contents as JSON, including all recorded
-collective operations, their metadata, and timing information.
+**``fr_trace_json``** — Flight-recorder trace (application/json). Returns
+the active entries of the flight-recorder ring buffer as JSON, with their
+metadata and timing information. The
+``backend`` query parameter selects the recorder (default ``gloo``, e.g.
+``nccl`` or ``nccl2``).
 
 ```bash
 curl -X POST \
@@ -1754,7 +1764,12 @@ curl -X POST \
 ```
 
 **``fr_dump_file``** — Starts a Flight Recorder dump for one backend. The
-``backend`` query parameter selects the backend-specific recorder.
+``backend`` query parameter selects the backend-specific recorder. The dump,
+without stack traces, goes to the same per-rank file
+(``<TORCH_FR_DUMP_TEMP_FILE><rank>``, prefix ``~/.cache/torch/comm_lib_trace_rank_``
+if unset) that every backend's dump and ProcessGroupNCCL's timeout dump write,
+so it overwrites any earlier dump there, including the watchdog's. Copy that
+file first to keep it.
 
 ```bash
 curl -X POST \
@@ -1847,7 +1862,7 @@ Handlers that support dumping:
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``PySpyHandler``                   | ``pyspy_dump``         | py-spy stack dumps (nonblocking) for all ranks.   |
 +------------------------------------+------------------------+---------------------------------------------------+
-| ``FlightRecorderHandler``          | ``fr_trace``           | CPU + NCCL flight-recorder tables.                |
+| ``FlightRecorderHandler``          | ``fr_trace``           | CPU, NCCL, nccl2 and nccl-lazy FR tables.         |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
 +------------------------------------+------------------------+---------------------------------------------------+

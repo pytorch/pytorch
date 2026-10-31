@@ -1355,12 +1355,17 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        self.tempdir = tempfile.TemporaryDirectory()
+        os.environ["TORCH_FR_DUMP_TEMP_FILE"] = os.path.join(
+            self.tempdir.name, "trace_"
+        )
         self._spawn_processes()
 
     def tearDown(self):
         if dist.is_initialized():
             dist.destroy_process_group()
         os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+        os.environ.pop("TORCH_FR_DUMP_TEMP_FILE", None)
         super().tearDown()
         try:
             os.remove(self.file_name)
@@ -1373,6 +1378,20 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
             torch._C._distributed_c10d._dump_fr_trace_json(backend=backend)
         )
         return trace.get("entries", [])
+
+    @staticmethod
+    def _wait_for_dump(path):
+        # fr_dump_file writes asynchronously and non-atomically, with no
+        # completion signal: poll until the file parses.
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                with open(path, "rb") as f:
+                    return pickle.load(f)
+            except (OSError, EOFError, pickle.UnpicklingError):
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.1)
 
     def _init_nccl(self, use_nccl2):
         # Read once, where the backend is registered, which is the first time a
@@ -1412,15 +1431,145 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         self.assertEqual(name, "nccl")
         self.assertNotIn(pg, _world.pg_flight_recorder_hooks)
 
-        before = len(self._entries("nccl"))
         dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
         torch.cuda.synchronize()
-        # Nothing in the hook's instance, and the native recording that made
-        # the hook unnecessary is still there.
-        self.assertEqual(self._entries("nccl")[before:], [])
+
+        # The generic dump under the backend's own name serves the native
+        # recording that made the hook unnecessary, so callers can dump
+        # whatever "nccl" built without knowing which kind it is.
+        def ids(entries):
+            return [(e["record_id"], e["profiling_name"]) for e in entries]
+
         native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
-        names = [e["profiling_name"] for e in native.get("entries", [])]
-        self.assertIn("nccl:all_reduce", names)
+        native_ids = ids(native.get("entries", []))
+        self.assertIn("nccl:all_reduce", [name for _, name in native_ids])
+        self.assertEqual(ids(self._entries(name)), native_ids)
+        trace = pickle.loads(torch._C._distributed_c10d._dump_fr_trace(backend=name))
+        self.assertEqual(ids(trace["entries"]), native_ids)
+
+        torch._C._distributed_c10d._reset_fr_trace(backend=name)
+        native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
+        self.assertEqual(native.get("entries", []), [])
+
+    def test_stock_nccl_control_plane(self):
+        import requests
+
+        from torch._C._distributed_c10d import _WorkerServer
+
+        _, name = self._init_nccl("0")
+        self.assertEqual(name, "nccl")
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
+        torch.cuda.synchronize()
+
+        server = _WorkerServer("", 0)
+        self.addCleanup(server.shutdown)
+        url = f"http://localhost:{server.port}/handler"
+        res = requests.post(f"{url}/fr_trace_json?backend=nccl", timeout=60)
+        self.assertEqual(res.status_code, 200)
+        native = json.loads(
+            torch._C._distributed_c10d._dump_nccl_trace_json(onlyActive=True)
+        )
+        self.assertEqual(res.json()["pg_config"], native["pg_config"])
+
+        path = os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+        torch._C._distributed_c10d._dump_fr_trace_file(self.rank, backend=name)
+        with open(path, "rb") as f:
+            dump = pickle.load(f)
+        self.assertIn("nccl:all_reduce", [e["profiling_name"] for e in dump["entries"]])
+
+        # The handler rewrites the same file asynchronously, so remove it and
+        # wait for it to parse again.
+        os.remove(path)
+        res = requests.post(f"{url}/fr_dump_file?backend=nccl", timeout=60)
+        self.assertEqual(res.status_code, 200, msg=res.text)
+        self.assertEqual(
+            res.text, f"Flight Recorder dump initiated for rank {self.rank}"
+        )
+        dump = self._wait_for_dump(path)
+        self.assertIn("nccl:all_reduce", [e["profiling_name"] for e in dump["entries"]])
+
+    def test_stock_nccl_subgroup_dumps_under_global_rank(self):
+        import requests
+
+        from torch._C._distributed_c10d import _WorkerServer
+
+        # The world group is nccl2, so the first stock ProcessGroupNCCL is a
+        # subgroup where global rank 1 is group rank 0.
+        _, name = self._init_nccl("1")
+        self.assertEqual(name, "nccl2")
+        sub = dist.new_group([1], backend="nccl-legacy")
+        prefix = os.environ["TORCH_FR_DUMP_TEMP_FILE"]
+        if self.rank == 1:
+            server = _WorkerServer("", 0)
+            self.addCleanup(server.shutdown)
+            url = f"http://localhost:{server.port}/handler/fr_dump_file?backend=nccl"
+            initiated = "Flight Recorder dump initiated for rank 1"
+            # Before both, whose rank 1 would hide a group-local rank from sub.
+            self.assertEqual(requests.post(url, timeout=60).text, initiated)
+            # The handler rewrites the same file asynchronously, so remove it
+            # once written and wait for it to parse again below.
+            self._wait_for_dump(prefix + "1")
+            os.remove(prefix + "1")
+        both = dist.new_group([0, 1], backend="nccl-legacy")
+        # shrink_group needs an initialized parent; NCCL 2.27 added shrink.
+        can_shrink = torch.cuda.nccl.version() >= (2, 27)
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"), group=both)
+        if self.rank != 1:
+            if can_shrink:
+                # The excluded rank releases both, as rank 1's shrink does.
+                dist.destroy_process_group(both)
+            return
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"), group=sub)
+        torch.cuda.synchronize()
+        # None of these map group rank 0 to global rank 1, so none may replace
+        # it: a stateless group has no list; a merged group keeps both's, where
+        # 0 is global rank 0; a shrunk group is renumbered; and a split builds
+        # its list from its parent's.
+        stateless = dist.ProcessGroupNCCL(dist.HashStore(), 0, 1)
+        merged = both.merge_remote_group(dist.HashStore(), 1)
+        # Splitting needs an initialized parent.
+        merged.allreduce([torch.ones(8, device=f"cuda:{self.rank}")]).wait()
+        unregistered = [stateless, merged, merged.split_group([0])]
+        if can_shrink:
+            shrunk = dist.shrink_group([0], group=both)
+            unregistered.append(shrunk.split_group([0]))
+
+        res = requests.post(url, timeout=60)
+        self.assertEqual(res.status_code, 200, msg=res.text)
+        self.assertEqual(res.text, initiated)
+        dump = self._wait_for_dump(prefix + "1")
+        self.assertIn(
+            ("nccl:all_reduce", sub.group_name),
+            [(e["profiling_name"], e["process_group"][0]) for e in dump["entries"]],
+        )
+        self.assertFalse(os.path.exists(prefix + "0"))
+        for pg in reversed(unregistered):
+            pg.shutdown()
+
+    def test_stock_nccl_recording_off(self):
+        import requests
+
+        from torch._C._distributed_c10d import _WorkerServer
+
+        # Read when ProcessGroupNCCL first touches its recorder, so set it
+        # before init.
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "0"
+        _, name = self._init_nccl("0")
+        self.assertEqual(name, "nccl")
+
+        # The rank is set but recording is off, so there is nothing to dump.
+        server = _WorkerServer("", 0)
+        self.addCleanup(server.shutdown)
+        res = requests.post(
+            f"http://localhost:{server.port}/handler/fr_dump_file?backend=nccl",
+            timeout=60,
+        )
+        self.assertEqual(res.status_code, 503, msg=res.text)
+        self.assertEqual(
+            res.text,
+            "Flight Recorder rank is unset for nccl; no process group has "
+            "registered with it yet, or recording is off",
+        )
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/WaitCounter.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -286,6 +287,10 @@ bool shouldAllCommunicatorsRegisterAllTensors() {
   }();
   return flag;
 }
+
+// Set while merge(), shrink(), or split() of a group whose ranks are not known
+// to be global constructs its child; see groupRanksNotGlobal_.
+thread_local bool constructingUnmappedGroup = false;
 
 } // namespace
 
@@ -1033,6 +1038,31 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
   init();
+  // The rank fr_dump_file?backend=nccl dumps under: this group's global rank.
+  // Not globalRank(): that is the rank in the first ProcessGroupNCCL, which may
+  // be a subgroup. An empty global_ranks_in_group is only the world mapping for
+  // the default group, so it only fills an unset rank.
+  auto* recorder = FlightRecorderCUDA::get();
+  const auto& ranks = groupRanks();
+  groupRanksNotGlobal_ = constructingUnmappedGroup ||
+      (options_->global_ranks_in_group.empty() && recorder->getRank() >= 0);
+  if (groupRanksNotGlobal_) {
+    // Leave the rank alone.
+  } else if (static_cast<size_t>(rank_) >= ranks.size()) {
+    LOG(WARNING) << logPrefix() << "rank " << rank_
+                 << " is outside global_ranks_in_group; Flight Recorder rank "
+                    "left unchanged.";
+  } else {
+    auto global_rank = static_cast<int>(ranks[rank_]);
+    auto previous = recorder->getRank();
+    if (previous >= 0 && previous != global_rank) {
+      LOG(WARNING) << logPrefix() << "Flight Recorder rank changed from "
+                   << previous << " to " << global_rank
+                   << "; an existing dump file keeps rank " << previous
+                   << "'s name.";
+    }
+    recorder->setRank(global_rank);
+  }
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
@@ -1358,7 +1388,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   // This value must be non-negative int32 and all ranks are.
   ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   // eagerConnectSingleDevice() initializes the child from ncclCommSplit before
-  // returning, so split does not need a separate Store connection.
+  // returning, so split does not need a separate Store connection. The child's
+  // list comes from groupRanks(), so it is no more global than ours.
+  constructingUnmappedGroup = groupRanksNotGlobal_;
+  auto reset = c10::make_scope_exit([] { constructingUnmappedGroup = false; });
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store, groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
@@ -1380,6 +1413,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
   // Unlike split(), merge returns an uninitialized child. Its first collective
   // may block in broadcastUniqueNCCLID() while holding the Store connection,
   // so preserve an independent connection.
+  // The child keeps the parent's list, which does not map the merged group.
+  constructingUnmappedGroup = true;
+  auto reset = c10::make_scope_exit([] { constructingUnmappedGroup = false; });
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
@@ -1692,10 +1728,6 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
-  // Serialize all calls to this function to avoid corrupting data, but allow
-  // multiple calls in one runtime. User is responsible for preserving the
-  // output file from an earlier call before a later call overwrites it.
-  static std::mutex writeDebugInfoMutex;
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
@@ -1706,9 +1738,15 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace(true, includeStackTrace, onlyActive);
     // dump_nccl_trace will hang so we don't grab the global lock until we get
-    // the trace.
-    std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
-    DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    // the trace. The lock serializes writes to the dump file across all
+    // recorders; callers must preserve an earlier file before a later write
+    // overwrites it.
+    std::lock_guard<std::mutex> lock(DebugInfoWriter::writeMutex());
+    // The recorder's global rank, so this and fr_dump_file name the file
+    // alike; globalRank() is group-local when the first PGNCCL is a subgroup.
+    auto rank = FlightRecorderCUDA::get()->getRank();
+    DebugInfoWriter& writer =
+        DebugInfoWriter::getWriter(rank >= 0 ? rank : globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
     writer.write(ncclTrace);
@@ -6210,6 +6248,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     new_opts->config = options_->config;
   }
 
+  // Ranks are renumbered after the exclusion, so they are not global.
+  constructingUnmappedGroup = true;
+  auto reset = c10::make_scope_exit([] { constructingUnmappedGroup = false; });
   auto new_pg = c10::make_intrusive<ProcessGroupNCCL>(
       new_store, new_rank, new_size, new_opts);
 

@@ -87,6 +87,13 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   writer_ = std::move(writer);
 }
 
+// Leaked so fr_dump_file workers joined during static destruction can still
+// lock it.
+std::mutex& DebugInfoWriter::writeMutex() {
+  static auto* mutex = new std::mutex();
+  return *mutex;
+}
+
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
@@ -125,11 +132,57 @@ bool recordsFlightRecorderNatively(const std::string& backend) {
   return backend == "gloo" || backend == "nccl" || backend == "xccl";
 }
 
+namespace {
+// Function-local so other libraries can register from their static
+// initializers; leaked so a dump during static destruction still works.
+std::mutex& dumpersMutex() {
+  static auto* mutex = new std::mutex();
+  return *mutex;
+}
+
+std::unordered_map<std::string, FlightRecorderDumper>& dumpers() {
+  static auto* dumpers =
+      new std::unordered_map<std::string, FlightRecorderDumper>();
+  return *dumpers;
+}
+
+std::optional<FlightRecorderDumper> getDumper(const std::string& backend) {
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  auto it = dumpers().find(backend);
+  if (it == dumpers().end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+} // namespace
+
+void registerFlightRecorderDumper(
+    const std::string& backend,
+    FlightRecorderDumper dumper) {
+  TORCH_CHECK_VALUE(
+      recordsFlightRecorderNatively(backend) && backend != kDefaultFRBackend,
+      "FlightRecorderDumper for ",
+      backend,
+      " would hide the trace in getFlightRecorder(\"",
+      backend,
+      "\")");
+  TORCH_CHECK_VALUE(
+      dumper.dump && dumper.dumpJson && dumper.reset && dumper.rank,
+      "FlightRecorderDumper for ",
+      backend,
+      " must set dump, dumpJson, reset and rank");
+  std::lock_guard<std::mutex> lock(dumpersMutex());
+  dumpers()[backend] = std::move(dumper);
+}
+
 std::string dump_fr_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->dump(includeCollectives, includeStackTraces, onlyActive);
+  }
   return getFlightRecorder(backend)->dump(
       std::unordered_map<
           std::string,
@@ -143,6 +196,9 @@ std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive,
     const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->dumpJson(includeCollectives, onlyActive);
+  }
   return getFlightRecorder(backend)->dump_json(
       std::unordered_map<
           std::string,
@@ -160,13 +216,19 @@ void dump_fr_trace_file(
   // Serialize writes so concurrent dumps cannot interleave into the same
   // file, but take the trace before locking: dump() can block on device APIs
   // and must not hold up an unrelated caller.
-  static std::mutex writeDebugInfoMutex;
   auto trace = dump_fr_trace(
       includeCollectives, includeStackTraces, onlyActive, backend);
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
+  std::lock_guard<std::mutex> lock(DebugInfoWriter::writeMutex());
   DebugInfoWriter& writer = DebugInfoWriter::getWriter(rank);
   LOG(INFO) << "Dumping Flight Recorder trace to " << writer.getWriterTarget();
   writer.write(trace);
+}
+
+int fr_trace_rank(const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->rank();
+  }
+  return getFlightRecorder(backend)->getRank();
 }
 
 bool try_dump_fr_trace_file(
@@ -174,9 +236,12 @@ bool try_dump_fr_trace_file(
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
-  auto* recorder = getFlightRecorder(backend);
-  int rank = recorder->getRank();
-  if (!recorder->enabled_ || rank < 0) {
+  // A dumper's rank is already -1 while recording is off.
+  if (!getDumper(backend) && !getFlightRecorder(backend)->enabled_) {
+    return false;
+  }
+  int rank = fr_trace_rank(backend);
+  if (rank < 0) {
     return false;
   }
   dump_fr_trace_file(
@@ -185,6 +250,10 @@ bool try_dump_fr_trace_file(
 }
 
 void reset_fr_trace(const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    dumper->reset();
+    return;
+  }
   getFlightRecorder(backend)->reset_all();
 }
 } // namespace c10d
