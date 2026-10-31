@@ -4,6 +4,9 @@
 #include <c10/cuda/CUDAException.h>
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#elif defined(USE_ROCM)
+#include <c10/cuda/CUDAGuard.h>
+#include <hip/hip_runtime_api.h>
 #endif
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -157,6 +160,94 @@ bool isFabricSupported() {
   return true;
 }
 
+#elif defined(USE_ROCM) && ROCM_VERSION >= 100000
+
+// The device attribute rules out GPUs without UALink. Provisioning is only
+// checked at export, so the full allocate/export/import cycle still runs.
+bool isFabricSupported(c10::DeviceIndex dev) {
+  int fabric_supported = 0;
+  hipError_t err = hipDeviceGetAttribute(
+      &fabric_supported,
+      hipDeviceAttributeHandleTypeFabricSupported,
+      static_cast<int>(dev));
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "status " << hipGetErrorString(err)
+        << " Could not query FABRIC handle support, falling back to fd handle exchange\n";
+    return false;
+  }
+  if (!fabric_supported) {
+    LOG(INFO)
+        << "FABRIC handles are not supported, falling back to fd handle exchange\n";
+    return false;
+  }
+
+  // hipMemImportFromShareableHandle imports onto the current device.
+  CUDAGuard guard(dev);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleType = hipMemHandleTypeFabric;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = static_cast<int>(dev);
+
+  // Failures below are returned, not checked. Each arms a sticky error that
+  // must be consumed here or it surfaces at an unrelated call later.
+  size_t granularity = 0;
+  err = hipMemGetAllocationGranularity(
+      &granularity, &prop, hipMemAllocationGranularityRecommended);
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "status " << hipGetErrorString(err)
+        << " Could not get FABRIC allocation granularity, falling back to fd handle exchange\n";
+    return false;
+  }
+
+  // 1. try allocating memory with FABRIC handle type
+  hipMemGenericAllocationHandle_t handle{};
+  err = hipMemCreate(&handle, granularity, &prop, 0);
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "status " << hipGetErrorString(err)
+        << " Could not allocate memory with FABRIC handle, falling back to fd handle exchange\n";
+    return false;
+  }
+
+  // 2. check export. An unprovisioned accelerator fails here, not above.
+  hipMemFabricHandle_t shared_handle{};
+  err = hipMemExportToShareableHandle(
+      &shared_handle, handle, hipMemHandleTypeFabric, 0);
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "status " << hipGetErrorString(err)
+        << " Could not export FABRIC handle, falling back to fd handle exchange\n";
+    (void)hipMemRelease(handle);
+    return false;
+  }
+
+  // 3. check import
+  hipMemGenericAllocationHandle_t import_handle{};
+  err = hipMemImportFromShareableHandle(
+      &import_handle, &shared_handle, hipMemHandleTypeFabric);
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "status " << hipGetErrorString(err)
+        << " Could not import FABRIC handle, falling back to fd handle exchange\n";
+    (void)hipMemRelease(handle);
+    return false;
+  }
+
+  (void)hipMemRelease(import_handle);
+  (void)hipMemRelease(handle);
+  LOG(INFO) << "using fabric to exchange memory handles\n";
+  return true;
+}
+
 #endif
 } // namespace
 
@@ -211,6 +302,24 @@ bool get_fabric_access(c10::DeviceIndex dev) {
     fabricCliqueId_[dev] = kCliqueIdUnsupported;
     return false;
   }
+#elif defined(USE_ROCM) && ROCM_VERSION >= 100000
+  TORCH_CHECK(
+      num_devices_ >= 0,
+      "p2p access cache not initialized. "
+      "Ensure c10::cuda::detail::init_p2p_access_cache() is called first.");
+  TORCH_CHECK(
+      dev >= 0 && dev < num_devices_,
+      static_cast<int>(dev),
+      " is not a valid device");
+
+  auto& cache = fabricAccessEnabled_[dev];
+  if (cache != -1) {
+    return cache;
+  }
+  // No UALink domain ID is exposed, so get_fabric_clique_id() reports
+  // unsupported and ranks in different UALink domains fail only at import.
+  cache = isFabricSupported(dev) ? 1 : 0;
+  return cache;
 #else
   (void)dev; // Suppress unused parameter warning
   return false;
