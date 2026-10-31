@@ -235,7 +235,7 @@ def get_backward_nested_region_config(
 def _specialize_nested_region_configs_for_backward(
     gm: torch.fx.GraphModule,
 ) -> None:
-    """Switch every region nested in a backward HOP graph to its backward config.
+    """Switch every region in a backward graph to its backward config.
 
     Both the HOP node meta and the subgraph module mirror are specialized. gm,
     which the partitioner just built, is updated in place. A module nested in it

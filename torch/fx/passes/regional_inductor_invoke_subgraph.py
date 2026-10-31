@@ -1,7 +1,9 @@
 import copy
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_inductor_compile
@@ -20,9 +22,8 @@ __all__ = ["regional_inductor_invoke_subgraph"]
 
 
 # Identity shared by one graph's forward and backward compile: the compile id
-# (the lazy backward re-enters the forward's CompileContext, so this pairs them
-# even without a TracingContext) plus the AOT graph scope (which keeps graphs a
-# single compile splits, e.g. DDPOptimizer, apart).
+# (the lazy backward re-enters the forward's CompileContext) plus the AOT graph
+# scope (which keeps graphs a single compile splits, e.g. DDPOptimizer, apart).
 _RegionalScopeKey = tuple[object, tuple[str, ...] | None]
 
 
@@ -36,8 +37,9 @@ class _RegionCompileContext:
     # None when this compile cannot be paired with its other direction, in which
     # case each region keeps its CUDA Graph state private.
     scope_key: _RegionalScopeKey | None
-    # None means the direction is unknown; fall back to the node's own tag.
-    is_inference: bool | None
+    # The graph's direction from AOTAutograd's graph name; None when unknown,
+    # in which case each node's partitioner tag decides.
+    direction: str | None
 
 
 def _get_aot_graph_scope_and_direction() -> tuple[tuple[str, ...] | None, str | None]:
@@ -76,19 +78,23 @@ def _get_regional_scope_key() -> _RegionalScopeKey | None:
     return (compile_id, scope)
 
 
-def _get_cudagraph_pairing_name(identifier: str, is_backward: bool) -> str:
-    """Name shared by a region's forward and backward invoke_subgraph calls."""
+def _get_cudagraph_pairing_name(identifier: str, is_backward: bool) -> str | None:
+    """Name shared by a region's forward and backward invoke_subgraph calls.
+
+    None for a call that has no counterpart in the other direction, e.g. a
+    forward call recomputed in the backward.
+    """
     # A first-level region is partitioned into partitioned_fw<X> and
     # partitioned_bw<X>. A region nested in an uncompiled one is not partitioned
     # and keeps InvokeSubgraphAutogradOp's identifiers, fw_<id> and bw_<id>_<n>,
     # where <n> numbers the backward variants of one forward.
-    if is_backward:
-        if identifier.startswith("partitioned_bw"):
-            return identifier.removeprefix("partitioned_bw")
-        return identifier.removeprefix("bw_").rpartition("_")[0]
-    if identifier.startswith("partitioned_fw"):
-        return identifier.removeprefix("partitioned_fw")
-    return identifier.removeprefix("fw_")
+    prefixes = ("partitioned_bw", "bw_") if is_backward else ("partitioned_fw", "fw_")
+    if identifier.startswith(prefixes[0]):
+        return identifier.removeprefix(prefixes[0])
+    if identifier.startswith(prefixes[1]):
+        name = identifier.removeprefix(prefixes[1])
+        return name.rpartition("_")[0] if is_backward else name
+    return None
 
 
 def _compile_submod(
@@ -109,31 +115,43 @@ def _compile_submod(
 
     # We use the first user for compile configs and inputs
     sub_node = subgraph_users[0]
-    if not _needs_inductor_compile(sub_node):
+    compile_fn = _get_region_compiler(sub_node, region_ctx.direction)
+    if compile_fn is None:
         raise AssertionError("sub_node does not need inductor compile")
     compile_config = sub_node.meta["custom"]["nested_region_config"]
     partitioner_tag = sub_node.meta.get("partitioner_tag")
-    is_backward = partitioner_tag == "is_backward"
-    compile_fn = (
-        compile_config.bw_compiler if is_backward else compile_config.fw_compiler
-    )
     identifier = sub_node.args[1]
     if not isinstance(identifier, str):
         raise AssertionError(f"Expected str identifier, got {type(identifier)}")
-    pairing_name = _get_cudagraph_pairing_name(identifier, is_backward)
+    uses_backward_config = _uses_backward_compiler(sub_node, region_ctx.direction)
+    if region_ctx.direction is None:
+        is_inference = partitioner_tag is None
+        compiles_as_backward = uses_backward_config
+    else:
+        is_inference = region_ctx.direction == "inference"
+        compiles_as_backward = region_ctx.direction == "backward"
+    # A region pairs with its other direction only when it runs in the graph of
+    # its own direction: not a forward call recomputed in the backward, nor a
+    # backward traced into a forward or inference graph by torch.autograd.grad.
+    pairing_name = (
+        _get_cudagraph_pairing_name(identifier, uses_backward_config)
+        if uses_backward_config == compiles_as_backward and not is_inference
+        else None
+    )
     cudagraph_state_key = (
-        None if region_ctx.scope_key is None else (*region_ctx.scope_key, pairing_name)
+        None
+        if region_ctx.scope_key is None or pairing_name is None
+        else (*region_ctx.scope_key, pairing_name)
     )
     # Only the built-in region compiler takes the regional CUDA Graph context; a
     # custom compiler keeps its (gm, example_inputs) call.
     region_kwargs: dict[str, object] = {}
     if getattr(compile_fn, "func", compile_fn) is invoke_subgraph_inductor_compile:
         region_kwargs = {
-            "is_inference": (
-                partitioner_tag is None
-                if region_ctx.is_inference is None
-                else region_ctx.is_inference
-            ),
+            # Inductor compiles a region in its graph's direction, whichever
+            # config it uses.
+            "is_backward": compiles_as_backward and not is_inference,
+            "is_inference": is_inference,
             "cudagraph_state_key": cudagraph_state_key,
         }
 
@@ -220,28 +238,50 @@ def _needs_inductor_compile(node: torch.fx.Node) -> bool:
     )
 
 
+def _uses_backward_compiler(node: torch.fx.Node, direction: str | None) -> bool:
+    if direction is None:
+        return node.meta.get("partitioner_tag") == "is_backward"
+    # Everything in a backward graph runs as part of the backward, including a
+    # forward call recomputed there. Elsewhere a backward region can only come
+    # from a traced torch.autograd.grad, and only its identifier says so.
+    identifier = node.args[1]
+    return direction == "backward" or (
+        isinstance(identifier, str) and identifier.startswith(("partitioned_bw", "bw_"))
+    )
+
+
+def _get_region_compiler(
+    node: torch.fx.Node, direction: str | None
+) -> Callable[..., Any] | None:
+    nested_config = node.meta.get("custom", {}).get("nested_region_config")
+    if nested_config is None:
+        return None
+    if _uses_backward_compiler(node, direction):
+        return nested_config.bw_compiler
+    return nested_config.fw_compiler
+
+
 def _compile_invoke_subgraph_nodes_with_inductor(
     gm: torch.fx.GraphModule,
     region_ctx: _RegionCompileContext,
 ) -> torch.fx.GraphModule:
-    map_subgraph_to_nodes = defaultdict(list)
-    subgraphs: set[str] = set()
+    # Keyed in graph order, so regions compile in a deterministic order.
+    map_subgraph_to_nodes: dict[str, list[torch.fx.Node]] = defaultdict(list)
 
     for node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.invoke_subgraph
     ):
-        if not _needs_inductor_compile(node):
+        if _get_region_compiler(node, region_ctx.direction) is None:
             continue
         if node.args[0].op != "get_attr":
             raise AssertionError(f"Expected get_attr, got {node.args[0].op}")
         subgraph_name = node.args[0].target
         if not isinstance(subgraph_name, str):
             raise AssertionError(f"Expected str, got {type(subgraph_name)}")
-        subgraphs.add(subgraph_name)
         map_subgraph_to_nodes[subgraph_name].append(node)
 
-    for subgraph in subgraphs:
-        gm = _compile_submod(gm, subgraph, map_subgraph_to_nodes[subgraph], region_ctx)
+    for subgraph, subgraph_users in map_subgraph_to_nodes.items():
+        gm = _compile_submod(gm, subgraph, subgraph_users, region_ctx)
 
     return gm
 
@@ -274,26 +314,24 @@ def regional_inductor_invoke_subgraph(
     from torch._inductor import config
     from torch._inductor.compile_fx import _validate_nested_region_cudagraphs
 
-    # AOTAutograd tells us the direction directly. Fall back to the node tags
-    # only when there is no tracing context (aot_module_simplified without
-    # Dynamo); an inference graph can carry is_backward-tagged regions from a
-    # traced torch.autograd.grad call, so the tags alone are not conclusive.
+    # AOTAutograd names the graph with its direction. Fall back to the node tags
+    # when it did not.
     _, direction = _get_aot_graph_scope_and_direction()
-    if direction is None:
-        is_backward = _has_backward_tagged_node(gm)
-        is_inference = None
-    else:
-        is_backward = direction == "backward"
-        is_inference = direction == "inference"
+    is_backward = (
+        _has_backward_tagged_node(gm) if direction is None else direction == "backward"
+    )
+    # A region nested in an uncompiled one is compiled on its own here, so only
+    # compiled regions enclose the regions inside them.
     _validate_nested_region_cudagraphs(
         gm,
         enclosing_forward=config.triton.cudagraphs,
         enclosing_backward=config.triton.cudagraphs,
         validate_forward=not is_backward,
         validate_backward=is_backward,
+        region_encloses=lambda node: _get_region_compiler(node, direction) is not None,
     )
     region_ctx = _RegionCompileContext(
-        scope_key=_get_regional_scope_key(), is_inference=is_inference
+        scope_key=_get_regional_scope_key(), direction=direction
     )
 
     # fuser utils create new nodes using create_proxy which retains the seq_nr
