@@ -11,6 +11,7 @@ import json
 import re
 import sys
 import unittest
+import urllib.parse
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -409,7 +410,7 @@ class TestWhatIsPosted(unittest.TestCase):
         go(gh, row(findings=[major, dict(major, line=2)]))
         body = gh.posted()[0]
         self.assertIn("\U0001f534 2 blocking findings are attached", body["body"])
-        self.assertEqual(body["comments"][0]["body"], "\U0001f534 Bug.")
+        self.assertTrue(body["comments"][0]["body"].startswith("\U0001f534 Bug.\n"))
 
     def test_the_mark_never_breaks_a_leading_block(self):
         table = "| a | b |" + chr(10) + "| --- | --- |"
@@ -426,7 +427,10 @@ class TestWhatIsPosted(unittest.TestCase):
             lines = gh.posted()[0]["comments"][0]["body"].split(chr(10))
             self.assertEqual(lines[0], first, message)
             if first == "\U0001f534":
-                self.assertEqual(lines[1:], ["", *message.split(chr(10))])
+                # Then a blank line and the report link.
+                self.assertEqual(lines[1:-2], ["", *message.split(chr(10))])
+                self.assertEqual(lines[-2], "")
+                self.assertTrue(lines[-1].startswith("<sub>[Report this finding]"))
 
     def test_permalink_path_is_percent_encoded(self):
         path = neutralize_path("docs/a b/@x#1.md")
@@ -481,6 +485,108 @@ class TestWhatIsPosted(unittest.TestCase):
         gh = FakeGitHub()
         go(gh, row(findings=[bad, good]))
         self.assertEqual([c["path"] for c in gh.posted()[0]["comments"]], ["y.py"])
+
+
+def report_links(text):
+    return [
+        urllib.parse.urlsplit(u)
+        for u in re.findall(r"\[Report [a-z ]+\]\(([^)]*)\)", text)
+    ]
+
+
+RUN77 = "https://github.com/o/r/actions/runs/77/attempts/2"  # @lint-ignore
+
+
+class TestReportLinks(unittest.TestCase):
+    def test_the_review_and_each_inline_finding_link_to_the_feedback_form(self):
+        gh = FakeGitHub()
+        go(gh, dict(row(), review_run_id=77, review_run_attempt=2))
+        (body,) = gh.posted()
+        (link,) = report_links(body["body"])
+        self.assertEqual(
+            f"{link.scheme}://{link.netloc}{link.path}", post_review.REPORT_ISSUE_URL
+        )
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["template"], "ai-pr-review-feedback.yml")
+        self.assertEqual(q["title"], "[AI PR review] o/r#1")
+        self.assertEqual(q["pr"], "https://github.com/o/r/pull/1")  # @lint-ignore
+        self.assertEqual(q["commit"], SHA)
+        self.assertEqual(q["run"], RUN77)  # @lint-ignore
+        self.assertNotIn("finding", q)
+        self.assertIn("[Report a bad review]", body["body"].splitlines()[-1])
+        (c,) = body["comments"]
+        (link,) = report_links(c["body"])
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["finding"], "torch/x.py:3")
+        self.assertEqual(q["run"], RUN77)  # @lint-ignore
+
+    def test_the_finding_names_the_real_file(self):
+        f = {
+            "path": neutralize_path("a_b/c.py"),
+            "line": 9,
+            "severity": "major",
+            "message": "Bug.",
+        }
+        gh = FakeGitHub()
+        go(gh, row(findings=[f]))
+        (c,) = gh.posted()[0]["comments"]
+        (link,) = report_links(c["body"])
+        self.assertEqual(
+            dict(urllib.parse.parse_qsl(link.query))["finding"], "a_b/c.py:9"
+        )
+
+    def test_the_run_link_names_the_attempt_that_posted(self):
+        u = post_review.run_url
+        runs = "https://github.com/o/r/actions/runs"  # @lint-ignore
+        self.assertEqual(
+            u("o/r", {"review_run_id": 7, "review_run_attempt": 2}),
+            f"{runs}/7/attempts/2",
+        )
+        for attempt in (None, 0, "2", True):
+            self.assertEqual(
+                u("o/r", {"review_run_id": 7, "review_run_attempt": attempt}),
+                f"{runs}/7",
+            )
+        for run_id in (None, "1)[x](y", True, 0):
+            self.assertEqual(u("o/r", {"review_run_id": run_id}), "")
+        self.assertNotIn("run=", post_review.report_url("o/r", 1, SHA))
+
+    def test_findings_in_the_body_carry_no_extra_links(self):
+        major = {"path": "a.py", "line": 1, "severity": "major", "message": "Bug."}
+        minor = {"path": "b.py", "line": 2, "severity": "minor", "message": "Nit."}
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review", findings=[major, minor]))
+        (body,) = gh.posted()
+        self.assertIn("non-blocking finding", body["body"])
+        self.assertEqual(len(report_links(body["body"])), 1)
+
+    def test_a_hostile_path_stays_inside_the_link(self):
+        path = neutralize_path("a)[x](https://evil.example) @pytorchbot merge/<b>.py")
+        url = post_review.report_url(
+            "o/r", 1, SHA, RUN77, {"path": path, "line": 3, "message": "m"}
+        )
+        self.assertNotRegex(url, r"[()\s<>\[\]@]")
+        q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+        self.assertTrue(q["finding"].endswith(".py:3"))
+
+    def test_the_body_fallback_keeps_one_review_link_and_no_finding_links(self):
+        gh = FakeGitHub(refuse_inline=True)
+        go(gh, dict(row(), review_run_id=77, review_run_attempt=2))
+        first, second = gh.posted()
+        self.assertIn("comments", first)
+        self.assertNotIn("comments", second)
+        (link,) = report_links(second["body"])
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["run"], RUN77)
+        self.assertNotIn("finding", q)
+
+    def test_a_fenced_code_block_in_a_finding_is_posted_unchanged(self):
+        message = "Use:\n\n```python\nx = a_b * c\n```"
+        f = {"path": "a.py", "line": 1, "severity": "major", "message": message}
+        gh = FakeGitHub()
+        go(gh, row(findings=[f]))
+        text = gh.posted()[0]["comments"][0]["body"]
+        self.assertTrue(text.startswith("\U0001f534 " + message + "\n\n<sub>[Report"))
 
 
 class TestNothingIsPosted(unittest.TestCase):

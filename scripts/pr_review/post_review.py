@@ -77,6 +77,14 @@ _BOT_MENTION = re.compile(r"@(?=pytorch(?:merge)?bot\b|pytorch-bot\b)", re.IGNOR
 
 BLOCKING_MARK = "\U0001f534"  # red circle
 FOLDED_MARK = "\u26aa"  # grey circle
+# "Report a bad review" links: a new pytorch/test-infra issue from the
+# automated review feedback form, with this review filled in. The form's label
+# puts the issue on the feedback board. The query keys are the form's field ids
+# (test-infra .github/ISSUE_TEMPLATE/ai-pr-review-feedback.yml), and
+# torchci/lib/prReview/prReviewReportLink.ts builds the same link for the
+# Dr.CI comment; keep the three in step.
+REPORT_ISSUE_URL = "https://github.com/pytorch/test-infra/issues/new"
+REPORT_TEMPLATE = "ai-pr-review-feedback.yml"
 _VERDICT_LINE = {
     "changes_requested": "changes requested before human review",
     "ready_for_human_review": "nothing blocking; ready for human review",
@@ -251,9 +259,45 @@ def marked(mark: str, lines: list[str]) -> list[str]:
     return [f"{mark} {lines[0]}", *lines[1:]]
 
 
-def comment_body(finding: dict) -> str:
-    message = finding["message"].split("\n")
-    return defuse_bot_commands("\n".join(marked(BLOCKING_MARK, message)))
+def _positive_int(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def run_url(repo: str, row: dict) -> str:
+    """The attempt that wrote `row`: a re-run would put a later attempt's logs
+    behind the bare run link. "" without a run id."""
+    run_id, attempt = row.get("review_run_id"), row.get("review_run_attempt")
+    if not _positive_int(run_id):
+        return ""
+    url = f"https://github.com/{repo}/actions/runs/{run_id}"
+    return f"{url}/attempts/{attempt}" if _positive_int(attempt) else url
+
+
+def report_url(
+    repo: str, pr: int, sha: str, run_link: str = "", finding: dict | None = None
+) -> str:
+    """The feedback form for this review, or for one finding of it. Every value
+    is percent-encoded, so the link cannot leave its markdown link syntax."""
+    params = {
+        "template": REPORT_TEMPLATE,
+        "title": f"[AI PR review] {repo}#{pr}",
+        "pr": f"https://github.com/{repo}/pull/{pr}",
+        "commit": sha,
+    }
+    if run_link:
+        params["run"] = run_link
+    if finding is not None:
+        params["finding"] = f"{unescape_path(finding['path'])}:{finding['line']}"
+    return f"{REPORT_ISSUE_URL}?{urllib.parse.urlencode(params)}"
+
+
+def comment_body(finding: dict, report: str = "") -> str:
+    # Not contained like the body: that would break every closed code block to
+    # save the link from a rare unclosed one, where it just shows as text.
+    lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
+    if report:
+        lines += ["", f"<sub>[Report this finding]({report})</sub>"]
+    return defuse_bot_commands("\n".join(lines))
 
 
 def count(n: int, noun: str) -> str:
@@ -316,7 +360,13 @@ MAX_BODY = 60_000
 
 
 def review_body(
-    verdict: str, summary: str, findings: list[dict], sha: str, repo: str, inline: bool
+    verdict: str,
+    summary: str,
+    findings: list[dict],
+    sha: str,
+    repo: str,
+    inline: bool,
+    report: str = "",
 ) -> str:
     """Verdict, summary, and the findings not posted inline (non-blocking ones
     folded). Over MAX_BODY, findings are dropped from the end and counted."""
@@ -334,6 +384,7 @@ def review_body(
             in_body[:keep_body],
             folded[:keep_folded],
             len(in_body) - keep_body + len(folded) - keep_folded,
+            report,
         )
         if len(body) <= MAX_BODY or keep_body + keep_folded == 0:
             return body
@@ -343,7 +394,9 @@ def review_body(
             keep_body -= 1
 
 
-def _compose(verdict, summary, sha, repo, n_inline, in_body, folded, omitted) -> str:
+def _compose(
+    verdict, summary, sha, repo, n_inline, in_body, folded, omitted, report=""
+) -> str:
     lines = [
         MARKER,
         f"**Automated review** of {sha[:12]}: {_VERDICT_LINE[verdict]}.",
@@ -379,17 +432,21 @@ def _compose(verdict, summary, sha, repo, n_inline, in_body, folded, omitted) ->
             "a fresh automated review.",
             "",
         ]
+    report_link = f" [Report a bad review]({report})" if report else ""
     lines += [
         "<sub>This review is AI-generated and advisory. Each new automated "
-        "review replaces the previous one.</sub>",
+        f"review replaces the previous one.{report_link}</sub>",
     ]
     return defuse_bot_commands("\n".join(lines))
 
 
-def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
+def post(
+    gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_link: str = ""
+) -> dict:
     """Create the review. If GitHub refuses the inline comments (422), they go
     into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
+    report = report_url(gh.repo, pr, sha, run_link)
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
     comments = [
@@ -397,13 +454,15 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
             "path": unescape_path(f["path"]),
             "line": f["line"],
             "side": "RIGHT",
-            "body": comment_body(f),
+            "body": comment_body(f, report_url(gh.repo, pr, sha, run_link, f)),
         }
         for f in blocking_findings(verdict, findings)
         if not f.get("discussion")
     ]
     if comments:
-        body = review_body(verdict, summary, findings, sha, gh.repo, inline=True)
+        body = review_body(
+            verdict, summary, findings, sha, gh.repo, inline=True, report=report
+        )
         try:
             return gh.request(
                 "POST", path, {**base, "body": body, "comments": comments}
@@ -414,7 +473,9 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
             warn(
                 f"GitHub refused the inline comments ({exc}); posting them in the body"
             )
-    body = review_body(verdict, summary, findings, sha, gh.repo, inline=False)
+    body = review_body(
+        verdict, summary, findings, sha, gh.repo, inline=False, report=report
+    )
     try:
         return gh.request("POST", path, {**base, "body": body})
     except GitHubError as exc:
@@ -1055,7 +1116,9 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     verdict, summary, findings = review
     clean = verdict == "ready_for_human_review"
     try:
-        new_id = publish(gh, pr, sha, author, verdict, summary, findings)
+        new_id = publish(
+            gh, pr, sha, author, verdict, summary, findings, run_url(gh.repo, row)
+        )
     except GitHubError as exc:
         if not clean:
             raise
@@ -1125,11 +1188,11 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
 RETRACTED = object()
 
 
-def publish(gh, pr, sha, author, verdict, summary, findings):
+def publish(gh, pr, sha, author, verdict, summary, findings, run_link: str = ""):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
     findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
-    new = post(gh, pr, sha, verdict, summary, findings)
+    new = post(gh, pr, sha, verdict, summary, findings, run_link)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
