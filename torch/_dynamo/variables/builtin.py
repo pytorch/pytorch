@@ -3759,7 +3759,9 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             args = [
                 a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
             ]
-        if len(args) != 2 or kwargs:
+        if kwargs:
+            raise_type_error(tx, "hasattr() takes no keyword arguments")
+        if len(args) != 2:
             raise_observed_exception(TypeError, tx)
         obj, attr = args
         if not attr.is_python_constant():
