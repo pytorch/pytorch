@@ -289,6 +289,146 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
                 self.assertIn(expected_declaration, generated_source)
                 self.assertNotIn(unexpected_declaration, generated_source)
 
+    # cuDNN prefix discovery: pure path-logic tests, nothing is compiled.
+
+    @unittest.skipIf(
+        IS_WINDOWS or torch.version.hip is not None,
+        "cuDNN prefix discovery is Linux/CUDA-only",
+    )
+    def test_cudnn_conda_prefix_discovery(self):
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            conda_prefix = os.path.join(root, "conda_env")
+            cuda_home = os.path.join(root, "cuda")
+            os.makedirs(os.path.join(conda_prefix, "include"))
+            os.makedirs(os.path.join(conda_prefix, "lib"))
+            open(os.path.join(conda_prefix, "include", "cudnn.h"), "w").close()
+            os.makedirs(os.path.join(cuda_home, "include"))
+            # $CONDA_PREFIX is probed when cudnn.h is not reachable via CUDA_HOME
+            with (
+                mock.patch.dict(os.environ, {"CONDA_PREFIX": conda_prefix}),
+                mock.patch.object(cpp, "CUDA_HOME", cuda_home),
+            ):
+                self.assertEqual(cpp._find_cudnn_home(), conda_prefix)
+            # the discovered prefix feeds include/library paths, with conda-style 'lib'
+            with (
+                mock.patch.object(cpp, "CUDA_HOME", cuda_home),
+                mock.patch.object(cpp, "CUDNN_HOME", conda_prefix),
+            ):
+                self.assertIn(
+                    os.path.join(conda_prefix, "include"),
+                    cpp.include_paths(device_type="cuda"),
+                )
+                self.assertIn(
+                    os.path.join(conda_prefix, "lib"),
+                    cpp.library_paths(device_type="cuda"),
+                )
+
+    @unittest.skipIf(
+        IS_WINDOWS or torch.version.hip is not None,
+        "cuDNN prefix discovery is Linux/CUDA-only",
+    )
+    def test_cudnn_pip_wheel_discovery(self):
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            site_packages = os.path.join(root, "site-packages")
+            cudnn_prefix = os.path.join(site_packages, "nvidia", "cudnn")
+            cuda_home = os.path.join(root, "cuda")
+            os.makedirs(os.path.join(cudnn_prefix, "include"))
+            os.makedirs(os.path.join(cudnn_prefix, "lib"))
+            open(os.path.join(cudnn_prefix, "include", "cudnn.h"), "w").close()
+            os.makedirs(os.path.join(cuda_home, "include"))
+            # the wheel candidate is resolved from sysconfig purelib, not torch.__file__
+            with (
+                mock.patch.dict(os.environ, {"CONDA_PREFIX": ""}),
+                mock.patch.object(cpp.sys, "prefix", cuda_home),
+                mock.patch.object(
+                    cpp.sysconfig, "get_paths", return_value={"purelib": site_packages}
+                ),
+                mock.patch.object(cpp, "CUDA_HOME", cuda_home),
+            ):
+                self.assertEqual(cpp._find_cudnn_home(), cudnn_prefix)
+
+    @unittest.skipIf(
+        IS_WINDOWS or torch.version.hip is not None,
+        "cuDNN prefix discovery is Linux/CUDA-only",
+    )
+    def test_cudnn_toolkit_coinstall_is_unchanged(self):
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            cuda_home = os.path.join(root, "cuda")
+            os.makedirs(os.path.join(cuda_home, "include"))
+            open(os.path.join(cuda_home, "include", "cudnn.h"), "w").close()
+            # cudnn.h already reachable via CUDA_HOME -> no discovery
+            with (
+                mock.patch.dict(os.environ, {"CONDA_PREFIX": root}),
+                mock.patch.object(cpp, "CUDA_HOME", cuda_home),
+            ):
+                self.assertIsNone(cpp._find_cudnn_home())
+
+    @unittest.skipIf(
+        IS_WINDOWS or torch.version.hip is not None,
+        "cuDNN prefix discovery is Linux/CUDA-only",
+    )
+    def test_cudnn_lib_dir_prefers_lib64_else_lib(self):
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            cuda_home = os.path.join(root, "cuda")
+            os.makedirs(os.path.join(cuda_home, "lib64"))
+            for lib_dir in ("lib64", "lib"):
+                with self.subTest(lib_dir=lib_dir):
+                    cudnn_prefix = os.path.join(root, f"cudnn_{lib_dir}")
+                    os.makedirs(os.path.join(cudnn_prefix, lib_dir))
+                    with (
+                        mock.patch.object(cpp, "CUDA_HOME", cuda_home),
+                        mock.patch.object(cpp, "CUDNN_HOME", cudnn_prefix),
+                    ):
+                        self.assertIn(
+                            os.path.join(cudnn_prefix, lib_dir),
+                            cpp.library_paths(device_type="cuda"),
+                        )
+
+    @unittest.skipIf(
+        IS_WINDOWS or torch.version.hip is not None,
+        "cuDNN prefix discovery is Linux/CUDA-only",
+    )
+    def test_cudnn_unactivated_conda_env_discovery(self):
+        # $CONDA_PREFIX is only set on activation; probe sys.prefix instead
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            conda_prefix = os.path.join(root, "conda_env")
+            cuda_home = os.path.join(root, "cuda")
+            os.makedirs(os.path.join(conda_prefix, "include"))
+            os.makedirs(os.path.join(conda_prefix, "conda-meta"))
+            open(os.path.join(conda_prefix, "include", "cudnn.h"), "w").close()
+            os.makedirs(os.path.join(cuda_home, "include"))
+            with (
+                mock.patch.dict(os.environ, {"CONDA_PREFIX": ""}),
+                mock.patch.object(cpp.sys, "prefix", conda_prefix),
+                mock.patch.object(cpp, "CUDA_HOME", cuda_home),
+            ):
+                self.assertEqual(cpp._find_cudnn_home(), conda_prefix)
+
+    def test_cudnn_env_var_takes_precedence_over_discovery(self):
+        # not skipped on Windows/ROCm: env-var precedence is platform-independent.
+        # CUDNN_HOME is resolved once at import, so check in a subprocess.
+        with tempfile.TemporaryDirectory() as root:
+            explicit = os.path.join(root, "explicit_cudnn")
+            os.makedirs(explicit)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import torch.utils.cpp_extension as ce; print(ce.CUDNN_HOME)",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env={**os.environ, "CUDNN_HOME": explicit},
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+            self.assertEqual(proc.stdout.strip(), explicit)
+
     @unittest.skipUnless(
         sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
         "requires free-threaded Python",
