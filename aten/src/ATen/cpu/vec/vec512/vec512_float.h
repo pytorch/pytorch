@@ -424,16 +424,16 @@ class Vectorized<float> {
     const __m512 vec_exp_min = _mm512_set1_ps(-104.f);
     const __m512 vec_ln_flt_max =
         _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
-    const __m512i vec_127 = _mm512_set1_epi32(0x0000007f);
-    const int n_mantissa_bits = 23;
 
     // exp(x) =
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
     // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
 
-    // Constants first: on NaN, min/max return the second operand.
-    auto vec_src = _mm512_min_ps(vec_ln_flt_max, values);
-    vec_src = _mm512_max_ps(vec_exp_min, vec_src);
+    // Below vec_exp_min exp rounds to 0. Those lanes, -inf included, are
+    // computed from 0 and zeroed at the end. NaN compares unordered and
+    // propagates.
+    const auto keep = _mm512_cmp_ps_mask(values, vec_exp_min, _CMP_NLT_UQ);
+    auto vec_src = _mm512_maskz_min_ps(keep, vec_ln_flt_max, values);
 
     // fx = floorf(x * log2ef + 0.5)
     auto vec_fx = _mm512_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
@@ -453,18 +453,8 @@ class Vectorized<float> {
     vec_res = _mm512_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
     vec_res = _mm512_fmadd_ps(vec_exp_poly, vec_res, vec_one);
 
-    // y = y * 2^n, as two normal factors so subnormal results round once and
-    // 2^128 does not overflow.
-    auto vec_n = _mm512_cvtps_epi32(vec_fx);
-    auto vec_n1 = _mm512_srai_epi32(vec_n, 1);
-    auto vec_n2 = _mm512_sub_epi32(vec_n, vec_n1);
-    auto vec_two_pow_n1 = _mm512_castsi512_ps(
-        _mm512_slli_epi32(_mm512_add_epi32(vec_n1, vec_127), n_mantissa_bits));
-    auto vec_two_pow_n2 = _mm512_castsi512_ps(
-        _mm512_slli_epi32(_mm512_add_epi32(vec_n2, vec_127), n_mantissa_bits));
-    vec_res = _mm512_mul_ps(vec_res, vec_two_pow_n1);
-    vec_res = _mm512_mul_ps(vec_res, vec_two_pow_n2);
-    return vec_res;
+    // y = y * 2^n. vscalefps rounds once, subnormal results included.
+    return _mm512_maskz_scalef_ps(keep, vec_res, vec_fx);
   }
 #ifdef AT_VEC_CUSTOM_MATH
   Vectorized<float> fmod(const Vectorized<float>& q) const;

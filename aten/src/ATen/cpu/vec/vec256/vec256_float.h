@@ -374,9 +374,12 @@ class Vectorized<float> {
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
     // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
 
-    // Constants first: on NaN, min/max return the second operand.
-    auto vec_src = _mm256_min_ps(vec_ln_flt_max, values);
-    vec_src = _mm256_max_ps(vec_exp_min, vec_src);
+    // Below vec_exp_min exp rounds to 0. Those lanes, -inf included, are
+    // computed from 0 and zeroed at the end, which avoids slow subnormal
+    // arithmetic. NaN compares false and propagates.
+    const auto zero_mask = _mm256_cmp_ps(values, vec_exp_min, _CMP_LT_OQ);
+    auto vec_src =
+        _mm256_andnot_ps(zero_mask, _mm256_min_ps(vec_ln_flt_max, values));
 
     // fx = floorf(x * log2ef + 0.5)
     auto vec_fx = _mm256_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
@@ -394,18 +397,27 @@ class Vectorized<float> {
     vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
     vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_one);
 
-    // y = y * 2^n, as two normal factors so subnormal results round once and
-    // 2^128 does not overflow.
+    // y = y * 2^n: add n to the exponent bits. For n outside [-125, 127]
+    // (subnormal results, or 2^128), scale by two normal factors instead so
+    // the result rounds once and does not overflow.
     auto vec_n = _mm256_cvtps_epi32(vec_fx);
-    auto vec_n1 = _mm256_srai_epi32(vec_n, 1);
-    auto vec_n2 = _mm256_sub_epi32(vec_n, vec_n1);
-    auto vec_two_pow_n1 = _mm256_castsi256_ps(
-        _mm256_slli_epi32(_mm256_add_epi32(vec_n1, vec_127), n_mantissa_bits));
-    auto vec_two_pow_n2 = _mm256_castsi256_ps(
-        _mm256_slli_epi32(_mm256_add_epi32(vec_n2, vec_127), n_mantissa_bits));
-    vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n1);
-    vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n2);
-    return vec_res;
+    auto vec_scaled = _mm256_castsi256_ps(_mm256_add_epi32(
+        _mm256_castps_si256(vec_res), _mm256_slli_epi32(vec_n, n_mantissa_bits)));
+    const auto rare = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
+        _mm256_add_epi32(vec_n, _mm256_set1_epi32(INT32_MIN + 125)),
+        _mm256_set1_epi32(INT32_MIN + 252)));
+    if (_mm256_movemask_ps(rare)) {
+      auto vec_n1 = _mm256_srai_epi32(vec_n, 1);
+      auto vec_n2 = _mm256_sub_epi32(vec_n, vec_n1);
+      auto vec_two_pow_n1 = _mm256_castsi256_ps(_mm256_slli_epi32(
+          _mm256_add_epi32(vec_n1, vec_127), n_mantissa_bits));
+      auto vec_two_pow_n2 = _mm256_castsi256_ps(_mm256_slli_epi32(
+          _mm256_add_epi32(vec_n2, vec_127), n_mantissa_bits));
+      auto vec_two_factor = _mm256_mul_ps(
+          _mm256_mul_ps(vec_res, vec_two_pow_n1), vec_two_pow_n2);
+      vec_scaled = _mm256_blendv_ps(vec_scaled, vec_two_factor, rare);
+    }
+    return _mm256_andnot_ps(zero_mask, vec_scaled);
   }
 #ifdef AT_VEC_CUSTOM_MATH
   Vectorized<float> fmod(const Vectorized<float>& q) const;
