@@ -78,6 +78,8 @@ namespace {
     class VecConvertTestsReducedFloat : public ::testing::Test {};
     template <typename T>
     class VecMaskTests : public ::testing::Test {};
+    template <typename T>
+    class VecBoolTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using RealFloatReducedFloatTestedTypes = ::testing::Types<vfloat, vdouble, vBFloat16, vHalf>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
@@ -134,6 +136,13 @@ namespace {
     TYPED_TEST_SUITE(VecConvertTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(VecConvertTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(VecMaskTests, RealFloatIntTestedTypes);
+#if defined(CPU_CAPABILITY_SVE256)
+    // Only on SVE do integer comparison results have zero_mask().
+    using VecBoolTestedTypes = ::testing::Types<vfloat, vdouble, vBFloat16, VecType<int8_t>, vshort, vint, vlong>;
+#else
+    using VecBoolTestedTypes = RealFloatReducedFloatTestedTypes;
+#endif
+    TYPED_TEST_SUITE(VecBoolTests, VecBoolTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1049,6 +1058,29 @@ namespace {
             ASSERT_EQ(expected, actual) << "Failure Details:\n"
                 << std::hex << "Expected:\n#\t" << expected
                 << "\nActual:\n#\t" << actual;
+        }
+    }
+    TYPED_TEST(VecBoolTests, ZeroMask) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        const vec zero(VT(0));
+        using mask_t = decltype((zero == zero).zero_mask());
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        const uint64_t seed = TestSeed();
+        std::mt19937_64 gen(seed);
+        for (int iter = 0; iter < 1000; ++iter) {
+            const uint64_t lanes = iter == 0 ? 0 : iter == 1 ? ~uint64_t(0) : gen();
+            uint64_t zeros = 0;
+            uint64_t nonzeros = 0;
+            for (int i = 0; i < vec::size(); ++i) {
+                const bool is_zero = (lanes >> i) & 1;
+                test_vals[i] = is_zero ? VT(0) : VT(1);
+                (is_zero ? zeros : nonzeros) |= uint64_t(1) << i;
+            }
+            const vec v = vec::loadu(test_vals);
+            ASSERT_EQ(static_cast<mask_t>(nonzeros), (v == zero).zero_mask()) << "seed " << seed;
+            ASSERT_EQ(static_cast<mask_t>(zeros), (v != zero).zero_mask()) << "seed " << seed;
         }
     }
     TYPED_TEST(BitwiseFloatsAdditional, Convert) {
