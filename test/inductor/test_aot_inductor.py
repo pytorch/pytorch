@@ -43,14 +43,19 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.graph import GraphLowering
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.select_algorithm import TritonTemplate
+from torch._inductor.select_algorithm import (
+    get_algorithm_selector_cache,
+    TritonTemplate,
+)
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import (
     get_code,
+    get_k_splits,
     IndentedBuffer,
     is_big_gpu,
     maybe_aoti_standalone_config,
     run_and_get_cpp_code,
+    use_decompose_k_choice,
 )
 from torch._inductor.virtualized import V
 from torch._library import capture_triton
@@ -349,6 +354,56 @@ def profiled_ivalue_kinds(code, kernel_name):
 
 
 class AOTInductorTestsTemplate:
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("autotune_at_compile_time", [False, True])
+    def test_decompose_k(self, dynamic, autotune_at_compile_time):
+        if self.device != GPU_TYPE or not IS_BIG_GPU:
+            raise unittest.SkipTest("requires modern GPU to run max-autotune")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                return torch.relu(a @ b), torch.sigmoid(a @ c)
+
+        def make_inputs(m):
+            return (
+                torch.randn(m, 2048, device=self.device, dtype=torch.float16) / 8,
+                torch.randn(2048, 16, device=self.device, dtype=torch.float16) / 8,
+                torch.randn(2048, 8, device=self.device, dtype=torch.float16) / 8,
+            )
+
+        def select_decompose_k(choices):
+            selected = [c for c in choices if c.name.startswith("decompose_k_mm")]
+            return selected or choices
+
+        configs = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.decompose_k_threshold": 0,
+            "triton.num_decompose_k_splits": 2,
+            "triton.autotune_at_compile_time": autotune_at_compile_time,
+        }
+        dynamic_shapes = ({0: Dim("m", min=2, max=32)}, None, None) if dynamic else None
+        selector = get_algorithm_selector_cache()
+        preprocessing_fns = [*selector.preprocessing_fns, select_decompose_k]
+        inputs = make_inputs(16)
+        get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
+        try:
+            with patch.object(selector, "preprocessing_fns", preprocessing_fns):
+                package_path, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, Model(), inputs, configs, dynamic_shapes
+                )
+        finally:
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+
+        FileCheck().check_count("// subgraph: decompose_k_mm", 2).run(code)
+        FileCheck().check("bmm_dtype_out").run(code)
+        optimized = torch._inductor.aoti_load_package(package_path)
+        for m in (16, 24) if dynamic else (16,):
+            inputs = make_inputs(m)
+            self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
+
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
     def test_simple(self, embed_kernel_binary, max_autotune):
