@@ -88,19 +88,25 @@ macro(find_package_and_print_version PACKAGE_NAME)
 endmacro()
 
 # Use CMake's native HIP language support instead of FindHIP.cmake.
-# Set up the HIP compiler before calling enable_language(HIP).
-if(DEFINED ENV{HIP_CLANG_PATH})
-  file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
-else()
-  set(_hip_clang_dir "${ROCM_PATH}/lib/llvm/bin")
-endif()
-if(WIN32)
-  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
-else()
-  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++")
-endif()
-if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
-  message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
+# Set up the HIP compiler before calling enable_language(HIP). Keep a compiler
+# that is already set, by -D or an earlier enable_language(HIP): replacing it,
+# even with another spelling of the same path, makes CMake delete the whole
+# cache and reconfigure. Not "DEFINED": a failed check_language(HIP) caches
+# NOTFOUND, and that still needs the lookup below.
+if(NOT CMAKE_HIP_COMPILER)
+  if(DEFINED ENV{HIP_CLANG_PATH})
+    file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
+  else()
+    set(_hip_clang_dir "${ROCM_PATH}/lib/llvm/bin")
+  endif()
+  if(WIN32)
+    set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
+  else()
+    set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++")
+  endif()
+  if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
+    message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
+  endif()
 endif()
 
 set(CMAKE_HIP_PLATFORM "amd" CACHE STRING "HIP platform" FORCE)
@@ -152,27 +158,21 @@ if(WIN32)
     endif()
   endforeach()
 
-  # Reinstate GNU-equivalent optimization flags. The generated HIP compile
-  # rule's <FLAGS> includes CMAKE_HIP_FLAGS but, on this code path, does
-  # not include CMAKE_HIP_FLAGS_<CONFIG> (verified via build.ninja), so
-  # appending to the per-config variables is dead code. Inject the per-config
-  # flags into CMAKE_HIP_FLAGS instead, gated on CMAKE_BUILD_TYPE for
-  # single-config generators (Ninja, Makefiles). Without this, clang++
-  # falls back to -O0 and HIP kernels are unoptimized (~99% conv2d FP16
-  # perf regression on gfx1150; TheRock#5157, #183853).
-  if(NOT CMAKE_CONFIGURATION_TYPES)
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" _hip_cfg)
-    if(_hip_cfg STREQUAL "DEBUG")
-      string(APPEND CMAKE_HIP_FLAGS " -O0 -g")
-    elseif(_hip_cfg STREQUAL "RELWITHDEBINFO")
-      string(APPEND CMAKE_HIP_FLAGS " -O2 -DNDEBUG -g")
-    elseif(_hip_cfg STREQUAL "MINSIZEREL")
-      string(APPEND CMAKE_HIP_FLAGS " -Os -DNDEBUG")
-    else()  # Release or unset
-      string(APPEND CMAKE_HIP_FLAGS " -O3 -DNDEBUG")
+  # With C/CXX on clang-cl, CMake gives HIP no GNU per-config defaults: none
+  # before 4.3, and only the MSVC ones stripped above from 4.3 on. Without
+  # an -O flag clang++ compiles HIP kernels at -O0 (#183853). Supply the
+  # defaults CMake uses for GNU-frontend compilers, unless the configuration
+  # already sets an optimization level.
+  set(_hip_cfg_flags_DEBUG "-O0 -g")
+  set(_hip_cfg_flags_RELEASE "-O3 -DNDEBUG")
+  set(_hip_cfg_flags_MINSIZEREL "-Os -DNDEBUG")
+  set(_hip_cfg_flags_RELWITHDEBINFO "-O2 -g -DNDEBUG")
+  foreach(_cfg DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+    if(NOT CMAKE_HIP_FLAGS_${_cfg} MATCHES "(^| )-O")
+      string(STRIP "${_hip_cfg_flags_${_cfg}} ${CMAKE_HIP_FLAGS_${_cfg}}" CMAKE_HIP_FLAGS_${_cfg})
     endif()
-    unset(_hip_cfg)
-  endif()
+    unset(_hip_cfg_flags_${_cfg})
+  endforeach()
 endif()
 
 if(WIN32)

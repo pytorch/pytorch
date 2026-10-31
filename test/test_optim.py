@@ -1,8 +1,12 @@
 # Owner(s): ["module: optimizer"]
+import asyncio
 import functools
 import math
 import tempfile
 import unittest
+import warnings
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from copy import deepcopy
 from itertools import product
 from typing import Any
@@ -46,6 +50,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.utils._pytree import tree_leaves, tree_map_only
 
 
 FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
@@ -1680,6 +1685,154 @@ class TestOptimRenewed(TestCase):
                 without_param_names(optimizer_c.state_dict())["param_groups"][-1],
             )
 
+    @skipMPS
+    @parametrize("fused", [False, True])
+    @parametrize("preserve_dtype", [None, False, True])
+    def test_load_state_dict_preserves_dtype(self, device, fused, preserve_dtype):
+        param = Parameter(torch.empty((), device=device, dtype=torch.bfloat16))
+        optimizer = torch.optim.Adam([param], fused=fused)
+        saved_state = {
+            "step": torch.tensor(3.0),
+            "exp_avg": torch.tensor(0.12345679),
+            "exp_avg_sq": torch.tensor(0.01234568),
+            "nested": [{"scalar": torch.tensor(0.23456789)}],
+            "history": (torch.ones(1, dtype=torch.int64),),
+        }
+        optimizer.state[param] = saved_state
+        saved_dict = optimizer.state_dict()
+        context = (
+            nullcontext()
+            if preserve_dtype is None
+            else torch.optim.preserve_state_dtype_on_load(preserve_dtype)
+        )
+        with warnings.catch_warnings(record=True) as caught, context:
+            warnings.simplefilter("always", FutureWarning)
+            optimizer.load_state_dict(saved_dict)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
+        self.assertEqual(len(caught), int(preserve_dtype is None))
+        if preserve_dtype is None:
+            self.assertIs(caught[0].category, FutureWarning)
+            self.assertEqual(caught[0].filename, __file__)
+            message = str(caught[0].message)
+            self.assertIn("the default will preserve their saved dtype", message)
+            self.assertIn("torch.optim.preserve_state_dtype_on_load(False)", message)
+        loaded_state = optimizer.state[param]
+
+        expected_dtype = torch.float32 if preserve_dtype else param.dtype
+        for key in ("exp_avg", "exp_avg_sq"):
+            self.assertEqual(loaded_state[key].dtype, expected_dtype)
+            self.assertEqual(loaded_state[key].device, param.device)
+            self.assertEqual(loaded_state[key], saved_state[key].to(expected_dtype))
+        scalar = loaded_state["nested"][0]["scalar"]
+        self.assertEqual(scalar.dtype, expected_dtype)
+        self.assertEqual(scalar.device, param.device)
+        self.assertEqual(scalar, saved_state["nested"][0]["scalar"].to(expected_dtype))
+        history_dtype = torch.int64 if preserve_dtype else param.dtype
+        self.assertEqual(loaded_state["history"][0].dtype, history_dtype)
+        self.assertEqual(loaded_state["history"][0].device, param.device)
+        self.assertEqual(
+            loaded_state["history"][0], saved_state["history"][0].to(history_dtype)
+        )
+        if fused:
+            self.assertEqual(loaded_state["step"].dtype, torch.float32)
+            self.assertEqual(loaded_state["step"].device, param.device)
+            self.assertEqual(loaded_state["step"].item(), 3.0)
+        else:
+            self.assertIs(loaded_state["step"], saved_state["step"])
+
+    @parametrize("fused", [False, True])
+    @parametrize("has_state", [False, True])
+    def test_load_state_dict_matching_dtype_does_not_warn(
+        self, device, fused, has_state
+    ):
+        param = Parameter(torch.ones(2, device=device, dtype=torch.float32))
+        optimizer = torch.optim.Adam([param], fused=fused)
+        if has_state:
+            optimizer.state[param] = {
+                "step": torch.tensor(3.0, dtype=torch.float64),
+                "exp_avg": torch.zeros_like(param),
+                "exp_avg_sq": torch.zeros_like(param),
+            }
+        saved_dict = optimizer.state_dict()
+        expected_dict = deepcopy(saved_dict)
+        if has_state and fused:
+            expected_dict["state"][0]["step"] = torch.tensor(
+                3.0, dtype=torch.float32, device=device
+            )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", FutureWarning)
+            optimizer.load_state_dict(saved_dict)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
+        self.assertEqual(caught, [])
+        self.assertEqual(optimizer.state_dict(), expected_dict, exact_device=True)
+
+    @skipMPS
+    @parametrize("impl", ["forloop", "fused", "capturable"])
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_preserves_optimizer_state_dtype(
+        self, device, dtype, optim_info, impl
+    ):
+        if impl == "fused" and "fused" not in optim_info.supported_impls:
+            self.skipTest("Optimizer does not support fused")
+        if impl == "capturable" and not optim_info.has_capturable_arg:
+            self.skipTest("Optimizer does not support capturable")
+
+        optim_cls = optim_info.optim_cls
+        kwargs = deepcopy(optim_info.optim_inputs_func(device="cpu")[0].kwargs)
+        if optim_cls is SGD:
+            kwargs["momentum"] = 0.9
+        elif optim_cls is torch.optim.LBFGS:
+            kwargs.update(lr=0.1, max_iter=3, history_size=2)
+        param = Parameter(torch.arange(1, 7, device="cpu", dtype=dtype).reshape(2, 3))
+        optimizer = optim_cls([param], **kwargs)
+
+        def closure():
+            optimizer.zero_grad()
+            loss = param.square().sum()
+            loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                param.grad = param.grad.to_sparse()
+            return loss
+
+        optimizer.step(closure)
+
+        # Use BF16 state to verify that opting in preserves non-step tensor dtypes.
+        saved_state = optimizer.state_dict()
+        saved_state["state"] = tree_map_only(
+            torch.Tensor,
+            lambda t: t.to(torch.bfloat16) if t.is_floating_point() else t,
+            saved_state["state"],
+        )
+        self.assertTrue(
+            any(isinstance(v, torch.Tensor) for v in tree_leaves(saved_state["state"]))
+        )
+        if optim_cls is torch.optim.LBFGS:
+            self.assertGreater(len(saved_state["state"][0]["old_dirs"]), 0)
+        if impl != "forloop":
+            saved_state["param_groups"][0][impl] = True
+            kwargs[impl] = True
+
+        param_c = Parameter(param.detach().to(device=device))
+        optimizer_c = optim_cls([param_c], **kwargs)
+        expected = tree_map_only(
+            torch.Tensor, lambda t: t.to(device=device), saved_state["state"]
+        )
+        step = saved_state["state"][0].get("step")
+        if isinstance(step, torch.Tensor):
+            if impl == "forloop":
+                expected[0]["step"] = step
+            else:
+                expected[0]["step"] = step.to(device=device, dtype=torch.float32)
+        with torch.optim.preserve_state_dtype_on_load():
+            optimizer_c.load_state_dict(saved_state)
+        self.assertEqual(
+            optimizer_c.state_dict()["state"],
+            expected,
+            atol=0,
+            rtol=0,
+            exact_device=True,
+        )
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_can_load_older_state_dict(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -2542,6 +2695,29 @@ class TestOptimRenewed(TestCase):
 
     @onlyAccelerator
     @skipMPS
+    def test_bf16_adamw_load_state_dict(self, device):
+        param = torch.rand(20, 7, device=device)
+        param.grad = torch.rand_like(param)
+        optimizer = torch.optim.AdamW([param], fused=True)
+        optimizer.register_step_pre_hook(_bf16_state_init_hook)
+        optimizer.step()
+
+        param_c = param.clone()
+        optimizer_c = torch.optim.AdamW([param_c], fused=True)
+        with torch.optim.preserve_state_dtype_on_load():
+            optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
+        # The fused kernel picks its bf16-state path from the exp_avg dtype alone.
+        for key in ("exp_avg", "exp_avg_sq"):
+            self.assertEqual(optimizer_c.state[param_c][key].dtype, torch.bfloat16)
+
+        param.grad = torch.rand_like(param)
+        param_c.grad = param.grad.clone()
+        optimizer.step()
+        optimizer_c.step()
+        self.assertEqual(param, param_c, atol=0, rtol=0)
+
+    @onlyAccelerator
+    @skipMPS
     @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
@@ -2707,6 +2883,110 @@ class TestOptimRenewed(TestCase):
             optimizer.state[param]["momentum_buffer"],
             expected,
         )
+
+
+class TestOptimizerLoadStateDictContext(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _make_optimizer_and_checkpoint(self, optimizer_cls=SGD):
+        param = Parameter(torch.ones(2, dtype=torch.bfloat16))
+        optimizer = optimizer_cls([param], momentum=0.9)
+        optimizer.state[param] = {"momentum_buffer": torch.full((2,), 0.12345679)}
+        return optimizer, param, optimizer.state_dict()
+
+    def test_subclass_override_is_unaffected(self):
+        class CustomSGD(SGD):
+            def load_state_dict(self, state_dict):
+                param = self.param_groups[0]["params"][0]
+                buffer = state_dict["state"][0]["momentum_buffer"]
+                self.state[param] = {"momentum_buffer": buffer.to(param.dtype)}
+
+        optimizer, param, checkpoint = self._make_optimizer_and_checkpoint(CustomSGD)
+        with (
+            torch.optim.preserve_state_dtype_on_load(),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always", FutureWarning)
+            optimizer.load_state_dict(checkpoint)
+        caught = [w for w in caught if issubclass(w.category, FutureWarning)]
+        self.assertEqual(caught, [])
+        self.assertEqual(
+            optimizer.state[param]["momentum_buffer"],
+            checkpoint["state"][0]["momentum_buffer"].to(param.dtype),
+        )
+
+    def test_nested_context_and_exception(self):
+        class CustomSGD(SGD):
+            def load_state_dict(self, state_dict):
+                super().load_state_dict(state_dict)
+
+        optimizer, param, checkpoint = self._make_optimizer_and_checkpoint(CustomSGD)
+
+        def load_dtype():
+            optimizer.load_state_dict(checkpoint)
+            return optimizer.state[param]["momentum_buffer"].dtype
+
+        with torch.optim.preserve_state_dtype_on_load():
+            self.assertEqual(load_dtype(), torch.float32)
+            other_optimizer = SGD([param], momentum=0.9)
+            other_optimizer.load_state_dict(checkpoint)
+            self.assertEqual(
+                other_optimizer.state[param]["momentum_buffer"].dtype, torch.float32
+            )
+            error = "different number of parameter groups"
+            with self.assertRaisesRegex(ValueError, error):
+                with torch.optim.preserve_state_dtype_on_load(False):
+                    self.assertEqual(load_dtype(), torch.bfloat16)
+                    optimizer.load_state_dict({"state": {}, "param_groups": []})
+            self.assertEqual(load_dtype(), torch.float32)
+
+        with self.assertWarnsRegex(FutureWarning, "the default will preserve"):
+            self.assertEqual(load_dtype(), torch.bfloat16)
+
+    def test_thread_isolation(self):
+        optimizer, param, checkpoint = self._make_optimizer_and_checkpoint()
+
+        def load_default():
+            with self.assertWarnsRegex(FutureWarning, "the default will preserve"):
+                optimizer.load_state_dict(checkpoint)
+            self.assertEqual(
+                optimizer.state[param]["momentum_buffer"].dtype, torch.bfloat16
+            )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            # Start the worker before it can inherit the preservation setting.
+            executor.submit(load_default).result()
+            with torch.optim.preserve_state_dtype_on_load():
+                executor.submit(load_default).result()
+                optimizer.load_state_dict(checkpoint)
+                self.assertEqual(
+                    optimizer.state[param]["momentum_buffer"].dtype, torch.float32
+                )
+
+    def test_async_task_isolation(self):
+        async def load_states():
+            cast_ready = asyncio.Event()
+            preserve_loaded = asyncio.Event()
+
+            def load_dtype():
+                optimizer, param, checkpoint = self._make_optimizer_and_checkpoint()
+                optimizer.load_state_dict(checkpoint)
+                return optimizer.state[param]["momentum_buffer"].dtype
+
+            async def load_cast():
+                with torch.optim.preserve_state_dtype_on_load(False):
+                    cast_ready.set()
+                    await preserve_loaded.wait()
+                    return load_dtype()
+
+            with torch.optim.preserve_state_dtype_on_load():
+                cast_task = asyncio.create_task(load_cast())
+                await cast_ready.wait()
+                preserved_dtype = load_dtype()
+                preserve_loaded.set()
+                return [preserved_dtype, await cast_task]
+
+        self.assertEqual(asyncio.run(load_states()), [torch.float32, torch.bfloat16])
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)

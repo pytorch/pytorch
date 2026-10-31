@@ -407,6 +407,17 @@ class RegisterDispatchKey:
             g,
             native_aot_manifests=self.native_aot_manifests,
         )
+        # A functional or inplace variant may override its generated Meta kernel
+        # (e.g. a SymInt-aware one); the other variants stay structured.
+        if self.backend_index.dispatch_key == DispatchKey.Meta:
+            return list(
+                mapMaybe(
+                    lambda f: self.gen_unstructured(f, g)
+                    if self.backend_index.has_kernel(f)
+                    else structured_gen.gen_one(f),
+                    g.functions(),
+                )
+            )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
     def gen_unstructured(
@@ -993,8 +1004,8 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         context, structured.impl_arguments(self.g), method=False
                     )
                 )
-                # Exact overload name wins over base name: "gt.Tensor" hooks only
-                # that overload, "topk" the unique structured group.
+                # An exact overload name wins over a base name, which represents
+                # the unique structured group.
                 aot_manifest = self.native_aot_manifests.get(
                     str(self.g.functional.func.name)
                 ) or self.native_aot_manifests.get(

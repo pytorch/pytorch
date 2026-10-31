@@ -4,11 +4,15 @@ from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
 from typing import Any, overload
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch._C import ScriptObject
 from torch._C._autograd import DeviceType
+from torch.distributed._backends.fake import (  # Runtime alias for BC
+    FakeProcessGroup as FakeProcessGroup,
+)
 from torch.distributed.distributed_c10d import GroupName
 from torch.futures import Future
 
@@ -170,12 +174,14 @@ class BroadcastOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllreduceOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
+    config: object | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -185,15 +191,18 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class GatherOptions:
     rootRank: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ScatterOptions:
     rootRank: int
@@ -204,6 +213,7 @@ class ReduceScatterOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class BarrierOptions:
     device_ids: list[int]
@@ -214,6 +224,7 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ReconfigureOptions:
     uuid: int
@@ -382,6 +393,7 @@ class _DistributedBackendOptions:
     def group_id(self) -> GroupName: ...
     @group_id.setter
     def group_id(self, group_id: GroupName) -> None: ...
+    group_desc: str
     @property
     def global_ranks_in_group(self) -> list[int]: ...
     @global_ranks_in_group.setter
@@ -411,7 +423,12 @@ class Work:
 
 class Backend:
     class Options:
+        @overload
         def __init__(self, backend: str, timeout: timedelta = ...) -> None: ...
+        @overload
+        def __init__(self, other: Backend.Options, /) -> None: ...
+        def __copy__(self) -> Self: ...
+        def __deepcopy__(self, memo: dict[int, Any]) -> Self: ...
         @property
         def backend(self) -> str: ...
         @property
@@ -420,6 +437,7 @@ class Backend:
         def _timeout(self, val: timedelta) -> None: ...
         global_ranks_in_group: list[int]
         group_name: GroupName
+        group_desc: str
         use_pg_for_symm_mem_rendezvous: bool
         enable_reconfigure: bool
 
@@ -827,33 +845,9 @@ class ProcessGroup:
     @property
     def group_desc(self) -> str: ...
 
-class FakeProcessGroup(Backend):
-    class Options(Backend.Options):
-        fake_option: int
-        error_on_collective: bool
-        simulate_uniform_ranks: bool
-
-        def __init__(self) -> None: ...
-
-    @staticmethod
-    def _create_internal(
-        rank: int,
-        world_size: int,
-        options: FakeProcessGroup.Options | None = ...,
-    ) -> FakeProcessGroup: ...
-    # getOptions() returns null when the group was built without options, and
-    # callers (test_device_mesh) branch on that, so this must stay optional.
-    # Backend.options is not, which makes the narrowing a real LSP violation
-    # rather than a stub inaccuracy: this property is bound to a different C++
-    # method than the base one, and widening it to match would misdescribe
-    # behavior three assertIsNone checks already pin.
-    @property
-    # pyrefly: ignore  # bad-override
-    def options(self) -> FakeProcessGroup.Options | None: ...
-
 class FakeWork(Work):
     seq_id: int
-    def __init__(self) -> None: ...
+    def __init__(self, result: list[Tensor] = ...) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
 
@@ -916,6 +910,7 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
         host_cft_mode: int
+        nvls_host_mode: int
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
@@ -923,6 +918,7 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
+        lazy_init: bool
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -1015,6 +1011,7 @@ def _nvshmemx_cumodule_init(module: int) -> None: ...
 
 # Check if NVSHMEM is available on current system.
 def _is_nvshmem_available() -> bool: ...
+def _is_nccl_symmem_available() -> bool: ...
 def _register_external_nccl_comm(
     group_name: str, comm_ptr: int, device: torch.device
 ) -> None: ...
@@ -1197,6 +1194,10 @@ class ProcessGroupNCCL2(Backend):
         device_id: torch.device | None = None,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
+    def register_mem_pool(
+        self, pool: torch.cuda.MemPool, symm: bool = False
+    ) -> None: ...
+    def deregister_mem_pool(self, pool: torch.cuda.MemPool) -> None: ...
     @property
     def options(self) -> ProcessGroupNCCL.Options: ...
 
@@ -1210,6 +1211,10 @@ class ProcessGroupNCCLLazy(Backend):
         device_id: torch.device | None = None,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
+    def register_mem_pool(
+        self, pool: torch.cuda.MemPool, symm: bool = False
+    ) -> None: ...
+    def deregister_mem_pool(self, pool: torch.cuda.MemPool) -> None: ...
     def _num_active_channels(self) -> int: ...
 
 class FlightRecorderHook:
