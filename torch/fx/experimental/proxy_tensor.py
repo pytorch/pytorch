@@ -2136,20 +2136,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
-        if func in [
-            torch._functorch.predispatch._add_batch_dim,
-            torch._functorch.predispatch._remove_batch_dim,
-            torch._functorch.predispatch._vmap_increment_nesting,
-            torch._functorch.predispatch._vmap_decrement_nesting,
-            torch._functorch.vmap.lazy_load_decompositions,
-            torch._functorch.predispatch._make_dual,
-            torch._functorch.predispatch._unpack_dual,
-            torch._functorch.predispatch._jvp_increment_nesting,
-            torch._functorch.predispatch._jvp_decrement_nesting,
-            torch._functorch.predispatch._unwrap_for_grad,
-            torch._functorch.predispatch._enter_dual_level,
-            torch._functorch.predispatch._exit_dual_level,
-        ]:
+        if func in _functorch_predispatch_functions:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
@@ -2191,21 +2178,25 @@ _jvp_predispatch_functions = frozenset(
     }
 )
 
-# These JVP predispatch wrappers manage transform nesting/level state
-# and must survive FX dead code elimination even with zero output users.
+# The functorch wrappers that pre-dispatch tracing keeps in the graph. They
+# change or read the functorch level stack, and several take their level as a
+# constant, so they must stay where they are: dead code elimination must keep
+# them even with no users, and passes that check Node.is_impure() must not fold,
+# reorder or run one on its own.
 # Registered here rather than in predispatch.py to avoid circular imports
 # (predispatch.py loads before torch.fx during torch.autograd init).
+_functorch_predispatch_functions = _jvp_predispatch_functions | {
+    torch._functorch.predispatch.lazy_load_decompositions,
+    torch._functorch.predispatch._vmap_increment_nesting,
+    torch._functorch.predispatch._vmap_decrement_nesting,
+    torch._functorch.predispatch._add_batch_dim,
+    torch._functorch.predispatch._remove_batch_dim,
+}
+
 from torch.fx.node import _side_effectful_functions
 
 
-_side_effectful_functions.update(
-    {
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
-)
+_side_effectful_functions.update(_functorch_predispatch_functions)
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):

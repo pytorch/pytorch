@@ -965,6 +965,23 @@ class TestExport(TestCase):
             if isinstance(node.meta.get("val"), torch.Tensor):
                 self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
         self.assertEqual(ep.module()(*inp), JvpInVmap()(*inp))
+        if is_training_ir_test(self._testMethodName):
+            return  # run_decompositions removes the functorch calls
+        # Passes must not remove, fold or run the vmap and jvp calls on their
+        # own, and some of them have no users.
+        gm = ep.module()
+        predispatch = torch._functorch.predispatch.__name__
+        calls = [
+            node
+            for node in gm.graph.nodes
+            if getattr(node.target, "__module__", None) == predispatch
+        ]
+        self.assertTrue(calls)
+        for node in calls:
+            self.assertTrue(node.is_impure(), node.name)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(*inp), JvpInVmap()(*inp))
 
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
