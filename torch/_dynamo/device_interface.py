@@ -891,6 +891,10 @@ def register_interface_for_device(
     an explicit ``import torch_npu``-style import, both of which precede any
     import of inductor. Registering later is not supported and will not be
     reflected in the snapshot.
+    Lazily cached per-device capability probes (e.g.
+    ``torch.utils._triton.has_triton_for_device``) are different: every
+    registration invalidates their entries, so a (re-)registration is
+    reflected immediately without waiting for any import ordering.
     """
     if isinstance(device, torch.device):
         device = device.type
@@ -898,6 +902,15 @@ def register_interface_for_device(
     from .variables.user_defined import UserDefinedClassVariable
 
     UserDefinedClassVariable._in_graph_classes.cache_clear()
+    try:
+        from torch.utils._triton import has_triton_for_device
+
+        has_triton_for_device.cache_clear()
+    except Exception:
+        # Early in torch init _triton may not be importable yet; nothing can
+        # have populated its cache before a registration, so there is nothing
+        # to invalidate.
+        pass
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:

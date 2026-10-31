@@ -26,6 +26,7 @@ def get_matmul_precision_for_cache(mat: Tensor) -> str:
 class ShouldPadEncodedParams(TypedDict):
     """TypedDict for encoded should_pad parameters."""
 
+    device: str
     mat1: EncodedTensor
     mat2: EncodedTensor
     op: str
@@ -45,6 +46,8 @@ def should_pad_params_encoder(
     """Encode parameters for _should_pad into a human-readable dict.
 
     This encoder extracts only the information needed for caching:
+    - The operand device (pad decisions are keyed per device; the same
+      shape/stride/dtype on another device must not replay this entry)
     - Tensor shape, stride, and dtype (not the actual data)
     - Whether padding time should be excluded for mat1 and mat2
     - The operation as a string
@@ -63,6 +66,7 @@ def should_pad_params_encoder(
     from torch._inductor.fx_passes.pad_mm import should_exclude_padding_time
 
     return ShouldPadEncodedParams(
+        device=mat1.device.type,
         mat1=_encode_tensor(mat1),
         mat2=_encode_tensor(mat2),
         op=str(op),
