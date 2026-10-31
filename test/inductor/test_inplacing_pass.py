@@ -256,6 +256,19 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertTrue(_aliases_graph_input(x, {}))
         self.assertFalse(_result_escapes_graph(scatter, {}))
 
+        alias_graph = torch.fx.Graph()
+        alias_x = alias_graph.placeholder("x")
+        alias_src = alias_graph.placeholder("src")
+        alias_scatter = alias_graph.call_function(
+            _generalized_scatter, args=(alias_x, alias_src, [])
+        )
+        alias_view = alias_graph.call_function(
+            aten.slice.Tensor, args=(alias_scatter, 0, 0, 1)
+        )
+        alias_graph.output(alias_view)
+        self.assertTrue(_result_escapes_graph(alias_scatter, {}))
+        self.assertFalse(_result_escapes_graph(alias_scatter, {}, {0}))
+
     def test_scatter_result_does_not_alias_mutated_input(self):
         def f(x, src):
             out = aten.slice_scatter.default(x, src, 0, 1, 4)
@@ -286,7 +299,11 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         )
         expected_x, actual_x = x.clone(), x.clone()
         expected = f(expected_x, src)
+        from torch._inductor import metrics
+
+        metrics.generated_kernel_count = 0
         actual = torch.compile(f)(actual_x, src)
+        self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_x, expected_x)
         self.assertEqual(
@@ -553,6 +570,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 )
             else:
                 result = auto_functionalized(boo._opoverload, x=x)
+            x.copy_(result[1])
             return result[1]
 
         x = torch.randn(3, device=device)
@@ -572,8 +590,11 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             for node in gm.graph.nodes
             if node.target is operator.getitem and node.args[0] is functionalized
         )
-        self.assertTrue(_aliases_graph_input(result, {}))
-        self.assertTrue(_result_escapes_graph(functionalized, {}))
+        expected_clones = [0] if enable_v2 else ["x"]
+        self.assertEqual(functionalized.meta["only_clone_these_tensors"], expected_clones)
+        self.assertFalse(_aliases_graph_input(result, {}))
+        self.assertFalse(_result_escapes_graph(functionalized, {}))
+        self.assertIn(aten.copy_.default, [node.target for node in gm.graph.nodes])
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
