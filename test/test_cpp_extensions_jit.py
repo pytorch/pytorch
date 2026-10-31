@@ -106,6 +106,101 @@ with tempfile.TemporaryDirectory() as tmpdir:
         self.assertNotIn("/usr/include", paths)
 
 
+@common.instantiate_parametrized_tests
+class TestCudnnPaths(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _assert_cudnn_paths(self, home, include, library, lib_prefix, /):
+        cpp = torch.utils.cpp_extension
+        self.assertEqual(
+            [p for p in cpp.include_paths("cuda") if p.startswith(home)], [include]
+        )
+        self.assertEqual(
+            [p for p in cpp.library_paths("cuda") if p.startswith(home)], [library]
+        )
+        flags = cpp._prepare_ldflags([], True, False, False, False)
+        self.assertEqual(
+            [f for f in flags if f.startswith(lib_prefix + home)],
+            [lib_prefix + library],
+        )
+
+    @common.parametrize(
+        "arch,cuda,headers,libraries,expected",
+        [
+            # A complete flat pair takes precedence over a versioned pair.
+            ("x64", "13.4", ("", "13.4"), ("", "13.4"), ""),
+            # Exact version, then numeric minor preference within the same major.
+            ("x64", "13.2", ("13.2", "13.10"), ("13.2", "13.10"), "13.2"),
+            (
+                "x64",
+                "13.4",
+                ("13.2", "13.10", "14.0"),
+                ("13.2", "13.10", "14.0"),
+                "13.10",
+            ),
+            # Incomplete versioned or flat candidates cannot displace a complete pair.
+            ("x64", "13.4", ("13.2", "13.4"), ("13.2", "13.10"), "13.2"),
+            ("x64", "13.4", ("", "13.4"), ("13.4",), "13.4"),
+            # No matching major falls back; exercise ARM64 independently.
+            ("x64", "13.4", ("12.9",), ("12.9",), ""),
+            ("arm64", "13.4", ("13.4",), ("13.4",), "13.4"),
+        ],
+    )
+    def test_windows_cudnn_paths(self, arch, cuda, headers, libraries, expected):
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            # Brackets in CUDNN_HOME must be treated literally by glob.
+            home = os.path.join(root, "cudnn [9]")
+            for version in headers:
+                directory = os.path.join(home, "include", version)
+                os.makedirs(directory, exist_ok=True)
+                open(os.path.join(directory, "cudnn.h"), "w").close()
+            for version in libraries:
+                os.makedirs(os.path.join(home, "include", version), exist_ok=True)
+                directory = os.path.join(home, "lib", version, arch)
+                os.makedirs(directory, exist_ok=True)
+                open(os.path.join(directory, "cudnn.lib"), "w").close()
+            with (
+                mock.patch.multiple(
+                    cpp,
+                    CUDNN_HOME=home,
+                    CUDA_HOME=os.path.join(root, "cuda"),
+                    IS_WINDOWS=True,
+                    IS_MACOS=False,
+                    IS_HIP_EXTENSION=False,
+                ),
+                mock.patch.object(
+                    sysconfig,
+                    "get_platform",
+                    return_value="win-arm64" if arch == "arm64" else "win-amd64",
+                ),
+                mock.patch("torch.version.cuda", cuda),
+            ):
+                version_parts = (expected,) if expected else ()
+                include = os.path.join(home, "include", *version_parts)
+                library = os.path.join(home, "lib", *version_parts, arch)
+                self._assert_cudnn_paths(home, include, library, "/LIBPATH:")
+
+    def test_non_windows_cudnn_paths(self):
+        cpp = torch.utils.cpp_extension
+        with tempfile.TemporaryDirectory() as root:
+            home = os.path.join(root, "cudnn")
+            with mock.patch.multiple(
+                cpp,
+                CUDNN_HOME=home,
+                CUDA_HOME=os.path.join(root, "cuda"),
+                IS_WINDOWS=False,
+                IS_MACOS=False,
+                IS_HIP_EXTENSION=False,
+            ):
+                self._assert_cudnn_paths(
+                    home,
+                    os.path.join(home, "include"),
+                    os.path.join(home, "lib64"),
+                    "-L",
+                )
+
+
 class _TestCppExtensionJITBase(common.TestCase):
     """Shared set up and tear down functions for device-specific test classes
     that test just-in-time cpp extensions. Don't confuse this with the PyTorch JIT
