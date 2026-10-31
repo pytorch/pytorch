@@ -4110,7 +4110,11 @@ def capture(
     ``triton.cudagraph_or_error``, ...) are the serving process's, as under
     ``torch.compile``, whose options also cover only the compile.
     ``cudagraph_policy``, which wraps the graphs again at load and is a Python
-    object, is refused in ``options``. As under ``torch.compile``, a
+    object, is refused in ``options``, and a capture with CUDA graphs on refuses
+    one set in ``torch._inductor.config``: unset it while capturing and set it
+    in the loading process. Under ``cpp_wrapper`` with ``graph_partition`` the
+    capture compiles without CUDA graphs, as :func:`torch.compile` does, and
+    records that. As under ``torch.compile``, a
     graph's outputs are overwritten by its next replay, so clone what you keep
     across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated

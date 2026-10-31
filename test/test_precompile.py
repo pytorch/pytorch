@@ -4957,6 +4957,16 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served", out.stdout)
         return out.stdout
 
+    def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
+        single = self.mod.single
+        options = {"triton.cudagraphs": True, "cpp_wrapper": True}
+        with self._capture(single, options=options) as cap:
+            y = cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            meta = _parse_artifact_metadata(f.read())
+        self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        self._serve_in_fresh_process([((self.x2,), {}, y)])
+
     def test_capture_takes_pathlike_paths(self):
         import pathlib
 
@@ -6555,10 +6565,11 @@ nodes = [] if manager is None else [n for ns in manager.roots.values() for n in 
 for node in nodes:
     nodes.extend(child for children in node.children.values() for child in children)
 recorded = len(nodes)
+trees = int(manager is not None)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
 compiles = torch._dynamo.utils.counters["frames"]["ok"]
 print("kept", kept, "bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
-print("recorded", recorded, "captured", captured)
+print("trees", trees, "recorded", recorded, "captured", captured)
 """
 
 
@@ -6608,8 +6619,10 @@ class TestPrecompileCudagraphs(TestCase):
         bumps=0,
         load_config=None,
         policy=None,
+        trees=None,
     ):
-        # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
+        # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all,
+        # including a tree manager's own memory-pool graph)
         # by the loading process while serving the artifact, under its env, the
         # inductor config patch (load_config, and the module's CUDAGraphPolicy
         # named by policy, from before load(); config around the calls). bumps:
@@ -6642,6 +6655,9 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(served["bumps"], bumps)
         if skips is not None:
             self.assertEqual(served["skips"], skips)
+        if trees is not None:
+            # Whether the loading process made a CUDA graph tree manager.
+            self.assertEqual(served["trees"], trees)
         return served["recorded"], served["captured"]
 
     @parametrize("how", ["mode", "options"])
@@ -6736,13 +6752,11 @@ class TestPrecompileCudagraphs(TestCase):
             # The forward and backward graphs, as the flag decides them.
             self.assertEqual(served[0], 2 if flag else 0)
 
-    def test_an_eager_capture_records_no_cudagraph_config_to_contradict(self):
-        m = self.mod
-        for fn in (m.overrides_the_forward, m.overrides_the_backward):
-            self._check_eager_capture_serves_no_cudagraph(fn)
-        self._check_eager_capture_serves_no_cudagraph(m.turns_cudagraphs_on)
-
-    def _check_eager_capture_serves_no_cudagraph(self, fn):
+    @parametrize(
+        "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
+    )
+    def test_an_eager_capture_records_no_cudagraph_config_to_contradict(self, fn):
+        fn = getattr(self.mod, fn)
         y, meta = self._capture_step(fn, grad=True, backend="eager")
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
         self.model.zero_grad(set_to_none=True)
@@ -6781,7 +6795,7 @@ class TestPrecompileCudagraphs(TestCase):
         y, meta = self._capture_step(self.mod.step, options=config)
         self.assertLessEqual(config.items(), meta["CUDAGRAPH_CONFIG"].items())
         # The loading process leaves triton.cudagraph_trees at its default (on).
-        recorded, captured = self._serve_in_fresh_process(y)
+        recorded, captured = self._serve_in_fresh_process(y, skips=0, trees=0)
         self.assertEqual(recorded, 0)
         self.assertGreater(captured, 0)
 

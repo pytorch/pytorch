@@ -164,7 +164,8 @@ def _check_cudagraph_policy(cudagraph_config: Mapping[str, bool]) -> None:
     # wraps them by CUDAGRAPH_CONFIG.
     import torch._inductor.config as inductor_config
 
-    if cudagraph_config.get("triton.cudagraphs") and inductor_config.cudagraph_policy:
+    policy = inductor_config.cudagraph_policy
+    if cudagraph_config.get("triton.cudagraphs") and policy is not None:
         raise PackageError(
             "a DynamoTracer capture cannot record "
             "torch._inductor.config.cudagraph_policy: it decides how the capture "
@@ -1978,10 +1979,16 @@ class PrecompileSession(Generic[_P, _R]):
                 "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
                 "graph_partition": inductor_config.graph_partition,
             }
+            config = self._cudagraph_config
+            cpp_wrapper = inductor_config.cpp_wrapper
             if not isinstance(backend, str):
-                config = self._cudagraph_config
                 config.update((k, v) for k, v in backend.config.items() if k in config)
-            _check_cudagraph_policy(self._cudagraph_config)
+                cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
+            if cpp_wrapper and config["graph_partition"]:
+                # compile_fx compiles a partitioned cpp_wrapper graph without CUDA
+                # graphs (get_cpp_wrapper_config), so record what it compiles.
+                config["triton.cudagraphs"] = False
+            _check_cudagraph_policy(config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
