@@ -15487,13 +15487,19 @@ def forward(self, x, b_t, y):
 
             def forward(self, x):
                 with torch.no_grad():
+                    torch._check(x.sum().item() > 0)
                     return self.linear(x)
 
         model = Model()
-        ep = export(model, (torch.randn(4, 4),), {})
+        ep = export(model, (torch.ones(4, 4),), {})
         FileCheck().check_count(
             "torch.ops.higher_order.wrap_with_set_grad_enabled", 1, exactly=True
         ).run(ep.graph_module.code)
+        # An error inside the region must not leak the region's grad mode.
+        with torch.enable_grad():
+            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+                ep.module()(-torch.ones(4, 4))
+            self.assertTrue(torch.is_grad_enabled())
 
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
