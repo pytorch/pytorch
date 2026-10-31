@@ -6,13 +6,23 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
+from torch._inductor.heuristics.registry import CodegenConfigHeuristics
+from torch._inductor.heuristics.triton_codegen.pointwise import (
+    PointwiseHeuristic,
+    ROCmPointwiseHeuristic,
+    XPUPointwiseHeuristic,
+)
+from torch._inductor.runtime.hints import DeviceProperties, HeuristicType
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -114,6 +124,139 @@ class DeterministicTest(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @parametrize("deterministic", [False, True])
+    @inductor_config.patch(max_autotune_pointwise=True, coordinate_descent_tuning=True)
+    def test_pointwise_autotuning(self, deterministic):
+        # Different XBLOCKs can contract multiply-adds into FMAs differently, so
+        # timing must not pick the pointwise config in deterministic mode.
+        def fn(x, buf):
+            return x / x.shape[0] * 0.01 + buf * 0.99
+
+        x = torch.randn(4097, device=GPU_TYPE)
+        buf = torch.randn(4097, device=GPU_TYPE)
+        num_bench = 0
+        outs = []
+        # Force opposite timing winners (smallest vs largest XBLOCK).
+        for prefer_small in (True, False):
+
+            def bench(self, launcher, *args, **kwargs):
+                nonlocal num_bench
+                num_bench += 1
+                xblock = launcher.config.kwargs["XBLOCK"]
+                return float(xblock) if prefer_small else 1.0 / xblock
+
+            torch._dynamo.reset()
+            with (
+                inductor_config.patch(deterministic=deterministic),
+                fresh_cache(),
+                unittest.mock.patch.object(CachingAutotuner, "bench", bench),
+            ):
+                outs.append(torch.compile(fn, dynamic=True)(x, buf))
+
+        if deterministic:
+            self.assertEqual(num_bench, 0)
+            self.assertEqual(counters["inductor"]["coordesc_tuning_bench"], 0)
+            self.assertTrue(torch.equal(outs[0], outs[1]))
+        else:
+            self.assertGreater(num_bench, 0)
+            self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
+
+    @parametrize("deterministic", [False, True])
+    @inductor_config.patch(max_autotune=True)
+    def test_foreach_autotuning(self, deterministic):
+        # Foreach kernels time num_warps under max-autotune; num_warps changes the
+        # elements per thread, like XBLOCK does for pointwise kernels.
+        num_bench = 0
+
+        def bench(self, launcher, *args, **kwargs):
+            nonlocal num_bench
+            if self.heuristic_type == HeuristicType.TEMPLATE:  # foreach kernels
+                num_bench += 1
+            return float(launcher.config.num_warps)
+
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        xs = [torch.randn(n, device=GPU_TYPE) for n in (1024, 2048)]
+        ys = [torch.randn(n, device=GPU_TYPE) for n in (1024, 2048)]
+        with (
+            inductor_config.patch(deterministic=deterministic),
+            unittest.mock.patch.object(CachingAutotuner, "bench", bench),
+        ):
+            torch.compile(fn)(xs, ys)
+
+        if deterministic:
+            self.assertEqual(num_bench, 0)
+        else:
+            self.assertGreater(num_bench, 0)
+
+    @parametrize(
+        "heuristic_cls",
+        [PointwiseHeuristic, ROCmPointwiseHeuristic, XPUPointwiseHeuristic],
+        name_fn=lambda cls: cls.__name__,
+    )
+    @parametrize("rank", [1, 2, 3])
+    def test_pointwise_heuristic_default_config(self, heuristic_cls, rank):
+        # Checks every device heuristic without its hardware: configs are
+        # recorded as (block sizes, options) instead of being built.
+        def record(size_hints, *blocks, **options):
+            return blocks, options
+
+        heuristic = heuristic_cls()
+        size_hints = dict.fromkeys("zyx"[3 - rank :], 1024)
+        config = heuristic.get_default_config(size_hints, 256, record)
+        default_blocks = {1: (256,), 2: (32, 32), 3: (16, 16, 16)}[rank]
+        self.assertEqual(config, (default_blocks, {}))
+
+        # With autotuning off, get_configs returns that same config, except on
+        # the XPU 3D path, which always returns all its configs.
+        meta = {"autotune_pointwise": False}
+        configs = heuristic.get_configs(size_hints, 256, record, [], inductor_meta=meta)
+        if heuristic_cls is XPUPointwiseHeuristic and rank == 3:
+            self.assertGreater(len(configs), 1)
+        else:
+            self.assertEqual(configs, [config])
+
+        with self.assertRaisesRegex(NotImplementedError, "size_hints"):
+            heuristic.get_default_config(dict.fromkeys("wzyx", 1024), 256, record)
+
+    def test_pointwise_deterministic_uses_default_config(self):
+        # The deterministic branch lives in pointwise(), so it holds for any
+        # registered heuristic, including one that does not inherit
+        # PointwiseHeuristic.
+        class TwoConfigs(CodegenConfigHeuristics):
+            def get_configs(self, size_hints, bs, config_fn, *args, **kwargs):
+                return [config_fn(size_hints, 128), config_fn(size_hints, 256)]
+
+        class WithDefault(TwoConfigs):
+            def get_default_config(self, size_hints, bs, config_fn):
+                self.default = config_fn(size_hints, 64)
+                return self.default
+
+        device = DeviceProperties.create(torch.device(GPU_TYPE))
+
+        def configs(heuristic, **inductor_meta):
+            with unittest.mock.patch(
+                "torch._inductor.heuristics.registry.get_codegen_heuristic",
+                return_value=heuristic,
+            ):
+                return pointwise(
+                    {"x": 1024},
+                    triton_meta={"device": device},
+                    inductor_meta=inductor_meta,
+                    return_configs=True,
+                )
+
+        heuristic = WithDefault()
+        self.assertEqual(len(configs(heuristic)), 2)
+        self.assertEqual(configs(heuristic, deterministic=True), [heuristic.default])
+        # The TMA filter prepends a copy of the default config, which is dropped.
+        tma = {"XBLOCK": 1}
+        tma_configs = configs(heuristic, deterministic=True, tma_min_block_sizes=tma)
+        self.assertEqual(len(tma_configs), 1)
+        with self.assertRaisesRegex(NotImplementedError, "get_default_config"):
+            configs(TwoConfigs(), deterministic=True)
+
     @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self):
@@ -152,12 +295,18 @@ class DeterministicTest(TestCase):
         x = torch.randn(1_000_003, device=GPU_TYPE, dtype=torch.float32)
         compiled = torch.compile(lambda v: torch.cumsum(v, dim=0))
 
-        torch.use_deterministic_algorithms(True, warn_only=False)
-        eager = torch.cumsum(x, dim=0)
-        result, (_,) = run_and_get_code(compiled, x)
-        for _ in range(5):
-            self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
-        self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
+        # torch.use_deterministic_algorithms also sets inductor_config.deterministic,
+        # so restore both on exit.
+        with (
+            inductor_config.patch(deterministic=inductor_config.deterministic),
+            DeterministicGuard(True),
+        ):
+            eager = torch.cumsum(x, dim=0)
+            result, (_,) = run_and_get_code(compiled, x)
+            for _ in range(5):
+                rerun = compiled(x).view(torch.int32)
+                self.assertEqual(result.view(torch.int32), rerun)
+            self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):

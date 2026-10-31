@@ -60,6 +60,22 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
             )
         raise NotImplementedError(f"size_hints: {size_hints}")
 
+    def get_default_config(
+        self,
+        size_hints: dict[str, int],
+        bs: int,
+        triton_config_fn: Callable[..., Any],
+    ) -> Any:
+        """The single config used when pointwise autotuning is off."""
+        n = len(size_hints)
+        if n == 1:
+            return triton_config_fn(size_hints, bs)
+        if n == 2:
+            return triton_config_fn(size_hints, 32, 32)
+        if n == 3:
+            return triton_config_fn(size_hints, 16, 16, 16)
+        raise NotImplementedError(f"size_hints: {size_hints}")
+
     def _configs_1d(
         self, size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
     ):
@@ -67,7 +83,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return [triton_config_fn(size_hints, bs)]
+            return [self.get_default_config(size_hints, bs, triton_config_fn)]
         return [
             triton_config_fn(size_hints, bs, num_elements_per_warp=256),
             triton_config_fn(size_hints, bs // 2, num_elements_per_warp=64),
@@ -84,7 +100,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return [triton_config_fn(size_hints, 32, 32)]
+            return [self.get_default_config(size_hints, bs, triton_config_fn)]
         return [
             triton_config_fn(size_hints, 32, 32),
             triton_config_fn(size_hints, 64, 64),  # ~8% better for fp16
@@ -102,7 +118,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return [triton_config_fn(size_hints, 16, 16, 16)]
+            return [self.get_default_config(size_hints, bs, triton_config_fn)]
         return [
             triton_config_fn(size_hints, 16, 16, 16),
             triton_config_fn(size_hints, 64, 8, 8),
@@ -169,7 +185,7 @@ class ROCmPointwiseHeuristic(PointwiseHeuristic):
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return [triton_config_fn(size_hints, 32, 32)]
+            return [self.get_default_config(size_hints, bs, triton_config_fn)]
         return [
             triton_config_fn(size_hints, 32, 32),
             triton_config_fn(size_hints, 64, 64),  # ~8% better for fp16
@@ -215,7 +231,7 @@ class XPUPointwiseHeuristic(PointwiseHeuristic):
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return [triton_config_fn(size_hints, 32, 32)]
+            return [self.get_default_config(size_hints, bs, triton_config_fn)]
         return [
             triton_config_fn(size_hints, 32, 32),
             triton_config_fn(size_hints, 64, 64),  # ~8% better for fp16

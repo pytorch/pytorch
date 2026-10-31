@@ -2473,6 +2473,9 @@ class CachingAutotuner(KernelInterface):
             HeuristicType.SPLIT_SCAN,
         ):
             return False
+        # Pointwise block sizes can change FMA contraction, so they are pinned too.
+        if self.deterministic_mode and self.heuristic_type == HeuristicType.POINTWISE:
+            return False
         return True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
@@ -4939,16 +4942,29 @@ def pointwise(
     from torch._inductor.heuristics.registry import get_codegen_heuristic
 
     pointwise_heuristic = get_codegen_heuristic("pointwise", triton_meta["device"].type)
-    configs = pointwise_heuristic.get_configs(
-        size_hints,
-        bs,
-        triton_config_with_settings,
-        hinted_configs,
-        tile_hint=tile_hint,
-        inductor_meta=inductor_meta,
-    )
+    deterministic = inductor_meta.get("deterministic")
+    if deterministic:
+        # Configs with different block sizes can round differently (FMA
+        # contraction), so deterministic mode must not let timing pick one.
+        configs = [
+            pointwise_heuristic.get_default_config(
+                size_hints, bs, triton_config_with_settings
+            )
+        ]
+    else:
+        configs = pointwise_heuristic.get_configs(
+            size_hints,
+            bs,
+            triton_config_with_settings,
+            hinted_configs,
+            tile_hint=tile_hint,
+            inductor_meta=inductor_meta,
+        )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    if deterministic:
+        # The TMA filter may add a copy of the default config.
+        configs = unique_configs(configs)
     if return_configs:
         return configs
 
@@ -5538,8 +5554,9 @@ def foreach(
     inductor_meta = {} if inductor_meta is None else inductor_meta
     configs = []
 
-    # Naive autotuning path for num_warps
-    if not (
+    # Naive autotuning path for num_warps. Deterministic mode keeps one config:
+    # num_warps changes the elements per thread, which can change FMA contraction.
+    if inductor_meta.get("deterministic") or not (
         inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
         configs.append(triton.Config({}, num_stages=1, num_warps=8))

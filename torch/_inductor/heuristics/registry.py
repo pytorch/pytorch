@@ -160,6 +160,19 @@ class CodegenConfigHeuristics:
     def get_configs(self, *args: Any, **kwargs: Any) -> list[Any]:
         raise NotImplementedError
 
+    def get_default_config(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Return the single config to use when timing must not pick one.
+
+        Only "pointwise" heuristics need it: in deterministic mode, ``pointwise()``
+        calls ``get_default_config(size_hints, bs, triton_config_fn)`` instead of
+        ``get_configs`` and uses the returned triton ``Config``.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not define get_default_config, "
+            "which Inductor's deterministic mode requires"
+        )
+
 
 def register_codegen_heuristic(
     name: str,
