@@ -429,13 +429,22 @@ def _carries_alias(
     return False
 
 
-def _aot_rebuilt_input_output_indices() -> set[int]:
+def _aot_rebuilt_input_output_indices(graph: torch.fx.Graph) -> set[int]:
     """Output positions AOTAutograd reconstructs from original forward inputs."""
     context = torch._guards.TracingContext.try_get()
     fw_metadata = context.fw_metadata if context is not None else None
     if fw_metadata is None:
         return set()
+    output_nodes = graph.find_nodes(op="output")
+    if len(output_nodes) != 1:
+        return set()
+    output_leaves = pytree.arg_tree_leaves(*output_nodes[0].args)
     offset = fw_metadata.num_mutated_inp_runtime_indices
+    expected_outputs = (
+        offset + len(fw_metadata.output_info) + fw_metadata.num_intermediate_bases
+    )
+    if len(output_leaves) != expected_outputs:
+        return set()
     return {
         offset + i
         for i, info in enumerate(fw_metadata.output_info)
@@ -450,7 +459,7 @@ def _result_escapes_graph(
 ) -> bool:
     """Whether node's result, or an alias of it, is returned as a non-input alias."""
     if aot_rebuilt_input_output_indices is None:
-        aot_rebuilt_input_output_indices = _aot_rebuilt_input_output_indices()
+        aot_rebuilt_input_output_indices = _aot_rebuilt_input_output_indices(node.graph)
     aliases = OrderedSet([node])
     stack = [node]
     while stack:
