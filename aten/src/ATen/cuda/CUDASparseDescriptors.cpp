@@ -142,7 +142,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
   auto col_indices = input.col_indices();
   auto values = input.values();
   auto nnz = values.size(-1);
-  c10::MaybeOwned<Tensor> values_ = values.expect_contiguous();
+  values_ = values.expect_contiguous();
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(crow_indices.is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(col_indices.is_contiguous());
