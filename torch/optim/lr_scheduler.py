@@ -1235,6 +1235,12 @@ class SequentialLR(LRScheduler):
                 still written against the older ``step`` API, which cannot
                 take them, is stepped without them.
         """
+        if "epoch" in kwargs:
+            raise TypeError(
+                f"{type(self).__name__}.step() does not accept the deprecated 'epoch' "
+                "argument: its meaning is ambiguous for a composite scheduler. "
+                "Omit 'epoch' when calling step()."
+            )
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
@@ -1625,6 +1631,12 @@ class ChainedScheduler(LRScheduler):
                 written against the older ``step`` API, which cannot take
                 them, is stepped without them.
         """
+        if "epoch" in kwargs:
+            raise TypeError(
+                f"{type(self).__name__}.step() does not accept the deprecated 'epoch' "
+                "argument: its meaning is ambiguous for a composite scheduler. "
+                "Omit 'epoch' when calling step()."
+            )
         for scheduler, accepts_kwargs in zip(
             self._schedulers, self._schedulers_accept_kwargs, strict=True
         ):

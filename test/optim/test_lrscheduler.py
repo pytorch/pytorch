@@ -1475,6 +1475,30 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(TypeError):
             scheduler.step(5)
 
+    @parametrize("epoch", [None, 5])
+    @parametrize("steps", [0, 1, 2])
+    def test_sequential_lr_rejects_keyword_epoch(self, epoch, steps):
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[ConstantLR(self.opt), ConstantLR(self.opt)],
+            milestones=[2],
+        )
+        # Reject before, at, and after the milestone without advancing any state.
+        for _ in range(steps):
+            self.opt.step()
+            scheduler.step()
+        self.opt.step()
+        scheduler_state = copy.deepcopy(scheduler.state_dict())
+        optimizer_state = copy.deepcopy(self.opt.state_dict())
+
+        with self.assertRaisesRegex(
+            TypeError, "does not accept the deprecated 'epoch' argument"
+        ):
+            scheduler.step(epoch=epoch)
+
+        self.assertEqual(scheduler.state_dict(), scheduler_state)
+        self.assertEqual(self.opt.state_dict(), optimizer_state)
+
     def test_chained_scheduler_forwards_kwargs_to_children(self):
         first = self.RecordingScheduler(self.opt)
         second = self.RecordingScheduler(self.opt)
@@ -1541,6 +1565,24 @@ class TestLRScheduler(TestCase):
         )
         with self.assertRaises(TypeError):
             scheduler.step(5)
+
+    @parametrize("epoch", [None, 5])
+    def test_chained_scheduler_rejects_keyword_epoch(self, epoch):
+        scheduler = ChainedScheduler(
+            [ExponentialLR(self.opt, gamma=0.5), ExponentialLR(self.opt, gamma=0.1)],
+            optimizer=self.opt,
+        )
+        self.opt.step()
+        scheduler_state = copy.deepcopy(scheduler.state_dict())
+        optimizer_state = copy.deepcopy(self.opt.state_dict())
+
+        with self.assertRaisesRegex(
+            TypeError, "does not accept the deprecated 'epoch' argument"
+        ):
+            scheduler.step(epoch=epoch)
+
+        self.assertEqual(scheduler.state_dict(), scheduler_state)
+        self.assertEqual(self.opt.state_dict(), optimizer_state)
 
     def test_sequential_lr_rejects_reduce_lr_on_plateau(self):
         with warnings.catch_warnings():
