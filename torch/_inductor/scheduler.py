@@ -7289,13 +7289,10 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
-                # aten won this GEMM, so its tuned solutions are what runtime
-                # will look up. Widen the recorded coverage across the dynamic
+                # aten won, so widen its recorded coverage across the dynamic
                 # dim, after output_node() as the select_algorithm sites do.
-                # Not on the layout-conflict fallback: there an input is frozen
-                # to a layout the constraints disagree with, and the meta
-                # rebuild reads the constraint, so the ladder would record an
-                # ld runtime never passes.
+                # Not on the layout-conflict fallback: the meta rebuild reads
+                # the constraint, not the frozen layout the kernel receives.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
                 if not layout_conflict:
