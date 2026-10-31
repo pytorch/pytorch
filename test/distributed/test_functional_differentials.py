@@ -1394,7 +1394,10 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
 
 if acc:
     instantiate_device_type_tests(
-        TestFunctionalDifferentialsWithCompile, globals(), only_for=acc.type
+        TestFunctionalDifferentialsWithCompile,
+        globals(),
+        only_for=acc.type,
+        allow_xpu=True,
     )
 else:
     del TestFunctionalDifferentialsWithCompile

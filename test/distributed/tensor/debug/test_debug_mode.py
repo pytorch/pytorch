@@ -1149,8 +1149,8 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("[triton]", triton_calls[0].render([]))
 
     def test_check_hash_mismatches(self):
-        x = torch.randn(64, 64, device=GPU_TYPE)
-        x_different = torch.randn(64, 64, device=GPU_TYPE)
+        x = torch.randn(64, 64, device=self.device_type)
+        x_different = torch.randn(64, 64, device=self.device_type)
 
         # Identical runs should have no mismatches
         with DebugMode() as dm1, DebugMode.log_tensor_hashes():

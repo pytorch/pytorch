@@ -118,20 +118,22 @@ class MicroPipelineTPTest(TestCase):
 
     @staticmethod
     def _make_nvfp4_inputs(a_shape, packed_k):
-        A = torch.randint(0, 256, a_shape, device="cuda", dtype=torch.uint8).view(
+        A = torch.randint(0, 256, a_shape, device=device_type, dtype=torch.uint8).view(
             torch.float4_e2m1fn_x2
         )
         B = (
-            torch.randint(0, 256, (128, packed_k), device="cuda", dtype=torch.uint8)
+            torch.randint(
+                0, 256, (128, packed_k), device=device_type, dtype=torch.uint8
+            )
             .view(torch.float4_e2m1fn_x2)
             .T
         )
         scale_numel = 128 * (packed_k // 8)
         scales = tuple(
-            torch.ones(scale_numel, device="cuda", dtype=torch.float8_e4m3fn)
+            torch.ones(scale_numel, device=device_type, dtype=torch.float8_e4m3fn)
             for _ in range(2)
         )
-        return A, B, *scales, torch.tensor(2.0, device="cuda")
+        return A, B, *scales, torch.tensor(2.0, device=device_type)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
