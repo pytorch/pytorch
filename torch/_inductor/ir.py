@@ -7149,7 +7149,7 @@ class ConcatKernel(NopKernel):
         # on purpose: these are the inputs of the node being lowered (for
         # aten.cat, the cat's own), and a mutation anywhere in the graph, even
         # before the cat, turns the aliasing off for all of them.
-        nodes = V.graph.current_node.all_input_nodes
+        nodes = [V.graph.current_node, *V.graph.current_node.all_input_nodes]
         mutated = V.graph.mutated_storages
         allow_alias = not any(get_node_storage(n) in mutated for n in nodes)
         op_names = []

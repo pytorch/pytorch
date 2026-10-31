@@ -12133,6 +12133,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(8, 8), torch.arange(4), torch.ones(4, 8)))
 
+    @parametrize("case", ("mm", "pointwise", "view_index"))
+    def test_cat_output_mutated_reads_input(self, case):
+        def fn(a, x, w, idx_a, idx_b):
+            b = torch.nn.functional.linear(x, w) if case == "mm" else x[:, :3] * 2
+            out = torch.cat([a, b], dim=0)
+            if case == "view_index":
+                out[:].index_put_((idx_a,), a)
+            else:
+                out.index_put_((idx_a,), a)
+            out.index_put_((idx_b,), b)
+            return out
+
+        perm = torch.tensor([6, 7, 8, 9, 0, 1, 2, 3, 4, 5])
+        args = (
+            torch.randn(6, 3),
+            torch.randn(4, 5),
+            torch.randn(3, 5),
+            perm[:6],
+            perm[6:],
+        )
+        self.common(fn, args, check_lowp=False)
+
     def test_index_put_deterministic_fallback(self):
         if is_mps_backend(self.device):
             # MPS has no deterministic implementation for
