@@ -336,6 +336,10 @@ void prepareTrace(
   const bool has_mtia_activity_filter =
       activity_filter.contains(torch::autograd::profiler::ActivityType::MTIA);
   const bool has_collectives_profiler = collectivesProfilerExists();
+  const bool has_device_activity =
+      std::any_of(activities.begin(), activities.end(), [](auto activity) {
+        return activity != torch::autograd::profiler::ActivityType::CPU;
+      });
 
   if (has_cpu_activity) {
     insertActivities(torch::autograd::profiler::ActivityType::CPU, kCpuTypes);
@@ -439,6 +443,11 @@ void prepareTrace(
     extraConfig += value;
     extraConfig += '\n';
   }
+  // libkineto is registered once per process, so cpuOnly only says whether the
+  // process has a device. A trace that requested no device activity must leave
+  // the device tracer alone, since another tool may own it.
+  extraConfig += has_device_activity ? "GPU_TRACING_ENABLED=true\n"
+                                     : "GPU_TRACING_ENABLED=false\n";
   const std::string configStr =
       appendCustomConfig(traceIdStr, config.custom_profiler_config) +
       extraConfig;

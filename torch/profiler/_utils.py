@@ -35,8 +35,10 @@ def index_of_first_match(seq, predicate, start=0, end=None):
 # TODO(dberard) - deprecate / remove workaround for CUDA >= 12, when
 # we stop supporting older CUDA versions.
 def _init_for_cuda_graphs() -> None:
-    from torch.autograd.profiler import profile
+    from torch.profiler import profile
 
+    # The default activities include CUDA when a GPU is present. Tracing CUDA
+    # is what initializes CUPTI ahead of graph capture.
     with profile():
         pass
 

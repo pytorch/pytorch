@@ -32,7 +32,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -43,28 +42,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def setUpModule():
-    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-    # safe; libkineto re-subscribes on its next profile, so kineto tests are
-    # unaffected. See pylibcupti().finalize.
-    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_3:
-        from torch.profiler._cuspy.cupti_python import pylibcupti
-
-        try:
-            pylibcupti().finalize()
-        except Exception:
-            pass
-
-
 def _isolated(test_fn):
     """Run a cuspy test in a fresh subprocess. Cuspy needs the single
     process-wide CUPTI subscriber, but libkineto grabs it for the process lifetime once
-    any kineto-CUDA profile runs (setUpModule's prime, or another test in a full run),
-    and decoded-record native state can leak between tests. Re-running the test alone in
-    a child gives it a clean process: setUpModule's finalize releases the child's own
-    prime, so Cuspy subscribes, with no cross-test interference."""
+    any kineto-CUDA profile runs, and decoded-record native state can leak between
+    tests. Re-running the test alone in a child gives it a clean process, so Cuspy
+    subscribes, with no cross-test interference."""
 
     @functools.wraps(test_fn)
     def wrapper(self):

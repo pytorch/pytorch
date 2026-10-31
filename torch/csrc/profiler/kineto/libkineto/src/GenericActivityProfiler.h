@@ -439,6 +439,13 @@ class GenericActivityProfiler {
 
   void resetTraceData();
 
+  // GPU tracing needs GPU support, which is fixed when the profiler is
+  // registered, and a trace config that allows it, which can change with
+  // every trace.
+  bool shouldTraceGpu() const {
+    return !cpuOnly_ && config_ && config_->gpuTracingEnabled();
+  }
+
   void addOverheadSample(profilerOverhead& counter, int64_t overhead) {
     counter.overhead += overhead;
     counter.cntr++;
@@ -485,6 +492,8 @@ class GenericActivityProfiler {
   // the overhead to enable/disable activity tracking
   profilerOverhead setupOverhead_;
 
+  // True when the profiler has no GPU support. See shouldTraceGpu for the
+  // per-trace decision.
   bool cpuOnly_{false};
   bool gpuOnly_{false};
   bool cpuActivityPresent_{false};

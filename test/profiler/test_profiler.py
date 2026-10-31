@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -93,10 +92,6 @@ def get_profiler_activities(device_type):
         if device_activity and device_activity in supported_activities():
             activities.append(device_activity)
     return activities
-
-
-def setUpModule():
-    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -209,7 +204,7 @@ class TestProfilerCUDA(TestCase):
                 """
 import os
 import torch
-from torch.profiler import ProfilerActivity, profile
+from torch.profiler import DeviceType, ProfilerActivity, profile
 
 def add_one(in_: torch.Tensor):
     return in_ + 1
@@ -228,8 +223,11 @@ if out[0] != 1:
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
 
-with profile(activities=[ProfilerActivity.CUDA]):
+with profile(activities=[ProfilerActivity.CUDA]) as prof:
     add_one_graphed(zeros)
+    torch.cuda.synchronize()
+if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
+    raise AssertionError("Expected device events from the graphed callable")
 """,
             ],
             text=True,
@@ -2375,7 +2373,7 @@ with open(sys.argv[1], "w") as f:
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     # The child deadlocks once the parent has initialized Kineto's XPU profiler,
-    # which setUpModule does on any XPU build.
+    # which the first profiling session does on any XPU build.
     @unittest.skipIf(
         TEST_XPU,
         "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
