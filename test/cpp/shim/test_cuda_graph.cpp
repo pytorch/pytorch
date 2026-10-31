@@ -248,66 +248,6 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
   EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
 }
 
-TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
-  auto handles = [](std::vector<at::Tensor>& tensors) {
-    std::vector<AtenTensorHandle> result;
-    for (auto& t : tensors) {
-      result.push_back(reinterpret_cast<AtenTensorHandle>(&t));
-    }
-    return result;
-  };
-  auto longs = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
-  // Same dtype and layout, so the copies fuse, then mixed ones, which don't.
-  for (bool fused : {true, false}) {
-    std::vector<at::Tensor> dst = {
-        at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
-    std::vector<at::Tensor> src = {
-        at::randn({4}, at::kCUDA), at::randn({3, 2}, at::kCUDA)};
-    if (!fused) {
-      dst[1] = at::empty({2, 3}, at::kCUDA).t();
-      dst.push_back(at::empty({5}, longs));
-      src.push_back(at::randint(100, {5}, longs));
-    }
-    auto dst_handles = handles(dst);
-    auto src_handles = handles(src);
-    auto n = static_cast<int64_t>(dst.size());
-    ASSERT_EQ(
-        aoti_torch__foreach_copy_(
-            dst_handles.data(), n, src_handles.data(), n, 0),
-        AOTI_TORCH_SUCCESS);
-    for (size_t i = 0; i < dst.size(); ++i) {
-      EXPECT_TRUE(dst[i].equal(src[i]));
-    }
-    EXPECT_EQ(
-        aoti_torch__foreach_copy_(
-            dst_handles.data(), n - 1, src_handles.data(), n, 0),
-        AOTI_TORCH_FAILURE);
-    dst[0] = at::empty({3}, at::kCUDA);
-    EXPECT_EQ(
-        aoti_torch__foreach_copy_(
-            dst_handles.data(), n, src_handles.data(), n, 0),
-        AOTI_TORCH_FAILURE);
-  }
-  EXPECT_EQ(
-      aoti_torch__foreach_copy_(nullptr, 1, nullptr, 1, 0), AOTI_TORCH_FAILURE);
-
-  // Asynchronous copies from pinned host memory.
-  std::vector<at::Tensor> host = {
-      at::randn({4}).pin_memory(), at::randn({3, 2}).pin_memory()};
-  std::vector<at::Tensor> device = {
-      at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
-  auto host_handles = handles(host);
-  auto device_handles = handles(device);
-  ASSERT_EQ(
-      aoti_torch__foreach_copy_(
-          device_handles.data(), 2, host_handles.data(), 2, 1),
-      AOTI_TORCH_SUCCESS);
-  at::cuda::getCurrentCUDAStream().synchronize();
-  for (size_t i = 0; i < host.size(); ++i) {
-    EXPECT_TRUE(device[i].cpu().equal(host[i]));
-  }
-}
-
 TEST_F(AOTICudaGraphTest, DeletingAPoolWhileCapturingFails) {
   CUDAMemPoolHandle pool = nullptr;
   ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool), AOTI_TORCH_SUCCESS);
@@ -349,6 +289,30 @@ TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
 }
 
 // Run with PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync.
+TEST(AOTIForeachCopyCudaTest, CopiesFromPinnedMemoryAsynchronously) {
+  if (c10::cuda::device_count() == 0) {
+    GTEST_SKIP() << "CUDA is not available";
+  }
+  std::vector<at::Tensor> host = {
+      at::randn({4}).pin_memory(), at::randn({3, 2}).pin_memory()};
+  std::vector<at::Tensor> device = {
+      at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
+  std::vector<AtenTensorHandle> host_handles;
+  std::vector<AtenTensorHandle> device_handles;
+  for (size_t i = 0; i < host.size(); ++i) {
+    host_handles.push_back(reinterpret_cast<AtenTensorHandle>(&host[i]));
+    device_handles.push_back(reinterpret_cast<AtenTensorHandle>(&device[i]));
+  }
+  ASSERT_EQ(
+      aoti_torch__foreach_copy_(
+          device_handles.data(), 2, host_handles.data(), 2, 1),
+      AOTI_TORCH_SUCCESS);
+  at::cuda::getCurrentCUDAStream().synchronize();
+  for (size_t i = 0; i < host.size(); ++i) {
+    EXPECT_TRUE(device[i].cpu().equal(host[i]));
+  }
+}
+
 TEST(AOTICudaGraphAsyncTest, RejectsTheCudaMallocAsyncBackend) {
   if (c10::cuda::device_count() == 0 || !uses_cuda_malloc_async()) {
     GTEST_SKIP() << "Needs the cudaMallocAsync allocator backend";

@@ -2575,6 +2575,8 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> None:
         import copy
 
+        from .compile_fx import clone_preserve_strides
+
         cloned_gm = copy.deepcopy(self.orig_gm)
         example_inputs = copy.deepcopy(example_inputs)
         triton_nodes = []
@@ -2619,7 +2621,10 @@ class GraphLowering(torch.fx.Interpreter):
             with cloned_gm.graph.inserting_before(node):
                 for k, v in kwargs.items():
                     if k in mutated:
-                        new_node = cloned_gm.graph.call_function(torch.clone, args=(v,))
+                        # Kernels keep the original stride arguments when autotuned.
+                        new_node = cloned_gm.graph.call_function(
+                            clone_preserve_strides, args=(v,)
+                        )
                         new_kwargs[k] = len(kwargs_inputs)
                         kwargs_inputs.append(new_node)
                         continue
