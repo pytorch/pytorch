@@ -361,7 +361,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 "is_hashable() called on an already realized LazyVariableTracker"
             )
         value = self._cache.value
-        if isinstance(value, tuple):
+        # Subclasses can override iteration or hashing; trace their callbacks.
+        if type(value) is tuple:
             return all(_helper(v) for v in value)
         return _helper(value)
 

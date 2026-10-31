@@ -52,6 +52,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
+from .guards import GuardBuilder, install_guard
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import (
     is_frozen_dataclass,
@@ -70,6 +71,7 @@ from .variables.base import (
     ValueMutationNew,
     VariableTracker,
 )
+from .variables.dicts import _contains_nan
 from .variables.user_defined import FrozenDataClassVariable
 
 
@@ -184,6 +186,36 @@ def _manual_dict_setitem(
 def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.clear(list_to)
     list.extend(list_to, list_from)
+
+
+def _manual_ordered_dict_update(
+    target: collections.OrderedDict[Any, Any],
+    items: tuple[tuple[Any, Any], ...],
+    keys: tuple[Any, ...] | None,
+    has_deleted_keys: bool,
+    has_reordered_keys: bool,
+) -> None:
+    if keys is None:
+        for key, value in items:
+            collections.OrderedDict.__setitem__(target, key, value)
+        return
+    # A pure reorder must not clear/reinsert the underlying dict entries.
+    previous = tuple(dict.items(target))
+    if (
+        has_deleted_keys
+        or len(previous) != len(items)
+        or any(old_key is not key for (old_key, _), (key, _) in zip(previous, items))
+    ):
+        collections.OrderedDict.clear(target)
+        previous = ()
+    for index, (key, value) in enumerate(items):
+        if index >= len(previous) or previous[index][1] is not value:
+            collections.OrderedDict.__setitem__(target, key, value)
+    if has_reordered_keys or any(
+        old is not key for old, key in zip(collections.OrderedDict.keys(target), keys)
+    ):
+        for key in keys:
+            collections.OrderedDict.move_to_end(target, key)
 
 
 def _manual_set_update(set_from: Any, set_to: Any) -> None:
@@ -1691,6 +1723,9 @@ def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
     #   + only if a key was removed from the input dict
     # (5) update the original dictionary with the dict created in (2)
     if var.has_new_items():
+        if isinstance(var, variables.OrderedDictVariable):
+            _codegen_ordered_dict_mutation(ctx)
+            return
         cg(var.source)  # type: ignore[attr-defined]
         cg.load_method("update")
         cg(var, allow_cache=False)  # Don't codegen via source
@@ -1778,11 +1813,73 @@ def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
         ctx.log(var)
 
 
+def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.OrderedDictVariable):
+        raise AssertionError(type(var))
+    if (
+        var.should_reconstruct_all
+        and var.source
+        and isinstance(
+            var.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+        )
+    ):
+        # Replay specializes on both storage order and linked-list iteration order.
+        cg.tx.output.guard_on_key_order.add(var.source)
+        var.install_dict_keys_match_guard()
+        install_guard(var.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+    cg.add_push_null(
+        lambda: cg.load_import_from(__name__, "_manual_ordered_dict_update")
+    )
+    cg(var.source)
+    # Build tuples explicitly so constant folding cannot discard key sources.
+    num_items = 0
+    for key, value in dict.items(var.items):
+        key_vt = key.vt
+        if not var.should_reconstruct_all:
+            original_value = var.original_items.get(key_vt)
+            if not var.is_new_item(original_value, value):
+                continue
+            key_vt = key_vt.unwrap()
+            # Update lookups preserve existing key objects without positional sources.
+            # Use an exact type check to avoid realizing lazy nonliteral keys.
+            if (
+                original_value is not None
+                and type(key_vt) is variables.ConstantVariable
+            ):
+                key_value = key_vt.as_python_constant()
+                if variables.ConstantVariable.is_literal(
+                    key_value
+                ) and not _contains_nan(key_value):
+                    key_vt = variables.ConstantVariable.create(key_value)
+        cg(key_vt)
+        cg(value)
+        cg.append_output(create_instruction("BUILD_TUPLE", arg=2))
+        num_items += 1
+    cg.append_output(create_instruction("BUILD_TUPLE", arg=num_items))
+    if var.should_reconstruct_all:
+        for key in var.items:
+            cg(key.vt)
+        cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
+    else:
+        cg(variables.ConstantVariable.create(None))
+    cg(variables.ConstantVariable.create(var.has_deleted_keys))
+    cg(variables.ConstantVariable.create(var.has_reordered_keys))
+    ctx.suffixes.append(
+        [*create_call_function(5, False), create_instruction("POP_TOP")]
+    )
+    ctx.log(var)
+
+
 def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
     if not isinstance(var, variables.UserDefinedDictVariable):
         raise AssertionError(type(var))
+    if isinstance(var, variables.OrderedDictVariable):
+        _codegen_ordered_dict_mutation(ctx)
+        return
     # Do dict related update manually here. The store_attr mutations will be
     # applied later.
     varname_map = {}

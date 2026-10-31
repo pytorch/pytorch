@@ -1114,6 +1114,16 @@
       "Hints": []
     }
   ],
+  "GB4179": [
+    {
+      "Gb_type": "OrderedDict mutation with user-defined hash",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo cannot replay input OrderedDict moves without repeating user hash callbacks.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
+      ]
+    }
+  ],
   "GB0066": [
     {
       "Gb_type": "Graph break under GenericContextWrappingVariable",
@@ -2264,6 +2274,16 @@
       "Hints": [
         "Make sure the arguments to itertools.groupby are correct.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6295": [
+    {
+      "Gb_type": "OrderedDict mutation with user-defined hash or equality",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo cannot replay input OrderedDict moves without repeating user hash or equality callbacks.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
       ]
     }
   ],
@@ -6760,6 +6780,16 @@
       "Explanation": "Cannot subscript typing construct {self.value} with a non-constant key.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8046": [
+    {
+      "Gb_type": "dict.popitem on OrderedDict",
+      "Context": "self.python_type().__name__",
+      "Explanation": "dict.popitem removes storage without updating OrderedDict links.",
+      "Hints": [
+        "Use OrderedDict.popitem to keep its linked order consistent."
       ]
     }
   ],
