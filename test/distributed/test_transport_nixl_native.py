@@ -177,7 +177,9 @@ def _connect_rank_worker(rank, port):
         memory = transport.register_memory(torch.full((1024,), float(rank)))
         if rank == 0:
             for peer in (1, 2):
-                transport.connect_rank(peer, store=store, rank=0, timeout=10)
+                transport.connect_rank(
+                    peer, store=store, rank=0, tag="nixl", timeout=10
+                )
             for peer in (1, 2):
                 remote = NIXLRemoteBuffer.deserialize(store.get(f"remote/{peer}"))
                 target = torch.zeros(1024)
@@ -186,7 +188,7 @@ def _connect_rank_worker(rank, port):
                 torch.testing.assert_close(target, torch.full_like(target, peer))
             store.set("done", "1")
         else:
-            transport.connect_rank(0, store=store, rank=rank, timeout=10)
+            transport.connect_rank(0, store=store, rank=rank, tag="nixl", timeout=10)
             # pyrefly: ignore [bad-argument-type]
             store.set(f"remote/{rank}", memory.to_remote_buffer().serialize())
             store.wait(["done"])
