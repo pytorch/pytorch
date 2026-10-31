@@ -31,6 +31,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _aligned_nccl_numel,
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _div_if_needed,
@@ -40,6 +41,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
@@ -71,6 +73,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
+    requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
 )
@@ -92,6 +95,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfTorchInductor,
+    subtest,
     TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
@@ -168,6 +172,34 @@ class TestFSDPCommContext(TestCase):
         comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
         comm_ctx.all_gather_stream.wait_event.assert_not_called()
         self.assertIsNone(comm_ctx.all_gather_state)
+
+
+@instantiate_parametrized_tests
+class TestFullyShardStagingAlignment(TestCase):
+    @parametrize(
+        "device_type, backend, dtype, numel, expected",
+        [
+            subtest(("cuda", "nccl", torch.bfloat16, 5, 8), name="nccl"),
+            subtest(
+                ("cuda", "cpu:gloo,cuda:nccl", torch.bfloat16, 5, 8),
+                name="multi_backend_nccl",
+            ),
+            subtest(("cuda", "gloo", torch.bfloat16, 5, 5), name="gloo"),
+            subtest(
+                ("cuda", "cpu:nccl,cuda:gloo", torch.bfloat16, 5, 5),
+                name="multi_backend_gloo",
+            ),
+            subtest(("cpu", "nccl", torch.bfloat16, 5, 5), name="cpu"),
+            subtest(("cuda", "nccl", torch.uint8, 17, 32), name="nccl_uint8"),
+            subtest(("cuda", "nccl", torch.float32, 8, 8), name="nccl_aligned"),
+            subtest(("cuda", "nccl", torch.float64, 0, 0), name="nccl_empty"),
+        ],
+    )
+    def test_aligned_nccl_numel(self, device_type, backend, dtype, numel, expected):
+        device, group = torch.device(device_type), MagicMock(spec=dist.ProcessGroup)
+        with patch.object(dist, "get_backend", return_value=backend):
+            actual = _aligned_nccl_numel(numel, dtype, device, group)
+        self.assertEqual(actual, expected)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -615,10 +647,17 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
     # Only uint8 buffers hold bytes, not those of other 1-byte dtypes such as int8
     @dtypes(torch.float32, torch.int8)
     @parametrize("byte_buffer", [False, True])
-    def test_smaller_payload_fills_prefix(self, device, dtype, byte_buffer: bool):
+    @parametrize("padding", [0, 2])
+    def test_smaller_payload_fills_prefix(
+        self, device, dtype, byte_buffer: bool, padding: int
+    ):
         # Two ranks gather two elements each into an output sized for eight each
         output = torch.full((16,), -1.0, device=device, dtype=dtype)
         all_gather_output = torch.arange(4.0, device=device).to(dtype)
+        if padding:
+            all_gather_output = nn.functional.pad(
+                all_gather_output.view(2, 2), (0, padding), value=-2
+            ).flatten()
         if byte_buffer:
             all_gather_output = all_gather_output.view(torch.uint8)
         with warnings.catch_warnings():
@@ -627,14 +666,15 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
             _default_all_gather_output_fn(
                 all_gather_output,
                 [output],
-                split_sizes=[all_gather_output.numel() // 2],
+                split_sizes=[2 * output.element_size() if byte_buffer else 2],
                 outer_sizes=[1],
                 world_size=2,
             )
         expected = torch.tensor([0.0, 1, 2, 3] + [-1] * 12, device=device)
         self.assertEqual(output, expected.to(dtype))
 
-    def test_byte_buffer_reassembles_typed_rows(self, device):
+    @parametrize("padding", [0, 12])
+    def test_byte_buffer_reassembles_typed_rows(self, device, padding: int):
         # Mixed dtypes gather bytes: per rank, a (2, 2) chunk of a parameter
         # gathered along dim 1, then two bf16 tags
         base = torch.arange(4.0, device=device).view(2, 2)
@@ -643,6 +683,10 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
         all_gather_output = torch.cat(
             [t.view(torch.uint8).view(-1) for pair in zip(chunks, tags) for t in pair]
         )
+        if padding:
+            all_gather_output = nn.functional.pad(
+                all_gather_output.view(2, -1), (0, padding), value=255
+            ).flatten()
         outputs = [torch.empty(8, device=device), torch.empty_like(tags[0]).repeat(2)]
         cat_dtypes: list[torch.dtype] = []
 
@@ -667,6 +711,51 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
         # Typed rows get vectorized cat kernels that bytes may not
         self.assertEqual(cat_dtypes, [torch.float32])
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("byte_buffer", [False, True])
+    @parametrize("padded", [False, True])
+    def test_padded_rows_use_fused_kernel(self, device, dtype, byte_buffer, padded):
+        # Two ranks gather 5 + 2 elements each, optionally padded to 8.
+        row_size = 8 if padded else 7
+        rows = torch.arange(2 * row_size, device=device, dtype=dtype).view(2, -1)
+        rows[:, 7:] = -1
+        outputs = [rows.new_empty((10,)), rows.new_empty((4,))]
+        all_gather_output = rows.view(torch.uint8) if byte_buffer else rows
+        split_sizes = [5, 2]
+        if byte_buffer:
+            split_sizes = [s * rows.element_size() for s in split_sizes]
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            _default_all_gather_output_fn(
+                all_gather_output.view(-1),
+                outputs,
+                split_sizes=split_sizes,
+                outer_sizes=[1, 1],
+                world_size=2,
+            )
+            torch.cuda.synchronize()
+        self.assertEqual(outputs[0], rows[:, :5].flatten())
+        self.assertEqual(outputs[1], rows[:, 5:7].flatten())
+        kernels = [e.name for e in prof.events() if e.device_type == DeviceType.CUDA]
+        # A strided source would fall back to one copy kernel per split
+        fused = [k for k in kernels if "split_with_sizes_copy_out_contiguous" in k]
+        self.assertEqual(len(fused), 1, str(kernels))
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            _default_all_gather_output_fn(
+                all_gather_output.view(-1),
+                outputs,
+                split_sizes=split_sizes,
+                outer_sizes=[1, 1],
+                world_size=2,
+            )
+        for _ in range(3):
+            rows.add_(1)
+            graph.replay()
+            self.assertEqual(outputs[0], rows[:, :5].flatten())
+            self.assertEqual(outputs[1], rows[:, 5:7].flatten())
+
 
 instantiate_device_type_tests(
     TestFullyShardDefaultAllGatherOutputFn, globals(), only_for=("cpu", "cuda", "xpu")
@@ -687,6 +776,35 @@ class TestFullyShardNativeReduceScatterInputFn(TestCase):
             input_fn(unsharded_grads, shard_dims=[1, 1], world_size=2)(output)
             outputs.append(output)
         self.assertEqual(outputs[0], outputs[1])
+
+    @onlyCUDA
+    @parametrize(
+        "grad_dtype, out_dtype",
+        [
+            subtest((torch.float32, torch.float32), name="fp32"),
+            subtest((torch.bfloat16, torch.bfloat16), name="bf16"),
+            # Deferred gradient upcast: bf16 gradients into an fp32 buffer
+            subtest((torch.bfloat16, torch.float32), name="bf16_to_fp32"),
+        ],
+    )
+    def test_padded_rows_zero_tails(self, device, grad_dtype, out_dtype):
+        # Per rank, 3 rows of a (6, 2) gradient and a (1,) gradient's padded
+        # shard, then one padding element for 16-byte alignment
+        grads = [torch.arange(12.0).view(6, 2), torch.ones(1)]
+        grads = [g.to(device, grad_dtype) for g in grads]
+        out = torch.full((2, 8), -1.0, device=device, dtype=out_dtype)
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            foreach_reduce_scatter_copy_in(grads, out.view(-1), world_size=2)
+            torch.cuda.synchronize()
+        rows = [[*range(6), 1, 0], [*range(6, 12), 0, 0]]
+        expected = torch.tensor(rows, device=device, dtype=out_dtype)
+        self.assertEqual(out, expected, atol=0, rtol=0)
+        kernels = [e.name for e in prof.events() if e.device_type == DeviceType.CUDA]
+        chunk_cat_kernels = [k for k in kernels if "chunk_cat_cuda_kernel" in k]
+        # Padding in the gradients' dtype keeps uniform gradients on the single
+        # same-dtype launch; padding in out's dtype would mix them into a copy
+        # launch plus a cast launch
+        self.assertEqual(len(chunk_cat_kernels), 1, str(kernels))
 
 
 instantiate_device_type_tests(
@@ -1050,6 +1168,21 @@ instantiate_device_type_tests(
 )
 
 
+class _UnalignedShardsModel(nn.Module):
+    # For 2 to 4 ranks (Shard(1) on the weight: 2 or 4), the per-rank stride is
+    # never a multiple of 16 bytes. The size-1 bias also leaves empty shards.
+    def __init__(self, compute_dtype: torch.dtype):
+        super().__init__()
+        self.compute_dtype = compute_dtype
+        self.weight = nn.Parameter(torch.randn(5, 4, device=device_type))
+        self.bias = nn.Parameter(torch.randn(1, device=device_type))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Casts as FSDP's mixed precision does, so a reference matches exactly
+        x = x.to(self.compute_dtype)
+        return x @ self.weight.to(x.dtype).t() + self.bias.to(x.dtype)
+
+
 class TestFullyShardCommunication(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
@@ -1107,6 +1240,142 @@ class TestFullyShardCommunication(FSDPTestContinuous):
         self.assertEqual(
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
         )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_staging_alignment(self):
+        self.run_subtests(
+            {
+                "mode": ["default", "custom_copy_out", "custom_copy_in"],
+                # A bf16 weight next to an fp32 bias makes the all-gather use a
+                # uint8 byte buffer
+                "config": [(False, 0), (True, 0), (False, 1)],
+            },
+            self._test_nccl_staging_alignment,
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_staging_alignment_hsdp_and_int_reshard(self):
+        # HSDP accumulates the trimmed reduce-scatter output while the
+        # all-reduce is skipped, then all-reduces it
+        self._test_nccl_staging_alignment("default", (False, 0), hsdp=True)
+        # The post-forward all-gather runs on a smaller group
+        self._test_nccl_staging_alignment(
+            "default", (False, 0), reshard_after_forward=2
+        )
+
+    def _test_nccl_staging_alignment(
+        self,
+        mode: str,
+        config: tuple[bool, int],
+        hsdp: bool = False,
+        reshard_after_forward: bool | int = True,
+    ):
+        mixed_param_dtypes, shard_dim = config
+        if shard_dim and 4 % self.world_size:
+            return  # Shard(1) needs the weight's dim 1 to be evenly divisible
+        torch.manual_seed(42)
+        # The root does not reshard after forward, so shard a child as well
+        weight_dtype = torch.bfloat16 if mixed_param_dtypes else torch.float32
+        model = nn.Sequential(_UnalignedShardsModel(weight_dtype))
+        ref_model = copy.deepcopy(model)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=0.1)
+        mp_policy = MixedPrecisionPolicy()
+        if mixed_param_dtypes:
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                param_dtype_override_fn=lambda p: torch.float32
+                if p.ndim == 1
+                else None,
+            )
+        if hsdp:
+            mesh_shape = (2, self.world_size // 2)
+            mesh = init_device_mesh(
+                device_type.type, mesh_shape, mesh_dim_names=("replicate", "shard")
+            )
+        else:
+            mesh = init_device_mesh(device_type.type, (self.world_size,))
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            mesh=mesh,
+            mp_policy=mp_policy,
+            reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=lambda p: Shard(shard_dim if p.ndim > 1 else 0),
+        )
+        fully_shard_fn(model[0])
+        fully_shard_fn(model)
+        optim = torch.optim.SGD(model.parameters(), lr=0.1)
+        if mode == "custom_copy_out":
+            # FSDPModule has no setter for the all-gather copy-out yet
+            group = fully_shard.state(model[0])._fsdp_param_group
+            group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+        elif mode == "custom_copy_in":
+            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        calls: list[tuple[str, int, int]] = []
+        all_gather_call = DefaultAllGather.__call__
+        reduce_scatter_call = DefaultReduceScatter.__call__
+
+        def all_gather(comm, output_tensor, input_tensor, group, **kwargs):
+            calls.append(("all_gather", group.size(), input_tensor.nbytes))
+            return all_gather_call(comm, output_tensor, input_tensor, group, **kwargs)
+
+        def reduce_scatter(comm, output_tensor, input_tensor, group, op, **kwargs):
+            calls.append(("reduce_scatter", group.size(), output_tensor.nbytes))
+            return reduce_scatter_call(
+                comm, output_tensor, input_tensor, group, op, **kwargs
+            )
+
+        with (
+            patch.object(DefaultAllGather, "__call__", all_gather),
+            patch.object(DefaultReduceScatter, "__call__", reduce_scatter),
+        ):
+            for iter_idx in range(2):
+                for microbatch_idx in range(2 if hsdp else 1):
+                    if hsdp:
+                        model.set_requires_all_reduce(microbatch_idx == 1)
+                    torch.manual_seed(10 * iter_idx + microbatch_idx + self.rank + 1)
+                    inp = torch.randn((4, 4), device=device_type)
+                    losses = []
+                    for _model in (ref_model, model):
+                        losses.append(_model(inp).sum())
+                        losses[-1].backward()
+                    self.assertEqual(losses[0], losses[1])
+                for param in ref_model.parameters():
+                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+                for _optim in (ref_optim, optim):
+                    _optim.step()
+                    _optim.zero_grad()
+                check_sharded_parity(self, ref_model, model)
+        weight, bias = ref_model[0].weight, ref_model[0].bias
+        # (param, shard dim, all-gather dtype); reduce-scatters run in fp32
+        params = ((weight, shard_dim, weight_dtype), (bias, 0, torch.float32))
+        shard_world_size = mesh.size(-1)
+
+        def raw_nbytes(kind: str, group_size: int) -> int:
+            # Post-forward shards split the padded unsharded param over a
+            # smaller group
+            return sum(
+                -(-p.size(dim) // shard_world_size)
+                * shard_world_size
+                // group_size
+                * (p.numel() // p.size(dim))
+                * (torch.float32 if kind == "reduce_scatter" else dtype).itemsize
+                for p, dim, dtype in params
+            )
+
+        # A custom copy-out or copy-in keeps the unpadded layout of its collective
+        unpadded = {"custom_copy_out": "all_gather", "custom_copy_in": "reduce_scatter"}
+        for kind, group_size, nbytes in calls:
+            raw = raw_nbytes(kind, group_size)
+            # Without padding, every collective here has a misaligned rank stride
+            self.assertNotEqual(raw % 16, 0)
+            expected = raw if unpadded.get(mode) == kind else -(-raw // 16) * 16
+            self.assertEqual(nbytes, expected, f"{kind} over {group_size} ranks")
+        if type(reshard_after_forward) is int:
+            group_sizes = {(kind, size) for kind, size, _ in calls}
+            self.assertIn(("all_gather", reshard_after_forward), group_sizes)
+        self.assertIn("reduce_scatter", {kind for kind, _, _ in calls})
 
     @skip_if_lt_x_gpu(2)
     def test_manual_reshard_with_reshard_after_forward_false(self):
@@ -2695,7 +2964,12 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
         # We target a specific count so that we don't pick up the barrier ops
         layer_numel = sum(w.numel() for w in model.layers[0].parameters())
-        comms_size = layer_numel // self.world_size
+        comms_size = _aligned_nccl_numel(
+            layer_numel // self.world_size,
+            torch.float32,
+            torch.device("cuda"),
+            dist.group.WORLD,
+        )
         reduce_scatter_avg_re = self.COLLECTIVE_RE.format(
             coll="ReduceScatter", count=comms_size, reduce_op=self.AVG_REDUCTION
         )
@@ -2756,11 +3030,19 @@ class TestFullyShardForceSumReduction(FSDPTest):
         # We target a specific count so that we don't pick up the barrier ops
         layer_numel = sum(w.numel() for w in model.layers[0].parameters())
         comms_size = layer_numel // (self.world_size // 2)
+        # The all-reduce runs on the reduce-scatter output trimmed of padding
+        reduce_scatter_size = _aligned_nccl_numel(
+            comms_size, torch.float32, torch.device("cuda"), mesh["fsdp"].get_group()
+        )
         reduce_scatter_avg_re = self.COLLECTIVE_RE.format(
-            coll="ReduceScatter", count=comms_size, reduce_op=self.AVG_REDUCTION
+            coll="ReduceScatter",
+            count=reduce_scatter_size,
+            reduce_op=self.AVG_REDUCTION,
         )
         reduce_scatter_sum_re = self.COLLECTIVE_RE.format(
-            coll="ReduceScatter", count=comms_size, reduce_op=self.SUM_REDUCTION
+            coll="ReduceScatter",
+            count=reduce_scatter_size,
+            reduce_op=self.SUM_REDUCTION,
         )
         all_reduce_avg_re = self.COLLECTIVE_RE.format(
             coll="AllReduce", count=comms_size, reduce_op=self.AVG_REDUCTION
