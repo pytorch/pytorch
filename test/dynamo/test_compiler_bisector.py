@@ -6,8 +6,6 @@ from importlib import import_module
 
 import torch
 import torch._prims_common as utils
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
@@ -17,7 +15,7 @@ from torch.library import _scoped_library, Library
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton_for_device
 
 
 aten = torch.ops.aten
@@ -314,28 +312,11 @@ class TestCompilerBisector(TestCase):
                 get_env_val.cache_clear()
 
 
-def _triton_available_for(device: str | torch.device) -> bool:
-    # Per-device parity with has_triton(); the aggregate is any-device.
-    if not has_triton_package() or config.triton_disable_device_detection:
-        return False
-    try:
-        interface = get_interface_for_device(torch.device(device).type)
-    except NotImplementedError:
-        return False
-    if not (interface.is_available() and interface.is_triton_capable()):
-        return False
-    try:
-        interface.raise_if_triton_unavailable()
-    except TritonUnavailableError:
-        return False
-    return True
-
-
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
-        if not _triton_available_for(self.device_type):
+        if not has_triton_for_device(self.device_type):
             self.skipTest(f"requires Triton on {self.device_type}")
         super().setUp()
 

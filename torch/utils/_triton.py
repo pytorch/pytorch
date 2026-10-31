@@ -280,6 +280,44 @@ def has_triton_reduction_ordering() -> bool:
 
 
 @functools.cache
+def has_triton_for_device(device: str) -> bool:
+    """Return whether a usable Triton backend is available for a specific device."""
+    if not has_triton_package():
+        return False
+
+    import torch
+    from torch._inductor.config import triton_disable_device_detection
+
+    if triton_disable_device_detection:
+        return False
+
+    from torch._dynamo.device_interface import get_interface_for_device
+    from torch._dynamo.exc import TritonUnavailableError
+
+    # A device supports Triton if it is available, reports Triton capability, and
+    # its Triton backend is actually built. Capability is gated first so that
+    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
+    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
+    # specific TritonUnavailableError rather than RuntimeError so unexpected
+    # errors are not silently swallowed.
+    try:
+        device_type = torch.device(device).type
+    except (ValueError, RuntimeError):
+        return False
+    try:
+        device_interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    if not (device_interface.is_available() and device_interface.is_triton_capable()):
+        return False
+    try:
+        device_interface.raise_if_triton_unavailable()
+    except TritonUnavailableError:
+        return False
+    return True
+
+
+@functools.cache
 def has_triton(*, include_cpu: bool = False) -> bool:
     """Return whether a usable Triton backend is available.
 
@@ -295,26 +333,12 @@ def has_triton(*, include_cpu: bool = False) -> bool:
         return False
 
     from torch._dynamo.device_interface import get_registered_device_interfaces
-    from torch._dynamo.exc import TritonUnavailableError
 
-    # A device supports Triton if it is available, reports Triton capability, and
-    # its Triton backend is actually built. Capability is gated first so that
-    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
-    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
-    # specific TritonUnavailableError rather than RuntimeError so unexpected
-    # errors are not silently swallowed.
-    for name, device_interface in get_registered_device_interfaces():
+    for name, _interface in get_registered_device_interfaces():
         if ":" in name or (name == "cpu" and not include_cpu):
             continue
-        if not (
-            device_interface.is_available() and device_interface.is_triton_capable()
-        ):
-            continue
-        try:
-            device_interface.raise_if_triton_unavailable()
-        except TritonUnavailableError:
-            continue
-        return True
+        if has_triton_for_device(name):
+            return True
     return False
 
 
