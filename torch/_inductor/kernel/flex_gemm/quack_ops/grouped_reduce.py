@@ -745,10 +745,6 @@ class GroupedReduceBase(EpiOp):
         """Whether a native GEMM config preserves the reduction and output layout."""
         if not grouped_reduce_supports_config(config, self.axis, self.group):
             return False
-        if config.device_capacity == 9 and self.axis == 1 and self.fragment_reduced:
-            # TensorSSA fragment partials assume contiguous N columns per fragment;
-            # WGMMA fragments interleave (2 columns every 8, rows r / r + 8).
-            return False
         return (
             self.output_layout is None
             or self.output_layout.supports_config_fn is None
@@ -759,12 +755,6 @@ class GroupedReduceBase(EpiOp):
         """Describe an unsupported group or caller-owned output layout."""
         if self.axis == 1 and all(config.device_capacity == 12 for config in configs):
             return "grouped N reduce is not supported on SM120"
-        if (
-            self.axis == 1
-            and self.fragment_reduced
-            and all(config.device_capacity == 9 for config in configs)
-        ):
-            return "grouped N reduce of TensorSSA fragment partials is not supported on SM90"
         if (
             self.output_layout is not None
             and self.output_layout.supports_config_fn is not None

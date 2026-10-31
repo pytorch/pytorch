@@ -866,11 +866,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertTrue(sink(0, 64).supports_config(pingpong))
         self.assertFalse(sink(0, 128).supports_config(pingpong))
         self.assertTrue(sink(0, 128).supports_config(coop))
-        # N sinks fold interleaved column runs; TensorSSA fragment partials
-        # assume contiguous columns and stay unsupported.
+        # N sinks fold interleaved column runs.
         self.assertTrue(sink(1, 4).supports_config(coop))
         self.assertTrue(sink(1, 128).supports_config(coop))
-        self.assertFalse(sink(1, 16, fragment_reduced=True).supports_config(coop))
         sm100 = dataclasses.replace(coop, tile_n=128, cluster_n=1, device_capacity=10)
         self.assertTrue(feed(32).supports_config(sm100))
 
@@ -10301,6 +10299,25 @@ class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
         a = self.makeTensor(128, 64, dtype=dtype)
         b = self.makeTensor(64, n, dtype=dtype)
         with self.assertRaisesRegex(Exception, error):
+            torch.compile(fn, fullgraph=True)(a, b)
+
+    def test_paired_fragment_reduction_names_sm90_limit(self):
+        # Only the paired main store rejects this on SM90, so its message survives.
+        m, k, n = 256, 64, 512
+
+        def epilogue_fn(acc):
+            lanes = acc.float().view(m, n // 2, 2)
+            y = (lanes[..., 0] * lanes[..., 1]).view(m, -1, 2)
+            r = y.amax(-1, keepdim=True)
+            return (y - r).view(m, n // 2).to(acc.dtype), r.squeeze(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a, b = self.makeTensor(m, k), self.makeTensor(k, n)
+        with self.assertRaisesRegex(Exception, "paired fragment reductions require"):
             torch.compile(fn, fullgraph=True)(a, b)
 
     @parametrize(
