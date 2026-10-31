@@ -978,10 +978,13 @@ BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
 BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
 ```
 
-For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
-options passed for the first time will persist; please run `ccmake build/`, run
-`cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
-options.
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), an option
+that is no longer in the environment keeps the value the cache remembers from
+the first build, while a variable that is in the environment is re-applied on
+every build. Environment variables win over `-C` flags, `-C` flags win over
+`pyproject.toml`, and all three win over the cache. To change a cached option
+without setting its variable, run `ccmake build/`, run `cmake-gui build/`, or
+directly edit `build/CMakeCache.txt`.
 
 ### Profile build time
 
