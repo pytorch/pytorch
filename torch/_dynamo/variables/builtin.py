@@ -3713,17 +3713,14 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                     f"frozendict.__new__({cls.__name__}): {cls.__name__} "
                     "is not a subtype of frozendict",
                 )
-            if cls is not self._fn:
-                unimplemented(
-                    gb_type="frozendict subclass allocation",
-                    context="frozendict.__new__",
-                    explanation="Dynamo does not yet support allocating frozendict subclasses.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
             result = self.call_function(tx, args[1:], kwargs)
             if not isinstance(result, variables.FrozenDictVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
-            return variables.FrozenDictVariable.create(result.storage)
+            if cls is self._fn:
+                return variables.FrozenDictVariable.create(result.storage)
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], [result], tx=tx
+            )
         if name == "fromkeys":
             return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
@@ -3734,13 +3731,8 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                     f"descriptor '{name}' for 'frozendict' objects doesn't apply "
                     f"to a '{args[0].python_type_name()}' object",
                 )
-            if not isinstance(args[0], variables.FrozenDictVariable):
-                unimplemented(
-                    gb_type="frozendict subclass methods",
-                    context=str(type(args[0])),
-                    explanation="Dynamo cannot access this dictionary's stored keys and values.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+            if isinstance(args[0], UserDefinedObjectVariable):
+                return args[0].call_base_method(tx, name, args[1:], kwargs)
             return args[0].call_method(tx, name, args[1:], kwargs)
         return super().call_method(tx, name, args, kwargs)
 
@@ -3749,12 +3741,14 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        *,
+        cls: VariableTracker | None = None,
     ) -> VariableTracker:
         no_keywords(tx, "frozendict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.frozendict_fromkeys),
-            [self, *args],
+            [self if cls is None else cls, *args],
             kwargs,
         )
 

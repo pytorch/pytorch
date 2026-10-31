@@ -859,7 +859,9 @@ class SideEffects:
         variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
         )
-        if issubclass(
+        if torch._has_frozendict and issubclass(user_cls, torch._frozendict):
+            variable_cls = variables.UserDefinedFrozenDictVariable
+        elif issubclass(
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
@@ -921,6 +923,8 @@ class SideEffects:
         else:
             if isinstance(base_cls_vt, variables.BuiltinVariable):
                 base_cls = base_cls_vt.fn
+            elif isinstance(base_cls_vt, variables.FrozenDictBuiltinVariable):
+                base_cls = base_cls_vt.as_python_constant()
             elif isinstance(base_cls_vt, variables.DictBuiltinVariable):
                 base_cls = dict
             elif isinstance(base_cls_vt, variables.ListBuiltinVariable):
@@ -1293,6 +1297,8 @@ class SideEffects:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
                 if isinstance(var, variables.UserDefinedObjectVariable):
+                    if isinstance(var, variables.UserDefinedFrozenDictVariable):
+                        var.check_reconstruction()
 
                     def load_new_method() -> None:
                         # pyrefly: ignore [missing-attribute]
