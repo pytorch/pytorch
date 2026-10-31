@@ -854,6 +854,48 @@ def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
     return dict(zip(context, values, strict=True))
 
 
+# Only mapping keys use this marker; arbitrary registered node contexts are
+# untouched. JSON arrays would otherwise turn tuple keys into unhashable lists.
+_TUPLE_MARKER = "__tuple__"
+
+
+def _json_escape_tuples(obj: Any) -> Any:
+    if isinstance(obj, tuple):
+        return {_TUPLE_MARKER: [_json_escape_tuples(item) for item in obj]}
+    return obj
+
+
+def _json_unescape_tuples(obj: Any) -> Any:
+    if isinstance(obj, dict) and len(obj) == 1 and _TUPLE_MARKER in obj:
+        return tuple(_json_unescape_tuples(item) for item in obj[_TUPLE_MARKER])
+    return obj
+
+
+def _mapping_context_serialize(context: Context) -> DumpableContext:
+    try:
+        return json.dumps(
+            [_json_escape_tuples(key) for key in context], cls=EnumEncoder
+        )
+    except TypeError as e:
+        raise TypeError(
+            "Unable to serialize context. "
+            "Please make the context json dump-able, or register a "
+            "custom serializer using _register_pytree_node."
+        ) from e
+
+
+def _mapping_context_deserialize(dumpable_context: DumpableContext) -> Context:
+    try:
+        context = json.loads(dumpable_context, object_hook=enum_object_hook)
+    except TypeError as e:
+        raise TypeError(
+            "Unable to deserialize context. "
+            "Please make the context json load-able, or register a "
+            "custom serializer using _register_pytree_node."
+        ) from e
+    return [_json_unescape_tuples(key) for key in context]
+
+
 def _namedtuple_flatten(d: NamedTuple) -> tuple[list[Any], Context]:
     return list(d), type(d)
 
@@ -959,7 +1001,7 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
     json_defaultdict = {
         "default_factory_module": default_factory.__module__,
         "default_factory_name": default_factory.__qualname__,
-        "dict_context": dict_context,
+        "dict_context": [_json_escape_tuples(key) for key in dict_context],
     }
     return json_defaultdict
 
@@ -987,7 +1029,9 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
-    dict_context = dumpable_context["dict_context"]
+    dict_context = [
+        _json_unescape_tuples(key) for key in dumpable_context["dict_context"]
+    ]
     return [default_factory, dict_context]
 
 
@@ -1026,6 +1070,8 @@ _private_register_pytree_node(
     _dict_flatten,
     _dict_unflatten,
     serialized_type_name="builtins.dict",
+    to_dumpable_context=_mapping_context_serialize,
+    from_dumpable_context=_mapping_context_deserialize,
     flatten_with_keys_fn=_dict_flatten_with_keys,
 )
 _private_register_pytree_node(
@@ -1042,6 +1088,8 @@ _private_register_pytree_node(
     _ordereddict_flatten,
     _ordereddict_unflatten,
     serialized_type_name="collections.OrderedDict",
+    to_dumpable_context=_mapping_context_serialize,
+    from_dumpable_context=_mapping_context_deserialize,
     flatten_with_keys_fn=_ordereddict_flatten_with_keys,
 )
 _private_register_pytree_node(

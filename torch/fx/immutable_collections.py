@@ -9,6 +9,8 @@ from torch.utils._pytree import (
     _list_flatten,
     _list_flatten_with_keys,
     _list_unflatten,
+    _mapping_context_deserialize,
+    _mapping_context_serialize,
     Context,
     register_pytree_node,
 )
@@ -118,5 +120,7 @@ register_pytree_node(
     _immutable_dict_flatten,
     _immutable_dict_unflatten,
     serialized_type_name="torch.fx.immutable_collections.immutable_dict",
+    to_dumpable_context=_mapping_context_serialize,
+    from_dumpable_context=_mapping_context_deserialize,
     flatten_with_keys_fn=_dict_flatten_with_keys,
 )
