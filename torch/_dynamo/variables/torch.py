@@ -37,6 +37,7 @@ from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
+import torch._prims_common
 import torch._refs
 import torch.fx
 import torch.nn
@@ -47,7 +48,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_item_memo
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -58,11 +59,16 @@ from ..create_parameter_op import (
     new_parameter_placeholder,
     tracable_create_parameter,
 )
-from ..device_interface import get_registered_device_interfaces
+from ..device_interface import (
+    DeviceInterface,
+    get_device_type_for_current_stream,
+    get_registered_device_interfaces,
+)
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
     unimplemented,
+    Unsupported,
     UserError,
     UserErrorType,
 )
@@ -150,6 +156,14 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+def _create_internal_torch_function(
+    value: Callable[..., Any], kind: "AllowInGraphKind | None" = None
+) -> "TorchInGraphFunctionVariable":
+    from .builder import SourcelessBuilder
+
+    return SourcelessBuilder.create_internal_torch_function(value, kind)
 
 
 def _is_supported_out_tensor_layout(
@@ -852,14 +866,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 }
             else:
                 annotation_dict = annotation.as_python_constant()
-            return FxTracebackAnnotateVariable(annotation_dict)
+            return FxTracebackAnnotateVariable.create(annotation_dict)
         elif self.value in (
             torch.fx.traceback._dynamo_annotate,
             torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
             if len(args) != 1 or kwargs:
                 raise AssertionError("_dynamo_annotate expects one positional argument")
-            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
+            return FxTracebackAnnotateVariable.create(
+                dict(args[0].as_python_constant())
+            )
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
@@ -874,7 +890,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"expected a float budget, got {type(budget).__name__}"
                 )
-            return FxTracebackAnnotateVariable(
+            return FxTracebackAnnotateVariable.create(
                 {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
@@ -909,7 +925,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return ProfilerContextVariable()
+            return ProfilerContextVariable()  # noqa: RVT001
         elif (
             self.value is torch._C.DisableTorchFunctionSubclass
             or self.value is torch._C.DisableTorchFunction
@@ -1393,7 +1409,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 if all(arg.is_tensor() for arg in args):
                     x, y, z = args
-                    addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
+                    addcmul_fn = _create_internal_torch_function(torch.addcmul)
                     return addcmul_fn.call_function(tx, [z, x, y], {})
 
                 # Use math.fma if constants
@@ -2121,13 +2137,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
-                result = TorchInGraphFunctionVariable(torch.div).call_function(
+                result = _create_internal_torch_function(torch.div).call_function(
                     tx, [*args[1:]], {}
                 )
-                result = TorchInGraphFunctionVariable(torch.mul).call_function(
+                result = _create_internal_torch_function(torch.mul).call_function(
                     tx, [result, kwargs["value"]], {}
                 )
-                return TorchInGraphFunctionVariable(torch.add).call_function(
+                return _create_internal_torch_function(torch.add).call_function(
                     tx, [args[0], result], {}
                 )
             return None
@@ -2140,14 +2156,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if fill_value.is_tensor() and not issubclass(
+            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
                 fill_value.python_type(), torch.nn.Parameter
             ):
+                dtype = kwargs.get("dtype")
+                out = kwargs.get("out")
+                if (
+                    dtype is None
+                    or (isinstance(dtype, ConstantVariable) and dtype.value is None)
+                ) and (
+                    out is None
+                    or (isinstance(out, ConstantVariable) and out.value is None)
+                ):
+                    kwargs["dtype"] = ConstantVariable.create(
+                        torch._prims_common.type_to_dtype(
+                            torch._prims_common.dtype_to_type(fill_value.dtype)
+                        )
+                    )
+
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
-                empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
-                    tx, [size], kwargs
-                )
+                empty_result = _create_internal_torch_function(
+                    torch.empty
+                ).call_function(tx, [size], kwargs)
                 # Call fill_ method on the empty tensor
                 return empty_result.call_method(tx, "fill_", [fill_value], {})
             return None
@@ -2173,7 +2204,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 or example_value.dim() != 0
                 or example_value.device.type != "cpu"
                 or example_value.dtype != torch.int64
-                or (item_memo := example_value.item_memo) is None
+                or (item_memo := maybe_get_item_memo(example_value)) is None
             ):
                 return None
 
@@ -2189,7 +2220,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 args = (args[0], sections_vt, *args[2:])
             else:
                 kwargs["indices_or_sections"] = sections_vt
-            return TorchInGraphFunctionVariable(torch.tensor_split).call_function(
+            return _create_internal_torch_function(torch.tensor_split).call_function(
                 tx, list(args), kwargs
             )
 
@@ -2777,7 +2808,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             from ..tensor_version_op import _unsafe_set_version_counter
 
-            return TorchInGraphFunctionVariable(
+            return _create_internal_torch_function(
                 _unsafe_set_version_counter
             ).call_function(tx, [*args], kwargs)
 
@@ -2787,11 +2818,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
-        ) -> UserDefinedObjectVariable:
+        ) -> VariableTracker:
             # Wrap C++ interpreter (torch._C._functorch.CInterpreter) as UserDefinedObjectVariable,
             # but Python interpreter (torch._functorch.pyfunctorch.FuncTorchInterpreter) as FuncTorchInterpreterVariable.
-            return UserDefinedObjectVariable(
-                torch._C._functorch.peek_interpreter_stack()
+            return VariableTracker.build(
+                tx, torch._C._functorch.peek_interpreter_stack()
             )
 
         @register(torch._functorch.pyfunctorch.coerce_cinterpreter)
@@ -2803,8 +2834,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> FuncTorchInterpreterVariable:
             # pyrefly: ignore[missing-attribute]
             cinterpreter = args[0].value
-            return FuncTorchInterpreterVariable(
-                torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
+            return VariableTracker.build(
+                tx, torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
             )
 
         @register(torch.tensor)
@@ -2839,9 +2870,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 # This is slower and less canonical, so only use it if we
                 # have to
-                return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
-                    tx, [*args], kwargs
-                )
+                return _create_internal_torch_function(
+                    torch._refs.tensor
+                ).call_function(tx, [*args], kwargs)
             else:
                 return None
 
@@ -3040,13 +3071,52 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
+
+            # `except Unsupported` passes the mismatch check below through
+            # rather than re-wrapping it as a bad-argument break. The check is
+            # best-effort: reverse lookup by function identity misses wrapper
+            # implementations (None -> skipped rather than false-break).
             try:
                 if kwargs:
-                    device = torch.device(as_python_device(kwargs["device"]))
+                    arg = as_python_device(kwargs["device"])
                 elif args:
-                    device = torch.device(as_python_device(args[0]))
+                    arg = as_python_device(args[0])
                 else:
-                    device = None
+                    arg = None
+                device = torch.device(arg) if arg is not None else None
+
+                # Fail loudly rather than silently return the tracked stream
+                # of a different device. The check compares against the top
+                # of the tracked stack only: a cross-device call breaks even
+                # when an explicit device argument could still be resolved
+                # deeper in the stack (cur_stream searches all entries);
+                # erroring on the type mismatch is the chosen, conservative
+                # trade-off.
+                if isinstance(arg, (str, torch.device)):
+                    requested_type = torch.device(arg).type
+                elif self.value is torch.accelerator.current_stream:
+                    # torch.accelerator dispatches dynamically; the reverse
+                    # lookup cannot resolve it.
+                    acc = torch.accelerator.current_accelerator()
+                    requested_type = acc.type if acc is not None else None
+                else:
+                    # no-arg call or int device index: the device type of the
+                    # module whose current_stream was called
+                    requested_type = get_device_type_for_current_stream(self.value)
+                tracked_type = tx.symbolic_stream_state.tracked_device_type()
+                if requested_type and tracked_type and requested_type != tracked_type:
+                    unimplemented(
+                        gb_type="current_stream device mismatch",
+                        context=f"requested={requested_type}, tracking={tracked_type}",
+                        explanation=(
+                            f"Dynamo stream mismatch: Requested '{requested_type}' stream, "
+                            f"but SymbolicStreamState is tracking '{tracked_type}'. "
+                            "Dynamo only tracks streams of the default accelerator "
+                            "(plus stream contexts entered during tracing). "
+                            "Please ensure you are using the default accelerator."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
@@ -3061,6 +3131,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         source=stream_var.source,
                     )
                 return stream_var
+            except Unsupported:
+                raise
             except Exception as e:
                 unimplemented(
                     gb_type="bad device argument to torch.accelerator.current_stream",
@@ -3926,6 +3998,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             )
             return None
 
+        # Register current_stream for third-party PrivateUse1 backends (e.g.
+        # torch_npu) that register a DeviceInterface at import time. Runs last
+        # so the explicit @register entries above always win. _get_handlers is
+        # @functools.cache'd (register before the first torch.compile(); only
+        # _get_handlers.cache_clear() clears it), and backends must also route
+        # their current_stream to TorchInGraphFunctionVariable via trace rules
+        # or Dynamo inlines it and this handler is bypassed.
+        for _, device_interface in get_registered_device_interfaces():
+            # Skip undefined current_stream, the abstract base stub, and
+            # backends already covered by an explicit @register above.
+            current_stream_fn = getattr(device_interface, "current_stream", None)
+            if (
+                current_stream_fn is not None
+                and current_stream_fn is not DeviceInterface.current_stream
+                and current_stream_fn not in handlers
+            ):
+                handlers[current_stream_fn] = handle_current_stream
+
         return handlers
 
     def tp_getattro_impl(
@@ -3941,7 +4031,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if isinstance(
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
-            return TorchInGraphFunctionVariable(member, source=source)
+            if source is not None:
+                if type(mro_lookup(type(self.value), name)) is property:
+                    # Guarding the result would call the property getter again.
+                    return TorchInGraphFunctionVariable(  # noqa: RVT001
+                        member, source=source
+                    )
+                return TorchInGraphFunctionVariable.create_with_source(member, source)
+            return _create_internal_torch_function(member)
         # Function metadata (__name__, __module__, __qualname__, ...) is
         # immutable on builtins and descriptors, so it can be constant folded.
         if name in _CONSTANT_FN_METADATA_ATTRS and ConstantVariable.is_literal(member):
