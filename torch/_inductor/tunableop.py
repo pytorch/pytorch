@@ -699,26 +699,22 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # worker is keyed on -- a second compile targeting another device or file
     # must not skip. Strides included: mm(A,B) and mm(A,B_colmajor) are both
     # dense with different TunableOp signatures (NN vs NT).
-    def _node_sig(n: Any) -> Any:
-        try:
-            dtype = n.get_dtype() if hasattr(n, "get_dtype") else n.dtype
-            size = n.get_size() if hasattr(n, "get_size") else n.size
-            stride = n.get_stride() if hasattr(n, "get_stride") else None
-            if stride is None:
-                try:
-                    from torch._inductor.select_algorithm import (
-                        get_strides_with_layout_constraints,
-                    )
+    def _as_buffer(node: Any) -> Any:
+        return (
+            ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
+        )
 
-                    stride = sizevars.optimization_hints(
-                        get_strides_with_layout_constraints(n)
-                    )
-                except (ImportError, AttributeError, TypeError):
-                    stride = ()
+    def _node_sig(n: Any) -> Any:
+        # Via _as_buffer: winner.layout is a Layout, which has no get_stride.
+        # Probing for one and falling back left the output stride out of the
+        # signature, so two GEMMs differing only in output layout collided in
+        # the memo and the second was never tuned.
+        try:
+            b = _as_buffer(n)
             return (
-                str(dtype),
-                tuple(str(x) for x in size),
-                tuple(str(x) for x in stride),
+                str(b.get_dtype()),
+                tuple(str(x) for x in b.get_size()),
+                tuple(str(x) for x in b.get_stride()),
             )
         except (AttributeError, TypeError):
             return None
@@ -849,11 +845,6 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # bucket, reusing Inductor's meta machinery rather than rebuilding the GEMM.
     from torch._inductor.autotune_process import TensorMeta
     from torch._inductor.select_algorithm import get_strides_with_layout_constraints
-
-    def _as_buffer(node: Any) -> Any:
-        return (
-            ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
-        )
 
     def _is_densely_packed(node: Any) -> bool:
         """Traced strides are the dense strides for the traced sizes.
