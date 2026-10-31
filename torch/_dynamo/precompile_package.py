@@ -1712,6 +1712,9 @@ class _CapturePackage(CompilePackage):
         self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
+        # The (fwd, bwd) of the torch._dynamo.override_cudagraphs each backend graph
+        # compiled under, by backend id.
+        self.cudagraph_overrides: dict[str, tuple[bool | None, bool | None]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1728,6 +1731,9 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
+        # The annotation compile_fx reads.
+        if (a := gm.meta.get("cudagraph_annotation")) is not None:
+            self.cudagraph_overrides[backend_id] = (a.fwd, a.bwd)
 
     def add_graph_break_op(
         self,
@@ -2340,6 +2346,29 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         package = self._package
+        # The artifact records the capture's CUDA graph config, not each graph's, so
+        # an override that decides a graph otherwise cannot be served. As compile_fx
+        # applies one: fwd decides the forward, and bwd=False alone keeps a CUDA
+        # graphed forward's backward out, if there is one.
+        overrides = package.cudagraph_overrides
+        inductor = self._backend_name == "inductor"
+        shipped: set[str] = backends.keys() & overrides.keys() if inductor else set()
+        flag = self._cudagraph_config.get("triton.cudagraphs", False)
+        for backend_id in shipped:
+            fwd, bwd = overrides[backend_id]
+            artifact = backends[backend_id]
+            backward = isinstance(artifact, BundledAOTAutogradCacheArtifact) and (
+                artifact.content.compiled_bw is not None
+            )
+            forward = flag if fwd is None else fwd
+            if forward != flag or (forward and backward and bwd is False):
+                raise PackageError(
+                    f"a DynamoTracer capture cannot serve torch._dynamo."
+                    f"override_cudagraphs(fwd={fwd}, bwd={bwd}) under "
+                    f"triton.cudagraphs={flag}: the artifact records the capture's "
+                    "CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. Set "
+                    "triton.cudagraphs to match, or remove the override."
+                )
         # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
         # on those of any compiled frame, and a graph's ops on the graph's devices.
         op_devices: dict[tuple[str, str], set[str]] = {

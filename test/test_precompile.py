@@ -6436,7 +6436,6 @@ class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(8, 8)
-        self.register_buffer("calls", torch.zeros(8))
 
     def forward(self, x):
         return torch.relu(self.lin(x))
@@ -6454,6 +6453,21 @@ def breaking_helper(y):
 
 def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
+
+
+def overrides_the_backward(model, x):
+    with torch._dynamo.override_cudagraphs(bwd=False):
+        return step(model, x)
+
+
+def overrides_the_forward(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=False):
+        return step(model, x)
+
+
+def turns_cudagraphs_on(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=True):
+        return step(model, x)
 
 
 def kernelless_backward(model, x):
@@ -6486,11 +6500,7 @@ torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 allow = saved["allow_serve_time_compiles"]
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 training = saved["expected_grad"] is not None
-calls = model.calls.clone()
-with (
-    contextlib.nullcontext() if training else torch.no_grad(),
-    torch._inductor.config.patch(saved["config"]),
-):
+with contextlib.nullcontext() if training else torch.no_grad():
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
@@ -6499,7 +6509,6 @@ with (
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
-bumps = int((model.calls - calls).max())
 manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
 nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
 for node in nodes:
@@ -6507,7 +6516,7 @@ for node in nodes:
 recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
 compiles = torch._dynamo.utils.counters["frames"]["ok"]
-print("bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
+print("skips", skips, "compiles", compiles, end=" ")
 print("recorded", recorded, "captured", captured)
 """
 
@@ -6553,21 +6562,16 @@ class TestPrecompileCudagraphs(TestCase):
         expected_grad=None,
         x=None,
         serve_time=False,
-        config=None,
         skips=None,
-        bumps=0,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
-        # by the loading process while serving the artifact, under its env and
-        # the inductor config patch. bumps: how much the three calls raise
-        # model.calls.
+        # by the loading process while serving the artifact, under its env.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "x": self.x if x is None else x,
             "expected": expected,
             "expected_grad": expected_grad,
             "allow_serve_time_compiles": serve_time,
-            "config": config or {},
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6583,7 +6587,6 @@ class TestPrecompileCudagraphs(TestCase):
         served = dict(zip(served[::2], map(int, served[1::2])))
         # The calls compile in the loading process only when they may.
         self.assertEqual(served["compiles"] > 0, serve_time)
-        self.assertEqual(served["bumps"], bumps)
         if skips is not None:
             self.assertEqual(served["skips"], skips)
         return served["recorded"], served["captured"]
@@ -6656,6 +6659,34 @@ class TestPrecompileCudagraphs(TestCase):
         grad = self.model.lin.weight.grad.clone()
         recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
         self.assertEqual(recorded, 1)
+
+    @parametrize(
+        "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
+    )
+    @parametrize("flag", [False, True])
+    def test_a_capture_overriding_cudagraphs_is_refused_when_they_disagree(
+        self, fn, flag
+    ):
+        fn = getattr(self.mod, fn)
+        options = {"triton.cudagraphs": flag}
+        disagrees = flag != (fn is self.mod.turns_cudagraphs_on)
+        if disagrees:
+            with self.assertRaisesRegex(PrecompileError, "Set triton.cudagraphs"):
+                self._capture_step(fn, grad=True, options=options)
+        else:
+            y, _ = self._capture_step(fn, grad=True, options=options)
+            self.model.zero_grad(set_to_none=True)
+            fn(self.model, self.x).sum().backward()
+            grad = self.model.lin.weight.grad.clone()
+            self._serve_in_fresh_process(y, expected_grad=grad, skips=0)
+        # An eager capture records no CUDA graph config for an override to contradict.
+        self._capture_step(fn, grad=True, backend="eager")
+
+    def test_an_inference_capture_keeping_out_a_backward_it_lacks_serves(self):
+        fn = self.mod.overrides_the_backward
+        y, _ = self._capture_step(fn, options={"triton.cudagraphs": True})
+        recorded, _ = self._serve_in_fresh_process(y, skips=0)
+        self.assertGreater(recorded, 0)
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
