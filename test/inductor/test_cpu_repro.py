@@ -20,8 +20,9 @@ import torch._functorch.config as functorch_config
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
+from torch._inductor.autotune_process import CppBenchmarkRequest
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
     CppOverrides,
@@ -6913,6 +6914,40 @@ class CPUReproTests(TestCase):
             fn,
             (torch.randn(1000), torch.rand(1000)),
         )
+
+    @requires_vectorization
+    @parametrize("batch_size", [0, 4])
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="CPP",
+    )
+    def test_bmm_template_export(self, batch_size):
+        a = torch.randn(batch_size, 8, 8)
+        b = torch.randn(batch_size, 8, 8)
+        # A single CPP choice bypasses benchmarking. Include ATen so autotuning
+        # loads the exported BMM benchmark entry point before testing CPP alone.
+        with (
+            config.patch(max_autotune_gemm_backends="ATEN,CPP"),
+            patch.object(
+                CppBenchmarkRequest,
+                "make_run_fn",
+                autospec=True,
+                side_effect=CppBenchmarkRequest.make_run_fn,
+            ) as make_run_fn,
+        ):
+            actual = torch.compile(torch.bmm, fullgraph=True)(a, b)
+            self.assertEqual(actual, torch.bmm(a, b), atol=1e-5, rtol=1e-5)
+
+        self.assertGreater(make_run_fn.call_count, 0)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        # Force the template so an ATen fallback cannot hide a missing DLL export.
+        actual = torch.compile(torch.bmm, fullgraph=True)(a, b)
+
+        self.assertEqual(actual, torch.bmm(a, b), atol=1e-5, rtol=1e-5)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     def test_max_autotune_bmm_omp_dynamic(self):
         try:
