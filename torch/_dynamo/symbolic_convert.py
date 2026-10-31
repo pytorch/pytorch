@@ -5322,22 +5322,31 @@ class InstructionTranslatorBase(
         else:
             user_stack_trace += str(user_stack_formatted)
 
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "dynamo_graph_break_reason",
-                "encoding": "string",
-            },
-            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
-        )
-
         # torch._dynamo.explain() formats this a little nicer, and presents a slightly
         # more actionable user code pointer
         gb_type = exc.gb_type if isinstance(exc, Unsupported) else type(exc)
+        is_first_graph_break = graph_break_dup_warning_checker.record_first(
+            (gb_type, frame_loc_chain)  # type: ignore[arg-type]
+        )
+        if is_first_graph_break:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "dynamo_graph_break_reason",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: (
+                    f"{user_stack_trace}\n"
+                    "NOTE: Duplicate graph breaks of the same type at this location "
+                    "are omitted from this trace.\n"
+                    f"{traceback.format_exc()}"
+                ),
+            )
+
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add((gb_type, frame_loc_chain))  # type: ignore[arg-type]
+            and (is_first_graph_break or config.verbose)
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from

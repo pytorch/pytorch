@@ -987,15 +987,19 @@ class DuplicateWarningChecker:
     def reset(self) -> None:
         self.set: OrderedDict[Any, Any] = OrderedDict()
 
-    def add(self, key: str | tuple[object, object]) -> bool:
+    def record_first(self, key: str | tuple[object, object]) -> bool:
+        """Return True the first time `key` is seen, ignoring config.verbose."""
         if key in self.set:
             self.set.move_to_end(key, last=True)
-            if not config.verbose:
-                return False
-        else:
-            self.set[key] = None
-            while len(self.set) > self.maxsize:
-                self.set.popitem(last=False)
+            return False
+        self.set[key] = None
+        while len(self.set) > self.maxsize:
+            self.set.popitem(last=False)
+        return True
+
+    def add(self, key: str | tuple[object, object]) -> bool:
+        if not self.record_first(key):
+            return bool(config.verbose)
         return True
 
 
