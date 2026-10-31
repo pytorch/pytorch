@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import asyncio
 import ctypes
 import os
 from types import SimpleNamespace
@@ -153,6 +154,38 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             source.to_view()
         with self.assertRaises(RuntimeError):
             first.write(stale_view, remote)
+
+    def test_close_after_handled_failure_does_not_reraise(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        with patch.object(_Engine, "transfer_sync", return_value=-1):
+            with self.assertRaises(RuntimeError):
+                first.write(source.to_view(), remote)
+        # The handled failure settled and was dropped; close must not resurface
+        # it, and a second close/__exit__ must stay a no-op.
+        self.assertEqual(first._pending, {})
+        first.close()
+        first.close()
+
+    def test_close_async_after_handled_failure_does_not_reraise(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+
+        async def run():
+            with patch.object(_Engine, "transfer_sync", return_value=-1):
+                with self.assertRaises(RuntimeError):
+                    await first.write_async(source.to_view(), remote)
+            self.assertEqual(first._pending, {})
+            await first.close_async()
+            await first.close_async()
+
+        asyncio.run(run())
 
 
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"

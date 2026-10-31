@@ -84,6 +84,12 @@ class _MooncakeWork(Work):
             raise TimeoutError(
                 "transport wait timed out; operation remains pending"
             ) from None
+        finally:
+            # Settled transfers (success or failure) leave _pending here so a
+            # later close() does not revisit and re-raise an observed failure.
+            # A still-running transfer after a timeout stays pending.
+            if self._future.done():
+                self._transport._prune(id(self))
         return True
 
     def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:

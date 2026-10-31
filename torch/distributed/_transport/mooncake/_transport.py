@@ -4,7 +4,7 @@ import asyncio
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 from datetime import timedelta
 from importlib import import_module
 from threading import RLock
@@ -53,6 +53,18 @@ class MooncakeTransport(Transport):
     selected. Transfers require registered views; raw tensors are rejected rather
     than allocated or registered implicitly.
 
+    Completion is event-driven, never polled. Mooncake also exposes a
+    non-blocking ``batch_transfer_async`` API, but its only completion signal is
+    status polling (``get_batch_transfer_status``), so adopting it would require a
+    poll loop. To keep the event loop poll-free, each transfer instead runs the
+    blocking ``transfer_sync`` on a worker thread and settles its Work through the
+    thread future's done callback; ``write_async``/``read_async``/``close_async``
+    are woken by that callback (via the asyncio future bridge) and never poll or
+    block the loop. The short lock-guarded submit/cleanup sections are offloaded
+    with ``asyncio.to_thread`` rather than spinning on the lock. The cost of this
+    choice is one pooled worker thread per in-flight transfer, bounded by
+    ``max_concurrent_transfers``.
+
     """
 
     def __init__(
@@ -88,7 +100,8 @@ class MooncakeTransport(Transport):
         self._default_timeout = timeout
         self._peer: str | None = None
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
-        # In-flight transfers; completed entries are pruned lazily on submit.
+        # In-flight transfers; each entry is pruned by a done callback when its
+        # transfer settles (see _submit), so a completed work is never revisited.
         self._pending: dict[int, _MooncakeWork] = {}
         # Async transfers run their blocking transfer_sync on this pool; the
         # TransferEngine supports concurrent transfers across worker threads.
@@ -125,16 +138,9 @@ class MooncakeTransport(Transport):
         finally:
             self._operation_lock.release()
 
-    @asynccontextmanager
-    async def _locked_async(self, deadline: float):
-        while not self._operation_lock.acquire(blocking=False):
-            if time.monotonic() >= deadline:
-                raise TimeoutError("transport lock wait timed out")
-            await asyncio.sleep(0)
-        try:
-            yield
-        finally:
-            self._operation_lock.release()
+    def _run_locked(self, operation: Any, timeout: float) -> Any:
+        with self._locked(timeout):
+            return operation()
 
     def _call(self, operation: Any, timeout: float | None) -> Any:
         with self._locked(timeout):
@@ -288,8 +294,9 @@ class MooncakeTransport(Transport):
         local_address = registration.address + local_buffer._offset
         remote_address = remote_buffer.address
 
-        # Mooncake's transfer APIs block until completion, so run the blocking
-        # call on the executor; the Work settles when the worker thread returns.
+        # transfer_sync blocks until completion, so run it on the executor; the
+        # Work settles via the thread future's callback when the worker returns.
+        # This keeps completion event-driven (no polling) at the cost of a thread.
         def run() -> None:
             status = engine.transfer_sync(
                 endpoint, local_address, remote_address, size, operation
@@ -297,16 +304,19 @@ class MooncakeTransport(Transport):
             if status != 0:
                 raise RuntimeError(f"Mooncake transfer failed: {status}")
 
-        self._pending = {
-            key: pending
-            for key, pending in self._pending.items()
-            if not pending.is_completed()
-        }
         future = self._executor.submit(run)
         work = _MooncakeWork(self, local_buffer, remote_buffer, future, timeout)
         self._pending[id(work)] = work
+        # Prune on completion so a settled (including failed) transfer is not
+        # revisited by close(); fires on the worker thread, or inline here if the
+        # transfer already finished.
+        future.add_done_callback(lambda _: self._prune(id(work)))
         _live_transports.add(self)
         return work
+
+    def _prune(self, key: int) -> None:
+        with self._operation_lock:
+            self._pending.pop(key, None)
 
     def _start(
         self,
@@ -377,11 +387,24 @@ class MooncakeTransport(Transport):
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
-        async with self._locked_async(deadline):
-            work = self._submit(
+        # Offload the lock-guarded submit to a thread so a contended lock never
+        # blocks the event loop; the blocking transfer itself already runs on the
+        # transport executor and settles the Work through its future callbacks.
+        work = await asyncio.to_thread(
+            self._run_locked,
+            lambda: self._submit(
                 opcode, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
-            )
-        await wait_all([work], timeout=max(0.0, deadline - time.monotonic()))
+            ),
+            max(0.0, deadline - time.monotonic()),
+        )
+        try:
+            await wait_all([work], timeout=max(0.0, deadline - time.monotonic()))
+        finally:
+            # Mirror the sync wait() prune: a settled transfer (success or
+            # failure) is observed here, so drop it before returning. A timed-out
+            # or cancelled transfer is still running and stays pending.
+            if work.is_completed():
+                await asyncio.to_thread(self._prune, id(work))
 
     async def write_async(
         self,
@@ -411,6 +434,8 @@ class MooncakeTransport(Transport):
             return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
+        if self._closed:
+            return
         self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
@@ -440,13 +465,16 @@ class MooncakeTransport(Transport):
         Retry close after pending work completes. Native cleanup is not
         interruptible, peer access must already have been stopped externally.
         """
+        if self._closed:
+            return
         self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
         self._closing = True
-        async with self._locked_async(deadline):
-            pending = list(self._pending.values())
+        pending = await asyncio.to_thread(
+            self._begin_close, max(0.0, deadline - time.monotonic())
+        )
         error: BaseException | None = None
         try:
             await wait_all(pending, timeout=max(0.0, deadline - time.monotonic()))
@@ -456,8 +484,11 @@ class MooncakeTransport(Transport):
             ):
                 raise
             error = failure
-        async with self._locked_async(deadline):
-            self._release_resources()
+        await asyncio.to_thread(
+            self._run_locked,
+            self._release_resources,
+            max(0.0, deadline - time.monotonic()),
+        )
         if error is not None:
             raise error
 
@@ -473,6 +504,7 @@ class MooncakeTransport(Transport):
             engine.unregister_memory(registration.address)
             registration.active = False
             del self._registrations[key]
+        self._pending.clear()
         self._peer = None
         # Mooncake has no explicit shutdown
         self._engine = None
