@@ -211,7 +211,6 @@
   "test/distributed/test_c10d_spawn_gloo.py",
   "test/distributed/test_c10d_spawn_ucc.py",
   "test/distributed/test_c10d_suspend_resume.py",
-  "test/distributed/test_c10d_torchcomms.py",
   "test/distributed/test_c10d_ucc.py",
   "test/distributed/test_c10d_window.py",
   "test/distributed/test_ce_colls.py",
