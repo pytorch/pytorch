@@ -257,7 +257,6 @@ REGISTER_THRESHOLD_OP(int);
 REGISTER_THRESHOLD_OP(short);
 REGISTER_THRESHOLD_OP(char);
 REGISTER_THRESHOLD_OP(uchar);
-REGISTER_THRESHOLD_OP(bool);
 
 struct prelu_functor {
   template <typename T>
@@ -270,6 +269,28 @@ REGISTER_BINARY_OP(prelu, float, float);
 REGISTER_BINARY_OP(prelu, half, half);
 REGISTER_BINARY_OP(prelu, bfloat, bfloat);
 
+struct prelu_backward_functor {
+  template <typename T>
+  inline T operator()(const T x, const T weight, const T grad) {
+    return float(x) > 0 ? grad : static_cast<T>(float(weight) * float(grad));
+  }
+};
+
+struct prelu_backward_weight_functor {
+  template <typename T>
+  inline T operator()(const T x, const T, const T grad) {
+    return float(x) > 0 ? T(0) : static_cast<T>(float(x) * float(grad));
+  }
+};
+
+REGISTER_TERNARY_OP(prelu_backward, float, float);
+REGISTER_TERNARY_OP(prelu_backward, half, half);
+REGISTER_TERNARY_OP(prelu_backward, bfloat, bfloat);
+
+REGISTER_TERNARY_OP(prelu_backward_weight, float, float);
+REGISTER_TERNARY_OP(prelu_backward_weight, half, half);
+REGISTER_TERNARY_OP(prelu_backward_weight, bfloat, bfloat);
+
 struct silu_functor {
   template <typename T>
   inline T operator()(const T x) {
@@ -281,18 +302,14 @@ struct silu_functor {
 REGISTER_UNARY_OP(silu, float, float);
 REGISTER_UNARY_OP(silu, half, half);
 REGISTER_UNARY_OP(silu, bfloat, bfloat);
-REGISTER_UNARY_OP(silu, int, int);
-REGISTER_UNARY_OP(silu, short, short);
-REGISTER_UNARY_OP(silu, char, char);
-REGISTER_UNARY_OP(silu, uchar, uchar);
-REGISTER_UNARY_OP(silu, bool, bool);
 
 struct silu_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
     float sf = float(self);
     float sig = 1.0f / (1.0f + ::metal::precise::exp(-sf));
-    return static_cast<T>(float(grad_output) * sig * (1.0f + sf - sf * sig));
+    return static_cast<T>(
+        float(grad_output) * sig * (1.0f + sf * (1.0f - sig)));
   }
 };
 

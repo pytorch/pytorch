@@ -167,7 +167,7 @@ void host_softmax(
   for (const auto i : c10::irange(dim)) {
     outer_size *= input.size(i);
   }
-  for (int64_t i = dim + 1; i < input.dim(); ++i) {
+  for (const auto i : c10::irange(dim + 1, input.dim())) {
     inner_size *= input.size(i);
   }
   int64_t dim_stride = inner_size;
@@ -255,7 +255,7 @@ void host_softmax_backward(
   for (const auto i : c10::irange(dim)) {
     outer_size *= grad.size(i);
   }
-  for (int64_t i = dim + 1; i < grad.dim(); ++i) {
+  for (const auto i : c10::irange(dim + 1, grad.dim())) {
     inner_size *= grad.size(i);
   }
   int64_t dim_stride = inner_size;
