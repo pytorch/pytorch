@@ -12,6 +12,7 @@
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/WorkStatusHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -5521,6 +5522,51 @@ be removed again via remove().)")
           "remove",
           &::c10d::NanCheckHook::remove,
           "Detach the hook from its process group.");
+
+  py::class_<::c10d::WorkStatusHook, std::shared_ptr<::c10d::WorkStatusHook>>(
+      module,
+      "WorkStatusHook",
+      R"(
+Periodically reports a process group's last enqueued and completed work, as
+stock ProcessGroupNCCL's watchdog does, while a C10dLogger is registered: a
+record with the same keys to the logger and, where glog provides LOG_EVERY_MS,
+the same INFO log line. One thread reports every attached group every
+``TORCH_DIST_WORK_STATUS_PERIOD_MS`` (default 30000). Attached automatically to
+new process groups unless the period is 0 or a backend of the group is stock
+ProcessGroupNCCL, which reports natively.)")
+      .def_static(
+          "attach",
+          &::c10d::WorkStatusHook::attach,
+          py::arg("pg"),
+          py::arg("global_ranks") = std::vector<uint64_t>{},
+          R"(
+Attach a work status hook to a process group. Returns None if the group
+reports natively or reporting is disabled. The hook detaches when remove() is
+called or the returned handle is garbage collected. global_ranks maps the
+group's ranks to world ranks and fills the ``global_rank`` key.)")
+      .def(
+          "remove",
+          &::c10d::WorkStatusHook::remove,
+          "Detach the hook from its process group.")
+      .def(
+          "status",
+          [](::c10d::WorkStatusHook& self) {
+            auto data = self.status();
+            py::dict result;
+            for (const auto& [key, value] : data.integers) {
+              result[py::str(key)] = value;
+            }
+            for (const auto& [key, value] : data.strings) {
+              result[py::str(key)] = value;
+            }
+            return result;
+          },
+          "The record the hook reports for its group, as a dict.")
+      .def_static(
+          "_log_all",
+          &::c10d::WorkStatusHook::logAll,
+          py::call_guard<py::gil_scoped_release>(),
+          "Report every attached group now, on the calling thread. For tests.");
 
   py::class_<::c10d::HealthCheckHook>(
       module,

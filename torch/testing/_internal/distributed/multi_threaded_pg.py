@@ -21,6 +21,7 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     Store,
+    WorkStatusHook,
 )
 from torch.distributed.distributed_c10d import (
     _CollOp,
@@ -667,6 +668,9 @@ class WorldData:
     pg_flight_recorder_hooks: dict[dist.ProcessGroup, FlightRecorderHook] = field(
         default_factory=dict
     )
+    pg_work_status_hooks: dict[dist.ProcessGroup, WorkStatusHook] = field(
+        default_factory=dict
+    )
     comms: list = field(default_factory=list)
 
 
@@ -725,6 +729,10 @@ class ThreadLocalWorld:
     @property
     def pg_flight_recorder_hooks(self) -> dict[dist.ProcessGroup, FlightRecorderHook]:
         return self._get_world().pg_flight_recorder_hooks
+
+    @property
+    def pg_work_status_hooks(self) -> dict[dist.ProcessGroup, WorkStatusHook]:
+        return self._get_world().pg_work_status_hooks
 
     @property
     def comms(self):

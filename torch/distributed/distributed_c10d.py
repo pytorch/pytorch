@@ -70,6 +70,7 @@ from torch._C._distributed_c10d import (
     WindowAccessType,  # noqa: F401
     WindowAttr,  # noqa: F401
     Work,
+    WorkStatusHook,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.monitor import _WaitCounter
@@ -1405,6 +1406,7 @@ class _World:
         self._default_pg = None
         self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
         self._pg_flight_recorder_hooks: dict[ProcessGroup, FlightRecorderHook] = {}
+        self._pg_work_status_hooks: dict[ProcessGroup, WorkStatusHook] = {}
         self._comms: list[_TorchComm] = []
 
     @property
@@ -1506,6 +1508,15 @@ class _World:
         group does.
         """
         return self._pg_flight_recorder_hooks
+
+    @property
+    def pg_work_status_hooks(self) -> dict[ProcessGroup, WorkStatusHook]:
+        """
+        Owning handles for the work status hooks attached at group creation.
+
+        Like pg_flight_recorder_hooks: dropping a handle detaches its hook.
+        """
+        return self._pg_work_status_hooks
 
     @property
     def comms(self) -> list[_TorchComm]:
@@ -2955,6 +2966,17 @@ def _maybe_attach_flight_recorder(
     _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
 
 
+def _maybe_attach_work_status(pg: ProcessGroup, global_ranks: list[int]) -> None:
+    # Groups replaced wholesale by a ProcessGroup subclass have no backend to
+    # name them; see _maybe_attach_flight_recorder.
+    if not pg._device_types:
+        return
+    # None if disabled or stock ProcessGroupNCCL reports the group itself.
+    hook = WorkStatusHook.attach(pg, global_ranks)
+    if hook is not None:
+        _world.pg_work_status_hooks[pg] = hook
+
+
 def _new_process_group_helper(
     group_size: int,
     group_rank: int | None,
@@ -3225,6 +3247,7 @@ def _new_process_group_helper(
     _maybe_attach_flight_recorder(
         pg, backend_config, global_ranks_in_group or list(range(group_size))
     )
+    _maybe_attach_work_status(pg, global_ranks_in_group or list(range(group_size)))
 
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
@@ -3366,6 +3389,7 @@ def destroy_process_group(
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
         _world.pg_flight_recorder_hooks.clear()
+        _world.pg_work_status_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3393,6 +3417,7 @@ def destroy_process_group(
             )
             del _world.pg_coalesce_state[pg]
         _world.pg_flight_recorder_hooks.pop(pg, None)
+        _world.pg_work_status_hooks.pop(pg, None)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3480,6 +3505,7 @@ def _abort_process_group(
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
         _world.pg_flight_recorder_hooks.clear()
+        _world.pg_work_status_hooks.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3508,6 +3534,7 @@ def _abort_process_group(
             )
             del _world.pg_coalesce_state[pg]
         _world.pg_flight_recorder_hooks.pop(pg, None)
+        _world.pg_work_status_hooks.pop(pg, None)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -7244,6 +7271,7 @@ def split_group(
 
     HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
+    _maybe_attach_work_status(split_pg, global_ranks_in_my_group)
 
     # update global state
     _register_pg_in_world(
@@ -8099,6 +8127,7 @@ def _finalize_shrunk_group(
         backend_config=original_group_metadata["backend_config"],
         rank_mapping=rank_mapping,
     )
+    _maybe_attach_work_status(new_pg, remaining_ranks)
 
     return new_pg
 
@@ -8317,6 +8346,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
         _world.pg_flight_recorder_hooks.pop(pg, None)
+        _world.pg_work_status_hooks.pop(pg, None)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups
