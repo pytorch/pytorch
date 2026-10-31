@@ -48,7 +48,7 @@ import torch.utils._content_store
 from torch._environment import is_fbcode
 from torch.utils import _config_module
 
-from . import config
+from . import config, polyfills
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
@@ -61,6 +61,7 @@ from .variables import (
     BuiltinVariable,
     ByteArrayBuiltinVariable,
     DictBuiltinVariable,
+    FrozenDictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
@@ -4128,7 +4129,8 @@ def is_torch(filename: str) -> bool:
 Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
 """
 
-BUILTIN_CALLABLES = {
+BUILTIN_CALLABLES: dict[Callable[..., Any], type[VariableTracker]] = {
+    polyfills._frozendict_fromkeys: BuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
@@ -4137,6 +4139,10 @@ BUILTIN_CALLABLES = {
     list: ListBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
 }
+
+
+if torch._has_frozendict:
+    BUILTIN_CALLABLES[torch._frozendict] = FrozenDictBuiltinVariable
 
 
 def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
