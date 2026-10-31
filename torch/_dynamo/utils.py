@@ -3291,7 +3291,7 @@ def enumerate_items_with_dict_position(
     if issubclass(dict_type, OrderedDict):
         items = list(dict.items(obj))
         if all(type(key) is str for key, _ in items):
-            keys: Iterable[K] = OrderedDict.keys(cast(OrderedDict[K, V], obj))
+            keys: list[K] = list(OrderedDict.keys(cast(OrderedDict[K, V], obj)))
         else:
             from .exc import unimplemented
 
@@ -3313,6 +3313,16 @@ def enumerate_items_with_dict_position(
             start = max(i for i in range(end) if refs[i] is state) + 1
             keys = refs[start:end]
         positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if len(keys) != len(items) or any(id(key) not in positions for key in keys):
+            from .exc import unimplemented
+
+            unimplemented(
+                gb_type="OrderedDict storage differs from linked keys",
+                context="OrderedDict input snapshot",
+                explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+                hints=[],
+                skip_frame=True,
+            )
         return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
     return ((i, k, v) for i, (k, v) in enumerate(items))

@@ -414,17 +414,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
             module._forward_hooks[key] = hook
             self.assertEqual(compiled(x, module), fn(x, module))
 
-    def test_empty_dict_membership_keeps_key_lazy(self):
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    def test_empty_dict_membership_reuses_graph(self, mapping_type):
         def fn(x, key, mapping):
-            return x + (key in mapping)
+            if key in mapping:
+                return x + mapping[key]
+            return x.cos()
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        for key in (3, 4):
-            self.assertEqual(compiled(x, key, {}), x)
+        mapping = mapping_type()
+        self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
+        mapping[2] = 5
+        self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
         self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(compiled(x, 4, {4: None}), x + 1)
+        mapping[1] = 3
+        self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_empty_hook_dict_membership_keeps_key_lazy(self):
+        def fn(x, key, module):
+            return x + (key in module._forward_hooks_with_kwargs)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        module = torch.nn.Identity()
+        for key in (3, 4):
+            self.assertEqual(compiled(x, key, module), x)
+        self.assertEqual(counter.frame_count, 1)
+        module._forward_hooks_with_kwargs[4] = True
+        self.assertEqual(compiled(x, 4, module), x + 1)
 
     @parametrize("flag_name", ["with_kwargs", "always_call"])
     def test_hook_membership_reuse(self, flag_name):
@@ -4064,9 +4085,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         dict.__setitem__(mapping, 2, 2)
         x = torch.ones(1)
         self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            torch.compile(fn, backend="eager")(x, mapping),
             fn(x, mapping),
         )
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            Unsupported, "OrderedDict storage differs from linked keys"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
 
     def test_move_to_end_unhashable_input_key(self):
         def fn(x, mapping):

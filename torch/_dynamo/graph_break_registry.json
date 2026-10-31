@@ -4334,6 +4334,14 @@
       ]
     }
   ],
+  "GB8811": [
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+      "Hints": []
+    }
+  ],
   "GB0238": [
     {
       "Gb_type": "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
