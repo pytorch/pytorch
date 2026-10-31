@@ -52,12 +52,13 @@ from ..exc import (
     raise_value_error,
     unimplemented,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import _has_tangent, GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    GlobalStateSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -722,6 +723,39 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
+def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
+    """Whether a forward-AD tangent can reach an `apply` on `value`.
+
+    A dual made inside the frame (`dual_level()`, `enter_dual_level()`,
+    `torch.func.jvp`) shows on the fake value. The global `_current_level` is no
+    use for that: Dynamo inlines `enter_dual_level()`, so the global stays -1
+    while tracing, and a live level says nothing about whether this input
+    carries a tangent. Level 0 is the only one there can be, since forward AD
+    does not support nesting.
+
+    A dual graph input breaks when it is wrapped only if no functorch transform
+    is active. Under one, as in jvp(vmap(compile(f))), its fake value drops the
+    tangent, so when a dual level was live at frame entry, check the real value
+    of every graph input, since any of them may flow into `apply`.
+    """
+    has_dual = False
+
+    def visit(vt: VariableTracker) -> None:
+        nonlocal has_dual
+        if vt.is_tensor() and not has_dual:
+            has_dual = _has_tangent(vt.as_proxy().node.meta.get("example_value"))
+
+    VariableTracker.visit(visit, value)
+    if has_dual or tx.output.dual_level < 0:
+        return has_dual
+    for var in tx.output.input_source_to_var.values():
+        if var.is_tensor():
+            grapharg = var.as_proxy().node.meta.get("grapharg")
+            if grapharg is not None and _has_tangent(grapharg.example):
+                return True
+    return False
+
+
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass or constructed instance"""
 
@@ -898,6 +932,36 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
+        # Forward-mode duals carry requires_grad=False, so the branch below is
+        # not taken under forward AD. Check the custom jvp here instead, or
+        # tracing forward() inline would silently swap it for the default
+        # forward-AD rules of the primitives it decomposes into.
+        jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
+        if jvp_fn is not torch.autograd.Function.jvp:
+            reverse_ad = requires_grad and torch.is_grad_enabled()
+            if reverse_ad or _forward_ad_active(tx, (args, kwargs)):
+                unimplemented(
+                    gb_type="Unsupported custom jvp",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo does not support tracing "
+                    "`torch.autograd.Function` subclasses that define "
+                    "a custom `jvp` method.",
+                    hints=[
+                        "Remove the custom `jvp` method if possible.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            # Not breaking relied on no graph input carrying a tangent, which
+            # nothing guards by default. Pin the dual level, and if one is
+            # already live, that every input is still not dual, so a later dual
+            # input recompiles instead of reusing a graph that inlined forward()
+            # and dropped the jvp.
+            install_guard(GlobalStateSource().make_guard(GuardBuilder.DUAL_LEVEL))
+            if tx.output.dual_level >= 0:
+                for source, var in tx.output.input_source_to_var.items():
+                    if var.is_tensor():
+                        install_guard(source.make_guard(GuardBuilder.NO_TANGENT_MATCH))
+
         if requires_grad and torch.is_grad_enabled():
             source = self.fn_cls_source
 
@@ -929,20 +993,6 @@ class AutogradFunctionVariable(VariableTracker):
                     hints=[
                         "Remove the custom `vjp` method if possible.",
                         "Use standard `backward` instead if applicable.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
-            if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented(
-                    gb_type="Unsupported custom jvp",
-                    context=f"call_apply {self} {args} {kwargs}",
-                    explanation="Dynamo does not support tracing "
-                    "`torch.autograd.Function` subclasses that define "
-                    "a custom `jvp` method.",
-                    hints=[
-                        "Remove the custom `jvp` method if possible.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )

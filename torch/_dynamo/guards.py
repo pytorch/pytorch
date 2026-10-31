@@ -79,6 +79,11 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+    is_functorch_wrapped_tensor,
+)
 from torch._dynamo.package import (
     _globals_module,
     _Missing,
@@ -351,6 +356,32 @@ def _cow_tensor_matches(value: object, expected: object) -> bool:
         return False
     actual = _try_is_cow_tensor(value)
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
+
+
+def _has_tangent(value: object) -> bool:
+    """Whether `value`, or a functorch layer under it, holds a forward-AD tangent.
+
+    `_unpack_dual` has no batching rule and a BatchedTensor never holds the
+    tangent (under jvp(vmap(f)) it is on an inner layer), so batched layers are
+    skipped. A tensor that cannot be unpacked cannot hold a tangent either:
+    unpacking dispatches `aten.alias`, which a subclass's `__torch_dispatch__`
+    may reject with any exception.
+    """
+    while isinstance(value, torch.Tensor):
+        if not is_batchedtensor(value):
+            try:
+                dual = torch.autograd.forward_ad.unpack_dual(value, level=0)
+            except Exception:
+                pass
+            else:
+                if dual.tangent is not None:
+                    return True
+        value = get_unwrapped(value) if is_functorch_wrapped_tensor(value) else None
+    return False
+
+
+def _has_no_tangent(value: object) -> bool:
+    return not _has_tangent(value)
 
 
 dunder_attrs_assumed_constants = (
@@ -973,6 +1004,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
+            "___has_no_tangent": _has_no_tangent,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -2837,6 +2869,17 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: _has_no_tangent(value),
+    )
+    def NO_TANGENT_MATCH(self, guard: Guard) -> None:
+        code = f"___has_no_tangent({self.arg_ref(guard)})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            _has_no_tangent, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     @register_guard_check_spec(
