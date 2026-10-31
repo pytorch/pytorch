@@ -379,8 +379,35 @@ void CuptiActivityApi::enableCuptiActivities(
       externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
     }
     if (activity == CUDA_SYNC) {
+      // Cases (build-time CUDA; runtime CUPTI and driver versions)
+      //
+      // CUDA build < 13.0, runtime CUPTI < 12.9 ->
+      // CUPTI_ACTIVITY_KIND_SYNCHRONIZATION includes both sync and events
+      //
+      // CUDA build < 13.0, runtime CUPTI >= 12.9 -> no explicit CUDA_EVENT
+      // capture, so stream-wait correlation is lost. CUPTI 12.9 event capture
+      // can hang.
+      //
+      // CUDA build >= 13.0, either runtime CUPTI or driver CUDA support < 13.4
+      // -> enable CUDA_EVENT and explicitly disable device timestamps
+      //
+      // CUDA build >= 13.0, runtime CUPTI >= 13.4 and driver CUDA support >=
+      // 13.4 -> device timestamps can be enabled
+
 #if CUDA_VERSION >= 13000
-      CUPTI_CALL(cuptiActivityEnableCudaEventDeviceTimestamps(true));
+      // Get the driver version so we can check for 13.4+
+      int driverVersion = 0;
+      CUDA_CALL(cudaDriverGetVersion(&driverVersion));
+      // The timestamp-control API requires a CUDA 13.0+ build; CUPTI 12.9 event
+      // capture can hang.
+      const bool success =
+          CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CUDA_EVENT)) ==
+          CUPTI_SUCCESS;
+      cudaEventActivityEnabled_.store(success, std::memory_order_relaxed);
+      // At least CUPTI 13.4 and CUDA 13.4 driver support are required for
+      // timestamps; NVIDIA is not backporting fix
+      CUPTI_CALL(cuptiActivityEnableCudaEventDeviceTimestamps(
+          cudaEventDeviceTimestampsSupported(cuptiVersion, driverVersion)));
 #endif
       CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_SYNCHRONIZATION));
     }
@@ -428,6 +455,10 @@ void CuptiActivityApi::disableCuptiActivities(
           cuptiActivityDisable(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION));
     }
     if (activity == CUDA_SYNC) {
+      if (cudaEventActivityEnabled_) {
+        CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_CUDA_EVENT));
+        cudaEventActivityEnabled_.store(false, std::memory_order_relaxed);
+      }
       CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_SYNCHRONIZATION));
     }
     if (activity == CUDA_RUNTIME) {
