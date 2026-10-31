@@ -859,6 +859,7 @@ def run_joint_graph_passes_on_hops(
     """
     from torch._higher_order_ops import invoke_subgraph
     from torch._higher_order_ops.invoke_subgraph import (
+        _specialize_nested_region_configs_for_backward,
         get_backward_nested_region_config,
     )
 
@@ -1033,6 +1034,7 @@ def run_joint_graph_passes_on_hops(
                 raise
 
         # Save the new forward and backward graph modules
+        _specialize_nested_region_configs_for_backward(new_bw_hop_gm)
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
         new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
 
@@ -1247,10 +1249,9 @@ def run_joint_graph_passes_on_hops(
             # whether to stamp.
             bw_region_config = get_backward_nested_region_config(fw_region_config)
             if bw_region_config is not fw_region_config:
-                # Re-stamp on the fresh backward node's meta["custom"] (the source
-                # of truth: unlike a GraphModule's meta it survives FX transforms).
-                # Lowering picks it up via the subgraph-module mirror (_propagate_*)
-                # or the ir.py node fallback.
+                # Re-stamp on the fresh backward node's meta["custom"], which
+                # lowering reads (unlike a GraphModule's meta it survives FX
+                # transforms).
                 new_bw_node.meta["custom"] = {
                     **new_bw_node.meta.get("custom", {}),
                     "nested_region_config": bw_region_config,
@@ -2011,6 +2012,13 @@ def _partition_joint_graph_into_fw_bw(
         num_fwd_outputs=num_inner_fwd_outputs,
         static_lifetime_input_indices=inner_meta.static_input_indices,
     )
+    # A region's forward call recomputed in the backward (e.g. under activation
+    # checkpointing) runs as part of the backward, so it takes the backward config.
+    from torch._higher_order_ops.invoke_subgraph import (
+        _specialize_nested_region_configs_for_backward,
+    )
+
+    _specialize_nested_region_configs_for_backward(bw_module)
 
     rng_states = [
         n

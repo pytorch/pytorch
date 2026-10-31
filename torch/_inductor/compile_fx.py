@@ -694,29 +694,54 @@ def _iter_reachable_graph_modules(
     yield from visit(gm)
 
 
+def _get_invoke_subgraph_graph_module(
+    gm: GraphModule, node: torch.fx.Node
+) -> GraphModule | None:
+    subgraph_node = node.args[0]
+    if (
+        not isinstance(subgraph_node, torch.fx.Node)
+        or subgraph_node.op != "get_attr"
+        or not isinstance(subgraph_node.target, str)
+    ):
+        return None
+    try:
+        subgraph = attrgetter(subgraph_node.target)(gm)
+    except AttributeError:
+        return None
+    return subgraph if isinstance(subgraph, GraphModule) else None
+
+
 def _iter_subgraph_cudagraph_overrides(
-    gm: GraphModule,
+    gm: GraphModule, *, backward: bool = False
 ) -> Generator[bool, None, None]:
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+    )
+
     for module in _iter_reachable_graph_modules(gm):
         for node in module.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.invoke_subgraph
         ):
             nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            if backward:
+                nested_config = get_backward_nested_region_config(nested_config)
             patches = getattr(nested_config, "inductor_config_patches", None)
             if patches is not None and "triton.cudagraphs" in patches:
                 yield bool(patches["triton.cudagraphs"])
 
 
-def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
-    return any(_iter_subgraph_cudagraph_overrides(gm))
+def _any_subgraph_enables_cudagraphs(
+    gm: GraphModule, *, backward: bool = False
+) -> bool:
+    return any(_iter_subgraph_cudagraph_overrides(gm, backward=backward))
 
 
 def _any_subgraph_cudagraphs_preference_differs(
-    gm: GraphModule, enclosing_cudagraphs: bool
+    gm: GraphModule, enclosing_cudagraphs: bool, *, backward: bool = False
 ) -> bool:
     return any(
         override != enclosing_cudagraphs
-        for override in _iter_subgraph_cudagraph_overrides(gm)
+        for override in _iter_subgraph_cudagraph_overrides(gm, backward=backward)
     )
 
 
@@ -749,14 +774,7 @@ def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
         nested_config = node.meta.get("custom", {}).get("nested_region_config")
         if nested_config is None:
             continue
-        subgraph_node = node.args[0]
-        if (
-            not isinstance(subgraph_node, torch.fx.Node)
-            or subgraph_node.op != "get_attr"
-            or not isinstance(subgraph_node.target, str)
-        ):
-            continue
-        subgraph = getattr(gm, subgraph_node.target, None)
+        subgraph = _get_invoke_subgraph_graph_module(gm, node)
         if isinstance(subgraph, GraphModule):
             subgraph.meta.setdefault("nested_region_config", nested_config)
 
@@ -2955,13 +2973,15 @@ def create_compiler_config_extra(
         if cudagraphs_bwd_override is not None
         else top_level_cudagraphs
     )
-    forward_has_regional_cudagraphs = bool(
-        pre_aot_graph is not None
-        and _any_subgraph_cudagraphs_preference_differs(
-            pre_aot_graph, top_level_cudagraphs
-        )
+    forward_has_regional_cudagraphs = _any_subgraph_cudagraphs_preference_differs(
+        pre_aot_graph, top_level_cudagraphs
     )
-    has_regional_cudagraphs = forward_has_regional_cudagraphs
+    backward_has_regional_cudagraphs = _any_subgraph_cudagraphs_preference_differs(
+        pre_aot_graph, backward_top_level_cudagraphs, backward=True
+    )
+    has_regional_cudagraphs = (
+        forward_has_regional_cudagraphs or backward_has_regional_cudagraphs
+    )
 
     forward_cudagraphs_requested = top_level_cudagraphs or bool(
         pre_aot_graph is not None and _any_subgraph_enables_cudagraphs(pre_aot_graph)
