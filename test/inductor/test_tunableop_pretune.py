@@ -530,10 +530,11 @@ class TestTunableOpPretune(TestCase):
             return mock.Mock(status="ok", time=1.0)
 
         def _fake_monotonic():
-            # Still t0 until something has been submitted, far past the
-            # deadline afterwards: exactly one bucket can run, whatever the
-            # loop's call pattern.
-            return t0 if submit_calls["n"] == 0 else t0 + 10**6
+            # t0 until something has been submitted, then a sliver short of the
+            # deadline: too little for a fair trial, so the loop must stop
+            # rather than submit a rung that could only time out.
+            budget = config.cuda.autotune_tunableop_timeout
+            return t0 if submit_calls["n"] == 0 else t0 + budget - 1
 
         with _ladder(s):
             with (
@@ -546,10 +547,11 @@ class TestTunableOpPretune(TestCase):
                 ),
             ):
                 tunableop.maybe_range_pretune(winner)
-        # Exactly one bucket submitted with a positive remaining budget; the
-        # rest were skipped by the expired deadline.
+        # Exactly one bucket ran; the rest were left rather than submitted
+        # with too little budget to be anything but a timeout.
         self.assertEqual(submit_calls["n"], 1)
-        self.assertGreater(timeouts[0], 0)
+        self.assertGreaterEqual(timeouts[0], tunableop._TUNABLEOP_MIN_BUCKET_BUDGET)
+        self.assertFalse(tunableop._pretuned_gemms.failed, "healthy rung charged")
 
     def test_non_ok_outcome_continues(self):
         s = sympy.Symbol("s_cont", positive=True, integer=True)
