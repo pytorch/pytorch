@@ -5494,6 +5494,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
+    def test_cross_entropy_loss_unpickle_without_dim(self):
+        # Modules pickled before `dim` was added have no such attribute.
+        loss = nn.CrossEntropyLoss()
+        del loss.dim
+        loss = pickle.loads(pickle.dumps(loss))
+        self.assertIsNone(loss.dim)
+        input, target = torch.randn(3, 5), torch.randint(5, (3,))
+        self.assertEqual(loss(input, target), F.cross_entropy(input, target))
+
+    def test_cross_entropy_loss_dim_torch_function(self):
+        class Subclass(torch.Tensor):
+            pass
+
+        input, target = torch.randn(2, 4, 5), torch.randint(5, (2, 4))
+        expected = F.cross_entropy(input, target, dim=-1)
+        self.assertEqual(F.cross_entropy(input.as_subclass(Subclass), target, dim=-1), expected)
+
     def test_linear_cross_entropy_options_aspect_ratio_chunk_size(self):
         """Pin the aspect_ratio heuristic's chunk size for representative shapes.
 
@@ -12442,6 +12459,51 @@ class TestNNDeviceType(NNTestCase):
                 # Check that we correctly tally the denominator for `mean`
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
+
+    @parametrize_test('reduction', ['none', 'mean', 'sum'])
+    @parametrize_test('prob_target', [False, True])
+    def test_cross_entropy_loss_dim(self, device, reduction, prob_target):
+        # Compare with the default layout: the classes moved to dim 1 (dim 0 if unbatched).
+        C = 5
+        shapes_and_dims = [
+            ((C,), -1), ((3, C), -1), ((C, 3), 0), ((3, 4, C), -1), ((3, 4, C), 2),
+            ((3, C, 4, 2), -3), ((3, 4, C, 2), 2), ((3, 2, 4, C), -1),
+        ]
+        kwargs_list = [{}, {'weight': torch.rand(C, device=device)}, {'label_smoothing': 0.1}]
+        if not prob_target:
+            kwargs_list.append({'ignore_index': 1})
+
+        for (shape, dim), kwargs in product(shapes_and_dims, kwargs_list):
+            class_dim = dim % len(shape)
+            default_dim = 0 if len(shape) == 1 else 1
+            input = torch.randn(shape, device=device, requires_grad=True)
+            if prob_target:
+                target = torch.randn(shape, device=device).softmax(class_dim)
+                default_target = target.movedim(class_dim, default_dim)
+            else:
+                target = torch.randint(C, shape[:class_dim] + shape[class_dim + 1:], device=device)
+                default_target = target
+
+            loss = F.cross_entropy(input, target, reduction=reduction, dim=dim, **kwargs)
+            expected = F.cross_entropy(
+                input.movedim(class_dim, default_dim), default_target, reduction=reduction, **kwargs)
+            self.assertEqual(loss, expected)
+            self.assertEqual(nn.CrossEntropyLoss(reduction=reduction, dim=dim, **kwargs)(input, target), expected)
+
+            grad, = torch.autograd.grad(loss.sum(), input)
+            expected_grad, = torch.autograd.grad(expected.sum(), input)
+            self.assertEqual(grad, expected_grad)
+
+    def test_cross_entropy_loss_dim_errors(self, device):
+        input = torch.randn(2, 3, 5, device=device)
+        target = torch.randint(5, (2, 3), device=device)
+        with self.assertRaisesRegex(ValueError, r"Expected target size \[2, 3\], got \[3, 2\]"):
+            F.cross_entropy(input, target.t(), dim=-1)
+        for dim in (3, -4):
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                F.cross_entropy(input, target, dim=dim)
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            F.cross_entropy(input[0, 0], target[0, 0], dim=1)
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyAccelerator

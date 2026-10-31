@@ -1113,10 +1113,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> VariableTracker:
         """
         functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
-        label_smoothing=0.0
+        label_smoothing=0.0, dim=None
 
         non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
-        label_smoothing=0.0
+        label_smoothing=0.0, dim=None
 
         non functional loss call: input, target, optional_output
         """
@@ -1129,6 +1129,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             reduce: VariableTracker = ConstantVariable.create(None),
             reduction: VariableTracker = ConstantVariable.create("mean"),
             label_smoothing: VariableTracker = ConstantVariable.create(0.0),
+            dim: VariableTracker = ConstantVariable.create(None),
         ) -> tuple[VariableTracker, ...]:
             return (
                 weight,
@@ -1137,6 +1138,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 reduce,
                 reduction,
                 label_smoothing,
+                dim,
             )
 
         (
@@ -1146,6 +1148,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             reduce_arg,
             reduction,
             label_smoothing,
+            dim,
         ) = normalize_args(*args, **kwargs)
 
         def fake_cross_entropy_loss(
@@ -1168,6 +1171,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             reduce_arg,
                             reduction,
                             label_smoothing,
+                            dim,
                         ],
                         {},
                     ),
