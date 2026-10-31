@@ -13,9 +13,13 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._inductor import inductor_prims
 from torch._inductor.fx_passes.reinplace import (
+    _WAIT_TENSORS_OP,
     _alias_sources,
     _aliases_graph_input,
+    _multi_output_aliases,
     _result_escapes_graph,
+    inplaceable_foreach_ops,
+    inplaceable_triton_ops,
     reinplace_inplaceable_ops_core,
 )
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -168,6 +172,38 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         n = 256
         x = torch.arange(n - 2, -2, -1, device=device)
         self.assertEqual(f(x), torch.compile(f)(x))
+
+    def test_multi_output_alias_paths(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+
+        foreach_op = next(iter(inplaceable_foreach_ops.values()))
+        foreach = graph.call_function(foreach_op.inplace_op, args=([x, y],))
+        self.assertEqual(
+            _multi_output_aliases(
+                foreach, {foreach_op.inplace_op: foreach_op.mutated_args}
+            ),
+            {0: x, 1: y},
+        )
+
+        if _WAIT_TENSORS_OP is not None:
+            waited = graph.call_function(_WAIT_TENSORS_OP, args=([x, y],))
+            self.assertEqual(_multi_output_aliases(waited, {}), {0: x, 1: y})
+            waited_y = graph.call_function(operator.getitem, (waited, 1))
+            self.assertEqual(_alias_sources(waited_y, {}), [y])
+
+        triton_wrapper = next(iter(inplaceable_triton_ops))
+        wrapped = graph.call_function(
+            triton_wrapper,
+            kwargs={
+                "kwargs": {"x": x, "y": y},
+                "tensors_to_clone": ["y"],
+            },
+        )
+        self.assertEqual(_multi_output_aliases(wrapped, {}), {"x": x})
+        wrapped_x = graph.call_function(operator.getitem, (wrapped, "x"))
+        self.assertEqual(_alias_sources(wrapped_x, {}), [x])
 
     def test_scatter_result_does_not_alias_mutated_input(self):
         def f(x, src):
