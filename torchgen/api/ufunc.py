@@ -93,14 +93,16 @@ def ufunctor_apply_type(
 
 # The actual ufunc template function the user writes.  Everything here
 # is done in the computation type.  compute_t is opmath_t in CUDA and scalar_t
-# in CPU
+# in CPU.  Scalar arguments are always opmath_t (every ufunc's CPUVector
+# overload must follow this contract: take a scalar opmath_t, not
+# Vectorized<scalar_t>, for each Scalar argument).
 def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
     r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
         return r
 
     if t == BaseType(BaseTy.Scalar):
-        return NamedCType(binds, compute_t)
+        return NamedCType(binds, BaseCType(api_types.opmath_t))
     elif t == BaseType(BaseTy.Tensor):
         return NamedCType(binds, compute_t)
     else:
@@ -183,8 +185,9 @@ def ufunctor_arguments(
 # which do the actual computation in question.  E.g.,
 #
 # template <typename T>
-# C10_HOST_DEVICE T add(T self, T other, T alpha) __ubsan_ignore_undefined__ {
-#   return self + alpha * other;
+# C10_HOST_DEVICE T add(T self, T other, at::opmath_type<T> alpha) __ubsan_ignore_undefined__ {
+#   using opmath_t = at::opmath_type<T>;
+#   return static_cast<opmath_t>(self) + alpha * static_cast<opmath_t>(other);
 # }
 #
 # In this file, we refer to T as compute_t which is bound by caller
