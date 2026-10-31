@@ -4213,7 +4213,6 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 
 std::vector<Tensor> meshgrid(TensorList tensors, std::string_view indexing) {
   int64_t size = tensors.size();
-  TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
 
   for (const auto i : c10::irange(size - 1)) {
     TORCH_CHECK(

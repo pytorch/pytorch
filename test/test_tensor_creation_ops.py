@@ -1496,9 +1496,27 @@ class TestTensorCreation(TestCase):
         self.assertEqual(int(y), 3)
 
     def test_meshgrid_empty(self, device):
+        self.assertEqual(torch.meshgrid(indexing='ij'), ())
+        self.assertEqual(torch.meshgrid([], indexing='xy'), ())
+        self.assertEqual(torch.meshgrid(), ())
+        self.assertEqual(torch.meshgrid([]), ())
         with self.assertRaisesRegex(RuntimeError,
-                                    'expects a non-empty TensorList'):
-            torch.meshgrid()
+                                    'indexing must be one of "xy" or "ij"'):
+            torch.meshgrid(indexing='foo')
+        with self.assertRaisesRegex(RuntimeError,
+                                    'indexing must be one of "xy" or "ij"'):
+            torch.meshgrid([], indexing='foo')
+        with self.assertRaisesRegex(RuntimeError,
+                                    'indexing must be one of "xy" or "ij"'):
+            torch._refs.meshgrid([], indexing='foo')
+        aten_empty = torch.ops.aten.meshgrid([], indexing='ij')
+        self.assertEqual(aten_empty, [])
+        self.assertEqual(torch._refs.meshgrid([], indexing='ij'), aten_empty)
+
+        def scripted_meshgrid_empty():
+            return torch.meshgrid([], indexing='ij')
+
+        self.assertEqual(torch.jit.script(scripted_meshgrid_empty)(), ())
 
     def test_meshgrid_unsupported_indexing(self, device):
         with self.assertRaisesRegex(RuntimeError,
