@@ -1031,9 +1031,10 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
-    IndexType dstIndex =
+    const IndicesType dstIndexRaw =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT(dstIndexRaw >= 0 && dstIndexRaw < dstAddDimSize);
+    const IndexType dstIndex = static_cast<IndexType>(dstIndexRaw);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -1089,9 +1090,10 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       srcIndex = linearIndex % innerSize;
     }
 
-    IndexType dstIndex =
+    const IndicesType dstIndexRaw =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT(dstIndexRaw >= 0 && dstIndexRaw < dstAddDimSize);
+    const IndexType dstIndex = static_cast<IndexType>(dstIndexRaw);
 
     IndexType dstOffset =
       cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -1596,9 +1598,10 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
-    IndexType srcIndex =
+    const IndicesType srcIndexRaw =
       indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
-    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
+    CUDA_KERNEL_ASSERT(srcIndexRaw >= 0 && srcIndexRaw < srcSelectDimSize);
+    const IndexType srcIndex = static_cast<IndexType>(srcIndexRaw);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
