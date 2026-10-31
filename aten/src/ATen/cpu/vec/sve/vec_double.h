@@ -374,17 +374,18 @@ class Vectorized<double> {
     return USE_SLEEF(
         Vectorized<double>(Sleef_sindx_u10sve(values)), map(std::sin));
   }
+  // Sleef sinhd/coshd overflow for large double inputs where std::sinh/cosh
+  // return finite results, because Sleef evaluates exp(x), which overflows
+  // before the result does.
   Vectorized<double> sinh() const {
-    return USE_SLEEF(
-        Vectorized<double>(Sleef_sinhdx_u10sve(values)), map(std::sinh));
+    return map(std::sinh);
   }
   Vectorized<double> cos() const {
     return USE_SLEEF(
         Vectorized<double>(Sleef_cosdx_u10sve(values)), map(std::cos));
   }
   Vectorized<double> cosh() const {
-    return USE_SLEEF(
-        Vectorized<double>(Sleef_coshdx_u10sve(values)), map(std::cosh));
+    return map(std::cosh);
   }
   Vectorized<double> ceil() const {
     return svrintp_f64_x(ptrue, values);

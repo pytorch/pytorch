@@ -1358,30 +1358,86 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_cosh_near_overflow(self):
         # https://github.com/pytorch/pytorch/issues/183765
+        # https://github.com/pytorch/pytorch/issues/201938
         def fn(x):
             return torch.cosh(x)
 
-        x = torch.tensor([88.5, 88.85, 89.0, 89.4, -88.85, -89.0]).repeat(3, 6)
-        for dtype in [torch.float32, torch.double]:
+        values = {
+            torch.float32: [88.5, 88.85, 89.0, 89.4, -88.85, -89.0],
+            torch.float64: [709.5, 709.78, 709.9, 710.0, -709.9, -710.4],
+        }
+        for dtype, vals in values.items():
             with torch.no_grad():
                 torch._dynamo.reset()
-                _x = x.to(dtype)
+                _x = torch.tensor(vals, dtype=dtype).repeat(3, 6)
+                expected = torch.tensor(
+                    [math.cosh(v) for v in vals], dtype=dtype
+                ).repeat(3, 6)
+                torch.testing.assert_close(
+                    torch.cosh(_x),
+                    expected,
+                    rtol=1e-5 if dtype == torch.float32 else 1e-12,
+                    atol=0,
+                )
                 self.assertFalse(torch.cosh(_x).isinf().any())
                 self.common(fn, (_x,))
+                if dtype == torch.float64:
+                    self.assertTrue(
+                        torch.isfinite(
+                            torch.cosh(torch.full((32,), 710.47, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
+                    self.assertTrue(
+                        torch.isinf(
+                            torch.cosh(torch.full((32,), 710.48, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
 
     @requires_vectorization
     def test_sinh_near_overflow(self):
         # https://github.com/pytorch/pytorch/issues/183763
+        # https://github.com/pytorch/pytorch/issues/201938
         def fn(x):
             return torch.sinh(x)
 
-        x = torch.tensor([88.5, 88.85, 89.0, -89.0, -89.2, 0.0]).repeat(3, 6)
-        for dtype in [torch.float32, torch.double]:
+        values = {
+            torch.float32: [88.5, 88.85, 89.0, -89.0, -89.2, 0.0],
+            torch.float64: [709.5, 709.78, 709.9, -709.9, -710.4, 0.0],
+        }
+        for dtype, vals in values.items():
             with torch.no_grad():
                 torch._dynamo.reset()
-                _x = x.to(dtype)
+                _x = torch.tensor(vals, dtype=dtype).repeat(3, 6)
+                expected = torch.tensor(
+                    [math.sinh(v) for v in vals], dtype=dtype
+                ).repeat(3, 6)
+                torch.testing.assert_close(
+                    torch.sinh(_x),
+                    expected,
+                    rtol=1e-5 if dtype == torch.float32 else 1e-12,
+                    atol=0,
+                )
                 self.assertFalse(torch.sinh(_x).isinf().any())
                 self.common(fn, (_x,))
+                if dtype == torch.float64:
+                    self.assertTrue(
+                        torch.isfinite(
+                            torch.sinh(torch.full((32,), 710.47, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
+                    self.assertTrue(
+                        torch.isinf(
+                            torch.sinh(torch.full((32,), 710.48, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
 
     @requires_vectorization
     def test_acosh_near_overflow(self):

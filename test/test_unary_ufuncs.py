@@ -1963,6 +1963,36 @@ class TestUnaryUfuncsCpuOnly(TestCase):
             ref_flat[i] = torch.special.logit(x_flat[i : i + 1], eps=eps)
         self.assertEqual(got, ref)
 
+    def test_cosh_sinh_float64_near_overflow(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201938:
+        # the f64 vectorized path returned inf while the scalar tail was finite.
+        values = torch.tensor(
+            [709.5, 709.78, 709.9, 710.0, -709.9, -710.4],
+            dtype=torch.float64,
+            device=device,
+        ).repeat(6)
+        for fn, ref in ((torch.cosh, math.cosh), (torch.sinh, math.sinh)):
+            expected = torch.tensor(
+                [ref(v) for v in values.tolist()],
+                dtype=torch.float64,
+                device=device,
+            )
+            torch.testing.assert_close(fn(values), expected, rtol=1e-12, atol=0)
+            self.assertTrue(
+                torch.isfinite(
+                    fn(torch.full((32,), 710.47, dtype=torch.float64, device=device))
+                )
+                .all()
+                .item()
+            )
+            self.assertTrue(
+                torch.isinf(
+                    fn(torch.full((32,), 710.48, dtype=torch.float64, device=device))
+                )
+                .all()
+                .item()
+            )
+
 
 class TestUnaryUfuncsCUDADevice(TestCase):
     hw_classification = HardwareClassification.CUDA

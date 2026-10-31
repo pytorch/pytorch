@@ -321,8 +321,9 @@ class Vectorized<double> {
   Vectorized<double> C10_ALWAYS_INLINE cos() const {
     return {Sleef_cosd2_u10(_vec0), Sleef_cosd2_u10(_vec1)};
   }
+  // See the comment above sinh() for why cosh uses the scalar fallback.
   Vectorized<double> C10_ALWAYS_INLINE cosh() const {
-    return {Sleef_coshd2_u10(_vec0), Sleef_coshd2_u10(_vec1)};
+    return map(std::cosh);
   }
   Vectorized<double> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
@@ -336,8 +337,11 @@ class Vectorized<double> {
   Vectorized<double> C10_ALWAYS_INLINE sin() const {
     return {Sleef_sind2_u10(_vec0), Sleef_sind2_u10(_vec1)};
   }
+  // Sleef sinhd/coshd overflow for large double inputs where std::sinh/cosh
+  // return finite results, because Sleef evaluates exp(x), which overflows
+  // before the result does.
   Vectorized<double> C10_ALWAYS_INLINE sinh() const {
-    return {Sleef_sinhd2_u10(_vec0), Sleef_sinhd2_u10(_vec1)};
+    return map(std::sinh);
   }
   Vectorized<double> C10_ALWAYS_INLINE tan() const {
     return {Sleef_tand2_u10(_vec0), Sleef_tand2_u10(_vec1)};
