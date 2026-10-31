@@ -145,8 +145,10 @@ class PyCodegen:
             items = [key.vt for key in value.set_items]
         else:
             # `is_safe_constant` accepts slices without checking their members.
-            # A mutable member must be rebuilt even when all its values are constants.
-            return not is_safe_constant(value.as_python_constant())
+            # Symbolic and mutable members must be reconstructed.
+            return not value.is_python_constant() or not is_safe_constant(
+                value.as_python_constant()
+            )
         # Only aggregate data affects reconstruction, not tracker metadata. Cache
         # immutable subtrees so reconstructing nested outputs visits each once.
         result = any(self._constant_requires_reconstruction(item) for item in items)
