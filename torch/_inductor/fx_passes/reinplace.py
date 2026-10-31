@@ -421,18 +421,41 @@ def _carries_alias(
     return False
 
 
+def _aot_rebuilt_input_output_indices() -> set[int]:
+    """Output positions AOTAutograd reconstructs from original forward inputs."""
+    context = torch._guards.TracingContext.try_get()
+    fw_metadata = context.fw_metadata if context is not None else None
+    if fw_metadata is None:
+        return set()
+    offset = fw_metadata.num_mutated_inp_runtime_indices
+    return {
+        offset + i
+        for i, info in enumerate(fw_metadata.output_info)
+        if info.output_type.name in ("alias_of_input", "is_input")
+    }
+
+
 def _result_escapes_graph(
     node: torch.fx.Node,
     mutated_args_by_op: dict[Callable[..., Any], tuple[int, ...]],
+    aot_rebuilt_input_output_indices: set[int] | None = None,
 ) -> bool:
-    """Whether node's result, or an alias of it, is returned from the graph."""
+    """Whether node's result, or an alias of it, is returned as a non-input alias."""
+    if aot_rebuilt_input_output_indices is None:
+        aot_rebuilt_input_output_indices = _aot_rebuilt_input_output_indices()
     aliases = OrderedSet([node])
     stack = [node]
     while stack:
         cur = stack.pop()
         for user in cur.users:
             if user.op == "output":
-                return True
+                leaves = pytree.arg_tree_leaves(*user.args)
+                output_indices = [i for i, value in enumerate(leaves) if value is cur]
+                if not output_indices or any(
+                    i not in aot_rebuilt_input_output_indices for i in output_indices
+                ):
+                    return True
+                continue
             if user in aliases:
                 continue
             if _carries_alias(user, aliases, mutated_args_by_op):
@@ -457,6 +480,18 @@ def _aliases_graph_input(
                 seen.add(source)
                 stack.append(source)
     return False
+
+
+def _value_aliases_graph_input(
+    value: Any,
+    mutated_args_by_op: dict[Callable[..., Any], tuple[int, ...]],
+) -> bool:
+    return any(
+        _aliases_graph_input(node, mutated_args_by_op)
+        for node in _as_alias_nodes(value)
+    )
+
+
 def should_reinplace_index_put(node: torch.fx.Node) -> bool:
     """
     index_put_(inp, indices, values) reads indices and values while writing inp,
@@ -1017,7 +1052,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger
+        old_tensors_to_clone, kwargs, node_name, trigger, result_alias_guard=None
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
@@ -1053,7 +1088,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             should_attempt_reinplace = not tensor_with_same_storage_already_reinplaced(
                 mutated_arg
             )
-            if should_attempt_reinplace and can_inplace(node, mutated_arg):
+            can_reinplace = should_attempt_reinplace and can_inplace(node, mutated_arg)
+            if can_reinplace and result_alias_guard is not None:
+                can_reinplace = not result_alias_guard(
+                    arg, mutated_arg, old_tensors_to_clone
+                )
+            if can_reinplace:
                 # In general, we probably do not need those optimizations.
                 copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                 if copy_node is not None:
@@ -1096,45 +1136,75 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         )
     }
 
+    def result_escapes_after_reinplace(
+        node, inplaceable_op, mutated_args, *, with_effects=False
+    ):
+        if not any(
+            _value_aliases_graph_input(arg, mutated_args_by_op)
+            for arg in mutated_args
+        ):
+            return False
+        if with_effects:
+            original_op = node.args[1]
+            node.update_arg(1, inplaceable_op.inplace_op)
+        else:
+            original_op = node.target
+            node.target = inplaceable_op.inplace_op
+        try:
+            return _result_escapes_graph(node, mutated_args_by_op)
+        finally:
+            if with_effects:
+                node.update_arg(1, original_op)
+            else:
+                node.target = original_op
+
+    def candidate_result_escapes(
+        node, arg, mutated_arg, all_args, *, triton=False
+    ):
+        if not _value_aliases_graph_input(mutated_arg, mutated_args_by_op):
+            return False
+        trial_clone_args = [candidate for candidate in all_args if candidate != arg]
+        if triton:
+            original_kwargs = node.kwargs
+            trial_kwargs = dict(original_kwargs)
+            trial_kwargs["tensors_to_clone"] = trial_clone_args
+            node.kwargs = immutable_dict(trial_kwargs)
+            try:
+                return _result_escapes_graph(node, mutated_args_by_op)
+            finally:
+                node.kwargs = original_kwargs
+        marker = object()
+        original_clone_args = node.meta.get("only_clone_these_tensors", marker)
+        node.meta["only_clone_these_tensors"] = trial_clone_args
+        try:
+            return _result_escapes_graph(node, mutated_args_by_op)
+        finally:
+            if original_clone_args is marker:
+                node.meta.pop("only_clone_these_tensors", None)
+            else:
+                node.meta["only_clone_these_tensors"] = original_clone_args
+
     def reinplace_registry_op(node, inplaceable_op) -> None:
-        if node.target in {
-            _generalized_scatter,
-            aten.index_put.default,
-            aten._unsafe_index_put.default,
-        }:
-            inp = node.args[0]
-            if isinstance(inp, torch.fx.Node) and _aliases_graph_input(
-                inp, mutated_args_by_op
-            ) and _result_escapes_graph(node, mutated_args_by_op):
-                return
         # Check if ALL mutated args can be inplaced
         # Only convert if we don't need to clone any tensor
         mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
         if all_can_inplace(node, mutated_args) and inplaceable_op.extra_check(node):
+            if result_escapes_after_reinplace(node, inplaceable_op, mutated_args):
+                return
             for mutated_arg in mutated_args:
                 copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
             node.target = inplaceable_op.inplace_op
 
-    # Scatters are decided in a second sweep, once every other decision in this
-    # graph has been taken. The shared reinplace_registry_op guard needs to know
-    # whether a result can escape as an alias of a graph input, which depends on
-    # the copy-removal decisions already made in this pass. Deferring lets the
-    # alias walks inspect the rewritten graph instead of predicting those decisions.
-    #
-    # No decision below depends on a scatter's own decision: can_inplace and
-    # the copy_ bookkeeping read storage, node_order, meta["val"] and the users
-    # of a node, none of which reinplacing a scatter changes; the only targets
-    # they compare against (view ops and aten.copy_) are never rewritten here.
-    deferred_scatters: list[tuple[torch.fx.Node, InplaceableOp]] = []
+    # Decide registry ops after the other reinplacing paths have been rewritten.
+    # Processing them downstream-first lets an upstream op see aliases introduced
+    # by a later registry op in the same chain.
+    deferred_registry_ops: list[tuple[torch.fx.Node, InplaceableOp]] = []
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
-            if node.target is _generalized_scatter:
-                deferred_scatters.append((node, inplaceable_op))
-            else:
-                reinplace_registry_op(node, inplaceable_op)
+            deferred_registry_ops.append((node, inplaceable_op))
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
@@ -1147,6 +1217,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 base_tensors_dct,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V2,
+                result_alias_guard=lambda arg, mutated_arg, all_args: candidate_result_escapes(
+                    node, arg, mutated_arg, all_args
+                ),
             )
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata
@@ -1166,6 +1239,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V1,
+                result_alias_guard=lambda arg, mutated_arg, all_args: candidate_result_escapes(
+                    node, arg, mutated_arg, all_args
+                ),
             )
 
             # Stash the metadata. There is a pass later on where we decompose
@@ -1216,7 +1292,13 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     can_inplace_all,
                 )
 
-                if can_inplace_all and inplaceable_op.extra_check(node):
+                if (
+                    can_inplace_all
+                    and inplaceable_op.extra_check(node)
+                    and not result_escapes_after_reinplace(
+                        node, inplaceable_op, mutated_tensors_flat, with_effects=True
+                    )
+                ):
                     log.debug(
                         "reinplace with_effects: converting %s -> %s",
                         inner_op,
@@ -1335,6 +1417,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["kwargs"],
                 kernel_name,
                 ReInplaceTrigger.TRITON_OPS,
+                result_alias_guard=lambda arg, mutated_arg, all_args: candidate_result_escapes(
+                    node, arg, mutated_arg, all_args, triton=True
+                ),
             )
 
             kwargs = dict(node.kwargs)
@@ -1354,19 +1439,18 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
                 continue
 
-            if can_inplace(node, mutated_args):
+            if can_inplace(node, mutated_args) and not result_escapes_after_reinplace(
+                node, inplaceable_op, mutated_args
+            ):
                 for arg in mutated_args:
                     copy_node = copy_args_to_copy_nodes[(arg, node)]
                     replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
 
-    # Second sweep: the scatters, in graph order. Every node upstream of a
-    # scatter has been decided, so its input walk is exact; the only undecided
-    # nodes its escape walk can reach are later scatters, and each of those
-    # re-runs the input walk with this decision in place before it can build an
-    # alias of its own.
-    for node, inplaceable_op in deferred_scatters:
+    # Resolve registry ops in reverse graph order so downstream reinplacing
+    # decisions are visible to upstream escape checks.
+    for node, inplaceable_op in reversed(deferred_registry_ops):
         reinplace_registry_op(node, inplaceable_op)
 
     for node, replacement in replace_dict.items():
