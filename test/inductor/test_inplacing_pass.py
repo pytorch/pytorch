@@ -215,6 +215,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         triton_wrapper = next(iter(inplaceable_triton_ops))
         wrapped = graph.call_function(
             triton_wrapper,
+            args=(),
             kwargs={
                 "kwargs": {"x": x, "y": y},
                 "tensors_to_clone": ["y"],
