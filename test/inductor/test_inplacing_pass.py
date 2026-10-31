@@ -183,9 +183,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         scatter = graph.call_function(_generalized_scatter, args=(x, y, []))
         graph.call_function(aten.copy_.default, args=(x, scatter))
         input_view = graph.call_function(aten.slice.Tensor, args=(x, 0, 0, 1))
-        graph.output(input_view)
-        self.assertTrue(_aliases_graph_input(x, {}))
-        self.assertFalse(_result_escapes_graph(scatter, {}))
 
         functionalized_v1 = graph.call_function(
             torch.ops.higher_order.auto_functionalized,
@@ -254,6 +251,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(_multi_output_aliases(wrapped, {}), {"x": x})
         wrapped_x = graph.call_function(operator.getitem, (wrapped, "x"))
         self.assertEqual(_alias_sources(wrapped_x, {}), [x])
+
+        graph.output(input_view)
+        self.assertTrue(_aliases_graph_input(x, {}))
+        self.assertFalse(_result_escapes_graph(scatter, {}))
 
     def test_scatter_result_does_not_alias_mutated_input(self):
         def f(x, src):
