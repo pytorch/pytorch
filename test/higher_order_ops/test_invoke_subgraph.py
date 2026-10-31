@@ -36,6 +36,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch._inductor.utils import run_and_get_code
 from torch._subclasses.functional_tensor import (
     FunctionalTensorMode,
     PythonFunctionalizeAPI,
@@ -49,6 +50,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
+    parametrize,
     run_tests,
     skipIfCppFakeTensor,
     skipIfTorchDynamo,
@@ -3576,6 +3578,88 @@ _reuse_test_global = None
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphAliases(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _check_against_eager(self, compiled, fn, x, y):
+        x_ref = x.detach().clone().requires_grad_()
+        y_ref = y.detach().clone().requires_grad_()
+        actual = compiled(x, y)
+        expected = fn(x_ref, y_ref)
+        self.assertEqual(actual, expected)
+        actual.sum().backward()
+        expected.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(y.grad, y_ref.grad)
+
+    @parametrize("view", ("identity", "transpose", "slice"))
+    @parametrize("nested", (False, True))
+    @parametrize("dynamic", (False, True))
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @inductor_config.patch(allow_buffer_reuse=True)
+    def test_saved_input_lifetime(self, device, view, nested, dynamic):
+        @nested_compile_region
+        def inner(a, b):
+            return a * b
+
+        @nested_compile_region
+        def region(a, b):
+            if view == "transpose":
+                a, b = a.t(), b.t()
+            elif view == "slice":
+                a, b = a[:, ::2], b[:, ::2]
+            return inner(a, b) if nested else a * b
+
+        def fn(x, y):
+            return region(x, x + 1).sum() + region(y, y + 1).sum()
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for rows in (4, 8, 4) if dynamic else (4, 4):
+            x = torch.randn(rows, 4, device=device, requires_grad=True)
+            y = torch.randn(rows, 4, device=device, requires_grad=True)
+            self._check_against_eager(compiled, fn, x, y)
+
+    @parametrize("save_inputs", (False, True))
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @inductor_config.patch(allow_buffer_reuse=True)
+    def test_saved_output_lifetime(self, device, save_inputs):
+        # tanh saves its output, so the partitioned forward returns the same
+        # buffer as its output and as a saved tensor.
+        @nested_compile_region
+        def region(a, b):
+            return torch.tanh(a @ b if save_inputs else a + b)
+
+        def fn(x, y):
+            return region(x, y) - 1
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        self._check_against_eager(torch.compile(fn, fullgraph=True), fn, x, y)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @inductor_config.patch(allow_buffer_reuse=True)
+    def test_fresh_output_reused(self, device):
+        @nested_compile_region
+        def region(a, b):
+            return a * b
+
+        def fn(x, y):
+            return region(x, y + 1) + 1
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        y = torch.randn(8, 8, device=device, requires_grad=True)
+        _, (code, *_) = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
+        operand = re.search(r"_args = \[\w+, (buf\d+)\]", code)
+        fresh = re.search(r"(buf\d+) = buf\d+\[0\]", code)
+        self.assertIsNotNone(operand, code)
+        self.assertIsNotNone(fresh, code)
+        # The saved operand stays alive for backward, while the fresh output is
+        # free to be reused once it is dead.
+        self.assertNotRegex(code, rf"\bdel {operand.group(1)}\b")
+        self.assertIn(f"= {fresh.group(1)}; del {fresh.group(1)}  # reuse", code)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -6399,6 +6483,14 @@ class GraphModule(torch.nn.Module):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+
+instantiate_device_type_tests(
+    TestInvokeSubgraphAliases,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 instantiate_device_type_tests(

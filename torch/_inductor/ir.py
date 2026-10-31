@@ -10764,6 +10764,9 @@ class MultiOutput(ExternKernel):
         )
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
+        parent = self.inputs[0]
+        if isinstance(parent, InvokeSubgraph):
+            return parent.get_output_aliases(self.indices[0][1])
         return [
             inp.get_name()
             for inp in self.inputs
@@ -11325,6 +11328,48 @@ class InvokeSubgraph(ExternKernel):
 
     def get_subgraphs(self) -> list[Subgraph]:
         return [self.subgraph] if self.subgraph else []
+
+    @cache_on_self
+    def _output_storages(self) -> list[OrderedSet[str]]:
+        if self.subgraph is None or self.subgraph.graph is None:
+            raise AssertionError("Expected a lowered invoke_subgraph body")
+        graph = self.subgraph.graph
+        storages: list[OrderedSet[str]] = []
+        for output in graph.graph_outputs:
+            names: OrderedSet[str] = OrderedSet()
+            pending: list[str] = []
+            if not isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                pending.append(output.get_name())
+            # Views use their storage's name; nested calls and fallback outputs
+            # can reach other buffers through additional alias edges.
+            while pending:
+                name = pending.pop()
+                if name in names:
+                    continue
+                names.add(name)
+                if (buffer := graph.name_to_buffer.get(name)) is not None:
+                    pending.extend(buffer.get_inputs_that_alias_output())
+            storages.append(names)
+        return storages
+
+    def get_output_aliases(self, index: int) -> list[str]:
+        # A partitioned forward returns saved inputs and saved outputs next to
+        # its fresh outputs, so aliases are tracked per output: the operands and
+        # sibling outputs that share its storage.
+        if self.subgraph is None or self.subgraph.graph is None or self.outputs is None:
+            raise AssertionError("Expected a lowered invoke_subgraph body")
+        storages = self._output_storages()
+        storage = storages[index]
+        names = self.subgraph.graph.graph_input_names
+        aliases = [self.input_name(i) for i, n in enumerate(names) if n in storage]
+        aliases.extend(
+            output.get_name()
+            for i, output in enumerate(self.outputs)
+            if i != index
+            and isinstance(output, MultiOutput)
+            and not storage.isdisjoint(storages[i])
+        )
+        return aliases
 
     @classmethod
     def create(
