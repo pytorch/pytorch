@@ -1195,7 +1195,7 @@ class FSDPParam:
                         self.mp_policy,
                     )
                 # Only the 5-argument hook gets outer_size to pad with (#137005), so
-                # only its Tensor inputs are checked for the padded sharded size
+                # only its Tensor inputs are checked for the padded size along dim 0
                 return self._get_extension_all_gather_inputs(
                     all_gather_inputs, check_padding=num_fn_params == 5
                 )
@@ -1592,14 +1592,35 @@ def _get_all_gather_output_layouts(
             layout = _get_all_gather_output_layout(size, dim, shard_world_size)
         else:
             if require_padded_size and size != padded_sharded_size:
-                # NOTE: Inputs with the unpadded local shard's size pass on ranks
-                # whose shard needs no padding, which then hang in the collective
-                raise ValueError(
-                    f"{param_name} is unevenly sharded, so its Tensor all-gather "
-                    "inputs must have the padded sharded size "
-                    f"{tuple(padded_sharded_size)}, but input {i} has size "
-                    f"{tuple(size)}. Return other payloads as AllGatherInput records."
-                )
+                # Uneven sharding implies dim 0 (FSDP rejects it on other
+                # dims in `FSDPParam.__init__`), and the flat all-gather only
+                # concatenates along that dim, so only dim 0 has to carry
+                # the padded size.
+                # NOTE: Inputs with the unpadded local shard's size pass on
+                # ranks whose shard needs no padding, which then hang in
+                # the collective. This check cannot catch an input whose
+                # trailing dims depend on the rank's unpadded row count
+                # either: it passes with a different numel per rank and
+                # hangs the same way, since the copy-out derives each
+                # rank's numel from its own inputs. Catching either case
+                # would require a cross-rank metadata exchange.
+                dim0_padded = len(size) > 0 and size[0] == padded_sharded_size[0]
+                if not dim0_padded:
+                    if len(size) == 0:
+                        raise ValueError(
+                            f"{param_name} is unevenly sharded, so each of its "
+                            "Tensor all-gather inputs must have at least one "
+                            f"dim, with the padded size {padded_sharded_size[0]} "
+                            f"along dim 0, but input {i} has size {tuple(size)}. "
+                            "Return other payloads as AllGatherInput records."
+                        )
+                    raise ValueError(
+                        f"{param_name} is unevenly sharded along dim 0, so "
+                        "each of its Tensor all-gather inputs must have "
+                        f"the padded size {padded_sharded_size[0]} along "
+                        f"dim 0, but input {i} has size {tuple(size)}. "
+                        "Return other payloads as AllGatherInput records."
+                    )
             if (
                 reassembled
                 and size.numel()
