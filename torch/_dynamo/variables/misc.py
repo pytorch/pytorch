@@ -668,10 +668,10 @@ class CellVariable(VariableTracker):
         ) or tx.output.side_effects.has_pending_mutation_of_attr(self, "cell_contents"):
             return
         unimplemented(
-            gb_type="Read uninitialized cell",
+            gb_type="Read a cell that was empty before tracing",
             context=str(self),
-            explanation="Attempted to read a cell variable that has not been populated yet.",
-            hints=[*graph_break_hints.USER_ERROR],
+            explanation="Dynamo cannot guard that a cell from before tracing stays empty.",
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
 
     def _get_cell_contents(self, tx: "InstructionTranslatorBase") -> VariableTracker:

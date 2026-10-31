@@ -3115,6 +3115,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaisesRegex(ValueError, "Cell is empty"):
             f.__closure__[0].cell_contents
 
+    def test_delete_attr_twice_matches_eager(self):
+        def function_attr(x):
+            def f():
+                pass
+
+            f.x = 1
+            del f.x
+            try:
+                del f.x
+            except AttributeError:
+                return x + 1, "AttributeError"
+            except KeyError:
+                return x + 1, "KeyError"
+
+        def module_attr(x):
+            m = torch.nn.Module()
+            m.x = 1
+            del m.x
+            try:
+                del m.x
+            except AttributeError:
+                return x + 1, "AttributeError"
+            return x + 1, "no error"
+
+        x = torch.ones(2)
+        for fn in (function_attr, module_attr):
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def test_cell_empty_before_tracing_filled_later(self):
         def make(body):
             a = 0
