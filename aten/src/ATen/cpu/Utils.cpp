@@ -180,15 +180,17 @@ std::unordered_map<std::string, c10::IValue> get_cpu_capabilities() {
 #endif // !defined(_SC_LEVEL2_CACHE_SIZE)
 #endif // !defined(__powerpc__)
 
-  return capabilities;
-}
-
-bool has_rvv() {
-#ifdef TORCH_RVV_FP64_ENABLED
-  return true;
-#else
-  return false;
+  // Build-time fact, not a runtime cpuinfo query (cpuinfo has no RVV detection):
+  // whether this build compiled in the FP64 RVV kernels. __riscv_v_intrinsic
+  // alone is defined for the Zve32x/Zve32f/Zve64f sub-profiles too, which lack
+  // the vfloat64m2_t intrinsics the FP64 RVV kernels use, so also require FP64
+  // element width.
+#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000 && \
+    defined(__riscv_v_elen_fp) && __riscv_v_elen_fp >= 64
+  capabilities["rvv_fp64_kernels"] = true;
 #endif
+
+  return capabilities;
 }
 
 bool is_avx512_vnni_supported() {

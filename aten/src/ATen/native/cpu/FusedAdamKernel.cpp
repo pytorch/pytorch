@@ -7,8 +7,14 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
-#include <ATen/cpu/Utils.h>
-// TORCH_RVV_FP64_ENABLED is defined in ATen/cpu/Utils.h.
+// Full RVV FP64 vector support, gated locally so no internal kernel macro leaks
+// into the public ATen/cpu/Utils.h header. __riscv_v_intrinsic alone is defined
+// for the Zve32x/Zve32f/Zve64f sub-profiles too, which lack the vfloat64m2_t
+// intrinsics that the FP64 RVV kernels use, so also require FP64 element width.
+#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000 && \
+    defined(__riscv_v_elen_fp) && __riscv_v_elen_fp >= 64
+#define TORCH_RVV_FP64_ENABLED 1
+#endif
 #ifdef TORCH_RVV_FP64_ENABLED
 #include <riscv_vector.h>
 #endif

@@ -1254,15 +1254,17 @@ class TestOptimRenewed(TestCase):
             )
         if _get_device_type(device) == "mps" and dtype == torch.float64:
             self.skipTest("MPS does not support torch.float64")
-        is_rvv = torch._C._cpu._has_rvv()
+        is_rvv = torch._C._cpu._get_cpu_capability().get("rvv_fp64_kernels", False)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
             kwargs = deepcopy(optim_input.kwargs)
             if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
                 continue
             kwargs["amsgrad"] = True
+            # 65 spans several VLEN tiles plus a remainder, so the pipelined
+            # main loop (not just the masked tail) is exercised.
             param_fused = torch.nn.Parameter(
-                torch.rand(4, device=device, dtype=dtype)
+                torch.rand(65, device=device, dtype=dtype)
             )
             param_forloop = param_fused.detach().clone().requires_grad_()
             opt_fused = optim_cls([param_fused], fused=True, **kwargs)
@@ -1270,9 +1272,10 @@ class TestOptimRenewed(TestCase):
             for step in range(2):
                 grad = torch.rand_like(param_fused)
                 if step == 1:
-                    # NaN gradient: the fused amsgrad update must propagate it
-                    # into max_exp_avg_sq exactly like the forloop path.
-                    grad[1] = float("nan")
+                    # NaN gradient in a middle tile: the fused amsgrad update
+                    # must propagate it into max_exp_avg_sq exactly like the
+                    # forloop path.
+                    grad[33] = float("nan")
                 param_fused.grad = grad.clone()
                 param_forloop.grad = grad.clone()
                 opt_fused.step()
