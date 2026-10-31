@@ -23,12 +23,17 @@ from torch.testing._internal.common_fsdp import (
     patch_register_post_backward_hook_backward,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
 
 device_type = torch.device(get_devtype())
 
 
+@instantiate_parametrized_tests
 class TestFullyShardFrozen(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -45,8 +50,25 @@ class TestFullyShardFrozen(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True, 2],
+                "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
+                "freeze_after_init": [False, True],
+            },
+            self._test_train_mixed_requires_grad_per_group,
+        )
+
+    # reshard_after_forward=2 makes every fully_shard call build a new post-forward
+    # mesh, and its NCCL communicators hold /dev/shm until the processes exit, so
+    # run each use_activation_checkpointing value in fresh processes.
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_activation_checkpointing", [False, True])
+    def test_train_mixed_requires_grad_per_group_reshard_to_2(
+        self, use_activation_checkpointing: bool
+    ):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [2],
+                "use_activation_checkpointing": [use_activation_checkpointing],
                 "freeze_after_init": [False, True],
             },
             self._test_train_mixed_requires_grad_per_group,

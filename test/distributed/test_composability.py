@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 import copy
+from typing import ClassVar
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy, share_comm_ctx
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.pipelining import PipelineStage
@@ -104,6 +105,20 @@ class ComposabilityTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
+
+    # The workers are reused for every test in this class, and each new mesh adds
+    # NCCL communicators that hold /dev/shm until the workers exit, so build each
+    # distinct mesh once and share it across tests.
+    _meshes: ClassVar[dict[tuple, DeviceMesh]] = {}
+
+    @classmethod
+    def _get_mesh(cls, mesh_shape, mesh_dim_names) -> DeviceMesh:
+        key = (mesh_shape, mesh_dim_names)
+        if key not in cls._meshes:
+            cls._meshes[key] = init_device_mesh(
+                device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            )
+        return cls._meshes[key]
 
     def _rand_microbatches(self, dp_mesh, num_microbatches, dim, dtype=torch.float32):
         full = [
@@ -219,9 +234,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
-        device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
-        )
+        device_mesh = self._get_mesh(mesh_shape, mesh_dim_names)
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
@@ -300,9 +313,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
-        device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
-        )
+        device_mesh = self._get_mesh(mesh_shape, mesh_dim_names)
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
@@ -409,11 +420,7 @@ class ComposabilityTest(MultiProcContinuousTest):
     @parametrize("defer_reduce_grad_wait", [False, True])
     def test_pp_fsdp_outer_gradient_accumulation(self, defer_reduce_grad_wait):
         torch.get_device_module(device_type).set_device(self.device)
-        device_mesh = init_device_mesh(
-            "cuda",
-            mesh_shape=(self.world_size, 1),
-            mesh_dim_names=("dp", "pp"),
-        )
+        device_mesh = self._get_mesh((self.world_size, 1), ("dp", "pp"))
         dp_mesh = device_mesh["dp"]
         pp_group = device_mesh["pp"].get_group()
         dim = 10
@@ -509,11 +516,7 @@ class ComposabilityTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_pp_fsdp_deferred_reduction_rejects_shared_comm_ctx(self):
         torch.get_device_module(device_type).set_device(self.device)
-        device_mesh = init_device_mesh(
-            "cuda",
-            mesh_shape=(self.world_size, 1),
-            mesh_dim_names=("dp", "pp"),
-        )
+        device_mesh = self._get_mesh((self.world_size, 1), ("dp", "pp"))
         dp_mesh = device_mesh["dp"]
         pp_group = device_mesh["pp"].get_group()
         models = [
@@ -542,9 +545,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size, 1)
         mesh_dim_names = ("dp", "pp")
-        device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
-        )
+        device_mesh = self._get_mesh(mesh_shape, mesh_dim_names)
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
