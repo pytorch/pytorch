@@ -38,11 +38,8 @@ namespace c10d::symmetric_memory {
 using FabricHandleType = hipMemFabricHandle_t;
 constexpr auto kMemHandleTypeFabric = hipMemHandleTypeFabric;
 #else
-// Unreachable: get_fabric_access() is false below this ROCm version, so
-// handle_type_ never becomes FABRIC_HANDLE. Defined only so that the
-// use_fabric_handle=true instantiation of make_peer_alloc_info still compiles;
-// rendezvous() instantiates both branches unconditionally. None, not a real
-// type, so that reaching it anyway fails in the HIP runtime.
+// Unreachable below ROCm 10.0, but rendezvous() instantiates both branches of
+// make_peer_alloc_info. None makes the HIP runtime reject it if reached.
 struct FabricHandleType {
   unsigned char data[64];
 };
@@ -640,11 +637,9 @@ void validate_rendezvous_requests(
 static void validate_handle_type_agreement(
     const std::vector<RendezvousRequest>& reqs,
     int world_size) {
-  bool agree = true;
-  for (const auto r : c10::irange(1, world_size)) {
-    agree = agree && reqs[r].use_fabric_handle == reqs[0].use_fabric_handle;
-  }
-  if (agree) {
+  if (std::all_of(reqs.begin(), reqs.end(), [&](const auto& req) {
+        return req.use_fabric_handle == reqs[0].use_fabric_handle;
+      })) {
     return;
   }
   std::ostringstream oss;

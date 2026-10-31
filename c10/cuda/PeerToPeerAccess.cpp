@@ -162,13 +162,8 @@ bool isFabricSupported() {
 
 #elif defined(USE_ROCM) && ROCM_VERSION >= 100000
 
-// Fabric handles on ROCm are UALink. Three things must hold: the GPU exposes
-// UALink, the accelerator has been provisioned to a ready state, and the loaded
-// runtime implements the export/import path. The device attribute answers the
-// first, and rules out systems without UALink before anything is allocated.
-// The second is dynamic state checked at export time, so the rest is probed by
-// running the whole cycle. This also covers a build made against newer headers
-// than the runtime it ends up loading.
+// The device attribute rules out GPUs without UALink. Provisioning is only
+// checked at export, so the full allocate/export/import cycle still runs.
 bool isFabricSupported(c10::DeviceIndex dev) {
   int fabric_supported = 0;
   if (hipDeviceGetAttribute(
@@ -176,6 +171,8 @@ bool isFabricSupported(c10::DeviceIndex dev) {
           hipDeviceAttributeHandleTypeFabricSupported,
           static_cast<int>(dev)) != hipSuccess) {
     (void)hipGetLastError();
+    LOG(INFO)
+        << "Could not query FABRIC handle support, falling back to fd handle exchange\n";
     return false;
   }
   if (!fabric_supported) {
@@ -193,14 +190,15 @@ bool isFabricSupported(c10::DeviceIndex dev) {
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = static_cast<int>(dev);
 
-  // Every step below is expected to fail on most systems, so failures are
-  // returned rather than checked, and the sticky error each one arms must be
-  // consumed here or it surfaces at an unrelated call later.
+  // Failures below are returned, not checked. Each arms a sticky error that
+  // must be consumed here or it surfaces at an unrelated call later.
   size_t granularity = 0;
   if (hipMemGetAllocationGranularity(
           &granularity, &prop, hipMemAllocationGranularityRecommended) !=
       hipSuccess) {
     (void)hipGetLastError();
+    LOG(INFO)
+        << "Could not get FABRIC allocation granularity, falling back to fd handle exchange\n";
     return false;
   }
 
@@ -310,12 +308,8 @@ bool get_fabric_access(c10::DeviceIndex dev) {
   if (cache != -1) {
     return cache;
   }
-  // There is no ROCm counterpart to the NVML fabric state query, and no UALink
-  // domain identifier is exposed, so clique_id stays unsupported and
-  // validate_nvlink_fabric_support() degrades to a no-op. Ranks spanning
-  // separate UALink domains therefore fail at import, with an error that names
-  // both ranks' hosts and devices but not their domains.
-  fabricCliqueId_[dev] = kCliqueIdUnsupported;
+  // No UALink domain ID is exposed, so get_fabric_clique_id() reports
+  // unsupported and ranks in different UALink domains fail only at import.
   cache = isFabricSupported(dev) ? 1 : 0;
   return cache;
 #else
