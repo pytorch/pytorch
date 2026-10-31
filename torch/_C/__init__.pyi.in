@@ -129,6 +129,7 @@ class Stream:
     device_type: _int
 
     device: _device  # The device of the stream
+    native_handle: _int  # The backend's native stream pointer
 
     @overload
     def __new__(
