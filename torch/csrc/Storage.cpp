@@ -72,7 +72,13 @@ static void THPStorage_dealloc(PyObject* self) {
     TORCH_INTERNAL_ASSERT(_self->cdata.use_count() == 1);
     pyobj_slot->clear();
   }
-  _self->cdata.~Storage();
+  // Storage destruction can release a shared-memory mapping through
+  // MapAllocator::close(). Keep Python object bookkeeping above under the
+  // GIL, but allow allocator teardown and munmap to run without it.
+  {
+    pybind11::gil_scoped_release no_gil;
+    _self->cdata.~Storage();
+  }
   Py_TYPE(_self)->tp_free(self);
 }
 
