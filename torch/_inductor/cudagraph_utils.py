@@ -346,12 +346,16 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    *,
+    use_cudagraph_partition: bool | None = None,
 ) -> str | None:
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
     # dynamo cudagraph does not support graph partition
-    if is_using_cudagraph_partition():
+    if use_cudagraph_partition is None:
+        use_cudagraph_partition = is_using_cudagraph_partition()
+    if use_cudagraph_partition:
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
 
@@ -361,6 +365,12 @@ def check_multiple_devices_or_any_cpu_nodes(
             return format_default_skip_message(f"{msg}. Found from : \n {stack_trace}")
 
         return format_default_skip_message(msg)
+
+    if not device_node_mapping:
+        # Everything left was tolerated above (cpu under partitioning, meta), so
+        # there is no GPU work to capture. Refuse, but name the real reason
+        # rather than falling through to an empty "multiple devices" list.
+        return format_default_skip_message("no GPU ops")
 
     if (
         len(device_node_mapping) == 1
@@ -394,10 +404,15 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    *,
+    use_cudagraph_partition: bool,
 ) -> str | None:
     return (
         check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+        or check_multiple_devices_or_any_cpu_nodes(
+            device_node_mapping,
+            use_cudagraph_partition=use_cudagraph_partition,
+        )
     )
 
 

@@ -9,7 +9,9 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 from torch._inductor.test_case import run_tests
-from torch._inductor.utils import run_fw_bw_and_get_code
+from torch._inductor.utils import (
+    run_fw_bw_and_get_code,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -17,7 +19,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_gpu_and_triton,
+)
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
@@ -236,6 +240,57 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(result, expected)
         self.assertEqual(pass_calls, [])
+
+    def test_check_multiple_devices_or_any_cpu_nodes(self):
+        """A device-less mapping has no GPU work, so capture is refused.
+
+        This helper is shared with whole-graph compiles and the dynamo cudagraphs
+        backend, so the empty case has to be right for them too: a CPU-only graph
+        under partitioning lands here once the cpu entry is popped, and reporting
+        no reason would claim an all-CPU graph is capturable.
+        """
+        from torch._inductor.cudagraph_utils import (
+            check_multiple_devices_or_any_cpu_nodes,
+        )
+
+        graph = torch.fx.Graph()
+        meta = torch.device("meta")
+        cuda0 = torch.device(GPU_TYPE, 0)
+        cuda1 = torch.device(GPU_TYPE, 1)
+        cpu = torch.device("cpu")
+
+        for mapping, partition, expected in (
+            ({}, False, "no GPU ops"),
+            ({meta: graph.placeholder("m")}, False, "no GPU ops"),
+            # A CPU-only graph under partitioning: the cpu entry is tolerated and
+            # popped, and what is left is not capturable.
+            ({cpu: graph.placeholder("c1")}, True, "no GPU ops"),
+            (
+                {cuda0: graph.placeholder("a"), meta: graph.placeholder("m2")},
+                False,
+                None,
+            ),
+            ({cuda0: graph.placeholder("a2")}, False, None),
+            (
+                {cuda0: graph.placeholder("a4"), cpu: graph.placeholder("c2")},
+                True,
+                None,
+            ),
+            (
+                {cuda0: graph.placeholder("a3"), cuda1: graph.placeholder("b")},
+                False,
+                "multiple devices",
+            ),
+            ({cpu: graph.placeholder("c")}, False, "cpu device"),
+        ):
+            with self.subTest(devices=sorted(map(str, mapping)), partition=partition):
+                reason = check_multiple_devices_or_any_cpu_nodes(
+                    dict(mapping), use_cudagraph_partition=partition
+                )
+                if expected is None:
+                    self.assertIsNone(reason)
+                else:
+                    self.assertIn(expected, reason)
 
 
 if __name__ == "__main__":
