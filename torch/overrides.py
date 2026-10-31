@@ -812,14 +812,14 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.miopen_batch_norm: (
             lambda input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon: -1
         ),
-        torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
+        torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32=False: -1,
         torch.miopen_convolution_add_relu: lambda input, weight, z, alpha, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_relu: lambda input, weight, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_transpose: (
-            lambda input, weight, bias, padding, output_padding, stride, dilation, groups, benchmark, deterministic: -1
+            lambda input, weight, bias, padding, output_padding, stride, dilation, groups, benchmark, deterministic, allow_tf32=False: -1
         ),
         torch.miopen_depthwise_convolution: (
-            lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1
+            lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32=False: -1
         ),
         torch.miopen_rnn: (
             lambda input, weight, weight_stride0, hx, cx, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state: -1
