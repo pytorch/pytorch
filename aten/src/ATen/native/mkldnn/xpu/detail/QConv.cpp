@@ -189,7 +189,7 @@ at::Tensor quantized_convolution(
 
   std::unordered_map<int, dnnl::memory> args;
   if (attr.with_binary())
-    attr.construct_post_binary(conv_fwd_pd, args);
+    attr.construct_post_binary(args);
   args.insert({DNNL_ARG_SRC, src_m});
   args.insert({DNNL_ARG_WEIGHTS, weight_m});
   args.insert({DNNL_ARG_DST, output_m});
