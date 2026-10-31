@@ -227,6 +227,50 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
     ]
 
 
+# Other "Collective name" values of record_param_comms events for an op:
+# legacy NCCL "allreduce", nccl2 "allToAllSingleImpl" for all_to_all_single.
+_PARAM_COMMS_ALIASES = {
+    "all_reduce": ("allreduce",),
+    "all_to_all": ("allToAllSingleImpl",),
+}
+
+
+def _param_comms_names(op):
+    return (op, *_PARAM_COMMS_ALIASES.get(op, ()))
+
+
+def _is_nccl2():
+    # nccl2 is registered as "nccl" but emits no "nccl:<op>" events and no
+    # process group description or global rank start/stride.
+    if dist.get_backend() != dist.Backend.NCCL:
+        return False
+    return dist.get_backend_impl(device=torch.device("cuda")).name() == "nccl2"
+
+
+def get_comm_profiling_events(op, profiler, dedup_gpu_user_annotation=False):
+    """Events for collective ``op``: "<backend>:<op>" events, or for nccl2
+    record_param_comms events whose "Collective name" matches."""
+    if not _is_nccl2():
+        return get_profiling_event(
+            f"{dist.get_backend()}:{op}", profiler, dedup_gpu_user_annotation
+        )
+    names = _param_comms_names(op)
+    return [
+        e
+        for e in get_profiling_event(
+            "record_param_comms", profiler, dedup_gpu_user_annotation
+        )
+        if (e.metadata or {}).get("Collective name") in names
+    ]
+
+
+def get_comm_event_input_shapes(event):
+    # record_param_comms records the collective's input tensor list first.
+    if event.name == "record_param_comms":
+        return event.structured_input_shapes[0]
+    return event.input_shapes
+
+
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
@@ -697,17 +741,27 @@ class DistributedTest:
                 if collname == "wait":
                     continue
 
-                self.assertEqual(args["Process Group Description"], "default_pg")
-                self.assertNotEqual(args["Process Group Ranks"], "")
-
                 self.assertGreaterEqual(args.get("In msg nelems", -1), 0)
                 self.assertGreaterEqual(args.get("Out msg nelems", -1), 0)
                 self.assertGreaterEqual(args.get("Group size", -1), 0)
+                self.assertNotEqual(args["Process Group Ranks"], "")
+                if _is_nccl2():
+                    continue
+
+                self.assertEqual(args["Process Group Description"], "default_pg")
                 self.assertGreaterEqual(args.get("Global rank start", -1), 0)
                 self.assertGreaterEqual(args.get("Global rank stride", -1), 0)
 
             # print(per_coll_meta)
             return per_coll_meta
+
+        def _assert_comm_event(self, event, name=None):
+            # record_param_comms events are synchronous and matched by name.
+            if event.name == "record_param_comms":
+                return
+            self.assertTrue(event.is_async)
+            if name is not None:
+                self.assertEqual(event.name, name)
 
         def test_dump_DDP_relevant_env_vars(self):
             with captured_output() as (out, _):
@@ -1635,9 +1689,9 @@ class DistributedTest:
             if profiler_ctx is not None:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
-                    for event_name in [f"{backend}:send", f"{backend}:recv"]:
-                        events = get_profiling_event(
-                            event_name, prof, dedup_gpu_user_annotation=True
+                    for op in ["send", "recv"]:
+                        events = get_comm_profiling_events(
+                            op, prof, dedup_gpu_user_annotation=True
                         )
                         self.assertTrue(events)
                         # Event order is not deterministic, so simply assert their shape
@@ -1646,7 +1700,9 @@ class DistributedTest:
                             [[rank + 1] * 3] for rank in range(dist.get_world_size())
                         ]
                         for event in events:
-                            self.assertTrue(event.input_shapes in expected_shapes)
+                            self.assertIn(
+                                get_comm_event_input_shapes(event), expected_shapes
+                            )
 
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(BACKEND != "nccl", "NCCL Send Recv Only")
@@ -2613,15 +2669,15 @@ class DistributedTest:
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 # We are only interested in the backend's implementation not the dispatcher wrapper.
-                events = get_profiling_event(
-                    dist.get_backend() + profiling_title_postfix, autograd_profiler_ctx
+                events = get_comm_profiling_events(
+                    profiling_title_postfix.removeprefix(":"), autograd_profiler_ctx
                 )
                 # DETAIL debug mode can use a pg wrapper that issues more collectives
                 # under the hood
                 if dist.get_debug_level() != dist.DebugLevel.DETAIL:
                     self.assertEqual(len(events), len(op_calls))
                 for e in events:
-                    self.assertTrue(e.is_async)
+                    self._assert_comm_event(e)
                     self.assertEqual(e.count, 1)
                     self.assertGreaterEqual(e.cpu_time, 0)
                     # Verify tensor shapes if given
@@ -2631,10 +2687,11 @@ class DistributedTest:
                         tensor_shapes is not None
                         and dist.get_debug_level() != dist.DebugLevel.DETAIL
                     ):
+                        shapes = get_comm_event_input_shapes(e)
                         self.assertEqual(
-                            e.input_shapes,
+                            shapes,
                             tensor_shapes,
-                            f"event shape: {e.input_shapes} vs tensor {tensor_shapes}",
+                            f"event shape: {shapes} vs tensor {tensor_shapes}",
                         )
 
         # ALL REDUCE
@@ -7027,24 +7084,24 @@ class DistributedTest:
                     loss.backward()
 
             all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
-            events = get_profiling_event(
-                all_reduce_event_name, prof, dedup_gpu_user_annotation=True
+            events = get_comm_profiling_events(
+                "all_reduce", prof, dedup_gpu_user_annotation=True
             )
             event_count = sum(e.count for e in events)
             self.assertEqual(event_count, num_iters)
             for event in events:
-                self.assertTrue(event.is_async)
-                self.assertEqual(event.name, all_reduce_event_name)
+                self._assert_comm_event(event, all_reduce_event_name)
 
             broadcast_event_name = f"{dist.get_backend()}:broadcast"
-            broadcast_events = get_profiling_event(
-                broadcast_event_name, prof, dedup_gpu_user_annotation=True
+            broadcast_events = get_comm_profiling_events(
+                "broadcast", prof, dedup_gpu_user_annotation=True
             )
             event_count = sum(e.count for e in broadcast_events)
             # Broadcast is called during rebuild_buckets
             self.assertGreaterEqual(event_count, 1)
             for event in broadcast_events:
-                self.assertEqual(event.name, broadcast_event_name)
+                if event.name != "record_param_comms":
+                    self.assertEqual(event.name, broadcast_event_name)
 
             # Run DDP with profiling for a few iterations, then enable profiling
             # for a single pass, and ensure it is recorded. This tests that the
@@ -7062,14 +7119,13 @@ class DistributedTest:
                 loss = net(inp).sum()
                 loss.backward()
 
-            events = get_profiling_event(
-                all_reduce_event_name, prof, dedup_gpu_user_annotation=True
+            events = get_comm_profiling_events(
+                "all_reduce", prof, dedup_gpu_user_annotation=True
             )
             self.assertGreaterEqual(len(events), 1)
             self.assertGreaterEqual(events[0].count, 1)
-            self.assertEqual(events[0].name, all_reduce_event_name)
             for event in events:
-                self.assertTrue(event.is_async)
+                self._assert_comm_event(event, all_reduce_event_name)
             # Ensure searching unused parameters was profiled
             events = get_profiling_event("search_unused_parameters", prof)
             self.assertEqual(len(events), 1)
@@ -7108,14 +7164,19 @@ class DistributedTest:
             nccl_meta = self._sanity_check_profiler_nccl_meta(nccl_meta_events)
 
             # additionally check the specific collectives in this test case
-            self.assertEqual(len(nccl_meta["allreduce"]), 2)
-            self.assertEqual(len(nccl_meta["wait"]), 1)
+            allreduce = [
+                a for name in _param_comms_names("all_reduce") for a in nccl_meta[name]
+            ]
+            self.assertEqual(len(allreduce), 2)
+            # nccl2 records "wait" only for pending work, also from getFuture().
+            if not _is_nccl2():
+                self.assertEqual(len(nccl_meta["wait"]), 1)
 
             # check allreduce message sizes
-            a0 = nccl_meta["allreduce"][0]
+            a0 = allreduce[0]
             self.assertEqual(a0["Out msg nelems"], 100, msg=f"{a0}")
             self.assertEqual(a0["dtype"], "Float", msg=f"{a0}")
-            a1 = nccl_meta["allreduce"][1]
+            a1 = allreduce[1]
             self.assertEqual(a1["Out msg nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 
