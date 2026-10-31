@@ -1987,6 +1987,35 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
 
+    @parametrize("op", ("linear", "module", "matmul"))
+    def test_constructed_subclass_method_descriptor_guard(self, op):
+        class MySubclass(torch.Tensor):
+            def __init__(self, data):
+                super().__init__()
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        weight = torch.randn(3, 4)
+        linear = torch.nn.Linear(4, 3)
+
+        def fn(x):
+            x = MySubclass(x)
+            if op == "linear":
+                t = torch.nn.functional.linear(x, weight)
+            elif op == "module":
+                t = linear(x)
+            else:
+                t = x @ weight.T
+            return t.numel(), t.dtype, t.dim(), t.is_complex()
+
+        x = torch.randn(2, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        expected = fn(x)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
+
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
         # object (from as_subclass call) is handled both during Dynamo tracing
