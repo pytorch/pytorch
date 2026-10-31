@@ -2191,12 +2191,6 @@ autodoc_default_options = {
     "exclude-members": "from_bytes, to_bytes",
 }
 
-# -- katex javascript in header
-#
-#    def setup(app):
-#    app.add_javascript("https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.js")
-
-
 # -- Options for HTML output ----------------------------------------------
 #
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -2217,7 +2211,6 @@ autodoc_default_options = {
 html_css_files = [
     "css/jit.css",
     "css/foreach.css",
-    "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
 
