@@ -5,6 +5,7 @@ with test_sym_bool)
 
 # Owner(s): ["oncall: export"]
 import copy
+import importlib.util
 import io
 import json
 import math
@@ -3002,35 +3003,43 @@ class TestPredispatchSerialization(TestCase):
                 b'"torch.nn.parameter.Parameter"',
                 "cannot be used as a flat_apply function",
             ),
-            (func_name, b'"os.system"', "not defined under that name"),
+            (func_name, b'"os.system"', "not a class or function defined"),
             (func_name, b'"torch.os.system"', "not in an imported module"),
             (func_name, b'"torch.builtins.exec"', "not in an imported module"),
             (func_name, b'"torch.does_not_exist.f"', "not in an imported module"),
             (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
             (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
-            (cls_name, b'"torch.autograd.Function"', "not defined under that name"),
+            (cls_name, b'"torch.autograd.Function"', "not a class or function defined"),
             (cls_name, b'"torch.os.system"', "not in an imported module"),
         ]:
             with self.assertRaisesRegex(SerializeError, reason, msg=new):
                 load(artifact.exported_program.replace(old, new))
 
-        # Importing a module runs its code, so load refuses a name from a
-        # module that is not imported yet, and the module's code never runs.
+        # Load never runs a module's code: not for a module that is not
+        # imported yet, and not for a lazily loaded one, which runs on its
+        # first attribute read.
         with tempfile.TemporaryDirectory() as tmp:
             ran = os.path.join(tmp, "ran")
-            with open(os.path.join(tmp, "flat_apply_side_effect.py"), "w") as f:
+            path = os.path.join(tmp, "flat_apply_side_effect.py")
+            with open(path, "w") as f:
                 f.write(f"open({ran!r}, 'w').close()\n")
-            with patch.object(sys, "path", [tmp, *sys.path]), patch.dict(sys.modules):
-                for old in (func_name, cls_name):
-                    with self.assertRaisesRegex(
-                        SerializeError, "not in an imported module"
-                    ):
-                        load(
-                            artifact.exported_program.replace(
-                                old, b'"flat_apply_side_effect.F"'
-                            )
-                        )
-                    self.assertFalse(os.path.exists(ran))
+            spec = importlib.util.spec_from_file_location("flat_apply_lazy", path)
+            spec.loader = importlib.util.LazyLoader(spec.loader)
+            holder = types.ModuleType("flat_apply_holder")
+            holder.lazy = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(holder.lazy)
+            with (
+                patch.object(sys, "path", [tmp, *sys.path]),
+                patch.dict(sys.modules, {holder.__name__: holder}),
+            ):
+                for new, reason in [
+                    (b'"flat_apply_side_effect.F"', "not in an imported module"),
+                    (b'"flat_apply_holder.lazy"', "not a class or function"),
+                ]:
+                    for old in (func_name, cls_name):
+                        with self.assertRaisesRegex(SerializeError, reason):
+                            load(artifact.exported_program.replace(old, new))
+                        self.assertFalse(os.path.exists(ran))
 
         # The input spec decides which input the helper gets as the class name.
         program = json.loads(artifact.exported_program)

@@ -714,14 +714,14 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
 def _find_imported(name: str) -> Any:
     """
-    Find the object that a saved flat_apply node names, without importing
-    anything. Importing a module runs its code, so a saved program must not
-    decide what gets imported: as with ``torch.load(weights_only=True)``, the
-    module that defines the object has to be imported before loading. The
-    object must report the same qualified name, so aliases such as
-    ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
-    ``__main__`` modules are refused too, because they differ between
-    processes.
+    Find the class or function that a saved flat_apply node names, without
+    importing anything or running a module's code. Importing a module runs
+    its code, so a saved program must not decide what gets imported: as with
+    ``torch.load(weights_only=True)``, the module that defines the object has
+    to be imported before loading. The object must report the same qualified
+    name, so aliases such as ``torch.nn.Module`` (defined in
+    ``torch.nn.modules.module``) are refused. ``__main__`` modules are refused
+    too, because they differ between processes.
     """
     module_name, _, attr = name.rpartition(".")
     if "__main__" in module_name.split("."):
@@ -733,13 +733,16 @@ def _find_imported(name: str) -> Any:
             "defines it first: load does not import modules named in a saved "
             "program, because importing runs their code."
         )
-    # getattr would call a module __getattr__, which can import submodules.
+    # Reading an attribute can run code: getattr calls a module __getattr__,
+    # and any attribute read on a lazily loaded module loads it. So the lookup
+    # is static, and only classes and functions are read further.
     obj = inspect.getattr_static(module, attr, None)
-    if (getattr(obj, "__module__", None), getattr(obj, "__qualname__", None)) != (
-        module_name,
-        attr,
-    ):
-        raise SerializeError(f"{name} is not defined under that name")
+    if not issubclass(
+        type(obj), (type, types.FunctionType, types.BuiltinFunctionType)
+    ) or (obj.__module__, obj.__qualname__) != (module_name, attr):
+        raise SerializeError(
+            f"{name} is not a class or function defined under that name"
+        )
     return obj
 
 
