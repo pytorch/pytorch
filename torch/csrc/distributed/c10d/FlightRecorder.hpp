@@ -387,16 +387,16 @@ TORCH_API bool recordsFlightRecorderNatively(const std::string& backend);
 
 // A backend whose trace is not in a getFlightRecorder() instance (stock
 // ProcessGroupNCCL records into the FlightRecorder<at::cuda::CUDAEvent> in
-// libtorch_cuda) registers how to read it, so dump_fr_trace, dump_fr_trace_json
-// and reset_fr_trace serve it under that name (e.g. "nccl"), like the
-// instances hook-recorded backends use. Only register names the hook does not
-// record into (recordsFlightRecorderNatively()); a dumper hides the instance.
-// All three callbacks are required and must return what dump()/dump_json()
-// would. They run on the dumping thread, outside the registry lock and
-// possibly with the GIL held. Registering again replaces the dumper.
-// dump_fr_trace_file writes the dumper's trace, but try_dump_fr_trace_file
-// (and so the fr_dump_file handler) still reads the rank from
-// getFlightRecorder(backend), which a dumper's backend never sets.
+// libtorch_cuda) registers how to read it, so the generic dump, file dump and
+// reset APIs serve it under that name (e.g. "nccl"), like the instances
+// hook-recorded backends use. Only natively recording names other than
+// kDefaultFRBackend may be registered (recordsFlightRecorderNatively()): the
+// hook records the others into getFlightRecorder(), which a dumper would hide.
+// All callbacks are required; dump and dumpJson must return what
+// dump()/dump_json() would, and rank returns the rank this process's dump files
+// are named with (normally its global rank), or -1 if recording is off or no
+// group has set it. They run on the dumping thread, outside the registry lock
+// and possibly with the GIL held. Registering again replaces the dumper.
 struct FlightRecorderDumper {
   std::function<std::string(
       bool includeCollectives,
@@ -405,6 +405,7 @@ struct FlightRecorderDumper {
       dump;
   std::function<std::string(bool includeCollectives, bool onlyActive)> dumpJson;
   std::function<void()> reset;
+  std::function<int()> rank;
 };
 
 TORCH_API void registerFlightRecorderDumper(
@@ -438,7 +439,11 @@ TORCH_API void dump_fr_trace_file(
     bool onlyActive,
     const std::string& backend = kDefaultFRBackend);
 
-// dump_fr_trace_file for the rank the recorder was told about at hook attach.
+// Global rank the backend's recorder was told about (at hook attach, or by
+// the dumper), or -1 if none. Names the file the dump-to-file paths write.
+TORCH_API int fr_trace_rank(const std::string& backend = kDefaultFRBackend);
+
+// dump_fr_trace_file for fr_trace_rank(backend).
 // Returns false without writing anything if the recorder is off or no rank was
 // ever set, which also means nothing was recorded. Used by
 // FlightRecorderHook's abort hook, whose whole job is a best-effort dump on a

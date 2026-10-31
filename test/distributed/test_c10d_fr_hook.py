@@ -1355,12 +1355,17 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        self.tempdir = tempfile.TemporaryDirectory()
+        os.environ["TORCH_FR_DUMP_TEMP_FILE"] = os.path.join(
+            self.tempdir.name, "trace_"
+        )
         self._spawn_processes()
 
     def tearDown(self):
         if dist.is_initialized():
             dist.destroy_process_group()
         os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+        os.environ.pop("TORCH_FR_DUMP_TEMP_FILE", None)
         super().tearDown()
         try:
             os.remove(self.file_name)
@@ -1431,6 +1436,39 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         torch._C._distributed_c10d._reset_fr_trace(backend=name)
         native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
         self.assertEqual(native.get("entries", []), [])
+
+    def test_stock_nccl_control_plane(self):
+        import requests
+
+        from torch._C._distributed_c10d import _WorkerServer
+
+        _, name = self._init_nccl("0")
+        self.assertEqual(name, "nccl")
+        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
+        torch.cuda.synchronize()
+
+        server = _WorkerServer("", 0)
+        self.addCleanup(server.shutdown)
+        url = f"http://localhost:{server.port}/handler"
+        res = requests.post(f"{url}/fr_trace_json?backend=nccl", timeout=60)
+        self.assertEqual(res.status_code, 200)
+        native = json.loads(
+            torch._C._distributed_c10d._dump_nccl_trace_json(onlyActive=True)
+        )
+        self.assertEqual(res.json()["pg_config"], native["pg_config"])
+
+        torch._C._distributed_c10d._dump_fr_trace_file(self.rank, backend=name)
+        with open(os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank), "rb") as f:
+            dump = pickle.load(f)
+        self.assertIn("nccl:all_reduce", [e["profiling_name"] for e in dump["entries"]])
+
+        # ProcessGroupNCCL sets the rank that names the file; checked from the
+        # reply, since the handler writes the same file asynchronously.
+        res = requests.post(f"{url}/fr_dump_file?backend=nccl", timeout=60)
+        self.assertEqual(res.status_code, 200, msg=res.text)
+        self.assertEqual(
+            res.text, f"Flight Recorder dump initiated for rank {self.rank}"
+        )
 
 
 if __name__ == "__main__":

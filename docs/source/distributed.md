@@ -1752,9 +1752,11 @@ curl -X POST \
   "http://worker-host:port/handler/pyspy_dump?nonblocking=1&native=1"  # @lint-ignore
 ```
 
-**``fr_trace_json``** — CPU flight-recorder trace (application/json). Returns
-the flight-recorder ring buffer contents as JSON, including all recorded
-collective operations, their metadata, and timing information.
+**``fr_trace_json``** — Flight-recorder trace (application/json). Returns
+the active entries of the flight-recorder ring buffer as JSON, with their
+metadata and timing information. The
+``backend`` query parameter selects the recorder (default ``gloo``, e.g.
+``nccl`` or ``nccl2``).
 
 ```bash
 curl -X POST \
@@ -1855,7 +1857,7 @@ Handlers that support dumping:
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``PySpyHandler``                   | ``pyspy_dump``         | py-spy stack dumps (nonblocking) for all ranks.   |
 +------------------------------------+------------------------+---------------------------------------------------+
-| ``FlightRecorderHandler``          | ``fr_trace``           | CPU + NCCL flight-recorder tables.                |
+| ``FlightRecorderHandler``          | ``fr_trace``           | CPU, NCCL and nccl2 flight-recorder tables.       |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
 +------------------------------------+------------------------+---------------------------------------------------+

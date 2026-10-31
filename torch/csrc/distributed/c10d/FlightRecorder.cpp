@@ -153,10 +153,17 @@ void registerFlightRecorderDumper(
     const std::string& backend,
     FlightRecorderDumper dumper) {
   TORCH_CHECK_VALUE(
-      dumper.dump && dumper.dumpJson && dumper.reset,
+      recordsFlightRecorderNatively(backend) && backend != kDefaultFRBackend,
       "FlightRecorderDumper for ",
       backend,
-      " must set dump, dumpJson and reset");
+      " would hide the trace in getFlightRecorder(\"",
+      backend,
+      "\")");
+  TORCH_CHECK_VALUE(
+      dumper.dump && dumper.dumpJson && dumper.reset && dumper.rank,
+      "FlightRecorderDumper for ",
+      backend,
+      " must set dump, dumpJson, reset and rank");
   std::lock_guard<std::mutex> lock(dumpersMutex());
   dumpers()[backend] = std::move(dumper);
 }
@@ -211,14 +218,24 @@ void dump_fr_trace_file(
   writer.write(trace);
 }
 
+int fr_trace_rank(const std::string& backend) {
+  if (auto dumper = getDumper(backend)) {
+    return dumper->rank();
+  }
+  return getFlightRecorder(backend)->getRank();
+}
+
 bool try_dump_fr_trace_file(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
-  auto* recorder = getFlightRecorder(backend);
-  int rank = recorder->getRank();
-  if (!recorder->enabled_ || rank < 0) {
+  // A dumper's rank is already -1 while recording is off.
+  if (!getDumper(backend) && !getFlightRecorder(backend)->enabled_) {
+    return false;
+  }
+  int rank = fr_trace_rank(backend);
+  if (rank < 0) {
     return false;
   }
   dump_fr_trace_file(

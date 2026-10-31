@@ -106,7 +106,10 @@ control_plane::RegisterHandler jsonDumpHandler{
 [[maybe_unused]] static const bool registeredDumper = [] {
   registerFlightRecorderDumper(
       NCCL_BACKEND_NAME,
-      {dump_nccl_trace, dump_nccl_trace_json, reset_nccl_trace});
+      {dump_nccl_trace, dump_nccl_trace_json, reset_nccl_trace, [] {
+         auto* recorder = FlightRecorder<at::cuda::CUDAEvent>::get();
+         return recorder->enabled_ ? recorder->getRank() : -1;
+       }});
   return true;
 }();
 

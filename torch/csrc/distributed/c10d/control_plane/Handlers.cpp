@@ -2,6 +2,7 @@
 
 #include <c10/core/Event.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 
 #include <fmt/format.h>
@@ -88,13 +89,15 @@ RegisterHandler frDumpFileHandler(
     "fr_dump_file",
     [](const Request& req, Response& res) {
       auto backend = frBackendParam(req);
-      int rank = ::c10d::getFlightRecorder(backend)->getRank();
+      int rank = ::c10d::fr_trace_rank(backend);
       // Nothing has told the recorder which rank this process is, so we would
       // write to <prefix>-1 and clobber every other rank's guess.
       if (rank < 0) {
         res.setStatus(503);
         res.setContent(
-            "Flight Recorder rank is unset; no process group has registered with it yet",
+            fmt::format(
+                "Flight Recorder rank is unset for {}; no process group has registered with it yet, or recording is off",
+                backend),
             "text/plain");
         return;
       }
@@ -124,12 +127,20 @@ RegisterHandler frDumpFileHandler(
         // std::launch::async so the future's destructor joins the worker
         // rather than leaking a detached thread.
         dumpFuture = std::async(std::launch::async, [rank, backend]() {
-          ::c10d::dump_fr_trace_file(
-              rank,
-              /*includeCollectives=*/true,
-              /*includeStackTraces=*/false,
-              /*onlyActive=*/false,
-              backend);
+          // Nothing reads the future, so log failures here.
+          try {
+            ::c10d::dump_fr_trace_file(
+                rank,
+                /*includeCollectives=*/true,
+                /*includeStackTraces=*/false,
+                /*onlyActive=*/false,
+                backend);
+          } catch (const std::exception& e) {
+            LOG(ERROR) << "Flight Recorder dump for " << backend
+                       << " failed: " << e.what();
+          } catch (...) {
+            LOG(ERROR) << "Flight Recorder dump for " << backend << " failed";
+          }
         });
       }
 
