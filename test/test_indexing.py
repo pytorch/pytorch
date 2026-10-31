@@ -1965,6 +1965,24 @@ class TestIndexingDevice(TestCase):
                         kwargs = {"atol": 0.02, "rtol": 0.1}
                     self.assertEqual(dest, expected, **kwargs)
 
+        # simple test for nan propagation
+        if dtype.is_floating_point:
+            src = torch.tensor([1, float("nan"), -2, 4], device=device, dtype=dtype)
+            idx = torch.tensor([0, 0, 1, 1], device=device)
+            for include_self in (True, False):
+                dest = torch.zeros(2, device=device, dtype=dtype)
+                dest.index_reduce_(0, idx, src, reduce, include_self=include_self)
+                other_slot = {
+                    "prod": 0 if include_self else -8,
+                    "amin": -2,
+                    "amax": 4,
+                    "mean": 2 / 3 if include_self else 1,
+                }[reduce]
+                expected = torch.tensor(
+                    [float("nan"), other_slot], device=device, dtype=dtype
+                )
+                self.assertEqual(dest, expected)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
