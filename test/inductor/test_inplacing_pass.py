@@ -385,6 +385,24 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_x, expected_x)
 
+    def test_registry_guard_sees_later_foreach_reinplace(self):
+        def f(x, idx, values, other):
+            updated = aten.index_put.default(x, [idx], values, False)
+            result = aten._foreach_add.List([updated], [other])
+            updated.copy_(result[0])
+            return result[0]
+
+        x = torch.randn(8, device=device)
+        idx = torch.tensor([1, 4], device=device)
+        values = torch.randn(2, device=device)
+        other = torch.randn(8, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x, idx, values, other)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+        self.assertIn(aten._foreach_add_.List, targets)
+
     def test_index_put_result_does_not_alias_mutated_input(self):
         def f(x, idx, val):
             out = torch.index_put(x, (idx,), val)
