@@ -1,47 +1,45 @@
 # Owner(s): ["module: inductor"]
 
-import sys
+import unittest
 
 import torch
 import torch.distributed as dist
 
 
-if not dist.is_available() or (
-    not dist.is_nccl_available() and not dist.is_xccl_available()
-):
-    print("c10d NCCL/XCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    DistributedTestBase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
-class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
+class TestCollectiveAutotuning2Ranks(DistributedTestBase):
     """Test collective autotuning with 2 ranks"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
         return 2
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        backend_str = dist.get_default_backend_for_device(cls.device_type)
+        if not dist.is_available() or not dist.is_backend_available(backend_str):
+            raise unittest.SkipTest("c10d NCCL/XCCL not available, skipping tests")
 
-    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5462")
     @skip_if_lt_x_gpu(2)
-    def test_equivalent_allreduce_strategies(self):
+    def test_equivalent_allreduce_strategies(self, device):
         """
         Test autotuning between mathematically equivalent all_reduce strategies.
 
         Strategy 1: sum all_reduce
         Strategy 2: avg all_reduce * world_size
         """
-        device = f"{GPU_TYPE}:{self.rank}"
-        backend = dist.get_default_backend_for_device(GPU_TYPE)
+        device = f"{torch.device(device).type}:{self.rank}"
+        backend = self.backend(device)
 
         dist.init_process_group(
             backend=backend,
@@ -103,20 +101,24 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
-class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
+class TestCollectiveAutotuning4Ranks(DistributedTestBase):
     """Test collective autotuning with 4 ranks"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
         return 4
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        backend_str = dist.get_default_backend_for_device(cls.device_type)
+        if not dist.is_available() or not dist.is_backend_available(backend_str):
+            raise unittest.SkipTest("c10d NCCL/XCCL not available, skipping tests")
 
-    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5462")
     @skip_if_lt_x_gpu(4)
-    def test_vllm_style_allreduce(self):
+    def test_vllm_style_allreduce(self, device):
         """
         Test vLLM-style custom allreduce with buffer copy pattern.
 
@@ -124,8 +126,8 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         Two implementations simulate vLLM's registered=False mode vs standard NCCL.
         """
 
-        device = f"{GPU_TYPE}:{self.rank}"
-        backend = dist.get_default_backend_for_device(device)
+        device = f"{torch.device(device).type}:{self.rank}"
+        backend = self.backend(device)
 
         dist.init_process_group(
             backend=backend,
@@ -198,6 +200,13 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         dist.barrier()
         dist.destroy_process_group()
 
+
+instantiate_device_type_tests(
+    TestCollectiveAutotuning2Ranks, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(
+    TestCollectiveAutotuning4Ranks, globals(), except_for="cpu"
+)
 
 if __name__ == "__main__":
     run_tests()
