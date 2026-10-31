@@ -1,5 +1,6 @@
 #include <ATen/test/vec_test_all_types.h>
 #include <c10/util/irange.h>
+#include <bit>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -1027,29 +1028,47 @@ namespace {
             createDefaultTernaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_clamp));
     }
+    // Exhausts each group of at most 16 lanes with the other lanes all clear or
+    // all set, instead of all 2^32 masks for 32 lanes.
+    template<int lanes, typename F>
+    void test_lane_masks(F check_mask) {
+        static_assert(lanes > 0 && lanes <= 32);
+        constexpr auto all_lanes = static_cast<uint32_t>((uint64_t{1} << lanes) - 1);
+        for (int offset = 0; offset < lanes; offset += 16) {
+            const int width = std::min(16, lanes - offset);
+            const uint32_t power_sets = uint32_t{1} << width;
+            const uint32_t other_lanes = all_lanes ^ ((power_sets - 1) << offset);
+            for (const auto pattern : c10::irange(power_sets)) {
+                const uint32_t expected = pattern << offset;
+                ASSERT_NO_FATAL_FAILURE(check_mask(expected));
+                if (other_lanes != 0) {
+                    ASSERT_NO_FATAL_FAILURE(check_mask(expected | other_lanes));
+                }
+            }
+        }
+    }
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
-        //all sets will be within 0  2^(n-1)
-        auto power_sets = 1UL << (vec::size());
-        for (const auto expected : c10::irange(power_sets)) {
+        auto check_mask = [&](uint32_t expected) {
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
             {
-                if (expected & (1 << i)) {
+                if (expected & (uint32_t{1} << i)) {
                     test_vals[i] = (VT)0;
                 }
                 else {
                     test_vals[i] = (VT)0.897;
                 }
             }
-            int actual = vec::loadu(test_vals).zero_mask();
+            auto actual = static_cast<uint32_t>(vec::loadu(test_vals).zero_mask());
             ASSERT_EQ(expected, actual) << "Failure Details:\n"
                 << std::hex << "Expected:\n#\t" << expected
                 << "\nActual:\n#\t" << actual;
-        }
+        };
+        ASSERT_NO_FATAL_FAILURE(test_lane_masks<vec::size()>(check_mask));
     }
     TYPED_TEST(BitwiseFloatsAdditional, Convert) {
         using vec = TypeParam;
@@ -1090,41 +1109,31 @@ namespace {
         auto actual2 = vec::loadu(actual_vals2);
         AssertVectorized<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
     }
-    TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-
+    template <typename vec, typename Ref, typename Op>
+    void test_fused(const char* name, Ref ref, Op op) {
+        using VT = ValueType<vec>;
         auto test_case = TestingCase<vec>::getBuilder()
           .addDomain(CheckWithinDomains<VT>{
               {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
               true, getDefaultTolerance<VT>()})
           .setTestSeed(TestSeed());
-
-        test_ternary<vec>(
-            NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
-            [](const vec& v0, const vec& v1, const vec& v2) {
-                return at::vec::fmadd(v0, v1, v2);
-            },
-            test_case,
-            RESOLVE_OVERLOAD(filter_fmadd));
+        test_ternary<vec>(name, ref, op, test_case, RESOLVE_OVERLOAD(filter_fmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
+        test_fused<TypeParam>(NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
+                              RESOLVE_OVERLOAD(at::vec::fmadd));
     }
     TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-
-        auto test_case = TestingCase<vec>::getBuilder()
-          .addDomain(CheckWithinDomains<VT>{
-              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
-              true, getDefaultTolerance<VT>()})
-          .setTestSeed(TestSeed());
-
-        test_ternary<vec>(
-            NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
-            [](const vec& v0, const vec& v1, const vec& v2) {
-                return at::vec::fmsub(v0, v1, v2);
-            },
-            test_case,
-            RESOLVE_OVERLOAD(filter_fmadd));
+        test_fused<TypeParam>(NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
+                              RESOLVE_OVERLOAD(at::vec::fmsub));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fnmadd) {
+        test_fused<TypeParam>(NAME_INFO(fnmadd), RESOLVE_OVERLOAD(local_fnmadd),
+                              RESOLVE_OVERLOAD(at::vec::fnmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fnmsub) {
+        test_fused<TypeParam>(NAME_INFO(fnmsub), RESOLVE_OVERLOAD(local_fnmsub),
+                              RESOLVE_OVERLOAD(at::vec::fnmsub));
     }
     TYPED_TEST(BitwiseFloatsAdditional, FmaddVecN) {
         using VT = ValueType<TypeParam>;
@@ -1191,10 +1200,9 @@ namespace {
         if (AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
         test_blend<vec, VT, mask - 1>(expected_val, a, b);
     }
-    template<typename vec, typename VT, int64_t idx, int64_t N>
-    std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
+    template<typename vec, typename VT> requires (!is_complex<VT>::value)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+    bool test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
         using bit_rep = BitType<VT>;
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
@@ -1215,24 +1223,6 @@ namespace {
         if (AssertVectorized<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
             return false;
         }
-        return true;
-    }
-    template<typename vec, typename VT, int64_t idx, int64_t N>
-    std::enable_if_t<(!is_complex<VT>::value && idx != N), bool>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
-        // shuffle mask and do blendv test
-        VT m = mask[idx];
-        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
-        if (m != (VT)0) {
-          mask[idx] = (VT)0;
-        }
-        else {
-          uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
-          std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
-        }
-        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
-        mask[idx] = m;
         return true;
     }
     template<typename T, int N>
@@ -1257,7 +1247,16 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
-        test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
+        auto check_mask = [&](uint32_t bits) {
+            using bit_rep = BitType<VT>;
+            for (int i = 0; i < vec::size(); ++i) {
+                const bit_rep value = (bits & (uint32_t{1} << i))
+                    ? std::numeric_limits<bit_rep>::max() : bit_rep{0};
+                mask[i] = std::bit_cast<VT>(value);
+            }
+            ASSERT_TRUE((test_blendv<vec, VT>(expected_val, a, b, mask)));
+        };
+        ASSERT_NO_FATAL_FAILURE(test_lane_masks<vec::size()>(check_mask));
     }
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
