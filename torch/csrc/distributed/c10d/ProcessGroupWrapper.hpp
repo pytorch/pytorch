@@ -132,6 +132,18 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
 
+  // The wrapped backend's Works are returned as they are, so are its
+  // completion keys.
+  bool supportsCompletionHooks() const override {
+    return backend_->supportsCompletionHooks();
+  }
+  void registerCompletionHook(int64_t hook_id, CompletionHook hook) override {
+    backend_->registerCompletionHook(hook_id, std::move(hook));
+  }
+  void unregisterCompletionHook(int64_t hook_id) override {
+    backend_->unregisterCompletionHook(hook_id);
+  }
+
   void waitForPendingWorks() override;
   void enableCollectivesTiming() override;
 

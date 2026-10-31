@@ -14,3 +14,5 @@
     -  For a more in depth explanation of this environment variable, see {doc}`/logging`.
   * - ``TORCH_DIST_NAN_CHECK``
     - If set to ``1``, checks the input (send) buffers of every ``torch.distributed`` collective for NaNs, for any backend. Unlike ``TORCH_NCCL_NAN_CHECK``, which is implemented natively by the NCCL backend, this is driven by the backend-agnostic ``ProcessGroup`` collective hooks.
+  * - ``TORCH_DIST_WORK_STATUS_PERIOD_MS``
+    - Period, in milliseconds, at which every process group's last enqueued and completed operation (collective or point-to-point) is logged while a C10dLogger is registered, for any backend. Groups with an ``nccl-legacy`` backend, which logs it natively, and groups without a backend are skipped. Read once per process. ``0`` disables it. Default: ``30000``.
