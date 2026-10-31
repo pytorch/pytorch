@@ -285,16 +285,20 @@ def _device_supports_triton(device_interface, device: str | None = None) -> bool
     # raise_if_triton_unavailable() only surfaces missing-backend errors (and
     # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
     # specific TritonUnavailableError rather than RuntimeError so unexpected
-    # errors are not silently swallowed. device is forwarded so index-specific
-    # capability checks (CUDA's per-SM probe) see the right GPU.
+    # errors are not silently swallowed. A concrete device is forwarded so
+    # index-specific capability checks (CUDA's per-SM probe) see the right GPU;
+    # the no-device aggregate path keeps calling the hooks with no arguments,
+    # matching the pre-existing behavior for third-party interfaces that
+    # override them without a device parameter.
     from torch._dynamo.exc import TritonUnavailableError
 
+    kwargs = {} if device is None else {"device": device}
     if not (
-        device_interface.is_available() and device_interface.is_triton_capable(device)
+        device_interface.is_available() and device_interface.is_triton_capable(**kwargs)
     ):
         return False
     try:
-        device_interface.raise_if_triton_unavailable(device)
+        device_interface.raise_if_triton_unavailable(**kwargs)
     except TritonUnavailableError:
         return False
     return True
