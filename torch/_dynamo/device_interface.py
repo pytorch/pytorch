@@ -248,6 +248,15 @@ class DeviceInterface:
             )
         return mp_count
 
+    @staticmethod
+    def is_graph_capture_supported(device: torch.types.Device = None) -> bool:
+        """Whether the backend opts into Inductor graph capture on this device.
+
+        Default ``False``. Backends enable this after installing a capture
+        runtime (e.g. by patching ``compile_fx.cudagraphify``).
+        """
+        return False
+
     @classmethod
     def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
         """
@@ -439,6 +448,10 @@ class CudaInterface(DeviceInterface):
             torch.version.hip is not None
             or CudaInterface.Worker.get_device_properties(device).major >= 7
         )
+
+    @staticmethod
+    def is_graph_capture_supported(device: torch.types.Device = None) -> bool:
+        return True
 
     @staticmethod
     def allow_tf32() -> bool:

@@ -1,0 +1,400 @@
+# Owner(s): ["module: inductor"]
+
+import contextlib
+from unittest import mock
+
+import torch
+import torch._inductor.cudagraph_utils as cudagraph_utils
+from torch._dynamo.backends import cudagraphs as cudagraphs_backend
+from torch._dynamo.device_interface import (
+    CudaInterface,
+    device_interfaces,
+    DeviceInterface,
+    register_interface_for_device,
+)
+from torch._inductor.cudagraph_utils import (
+    _graph_capture_compatible_device_type,
+    is_graph_capture_runtime_ready,
+)
+from torch._inductor.output_code import (
+    cudagraph_partition_post_compile,
+    cudagraph_post_compile,
+)
+from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import BoxedBool, GraphPartitionMap
+from torch.utils._ordered_set import OrderedSet
+
+
+# Synthetic renamed PrivateUse1 backend; not tied to any real OOT device.
+OOT_DEVICE = "fakeoot"
+
+
+class _FakeNode:
+    name = "n"
+
+
+class _FakeDevice:
+    def __init__(self, device_type: str, index: int = 0) -> None:
+        self.type = device_type
+        self.index = index
+
+    def __repr__(self) -> str:
+        return f"{self.type}:{self.index}"
+
+
+class _RegisteredInterface(DeviceInterface):
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def is_graph_capture_supported(device=None) -> bool:
+        return False
+
+
+class _CaptureInterface(DeviceInterface):
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def is_graph_capture_supported(device=None) -> bool:
+        return True
+
+
+class _IndexedCaptureInterface(DeviceInterface):
+    """Capture is supported only on device index 0. Records the device argument."""
+
+    seen: list[object] = []
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def is_graph_capture_supported(device=None) -> bool:
+        _IndexedCaptureInterface.seen.append(device)
+        return device is not None and getattr(device, "index", None) == 0
+
+
+@contextlib.contextmanager
+def renamed_privateuse1(device_type: str = OOT_DEVICE):
+    with mock.patch("torch._C._get_privateuse1_backend_name", return_value=device_type):
+        yield
+
+
+@contextlib.contextmanager
+def temporary_device_interface(device_type: str, interface_cls: type[DeviceInterface]):
+    had_entry = device_type in device_interfaces
+    previous = device_interfaces.get(device_type)
+    register_interface_for_device(device_type, interface_cls)
+    try:
+        yield
+    finally:
+        if had_entry:
+            device_interfaces[device_type] = previous
+        else:
+            device_interfaces.pop(device_type, None)
+
+
+@contextlib.contextmanager
+def without_device_interface(device_type: str):
+    filtered = {
+        name: interface
+        for name, interface in device_interfaces.items()
+        if name != device_type
+    }
+    with mock.patch.dict(device_interfaces, filtered, clear=True):
+        yield
+
+
+def _make_post_compile_graph(
+    *, device_type: str = OOT_DEVICE, with_partition: bool = False
+):
+    from torch._inductor.cudagraph_utils import CudagraphCachedInfo, PlaceholderInfo
+
+    def identity(x):
+        return x
+
+    placeholder = PlaceholderInfo(
+        name="x",
+        stack_trace=None,
+        users=[],
+        mutating_use_stack_trace=None,
+    )
+
+    class _Graph:
+        pass
+
+    graph = _Graph()
+    graph.device_types = OrderedSet([device_type])
+    graph.device_idxs = OrderedSet([0])
+    graph.mutated_input_idxs = OrderedSet()
+    graph.kernel_free_cudagraph = False
+    graph.cudagraph_info = CudagraphCachedInfo(
+        placeholders=(placeholder,),
+        stack_traces=[None],
+        user_visible_output_idxs=(0,),
+        cudagraph_fail_reasons=[],
+    )
+    graph.fx_kwargs = {
+        "is_inference": False,
+        "is_backward": False,
+        "static_input_idxs": (),
+    }
+    graph.current_callable = identity
+    graph.disabled_cudagraphs_reason = None
+    graph.partition_maps = None
+    graph.cudagraphify_calls = []
+
+    def recursively_apply_fns(fns):
+        graph.cudagraphify_calls.extend(fns)
+
+    graph.recursively_apply_fns = recursively_apply_fns
+    if with_partition:
+        graph.partition_maps = [
+            GraphPartitionMap(
+                id=0,
+                input_index_mapping=[0],
+                output_index_mapping=[[0]],
+                constant_names=[],
+            )
+        ]
+    return graph
+
+
+class TestGraphCaptureCompatibleDeviceType(TestCase):
+    def test_cuda(self):
+        self.assertTrue(_graph_capture_compatible_device_type("cuda"))
+
+    def test_default_privateuseone_slot_unused(self):
+        with renamed_privateuse1("privateuseone"):
+            self.assertFalse(_graph_capture_compatible_device_type("privateuseone"))
+
+    def test_renamed_without_interface(self):
+        with without_device_interface(OOT_DEVICE), renamed_privateuse1():
+            self.assertFalse(_graph_capture_compatible_device_type(OOT_DEVICE))
+
+    def test_renamed_with_interface(self):
+        with temporary_device_interface(OOT_DEVICE, _RegisteredInterface):
+            with renamed_privateuse1():
+                self.assertTrue(_graph_capture_compatible_device_type(OOT_DEVICE))
+
+
+class TestGraphCaptureRuntimeReady(TestCase):
+    def test_cuda(self):
+        self.assertTrue(is_graph_capture_runtime_ready({"cuda"}))
+        self.assertTrue(CudaInterface.is_graph_capture_supported())
+
+    def test_oot_without_capture_bit(self):
+        with temporary_device_interface(OOT_DEVICE, _RegisteredInterface):
+            self.assertFalse(is_graph_capture_runtime_ready({OOT_DEVICE}))
+
+    def test_oot_with_capture_bit(self):
+        with temporary_device_interface(OOT_DEVICE, _CaptureInterface):
+            self.assertTrue(is_graph_capture_runtime_ready({OOT_DEVICE}))
+
+    def test_oot_uses_graph_device_index(self):
+        # Device 0 supports capture and device 1 does not. The check must
+        # receive the graph device, not an omitted argument that falls back
+        # to the process current device. privateuseone is a real device
+        # string, so the argument is a torch.device with that index.
+        device_type = "privateuseone"
+        _IndexedCaptureInterface.seen = []
+        with temporary_device_interface(device_type, _IndexedCaptureInterface):
+            ready_on_one = is_graph_capture_runtime_ready(
+                {device_type}, OrderedSet([1])
+            )
+            ready_on_zero = is_graph_capture_runtime_ready(
+                {device_type}, OrderedSet([0])
+            )
+        self.assertFalse(ready_on_one)
+        self.assertTrue(ready_on_zero)
+        self.assertEqual(len(_IndexedCaptureInterface.seen), 2)
+        first, second = _IndexedCaptureInterface.seen
+        self.assertEqual(first, torch.device(device_type, 1))
+        self.assertEqual(second, torch.device(device_type, 0))
+
+    def test_cuda_with_cpu_is_ready(self):
+        self.assertTrue(is_graph_capture_runtime_ready({"cuda", "cpu"}))
+
+    def test_empty_device_types_not_ready(self):
+        self.assertFalse(is_graph_capture_runtime_ready(set()))
+
+    def test_multiple_accelerators_not_ready(self):
+        self.assertFalse(is_graph_capture_runtime_ready({"cuda", "xpu"}))
+
+
+class TestCudagraphPostCompileRuntimeDispatch(TestCase):
+    def test_post_compile_skips_without_capture_bit(self):
+        from torch._inductor import compile_fx
+
+        graph = _make_post_compile_graph(device_type="privateuseone")
+        cudagraphs = BoxedBool(True)
+        with temporary_device_interface("privateuseone", _RegisteredInterface):
+            with mock.patch.object(
+                compile_fx,
+                "cudagraphify",
+                side_effect=AssertionError("cudagraphify must not run"),
+            ):
+                cudagraph_post_compile([], graph, cudagraphs, {}, None)
+        self.assertFalse(cudagraphs.value)
+
+    def test_partition_post_compile_skips_without_capture_bit(self):
+        from torch._inductor import compile_fx
+
+        graph = _make_post_compile_graph(
+            device_type="privateuseone", with_partition=True
+        )
+        cudagraphs = BoxedBool(True)
+        with temporary_device_interface("privateuseone", _RegisteredInterface):
+            with mock.patch.object(
+                compile_fx,
+                "cudagraphify",
+                side_effect=AssertionError("cudagraphify must not run"),
+            ):
+                cudagraph_partition_post_compile([], graph, cudagraphs, {}, None)
+        self.assertFalse(cudagraphs.value)
+        self.assertEqual(graph.cudagraphify_calls, [])
+
+    def test_post_compile_runs_with_capture_bit(self):
+        from torch._inductor import compile_fx
+
+        calls: list[str] = []
+
+        def oot_cudagraphify(model, static_input_idxs, **kwargs):
+            calls.append("oot")
+            return model
+
+        graph = _make_post_compile_graph(device_type="privateuseone")
+        cudagraphs = BoxedBool(True)
+        with temporary_device_interface("privateuseone", _CaptureInterface):
+            with mock.patch.object(compile_fx, "cudagraphify", oot_cudagraphify):
+                cudagraph_post_compile([], graph, cudagraphs, {}, None)
+        self.assertEqual(calls, ["oot"])
+        self.assertTrue(cudagraphs.value)
+
+    def test_post_compile_checks_graph_device_index(self):
+        from torch._inductor import compile_fx
+
+        _IndexedCaptureInterface.seen = []
+        graph = _make_post_compile_graph(device_type="privateuseone")
+        graph.device_idxs = OrderedSet([1])
+        cudagraphs = BoxedBool(True)
+        with temporary_device_interface("privateuseone", _IndexedCaptureInterface):
+            with mock.patch.object(
+                compile_fx,
+                "cudagraphify",
+                side_effect=AssertionError("cudagraphify must not run"),
+            ):
+                cudagraph_post_compile([], graph, cudagraphs, {}, None)
+        self.assertFalse(cudagraphs.value)
+        self.assertEqual(
+            _IndexedCaptureInterface.seen, [torch.device("privateuseone", 1)]
+        )
+
+
+class TestCudagraphDeviceGate(TestCase):
+    def test_single_cuda_allowed(self):
+        node = _FakeNode()
+        mapping = {torch.device("cuda:0"): node}
+        self.assertIsNone(
+            cudagraph_utils.check_multiple_devices_or_any_cpu_nodes(mapping)
+        )
+
+    def test_single_xpu_skipped(self):
+        node = _FakeNode()
+        mapping = {torch.device("xpu:0"): node}
+        msg = cudagraph_utils.check_multiple_devices_or_any_cpu_nodes(mapping)
+        self.assertIsNotNone(msg)
+        self.assertIn("multiple devices", msg)
+
+    def test_renamed_oot_with_interface_allowed(self):
+        with temporary_device_interface(OOT_DEVICE, _RegisteredInterface):
+            node = _FakeNode()
+            mapping = {_FakeDevice(OOT_DEVICE): node}
+            with renamed_privateuse1():
+                self.assertIsNone(
+                    cudagraph_utils.check_multiple_devices_or_any_cpu_nodes(mapping)
+                )
+
+    def test_renamed_oot_without_interface_skipped(self):
+        node = _FakeNode()
+        mapping = {_FakeDevice(OOT_DEVICE): node}
+        with without_device_interface(OOT_DEVICE), renamed_privateuse1():
+            msg = cudagraph_utils.check_multiple_devices_or_any_cpu_nodes(mapping)
+        self.assertIsNotNone(msg)
+        self.assertIn("multiple devices", msg)
+
+    def test_default_privateuseone_skipped(self):
+        node = _FakeNode()
+        mapping = {torch.device("privateuseone:0"): node}
+        with renamed_privateuse1("privateuseone"):
+            msg = cudagraph_utils.check_multiple_devices_or_any_cpu_nodes(mapping)
+        self.assertIsNotNone(msg)
+        self.assertIn("multiple devices", msg)
+
+
+class TestCudagraphLoweringGate(TestCase):
+    def test_cuda_checks_cuda_allocator(self):
+        allocator_reason = "CUDA caching allocator is disabled"
+        mapping = {torch.device("cuda:0"): _FakeNode()}
+        with mock.patch.object(
+            cudagraph_utils,
+            "check_caching_allocator_for_cudagraphs",
+            return_value=allocator_reason,
+        ) as check_allocator:
+            reason = cudagraph_utils.check_lowering_disable_cudagraph(mapping, "cuda")
+
+        self.assertEqual(reason, allocator_reason)
+        check_allocator.assert_called_once_with()
+
+    def test_oot_does_not_check_cuda_allocator(self):
+        mapping = {_FakeDevice(OOT_DEVICE): _FakeNode()}
+        with (
+            temporary_device_interface(OOT_DEVICE, _RegisteredInterface),
+            renamed_privateuse1(),
+            mock.patch.object(
+                cudagraph_utils,
+                "check_caching_allocator_for_cudagraphs",
+                return_value="CUDA caching allocator is disabled",
+            ) as check_allocator,
+        ):
+            reason = cudagraph_utils.check_lowering_disable_cudagraph(
+                mapping, OOT_DEVICE
+            )
+
+        self.assertIsNone(reason)
+        check_allocator.assert_not_called()
+
+
+class TestStandaloneCudagraphBackendGate(TestCase):
+    def test_renamed_oot_backend_is_skipped(self):
+        mapping = {_FakeDevice(OOT_DEVICE): _FakeNode()}
+        with (
+            temporary_device_interface(OOT_DEVICE, _CaptureInterface),
+            renamed_privateuse1(),
+            mock.patch.object(
+                cudagraphs_backend,
+                "get_device_node_mapping",
+                return_value=mapping,
+            ),
+            mock.patch.object(
+                cudagraphs_backend,
+                "check_for_mutation_ignore_cuda_graph_managed_tensor",
+                return_value=None,
+            ),
+            mock.patch.object(
+                cudagraphs_backend,
+                "get_first_incompatible_cudagraph_node",
+                return_value=None,
+            ),
+        ):
+            reason = cudagraphs_backend.check_for_skip(mock.Mock(), 0)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("not supported by the cudagraphs backend", reason)
+
+
+if __name__ == "__main__":
+    run_tests()
