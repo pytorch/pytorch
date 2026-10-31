@@ -1120,6 +1120,128 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch(
         {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": False,
+            # Too small for the one-matmul forward, not for the two-matmul
+            # backward.
+            "triton.cudagraph_min_partition_size": 2,
+        }
+    )
+    @skip_if_caches_force_disabled
+    @parametrize("forward_cudagraphs", (False, True))
+    @parametrize("warm", (False, True))
+    def test_backward_cannot_bring_back_lost_forward_capture(
+        self, forward_cudagraphs, warm
+    ):
+        """A region opting in both ways captures its backward only if its
+        forward was captured; a backward-only opt-in stands on its own."""
+        from torch._dynamo.utils import counters
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": True},
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x, y):
+            return x @ y
+
+        def fn(x, y):
+            return torch.sin(region(x, y))
+
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE, requires_grad=True) for _ in range(2)
+        ]
+        if warm:
+            self._run_fw_bw_and_compare(fn, *inputs)
+            torch._dynamo.reset()
+            counters.clear()
+        with self._record_captures() as captures:
+            self._run_fw_bw_and_compare(fn, *inputs)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], int(warm))
+        self.assertEqual(
+            [c["is_backward"] for c in captures], [] if forward_cudagraphs else [True]
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @skip_if_caches_force_disabled
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs,region_needs_grad,checkpoint",
+        (
+            (True, False, True, False),
+            (False, True, True, False),
+            # The region has no backward, though its backward setting asks for
+            # capture.
+            (True, True, False, False),
+            # Recomputed in the backward, the region runs under its backward
+            # setting.
+            (True, False, True, True),
+        ),
+    )
+    def test_aot_autograd_warm_start_captures_like_cold_compile(
+        self, forward_cudagraphs, backward_cudagraphs, region_needs_grad, checkpoint
+    ):
+        from torch._dynamo.utils import counters
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x) * 2
+
+        def block(x, weight):
+            return torch.cos(region(x)) * weight
+
+        def fn(x, weight):
+            if checkpoint:
+                return torch.utils.checkpoint.checkpoint(
+                    block, x, weight, use_reentrant=False
+                )
+            return block(x, weight)
+
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=region_needs_grad)
+        weight = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        runs = []
+        for _ in range(2):
+            torch._dynamo.reset()
+            counters.clear()
+            with self._record_captures() as captures:
+                self._run_fw_bw_and_compare(fn, x, weight)
+            runs.append(
+                (
+                    sorted(c["is_backward"] for c in captures),
+                    counters["inductor"]["cudagraph_skips"],
+                )
+            )
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        cold, warm = runs
+        expected_captures = [False] * forward_cudagraphs + [True] * (
+            backward_cudagraphs and region_needs_grad
+        )
+        self.assertEqual(cold[0], expected_captures)
+        self.assertEqual(warm, cold)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
             "fx_graph_cache": False,
             "fx_graph_remote_cache": False,
             "graph_partition": False,
