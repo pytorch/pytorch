@@ -18,6 +18,7 @@ from ..graph_bytecode_inputs import (
     register_graph_created_object,
 )
 from ..source import CurrentStreamSource
+from ..utils import set_example_value
 from .base import GetSet, Method, readonly_setter, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -57,20 +58,22 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
 
 
 def _codegen_current_stream(device: torch.device, cg: "PyCodegen") -> None:
-    cg.add_push_null(
-        lambda: cg.load_import_from(
-            torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
-            "stash_graph_created_object",
-        )
-    )
+    # No stash_graph_created_object wrapper: the pre-graph store keeps the
+    # runtime-queried stream alive in a frame temp and rebinds the index
+    # weakref on every call (store_user_object_weakrefs); stashing into the
+    # module-level keep_alive would leak one stream per compiled call.
     cg(CurrentStreamSource(device))
-    cg.extend_output(create_call_function(1, False))
+
+
+def _register_current_stream_object(stream: torch.Stream, device: torch.device) -> int:
+    return register_graph_created_object(
+        stream, lambda _, cg: _codegen_current_stream(device, cg)
+    )
 
 
 def get_current_stream(device: torch.device) -> int:
-    stream = torch.accelerator.current_stream(device)
-    return register_graph_created_object(
-        stream, lambda _, cg: _codegen_current_stream(device, cg)
+    return _register_current_stream_object(
+        torch.accelerator.current_stream(device), device
     )
 
 
@@ -78,16 +81,22 @@ def _get_stream_by_index(index: int) -> torch.Stream:
     stream = get_external_object_by_index(index)
     if not isinstance(stream, torch.Stream):
         raise AssertionError(
-            f"Fork/join stream expected a stream object at index {index}"
+            f"expected a stream object at index {index}, got {type(stream)}"
         )
     return stream
+
+
+def _is_slot_zero(stream: "StreamVariable") -> bool:
+    # Reading user_object_index does not realize a lazy tracker; it is set
+    # as an instance attribute when the tracked stream is seeded.
+    return stream.user_object_index == CURRENT_STREAM_INDEX
 
 
 def _get_event_by_index(index: int) -> torch.Event:
     event = get_external_object_by_index(index)
     if not isinstance(event, torch.Event):
         raise AssertionError(
-            f"Record/wait event expected an event object at index {index}"
+            f"expected an event object at index {index}, got {type(event)}"
         )
     return event
 
@@ -298,6 +307,8 @@ class SymbolicStreamState:
         self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
             cur_stack
         )
+        # Per-device cache: repeated queries share one registry entry.
+        self._minted_streams: dict[torch.device, StreamVariable] = {}
 
     def enter_stream(self, stream: "StreamVariable") -> None:
         self.cur_stream_stack.append(stream)
@@ -305,35 +316,92 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
-        mark_current_stream_used()
-        if device is not None:
-            for stream in reversed(self.cur_stream_stack):
-                if stream.device == device:
-                    return stream
+    def cur_stream(self) -> "StreamVariable":
+        if not self.cur_stream_stack:
+            # CPU-only machines seed no stream; fail as a user error (eager
+            # raises a backend error here too) instead of an IndexError.
+            unimplemented(
+                gb_type="no tracked accelerator stream",
+                context="cur_stream called with an empty stream stack",
+                explanation=(
+                    "Dynamo has no tracked current stream on this machine; "
+                    "an accelerator with stream support is required"
+                ),
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+        stream = self.cur_stream_stack[-1]
+        if _is_slot_zero(stream):
+            mark_current_stream_used()
+        return stream
 
-        return self.cur_stream_stack[-1]
+    @staticmethod
+    def _peek_stream(stream: "StreamVariable") -> torch.Stream:
+        """The underlying stream object, without realizing lazy trackers."""
+        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+            return stream.peek_value()
+        return stream.value
+
+    def _find_stream(self, device: torch.device) -> "StreamVariable | None":
+        """Return the tracked stack stream for device, or None on a miss."""
+        for stream in reversed(self.cur_stream_stack):
+            if self._peek_stream(stream).device == device:
+                return stream
+        return None
+
+    def cur_stream_or_mint(
+        self, device: torch.device, tx: "InstructionTranslatorBase"
+    ) -> "StreamVariable":
+        """Current stream for an explicitly indexed device: an entered
+        stream context wins, else the per-device cached mint, else a fresh
+        mint (registered like an allocation stream in
+        _maybe_emit_sync_dealloc). Only the device query is a user error."""
+        if (stream := self._find_stream(device)) is not None:
+            if _is_slot_zero(stream):
+                mark_current_stream_used()
+            return stream
+        if (minted_var := self._minted_streams.get(device)) is not None:
+            return minted_var
+        try:
+            stream = torch.accelerator.current_stream(device)
+        except Exception as e:
+            unimplemented(
+                gb_type="invalid device index to current_stream",
+                context=f"requested={device}",
+                explanation="Expected a valid device index for current_stream",
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=e,
+            )
+        # Registration failures are internal errors, not the user-error break above.
+        minted_index = _register_current_stream_object(stream, device)
+        minted = _get_stream_by_index(minted_index)
+        # The cached variable outlives the tracer that first mints it:
+        # use the root tracer so the root frame can reuse a proxy that was
+        # first created inside a HOP body (see builder.py, issue #193194,
+        # same bug class).
+        minted_proxy = tx.output.root_tracer.create_proxy(
+            "call_function", get_external_object_by_index, (minted_index,), {}
+        )
+        set_example_value(minted_proxy.node, minted)
+        minted_var = StreamVariable(
+            minted_proxy, minted, minted_index, source=CurrentStreamSource(device)
+        )
+        self._minted_streams[device] = minted_var
+        return minted_var
 
     def tracked_device_type(self) -> str | None:
         """Device type of the tracked current stream, or None if no stream is
-        tracked.  Peeks the value so LazyVariableTrackers on the stack are not
-        realized (same pattern as cur_stream_id)."""
+        tracked. Peeks so lazy trackers are not realized."""
         if not self.cur_stream_stack:
             return None
-        stream = self.cur_stream_stack[-1]
-        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
-            return stream.peek_value().device.type
-        return stream.value.device.type
+        return self._peek_stream(self.cur_stream_stack[-1]).device.type
 
     def in_stream_context(self) -> bool:
         return len(self.cur_stream_stack) > 0
 
     def cur_stream_id(self) -> int:
-        """Get a Python object id for the current stream without realizing lazy variables."""
-        stream = self.cur_stream_stack[-1]
-        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
-            return id(stream.peek_value())
-        return id(stream.value)
+        """Get a Python object id for the current stream without realizing
+        lazy variables."""
+        return id(self._peek_stream(self.cur_stream_stack[-1]))
 
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
@@ -341,6 +409,24 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     # Re-entering only the stream annotation would not restore the stream.
     _reenter_after_graph_break = False
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        # A stream context cannot be resumed across a graph break (see
+        # _reenter_after_graph_break above); break with its own reason
+        # instead of the inherited annotate-escape message, which points
+        # users at annotation machinery they never used.
+        unimplemented(
+            gb_type="torch stream context escaped from compiled region",
+            context=f"with-stream context for {self.get_stream().value}",
+            explanation=(
+                "Dynamo cannot resume a stream context across a graph "
+                "break; the whole function falls back to eager."
+            ),
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+                "Avoid graph breaks inside a with-stream block: the block cannot be resumed.",
+            ],
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -397,6 +483,30 @@ class StreamVariable(StreamContextVariable):
     # Subclasses set this to the device-specific handle attribute name
     # (e.g. "cuda_stream", "sycl_queue").  None means no special handling.
     _device_handle_attr: str | None = None
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        # A Stream data value cannot enter a resume frame yet; break with
+        # its own reason instead of the inherited annotate-escape message,
+        # which points users at annotation machinery they never used. This
+        # fires for bare stream values and for `with s:` where the stream
+        # itself is the with-context; contexts from device_module.stream(s)
+        # use the StreamContextVariable override above.
+        unimplemented(
+            gb_type="torch.Stream escaped from compiled region",
+            context=(
+                f"stream={self.value}, user_object_index={self.user_object_index}"
+            ),
+            explanation=(
+                "Dynamo cannot keep a torch.Stream object alive across a "
+                "graph break; the whole function falls back to eager."
+            ),
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+                "Move stream ops into one compiled region, or re-acquire the stream after the break.",
+                "Example: call current_stream(device) again after the graph break.",
+                "Avoid graph breaks inside a with-stream block: the block cannot be resumed.",
+            ],
+        )
 
     def __init__(
         self,

@@ -71,5 +71,6 @@ if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     time python test/run_test.py --verbose -i test_optim -- -k test_forloop_goes_right_direction_multigpu
     time python test/run_test.py --verbose -i test_optim -- -k test_mixed_device_dtype
     time python test/run_test.py --verbose -i test_foreach -- -k test_tensors_grouping
+    time python test/run_test.py --verbose -i dynamo/test_streams -- -k test_untracked_device_index
 fi
 assert_git_not_dirty

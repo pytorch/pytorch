@@ -18,11 +18,13 @@ from torch._dynamo.device_interface import (
 )
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
+    get_external_object_by_index,
     index_to_external_object_weakref,
     reset_user_object_tracking,
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._dynamo.utils import counters as dynamo_counters
 from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -33,6 +35,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_accelerator,
     requires_cuda,
+    requires_multigpu,
     requires_xpu,
     TEST_WITH_ROCM,
 )
@@ -3739,7 +3742,486 @@ class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
             torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
-        self.assertIn("bad device argument", str(ctx.exception))
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "bad device argument to torch.accelerator.current_stream",
+        )
+
+
+class TestAcceleratorCurrentStreamResolution(torch._dynamo.test_case.TestCase):
+    """
+    Generic torch.accelerator current_stream resolution (runs on any
+    accelerator backend, not just PrivateUse1; no fake-device setup
+    needed).
+    """
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    @unittest.skipIf(
+        torch.accelerator.device_count() >= 2,
+        "covered by the multi-GPU tests below",
+    )
+    def test_untracked_device_index_breaks_on_single_device(self):
+        """
+        On a single-device machine, current_stream(1) queries an unavailable
+        device: the mint query fails (eager would raise too) and surfaces as
+        the structured invalid-device-index graph break - never the traced
+        device's stream.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+
+        def fn(x):
+            device_module.current_stream(1)
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, device=device_type)
+            )
+        self.assertEqual(
+            ctx.exception.gb_type, "invalid device index to current_stream"
+        )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_traced_device_index_marks_current_stream_used(self):
+        """
+        current_stream(<traced device's index>) used in-graph must keep
+        marking the current stream used: wait_stream/synchronize on it
+        resolve registry slot CURRENT_STREAM_INDEX across two calls of the
+        same compiled function. Regression: the cur_stream_or_mint stack
+        match once skipped mark_current_stream_used, leaving an
+        unused_current_stream placeholder at slot 0 that fails at runtime.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            cur = device_module.current_stream(0)
+            s = device_module.Stream()
+            s.wait_stream(cur)
+            cur.synchronize()
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(compiled(x), x + 1)
+
+    @requires_multigpu
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_untracked_device_index_returns_correct_stream(self):
+        """
+        current_stream(<untracked index>) mints a tracked stream for the
+        requested device instead of silently returning the traced device's
+        stream (the wrong device's stream). Compiled matches eager on
+        device_index and stream_id, and the same compiled artifact reflects
+        a runtime stream switch on device 1 without recompiling.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        torch.zeros(1, device=f"{device_type}:1")  # init device 1 default stream
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            return device_module.current_stream(1), x + 1
+
+        eager = fn(x)[0]
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        r1 = compiled_fn(x)[0]
+        self.assertEqual(eager.device_index, 1)
+        self.assertEqual(r1.device_index, 1)
+        self.assertEqual(r1.stream_id, eager.stream_id)
+        self.assertEqual(counter.frame_count, 1)
+
+        s1 = device_module.Stream(device=1)
+        with device_module.stream(s1):
+            r2 = compiled_fn(x)[0]
+        self.assertEqual(
+            r2.stream_id, s1.stream_id, "runtime stream switch not reflected"
+        )
+        self.assertEqual(
+            counter.frame_count, 1, "runtime stream switch must not recompile"
+        )
+
+    @requires_multigpu
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_untracked_device_index_in_graph_uses_minted_index(self):
+        """
+        In-graph uses of a minted stream (wait_stream on it, synchronize,
+        entering its stream context) must reference the minted stream's
+        index - never CURRENT_STREAM_INDEX, which is the traced device's
+        stream (the silent wrong-stream bug this PR fixes).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        torch.zeros(1, device=f"{device_type}:1")
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            minted = device_module.current_stream(1)
+            s = device_module.Stream()
+            s.wait_stream(minted)
+            minted.wait_stream(s)
+            minted.synchronize()
+            with device_module.stream(minted):
+                r = x + 1
+            return r
+
+        eager = fn(x)
+        checked: list[tuple[str, list[int], list[int]]] = []
+        # String matching, like the other stream-op assertions in this
+        # file (targets may be overload packets).
+        stream_ops = ("wait_stream", "synchronize_stream")
+        annotated: list[tuple[str, int]] = []
+
+        def inspecting_backend(gm, *args):
+            for n in gm.graph.nodes:
+                if n.op != "call_function":
+                    continue
+                target = str(n.target)
+                if any(name in target for name in stream_ops):
+                    int_args = [a for a in n.args if isinstance(a, int)]
+                    devices = [
+                        get_external_object_by_index(a).device_index for a in int_args
+                    ]
+                    checked.append((target, int_args, devices))
+                elif (stream := n.meta.get("custom", {}).get("stream")) is not None:
+                    # Nodes created inside `with stream(minted)` carry the
+                    # stream's user-object index as fx metadata
+                    # "custom" -> {'stream': N}; nodes outside carry none.
+                    annotated.append((target, stream))
+            return gm.forward
+
+        result = torch.compile(fn, backend=inspecting_backend, fullgraph=True)(x)
+        self.assertEqual(result, eager)
+        self.assertTrue(checked, "no stream ops found in the compiled graph")
+        minted_indices = set()
+        for target, int_args, devices in checked:
+            for a in int_args:
+                self.assertNotEqual(
+                    a,
+                    CURRENT_STREAM_INDEX,
+                    f"{target} must not use the traced device's stream slot",
+                )
+            self.assertIn(
+                1,
+                devices,
+                f"{target} must reference the minted device-1 stream",
+            )
+            minted_indices.update(a for a, d in zip(int_args, devices) if d == 1)
+        self.assertTrue(annotated, "no stream-tagged nodes inside the stream context")
+        for target, stream in annotated:
+            self.assertNotEqual(
+                stream,
+                CURRENT_STREAM_INDEX,
+                f"{target} in the stream context must not be tagged with the traced device's stream",
+            )
+            self.assertIn(
+                stream,
+                minted_indices,
+                f"{target} must be tagged with the minted device-1 stream index",
+            )
+
+    @requires_multigpu
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_untracked_device_index_cache_and_stack_precedence(self):
+        """
+        Repeated current_stream(<untracked index>) in one frame must share
+        one minted registry entry, a stream context entered on that device
+        must take precedence over the cache while it is active, and an
+        explicit query of the traced device inside that context must
+        resolve to the tracked current stream (slot 0).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        torch.zeros(1, device=f"{device_type}:1")
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            a = device_module.current_stream(1)
+            a.synchronize()
+            b = device_module.current_stream(1)
+            b.synchronize()
+            s1 = device_module.Stream(device=1)
+            with device_module.stream(s1):
+                device_module.current_stream(1).synchronize()
+                device_module.current_stream(0).synchronize()
+            a.synchronize()
+            return x + 1
+
+        eager = fn(x)
+        syncs: list[tuple[list[int], list[int]]] = []
+
+        def inspecting_backend(gm, *args):
+            for n in gm.graph.nodes:
+                if n.op != "call_function":
+                    continue
+                if "synchronize_stream" not in str(n.target):
+                    continue
+                int_args = [q for q in n.args if isinstance(q, int)]
+                syncs.append(
+                    (
+                        int_args,
+                        [
+                            get_external_object_by_index(q).device_index
+                            for q in int_args
+                        ],
+                    )
+                )
+            return gm.forward
+
+        result = torch.compile(fn, backend=inspecting_backend, fullgraph=True)(x)
+        self.assertEqual(result, eager)
+        self.assertEqual(
+            len(syncs), 5, f"expected five synchronize_stream ops, saw {syncs}"
+        )
+        dev1_syncs = [
+            (int_args, devices) for int_args, devices in syncs if 1 in devices
+        ]
+        for int_args, devices in dev1_syncs:
+            for q in int_args:
+                self.assertNotEqual(
+                    q,
+                    CURRENT_STREAM_INDEX,
+                    "must not use the traced device's stream slot",
+                )
+            self.assertIn(1, devices, "must reference a device-1 stream")
+        first, second, in_context, after = (
+            int_args[0] for int_args, _ in dev1_syncs[:4]
+        )
+        # Inside the device-1 context, an explicit query of the traced
+        # device still resolves to the tracked current stream (slot 0),
+        # keeping it marked used.
+        self.assertTrue(
+            any(int_args == [CURRENT_STREAM_INDEX] for int_args, _ in syncs),
+            "the traced device's stream must resolve to slot CURRENT_STREAM_INDEX",
+        )
+        self.assertEqual(first, second, "repeated queries must share the minted index")
+        self.assertNotEqual(
+            first, in_context, "the entered device-1 context must win over the cache"
+        )
+        self.assertEqual(
+            first, after, "the minted stream must resume after the context exits"
+        )
+
+    @requires_multigpu
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_untracked_device_index_escapes_loudly_across_graph_break(self):
+        """
+        A minted stream held across a graph break breaks loudly with its
+        own reason. The break repeats on the restart pass, so the whole
+        function falls back to eager; any graphs the backend saw are
+        discarded pre-break regions, and the result still matches eager.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        torch.zeros(1, device=f"{device_type}:1")
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            minted = device_module.current_stream(1)
+            minted.synchronize()
+            torch._dynamo.graph_break()
+            minted.synchronize()
+            return x + 1
+
+        eager = fn(x)
+        per_graph_syncs: list[list[int]] = []
+
+        def inspecting_backend(gm, *args):
+            # Resolve indices now, inside the backend call: the minted
+            # stream dies with the frame once it falls back to eager
+            # (gc.collect runs after each compile by default).
+            ops = []
+            for n in gm.graph.nodes:
+                if n.op != "call_function":
+                    continue
+                if "synchronize_stream" not in str(n.target):
+                    continue
+                ops.extend(
+                    get_external_object_by_index(q).device_index
+                    for q in n.args
+                    if isinstance(q, int)
+                )
+            per_graph_syncs.append(ops)
+            return gm.forward
+
+        result = torch.compile(fn, backend=inspecting_backend)(x)
+        self.assertEqual(result, eager)
+        # The exact number of backend calls is an accident of the restart
+        # mechanics; what matters is that every compiled synchronize
+        # targets the minted device-1 stream, never the traced device's
+        # slot, and that the escape surfaces its own break reason below.
+        self.assertGreater(len(per_graph_syncs), 0)
+        for device_indexes in per_graph_syncs:
+            self.assertEqual(
+                len(device_indexes), 1, "only the pre-break synchronize is compiled"
+            )
+            self.assertEqual(device_indexes[0], 1)
+        # The escaped stream must surface its own actionable break reason,
+        # not the misleading annotate-escape message.
+        self.assertTrue(
+            any(
+                "torch.Stream escaped from compiled region" in reason
+                for reason in dynamo_counters["unimplemented"]
+            ),
+            "expected the stream-escape graph break reason",
+        )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_no_arg_current_stream_gets_stream_escape_reason(self):
+        """
+        Any Stream value held across a graph break - here the no-arg
+        current stream - escapes with the dedicated stream reason, not the
+        inherited annotate-escape message (which points at annotation
+        machinery the user never used).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            s = device_module.current_stream()
+            torch._dynamo.graph_break()
+            s.synchronize()
+            return x + 1
+
+        eager = fn(x)
+        result = torch.compile(fn, backend=lambda gm, *args: gm.forward)(x)
+        self.assertEqual(result, eager)
+        reasons = list(dynamo_counters["unimplemented"])
+        self.assertTrue(
+            any("torch.Stream escaped" in reason for reason in reasons),
+            "expected the stream-escape reason",
+        )
+        self.assertFalse(
+            any("annotate escaped" in reason for reason in reasons),
+            "the stream must not report the annotate-escape reason",
+        )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_stream_context_block_break_reason(self):
+        """
+        A graph break inside a stream context reports a dedicated reason,
+        not the inherited annotate-escape message: `with s:` (the stream
+        itself is the with-context) gets the stream-value reason, and
+        `with device_module.stream(s):` gets the stream-context reason.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        x = torch.ones(2, device=device_type)
+        s = device_module.Stream()
+
+        def bare_fn(x):
+            with s:
+                torch._dynamo.graph_break()
+                r = x + 1
+            return r
+
+        def ctx_fn(x):
+            with device_module.stream(s):
+                torch._dynamo.graph_break()
+                r = x + 1
+            return r
+
+        for fn, expected in (
+            (bare_fn, "torch.Stream escaped from compiled region"),
+            (ctx_fn, "torch stream context escaped from compiled region"),
+        ):
+            eager = fn(x)
+            result = torch.compile(fn, backend=lambda gm, *args: gm.forward)(x)
+            self.assertEqual(result, eager)
+            reasons = list(dynamo_counters["unimplemented"])
+            self.assertTrue(
+                any(expected in reason for reason in reasons),
+                f"expected {expected!r} for {fn.__name__}",
+            )
+            self.assertFalse(
+                any("annotate escaped" in reason for reason in reasons),
+                f"{fn.__name__} must not report the annotate-escape reason",
+            )
+            torch._dynamo.reset()
+
+    @unittest.skipIf(
+        torch.accelerator.is_available(),
+        "CPU-only behavior: no tracked current stream",
+    )
+    def test_no_tracked_stream_breaks_as_user_error(self):
+        """
+        On a CPU-only machine a compiled current_stream call surfaces as
+        the dedicated no-tracked-stream user-error break (eager raises a
+        backend error too), never as an internal Dynamo error from an
+        empty stream stack.
+        """
+        x = torch.ones(2)
+
+        def fn(x):
+            return torch.cuda.current_stream(), x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ctx.exception.gb_type, "no tracked accelerator stream")
+
+    @requires_multigpu
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs",
+    )
+    def test_untracked_device_index_minted_inside_hop_body(self):
+        """
+        A stream first minted inside a HOP body must live on the root
+        tracer, so the cached variable stays usable in the root frame
+        afterwards (same bug class as issue #193194).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        torch.zeros(1, device=f"{device_type}:1")
+        x = torch.ones(2, device=device_type)
+
+        def true_fn(x):
+            _ = device_module.current_stream(1)
+            return x.sin()
+
+        def false_fn(x):
+            _ = device_module.current_stream(1)
+            return x.cos()
+
+        def fn(x):
+            r = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+            minted = device_module.current_stream(1)  # cache hit from the HOP mint
+            ready = minted.query()  # as_proxy path: lifts the minted node
+            return r + 1 if ready else r
+
+        eager = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, eager)
 
 
 if __name__ == "__main__":
