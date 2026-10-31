@@ -88,12 +88,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
     @parametrize("mapping_type", [dict, collections.OrderedDict])
     def test_dict_input_key_snapshot_reused(self, mapping_type):
         def hook(instructions):
-            self.assertEqual(
-                sum(
-                    i.opname == "LOAD_ATTR" and i.argval == "keys" for i in instructions
-                ),
-                1,
-            )
+            attrs = [i.argval for i in instructions if i.opname == "LOAD_ATTR"]
+            self.assertEqual(attrs.count("keys"), 1)
 
         def fn(mapping):
             a, b, c = mapping.values()
@@ -106,47 +102,42 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             compiled = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(compiled(mapping), fn(mapping))
 
-    def test_sourced_dict_key_in_constant_aggregates(self):
+    @parametrize("container_type", [None, list, dict, set])
+    @parametrize("nested", [False, True])
+    def test_sourced_dict_key_in_aggregates(self, container_type, nested):
         def fn(x, mapping):
             key = next(iter(mapping.copy()))
-            return x + 1, ((key,),), frozenset((key,)), slice(key, None)
+            contents = key
+            if container_type is not None:
+                contents = (
+                    {key: None} if container_type is dict else container_type((key,))
+                )
+            value = slice(contents, None)
+            if nested:
+                value = ((slice(value, None),),)
+            return x + 1, ((key,),), frozenset((key,)), value
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         keys = [b"layer0weight".decode() for _ in range(2)]
         self.assertIsNot(keys[0], keys[1])
         x = torch.ones(1)
+        previous = None
         for key in keys:
             mapping = collections.OrderedDict.fromkeys([key], 1)
             result = compiled(x, mapping)
             self.assertEqual(result, fn(x, mapping))
             self.assertIs(result[1][0][0], key)
             self.assertIs(next(iter(result[2])), key)
-            self.assertIs(result[3].start, key)
-        self.assertEqual(counter.frame_count, 1)
-
-    @parametrize("container_type", [list, dict, set])
-    @parametrize("nested", [False, True])
-    def test_sourced_dict_key_in_mutable_slice(self, container_type, nested):
-        def fn(x, mapping):
-            key = next(iter(mapping.copy()))
-            contents = {key: None} if container_type is dict else container_type((key,))
-            value = slice(contents, None)
-            if nested:
-                value = ((slice(value, None),),)
-            return x + 1, value
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        keys = [b"layer0weight".decode() for _ in range(2)]
-        self.assertIsNot(keys[0], keys[1])
-        previous = None
-        for key in keys:
-            mapping = collections.OrderedDict.fromkeys([key], 1)
-            result = compiled(torch.ones(1), mapping)[1]
-            contents = result[0][0].start.start if nested else result.start
-            self.assertIs(next(iter(contents)), key)
-            self.assertIsNot(contents, previous)
-            previous = contents
+            contents = result[3][0][0].start.start if nested else result[3].start
+            if container_type is None:
+                self.assertIs(contents, key)
+            else:
+                self.assertIs(next(iter(contents)), key)
+                self.assertIsNot(contents, previous)
+                previous = contents
+        if container_type is None:
+            self.assertEqual(counter.frame_count, 1)
 
     @parametrize("graph_break", [False, True])
     def test_dynamic_slice_reconstruct(self, graph_break):

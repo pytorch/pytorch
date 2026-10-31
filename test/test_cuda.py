@@ -2974,6 +2974,36 @@ raise RuntimeError("device assert did not fire")
                 y = torch.randn(2, 1, device="cuda")
                 x + y
 
+    def test_mixed_dtype_binary_remainder_sizes(self):
+        # Sizes around the 2048 / 16384 boundaries of the remainder block of the
+        # mixed-dtype vectorized kernel, alone and after full blocks.
+        sizes = [1, 512, 2047, 2048, 2049, 16383, 16384, 16385]
+        sizes += [16384 + 512, 16384 + 2048, 3 * 16384 + 17]
+        f32 = torch.float32
+        for out_dtype, a_dtype, b_dtype in [
+            (f32, f32, torch.bfloat16),
+            (f32, torch.bfloat16, f32),
+            (torch.bfloat16, torch.bfloat16, f32),
+            (f32, f32, torch.half),
+            (f32, torch.half, f32),
+            (torch.half, torch.half, f32),
+        ]:
+            for n in sizes:
+                a = torch.randn(n, device="cuda").to(a_dtype)
+                b = torch.randn(n, device="cuda").to(b_dtype)
+                out = torch.full((n + 64,), 7, device="cuda", dtype=out_dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], (a.double() + b.double()).to(out_dtype))
+                self.assertEqual(
+                    out[n:], torch.full((64,), 7, device="cuda", dtype=out_dtype)
+                )
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x = torch.randn(n, device="cuda")
+            y = torch.randn(n, device="cuda").bfloat16()
+            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
+
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     @serialTest()
     def test_cuda_kernel_loop_overflow(self):
@@ -2984,6 +3014,18 @@ raise RuntimeError("device assert did not fire")
         y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**30], expected)
+
+    def test_mixed_dtype_binary_low_precision_out(self):
+        # The float input must not be rounded to the output dtype before the op.
+        for dtype in (torch.bfloat16, torch.half):
+            for n in (1, 16383, 16384, 65537):
+                a = torch.randn(n, device="cuda").to(dtype)
+                b = torch.randn(n, device="cuda")
+                out = torch.empty(n, device="cuda", dtype=dtype)
+                torch.add(a, b, out=out)
+                self.assertEqual(
+                    out, (a.cpu().float() + b.cpu()).to(dtype), atol=0, rtol=0
+                )
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
