@@ -2877,10 +2877,10 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return ScaleBy.apply(x, Config(3))
 
-        # A class defined inside a function cannot be imported by name. The
-        # message depends on whether this file runs as __main__.
+        # A class defined inside a function cannot be imported by name.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        with self.assertRaisesRegex(SerializeError, "Could not import|__main__ module"):
+        reason = "__main__ module" if __name__ == "__main__" else "Could not import"
+        with self.assertRaisesRegex(SerializeError, reason):
             torch.export.save(ep, io.BytesIO())
 
         # A pytree constant input cannot be stored in a treespec string.
@@ -2948,7 +2948,7 @@ class TestPredispatchSerialization(TestCase):
             for n in program["graph_module"]["graph"]["nodes"]
             if n["target"] == "torch.ops.higher_order.flat_apply"
         ]
-        spec = pytree.tree_flatten(((), {"function_cls_name": 0, "x": 0, "i": 0}))[1]
+        spec = pytree.tree_flatten(((0, 0), {"function_cls_name": 0}))[1]
         node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
         with self.assertRaisesRegex(SerializeError, "name as the first input"):
             load(json.dumps(program).encode())
