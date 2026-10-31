@@ -10,6 +10,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/miopen_ctc_loss.h>
 #include <ATen/ops/miopen_ctc_loss_native.h>
 #include <ATen/ops/_use_miopen_ctc_loss_native.h>
@@ -77,6 +78,8 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss_tensor(
 #include <c10/hip/HIPStream.h>
 #include <c10/hip/HIPException.h>
 #include <c10/util/irange.h>
+
+#include <algorithm>
 
 namespace at::native {
 
@@ -209,7 +212,13 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   MIOPEN_CHECK(miopenSetTensorDescriptor(grads_desc, miopenFloat, 3, dims, strides));
 
   Tensor costs = at::empty({batch_size}, log_probs->options());
-  Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // MIOpen does not write grads for t >= input_lengths[b]; zero-fill them.
+  const bool has_padding = std::any_of(
+      input_lengths.begin(), input_lengths.end(),
+      [&](int len) { return len < input_length; });
+  Tensor grad = has_padding
+      ? at::zeros_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+      : at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // MIOpen reads labels/lengths on the host.
   size_t workspace_size;
