@@ -1470,6 +1470,31 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
             res.text, f"Flight Recorder dump initiated for rank {self.rank}"
         )
 
+    def test_stock_nccl_recording_off(self):
+        import requests
+
+        from torch._C._distributed_c10d import _WorkerServer
+
+        # Read when ProcessGroupNCCL first touches its recorder, so set it
+        # before init.
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "0"
+        _, name = self._init_nccl("0")
+        self.assertEqual(name, "nccl")
+
+        # The rank is set but recording is off, so there is nothing to dump.
+        server = _WorkerServer("", 0)
+        self.addCleanup(server.shutdown)
+        res = requests.post(
+            f"http://localhost:{server.port}/handler/fr_dump_file?backend=nccl",
+            timeout=60,
+        )
+        self.assertEqual(res.status_code, 503, msg=res.text)
+        self.assertEqual(
+            res.text,
+            "Flight Recorder rank is unset for nccl; no process group has "
+            "registered with it yet, or recording is off",
+        )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -417,8 +417,14 @@ class FlightRecorderHandler(DebugHandler):
         parts.extend(self._dump_tables("FR Trace", addrs, list(resps)))
 
         # Backend.NCCL is nccl2 by default, which records into its own
-        # instance rather than the stock ProcessGroupNCCL one ("nccl").
-        for name, backend in (("NCCL", "nccl"), ("nccl2", "nccl2")):
+        # instance rather than the stock ProcessGroupNCCL one ("nccl"). The
+        # list is closed since recorder names can't be enumerated; other
+        # backends are reachable via fr_trace_json?backend=<name>.
+        for name, backend in (
+            ("NCCL", "nccl"),
+            ("nccl2", "nccl2"),
+            ("nccl-lazy", "nccl-lazy"),
+        ):
             title = f"FR Trace {name}"
             parts.append("")
             try:

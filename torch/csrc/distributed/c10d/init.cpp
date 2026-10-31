@@ -5608,7 +5608,9 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
       R"(
             Dumps the pickled work traces to the file the registered
             DebugInfoWriter points at, which defaults to
-            <TORCH_FR_DUMP_TEMP_FILE><rank>.
+            <TORCH_FR_DUMP_TEMP_FILE><rank>. Every backend's dump and
+            ProcessGroupNCCL's timeout dump write that file, so this
+            overwrites any earlier dump there, including the watchdog's.
 
             Arguments:
                 rank(int): Rank used to name the per-rank output file.
