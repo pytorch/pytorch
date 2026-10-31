@@ -67,6 +67,13 @@ def _is_float_qparams(qscheme: "torch.qscheme") -> bool:
     return qscheme == torch.per_channel_affine_float_qparams
 
 
+def _get_buffer(module: Module, name: str) -> torch.Tensor:
+    buf = module._buffers[name]
+    if buf is None:
+        raise AssertionError(f"buffer {name} is not set")
+    return buf
+
+
 class FakeQuantizeBase(ABC, Module):
     r"""Base fake quantize module.
 
@@ -225,7 +232,64 @@ class FakeQuantize(FakeQuantizeBase):
     def calculate_qparams(self):  # type: ignore[override]
         return self.activation_post_process.calculate_qparams()
 
+    def _forward_compiled(self, X):
+        # ``observer_enabled`` and ``fake_quant_enabled`` are tensors, so branching
+        # on them is data-dependent control flow that torch.compile cannot trace.
+        # Run both steps unconditionally and select the result with torch.where.
+        observer_enabled = self.observer_enabled[0] == 1
+        observer = self.activation_post_process
+        owners = [
+            (module, name)
+            for module in (observer, self)
+            for name in ("min_val", "max_val", "scale", "zero_point")
+            if module._buffers.get(name) is not None
+        ]
+        saved = {(id(m), n): _get_buffer(m, n).clone() for m, n in owners}
+
+        observer(X.detach())
+        _scale, _zero_point = self.calculate_qparams()
+        _scale, _zero_point = (
+            _scale.to(self.scale.device),
+            _zero_point.to(self.zero_point.device),
+        )
+        if self.scale.shape != _scale.shape:
+            # Resizing a module buffer in place is not traceable, so replace it.
+            self.scale = torch.empty_like(_scale, dtype=self.scale.dtype)
+            self.zero_point = torch.empty_like(_zero_point, dtype=self.zero_point.dtype)
+        self.scale.copy_(_scale)
+        self.zero_point.copy_(_zero_point)
+        for module, name in owners:
+            buf = _get_buffer(module, name)
+            old = saved[(id(module), name)]
+            if buf.shape == old.shape:
+                buf.copy_(torch.where(observer_enabled, buf, old))
+            else:
+                # The state was (re)initialized by this call, so there is no old
+                # value to fall back to: the observer has to be enabled.
+                torch._assert_async(observer_enabled)
+
+        if self.is_per_channel:
+            fake_quantized = torch.fake_quantize_per_channel_affine(
+                X,
+                self.scale,
+                self.zero_point,
+                self.ch_axis,
+                self.activation_post_process.quant_min,
+                self.activation_post_process.quant_max,
+            )
+        else:
+            fake_quantized = torch.fake_quantize_per_tensor_affine(
+                X,
+                self.scale,
+                self.zero_point,
+                self.activation_post_process.quant_min,
+                self.activation_post_process.quant_max,
+            )
+        return torch.where(self.fake_quant_enabled[0] == 1, fake_quantized, X)
+
     def forward(self, X):
+        if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+            return self._forward_compiled(X)
         if self.observer_enabled[0] == 1:
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()

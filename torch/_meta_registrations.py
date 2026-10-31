@@ -2671,6 +2671,42 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
+@register_meta(aten._fake_quantize_per_tensor_affine_cachemask_tensor_qparams.default)
+def meta__fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+    self, scale, zero_point, fake_quant_enabled, quant_min, quant_max
+):
+    torch._check(
+        quant_min <= quant_max,
+        lambda: "`quant_min` should be less than or equal to `quant_max`.",
+    )
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
+
+
+@register_meta(aten.fake_quantize_per_channel_affine_cachemask.default)
+def meta_fake_quantize_per_channel_affine_cachemask(
+    self, scale, zero_point, axis, quant_min, quant_max
+):
+    torch._check(
+        quant_min <= quant_max,
+        lambda: "`quant_min` should be less than or equal to `quant_max`.",
+    )
+    torch._check(
+        scale.dim() == 1 and zero_point.dim() == 1,
+        lambda: "scale and zero_point should be 1-D tensors",
+    )
+    torch._check(
+        0 <= axis < self.dim(),
+        lambda: f"`axis` must be between 0 and {self.dim() - 1}, got {axis}",
+    )
+    torch._check(
+        scale.numel() == zero_point.numel() == self.size(axis),
+        lambda: "dimensions of scale and zero-point are not consistent with input tensor",
+    )
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
+
+
 @register_meta(aten.mm)
 @out_wrapper(exact_dtype=True)
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):

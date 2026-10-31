@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import cmath
+import copy
 import dataclasses
 import importlib
 import inspect
@@ -585,6 +586,135 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         )
 
 
+class FakeQuantizeInlineTests(torch._dynamo.test_case.TestCase):
+    # torch.ao is in MOD_SKIPLIST, so torch.ao.quantization.fake_quantize must be
+    # explicitly inlined for QAT modules to trace under fullgraph=True.
+    def _check_fullgraph(self, mod, x):
+        torch._dynamo.reset()
+        ref = copy.deepcopy(mod)
+        compiled = torch.compile(mod, backend="eager", fullgraph=True)
+        for _ in range(2):
+            self.assertEqual(compiled(x), ref(x))
+        # The observers update their running statistics in place.
+        self.assertEqual(mod.state_dict(), ref.state_dict())
+
+    @parametrize("per_channel", (False, True), name_fn=lambda b: f"per_channel_{b}")
+    def test_fused_moving_avg_obs_fake_quant_fullgraph(self, per_channel):
+        from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+        from torch.ao.quantization.observer import (
+            MovingAverageMinMaxObserver,
+            MovingAveragePerChannelMinMaxObserver,
+        )
+
+        if per_channel:
+            fake_quant = FusedMovingAvgObsFakeQuantize(
+                observer=MovingAveragePerChannelMinMaxObserver,
+                quant_min=-128,
+                quant_max=127,
+                dtype=torch.qint8,
+                qscheme=torch.per_channel_symmetric,
+                ch_axis=0,
+            )
+        else:
+            fake_quant = FusedMovingAvgObsFakeQuantize(
+                observer=MovingAverageMinMaxObserver,
+                quant_min=0,
+                quant_max=255,
+                dtype=torch.quint8,
+                qscheme=torch.per_tensor_affine,
+            )
+        self._check_fullgraph(fake_quant, torch.randn(8, 4))
+
+    @parametrize(
+        "config",
+        (
+            "per_tensor_min_max",
+            "per_tensor_moving_average",
+            "per_channel_min_max",
+            "per_channel_moving_average",
+        ),
+    )
+    @parametrize("observer_enabled", (True, False), name_fn=lambda b: f"observer_{b}")
+    @parametrize(
+        "fake_quant_enabled", (True, False), name_fn=lambda b: f"fake_quant_{b}"
+    )
+    def test_fake_quantize_fullgraph(
+        self, config, observer_enabled, fake_quant_enabled
+    ):
+        # FakeQuantize picks its behavior from the observer_enabled and
+        # fake_quant_enabled buffers, which must not become Python control flow.
+        from torch.ao.quantization.fake_quantize import FakeQuantize
+        from torch.ao.quantization.observer import (
+            MinMaxObserver,
+            MovingAverageMinMaxObserver,
+            MovingAveragePerChannelMinMaxObserver,
+            PerChannelMinMaxObserver,
+        )
+
+        per_channel_kwargs = {
+            "qscheme": torch.per_channel_symmetric,
+            "dtype": torch.qint8,
+            "quant_min": -128,
+            "quant_max": 127,
+            "ch_axis": 1,
+        }
+        observer, kwargs = {
+            "per_tensor_min_max": (MinMaxObserver, {}),
+            "per_tensor_moving_average": (MovingAverageMinMaxObserver, {}),
+            "per_channel_min_max": (PerChannelMinMaxObserver, per_channel_kwargs),
+            "per_channel_moving_average": (
+                MovingAveragePerChannelMinMaxObserver,
+                per_channel_kwargs,
+            ),
+        }[config]
+        fake_quant = FakeQuantize(observer=observer, **kwargs)
+
+        x = torch.randn(8, 4)
+        if not observer_enabled:
+            # Without the observer there is nothing to initialize the qparams.
+            fake_quant(x)
+        fake_quant.enable_observer(observer_enabled)
+        fake_quant.enable_fake_quant(fake_quant_enabled)
+
+        torch._dynamo.reset()
+        ref = copy.deepcopy(fake_quant)
+        compiled = torch.compile(fake_quant, backend="eager", fullgraph=True)
+        for _ in range(2):
+            x_ref = torch.randn(8, 4, requires_grad=True)
+            x_compiled = x_ref.detach().clone().requires_grad_()
+            expected = ref(x_ref)
+            actual = compiled(x_compiled)
+            self.assertEqual(actual, expected)
+            expected.sum().backward()
+            actual.sum().backward()
+            self.assertEqual(x_compiled.grad, x_ref.grad)
+        self.assertEqual(fake_quant.state_dict(), ref.state_dict())
+
+    @parametrize(
+        "name",
+        (
+            "default_fake_quant",
+            "default_weight_fake_quant",
+            "default_per_channel_weight_fake_quant",
+            "default_fixed_qparams_range_0to1_fake_quant",
+            "default_fixed_qparams_range_neg1to1_fake_quant",
+        ),
+    )
+    def test_default_fake_quant_fullgraph(self, name):
+        import torch.ao.quantization.fake_quantize as fake_quantize
+
+        self._check_fullgraph(getattr(fake_quantize, name)(), torch.randn(8, 4))
+
+    @parametrize("backend", ("fbgemm", "qnnpack"))
+    def test_qat_linear_fullgraph(self, backend):
+        from torch.ao.quantization import get_default_qat_qconfig
+
+        qat_linear = torch.ao.nn.qat.Linear(
+            4, 3, qconfig=get_default_qat_qconfig(backend)
+        )
+        self._check_fullgraph(qat_linear, torch.randn(8, 4))
+
+
 class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
     def test_top_level_torch_exp_compiles_through_dynamo(self):
         x = torch.randn(4)
@@ -612,6 +742,7 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TraceRuleTests)
+instantiate_parametrized_tests(FakeQuantizeInlineTests)
 
 
 if __name__ == "__main__":

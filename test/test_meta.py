@@ -1573,6 +1573,47 @@ class TestMeta(_TestMetaBase):
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
 
+    def test_meta_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(self, device):
+        to_meta = MetaConverter()
+        x = torch.randn(5, 5, device=device)
+        scale = torch.tensor([0.1], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+        fake_quant_enabled = torch.tensor([1], dtype=torch.long, device=device)
+        args = [x, scale, zero_point, fake_quant_enabled, -128, 127]
+        meta_args = [to_meta(a) if isinstance(a, torch.Tensor) else a for a in args]
+
+        op = aten._fake_quantize_per_tensor_affine_cachemask_tensor_qparams.default
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        for ref, meta in zip(ref_out, meta_out):
+            self.assertEqual(meta.device.type, "meta")
+            self.assertEqual(ref.size(), meta.size())
+            self.assertEqual(ref.stride(), meta.stride())
+            self.assertEqual(ref.dtype, meta.dtype)
+
+    def test_meta_fake_quantize_per_channel_affine_cachemask(self, device):
+        to_meta = MetaConverter()
+        x = torch.randn(5, 4, device=device)
+        scale = torch.rand(4, device=device) + 0.1
+        zero_point = torch.zeros(4, dtype=torch.int, device=device)
+        args = [x, scale, zero_point, 1, -128, 127]
+        meta_args = [to_meta(a) if isinstance(a, torch.Tensor) else a for a in args]
+
+        op = aten.fake_quantize_per_channel_affine_cachemask.default
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        for ref, meta in zip(ref_out, meta_out):
+            self.assertEqual(meta.device.type, "meta")
+            self.assertEqual(ref.size(), meta.size())
+            self.assertEqual(ref.stride(), meta.stride())
+            self.assertEqual(ref.dtype, meta.dtype)
+
+        # scale and zero_point must match the size of the quantized axis
+        bad_scale = to_meta(torch.rand(3, device=device))
+        bad_zero_point = to_meta(torch.zeros(3, dtype=torch.int, device=device))
+        with self.assertRaisesRegex(RuntimeError, "not consistent with input tensor"):
+            op(meta_args[0], bad_scale, bad_zero_point, 1, -128, 127)
+
     def test_cdist_forward(self, device):
         to_meta = MetaConverter()
         x1 = torch.rand([3, 2], device=device)
