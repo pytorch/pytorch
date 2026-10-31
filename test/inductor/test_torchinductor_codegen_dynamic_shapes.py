@@ -185,7 +185,6 @@ test_failures = {
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_implicit_kwarg_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
-    "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_masked_scatter_dynamic_shapes": TestFailure(("cpu",)),
