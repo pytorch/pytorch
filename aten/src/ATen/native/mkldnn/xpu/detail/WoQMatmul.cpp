@@ -204,11 +204,15 @@ void woq_matmul_int4_impl_cache(
   const int k = *(a_sz.end() - 1);
 
   const int64_t ldb = mat2.strides()[mat2.dim() - 2] * 8; // for int4 matmul
-  const int64_t lda = mat1.strides()[mat1.dim() - 2];
   const int64_t ldc = result.strides()[result.dim() - 2];
 
   bias_type_t b_type = bias_type_t::none;
-  trans_type_t tt = trans_type_t::nt; // only support nt for int4 matmul
+  // A is row-major (nt) or column-major (tt); weight is always transposed.
+  const bool a_col_major =
+      m > 1 && mat1.stride(-2) == 1 && mat1.stride(-1) != 1;
+  trans_type_t tt = a_col_major ? trans_type_t::tt : trans_type_t::nt;
+  const int64_t lda =
+      a_col_major ? mat1.stride(-1) : (m == 1 ? k : mat1.stride(-2));
 
   joint_dtypes_t jd;
   if (mat1.scalar_type() == at::ScalarType::Half) {
