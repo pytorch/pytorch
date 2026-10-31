@@ -70,8 +70,17 @@ class OpenRegInterface(DeviceInterface):
 
     @staticmethod
     def maybe_exchange_device(device):
-        if not 0 <= device < torch_openreg._C._get_device_count():
-            return torch_openreg._C._get_device()
+        # Negative indices report no exchange via the -1 convention (matching
+        # torch.cuda); positive out-of-range indices raise, like the C++
+        # backend's maybe_exchange_device and set_device do.
+        if device < 0:
+            return -1
+        count = torch_openreg._C._get_device_count()
+        if device >= count:
+            raise RuntimeError(
+                "The device index is out of range. It must be in [0, "
+                f"{count}), but got {device}."
+            )
         return torch_openreg._C._exchangeDevice(device)
 
     @staticmethod

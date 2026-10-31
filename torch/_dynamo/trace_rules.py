@@ -3141,9 +3141,9 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
     # import, so the map (built lazily on first lookup) is probed here whenever
     # it is (re)built. A backend that registers after the map already exists is
     # routed in place by _register_privateuse1_backend(), called from
-    # torch._register_device_module, without rebuilding the map (a rebuild
-    # would drop substitute_in_graph polyfill entries). When no backend is
-    # registered this adds nothing.
+    # torch._register_device_module and rename_privateuse1_backend, without
+    # rebuilding the map (a rebuild would drop substitute_in_graph polyfill
+    # entries). When no backend is registered this adds nothing.
     _probe_privateuse1_rule_map(d)
     return d
 
@@ -3171,9 +3171,9 @@ def _register_privateuse1_backend() -> None:
     # A privateuse1 backend registers torch.<name> after Dynamo is loaded;
     # route its stream/synchronize/exchange_device functions in the existing
     # rule map in place and clear the handler cache so the backend's handlers
-    # are probed on the next compile. Called from torch._register_device_module;
-    # when the backend registered before the first map build, the build itself
-    # picks it up.
+    # are probed on the next compile. Called from torch._register_device_module
+    # and rename_privateuse1_backend; when the backend registered before the
+    # first map build, the build itself picks it up.
     _probe_privateuse1_rule_map(get_torch_obj_rule_map())
     TorchInGraphFunctionVariable._get_handlers.cache_clear()
 
@@ -4362,11 +4362,6 @@ def _lookup_inner(
 
 def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
-    # The handler cache only needs clearing when a privateuse1 backend is
-    # present (its handlers are probed into the cached dict on rebuild);
-    # otherwise the rebuild re-runs ~150 @register closures for nothing.
-    if torch._C._get_privateuse1_backend_name() != "privateuseone":
-        TorchInGraphFunctionVariable._get_handlers.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()

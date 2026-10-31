@@ -134,7 +134,8 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     each is matched by name and routed in-graph by TorchDynamo when present:
 
     (1) ``current_stream(device: Union[int, str, torch.device, None] = None) -> torch.Stream``
-        Return the current stream for the device.
+        Return the current stream for the device; Dynamo traces it from its
+        symbolic stream state instead of calling the backend function.
     (2) ``synchronize(device: Union[int, str, torch.device, None] = None) -> None``
         Wait for all kernels on the device to complete; Dynamo emits
         ``torch.ops.streams.synchronize_device`` for it.
@@ -145,9 +146,11 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         the requested index is valid.
 
     If either exchange function is present, BackendModule must also define
-    ``current_device() -> int`` and ``set_device(int)``, which the exchange
-    handler uses for its guard source and its cleanup hook that restores the
-    previous device after the compiled region runs.
+    ``current_device() -> int`` and ``set_device(int)``: the exchange handler
+    guards on the current device at trace time and registers a cleanup hook
+    that restores the previous device when tracing finishes. At runtime the
+    emitted exchange node switches the device and leaves it switched, matching
+    eager semantics.
 
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example

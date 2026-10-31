@@ -250,96 +250,113 @@ class TestDeviceInterface(TestCase):
 
 class TestPrivateUse1Routing(TestCase):
     def test_stream_synchronize_exchange_routing(self):
-        # The backend calls are the first torch calls traced, so this is the
-        # ordering regression: routing must be resolved when the callable is
-        # first looked up (get_torch_obj_rule_map, rebuilt on cache clears and
-        # backend registration), not later by _get_handlers() which runs only
-        # on the first dispatch.
+        # current_stream/synchronize are traced without calling the backend's
+        # own implementations (streams.synchronize_device etc.), while
+        # _exchange_device/_maybe_exchange_device run the backend's real
+        # functions. The exchange leaves the runtime device switched (matching
+        # eager semantics), so the current_device guard forces a recompile when
+        # the next call starts on another device.
         cnt = CompileCounterWithBackend("eager")
         prev_device = torch.openreg.current_device()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def compiled_fn():
-            torch.openreg.current_stream()
-            torch.openreg.synchronize()
-            torch.openreg._exchange_device(0)
-            torch.openreg._maybe_exchange_device(0)
-
-        compiled_fn()
-        compiled_fn()  # second call evaluates the current_device guard
-        self.assertEqual(cnt.frame_count, 1)
-        # The eager backend executes the emitted graph; the exchange cleanup
-        # hook restores the previous device after each call.
-        self.assertEqual(torch.openreg.current_device(), prev_device)
-
-        graph = cnt.graphs[0]
-        call_targets = {
-            node.target for node in graph.graph.nodes if node.op == "call_function"
-        }
-        # synchronize dispatches to its handler, which emits the
-        # device-type-specific synchronize_device op.
-        self.assertIn(torch.ops.streams.synchronize_device, call_targets)
-        self.assertTrue(
-            any(
-                node.target is torch.ops.streams.synchronize_device
-                and node.args[0] == "openreg"
-                for node in graph.graph.nodes
-            )
-        )
-        # _exchange_device/_maybe_exchange_device are traced as call_function
-        # nodes; the current_device guard and set_device cleanup hook are
-        # exercised by the real backend on the second call.
-        self.assertIn(torch.openreg._exchange_device, call_targets)
-        self.assertIn(torch.openreg._maybe_exchange_device, call_targets)
-
-        from torch._dynamo import trace_rules
-        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
-
-        fns = (
-            torch.openreg.current_stream,
-            torch.openreg.synchronize,
-            torch.openreg._exchange_device,
-            torch.openreg._maybe_exchange_device,
-        )
-        for fn in fns:
-            self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
-            self.assertIn(fn, TorchInGraphFunctionVariable._get_handlers())
-
-        # A backend that registers after the rule map was built is routed in
-        # place without rebuilding the map, which would drop substitute_in_graph
-        # polyfill entries. Exercise the production wiring end-to-end: unbind
-        # the module and re-register it through torch._register_device_module,
-        # which calls trace_rules._register_privateuse1_backend() for a
-        # privateuse1 backend.
-        from torch._dynamo.variables import PolyfilledFunctionVariable
-
-        rule_map = trace_rules.get_torch_obj_rule_map()
-        for fn in fns:
-            del rule_map[fn]
-        openreg_module = torch.openreg
         try:
-            delattr(torch, "openreg")
-            torch._register_device_module("openreg", openreg_module)
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def compiled_fn():
+                torch.openreg.current_stream()
+                torch.openreg.synchronize()
+                torch.openreg._exchange_device(1)
+                torch.openreg._maybe_exchange_device(1)
+
+            compiled_fn()
+            # The eager backend executes the emitted graph as-is; the exchange
+            # leaves the runtime device switched, matching eager semantics. The
+            # cleanup hook ran once at the end of tracing, not after each call.
+            self.assertEqual(torch.openreg.current_device(), 1)
+            # The current_device guard was installed for device 0 at compile
+            # time, so starting this call from device 1 recompiles.
+            compiled_fn()
+            self.assertEqual(cnt.frame_count, 2)
+
+            graph = cnt.graphs[0]
+            call_targets = {
+                node.target for node in graph.graph.nodes if node.op == "call_function"
+            }
+            # synchronize dispatches to its handler, which emits the
+            # device-type-specific synchronize_device op.
+            self.assertIn(torch.ops.streams.synchronize_device, call_targets)
+            self.assertTrue(
+                any(
+                    node.target is torch.ops.streams.synchronize_device
+                    and node.args[0] == "openreg"
+                    for node in graph.graph.nodes
+                )
+            )
+            # The exchange helpers are traced as call_function nodes that run
+            # the backend's real functions; the current_device guard and the
+            # set_device cleanup hook are exercised across the two calls above.
+            self.assertIn(torch.openreg._exchange_device, call_targets)
+            self.assertIn(torch.openreg._maybe_exchange_device, call_targets)
+
+            from torch._dynamo import trace_rules
+            from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+            fns = (
+                torch.openreg.current_stream,
+                torch.openreg.synchronize,
+                torch.openreg._exchange_device,
+                torch.openreg._maybe_exchange_device,
+            )
             for fn in fns:
-                self.assertIn(fn, rule_map)
                 self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
-            # The in-place re-routing must not rebuild the map: the polyfill
-            # entry (and everything else) survives.
-            self.assertIs(rule_map[builtins.all], PolyfilledFunctionVariable)
-        finally:
-            # Restore unconditionally: torch._dynamo.reset() does not clear the
-            # rule map, so a failure here must not corrupt it for later tests.
-            setattr(torch, "openreg", openreg_module)
+                self.assertIn(fn, TorchInGraphFunctionVariable._get_handlers())
+
+            # A backend that registers after the rule map was built is routed in
+            # place without rebuilding the map, which would drop substitute_in_graph
+            # polyfill entries. Exercise the production wiring end-to-end: unbind
+            # the module and re-register it through torch._register_device_module,
+            # which calls trace_rules._register_privateuse1_backend() for a
+            # privateuse1 backend.
+            from torch._dynamo.variables import PolyfilledFunctionVariable
+
+            rule_map = trace_rules.get_torch_obj_rule_map()
             for fn in fns:
-                rule_map[fn] = TorchInGraphFunctionVariable
+                del rule_map[fn]
+            openreg_module = torch.openreg
+            try:
+                delattr(torch, "openreg")
+                torch._register_device_module("openreg", openreg_module)
+                for fn in fns:
+                    self.assertIn(fn, rule_map)
+                    self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+                # The in-place re-routing must not rebuild the map: the polyfill
+                # entry (and everything else) survives.
+                self.assertIs(rule_map[builtins.all], PolyfilledFunctionVariable)
+            finally:
+                # Restore unconditionally: torch._dynamo.reset() does not clear the
+                # rule map, so a failure here must not corrupt it for later tests.
+                torch.openreg = openreg_module
+                for fn in fns:
+                    rule_map[fn] = TorchInGraphFunctionVariable
+        finally:
+            torch.openreg.set_device(prev_device)
 
     def test_maybe_exchange_device_invalid_index(self):
-        # Invalid indices (negative or out of range) must not switch the device:
-        # report no exchange and leave the current device unchanged.
+        # Negative indices must not switch the device: report no exchange via
+        # the -1 convention (matching torch.cuda). Positive out-of-range
+        # indices raise in the C++ backend, like torch.cuda does.
         prev = torch.openreg.current_device()
-        for idx in (-1, torch.openreg.device_count() + 10):
-            self.assertEqual(torch.openreg._maybe_exchange_device(idx), prev)
-            self.assertEqual(torch.openreg.current_device(), prev)
+        self.assertEqual(torch.openreg._maybe_exchange_device(-1), -1)
+        self.assertEqual(torch.openreg.current_device(), prev)
+        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
+            torch.openreg._maybe_exchange_device(torch.openreg.device_count() + 10)
+        self.assertEqual(torch.openreg.current_device(), prev)
+
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        iface = get_interface_for_device("openreg")
+        self.assertEqual(iface.maybe_exchange_device(-1), -1)
+        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
+            iface.maybe_exchange_device(torch.openreg.device_count() + 10)
 
     def test_rename_reroutes_late_backend(self):
         # Renaming a backend after the rule map was built re-routes it in place

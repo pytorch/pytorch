@@ -2996,9 +2996,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         # trace_rules.get_torch_obj_rule_map() when it is (re)built and
         # re-established in place by trace_rules._register_privateuse1_backend()
         # when the backend registers. The handlers are captured here, cached on
-        # first compile; torch._register_device_module clears that cache on
-        # registration, so a backend that registers after the first compile is
-        # picked up on the next dispatch.
+        # first compile; backend registration (torch._register_device_module or
+        # rename_privateuse1_backend) clears that cache, so a backend that
+        # registers after the first compile is picked up on the next dispatch.
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
         from ..trace_rules import _get_privateuse1_backend_fns
@@ -3088,7 +3088,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and backend_synchronize not in _synchronize_fn_to_device_type
             and backend_synchronize not in handlers
         ):
-            _synchronize_fn_to_device_type[backend_synchronize] = privateuse1_backend_name
+            _synchronize_fn_to_device_type[backend_synchronize] = (
+                privateuse1_backend_name
+            )
 
         @register(
             torch.accelerator.synchronize,
