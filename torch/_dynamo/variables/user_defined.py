@@ -68,6 +68,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
+    GlobalWeakRefSource,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -284,6 +285,8 @@ def maybe_reconstruct_decorator_ctx_manager_clone(
     self.mode can be guarded rather than baked into the graph. Unsupported
     cases return None for the caller to handle.
     """
+    from .builder import SourcelessBuilder
+
     if (
         args
         or kwargs
@@ -291,15 +294,15 @@ def maybe_reconstruct_decorator_ctx_manager_clone(
     ):
         return None
     if func is torch.utils._contextlib._DecoratorContextManager.clone:
-        return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
-            tx, [], {}
-        )
+        return SourcelessBuilder.create_internal_torch_ctx_manager(
+            obj.__class__
+        ).call_function(tx, [], {})
     if obj_source is None:
         return None
     mode_var = VariableTracker.build(tx, obj.mode, AttrSource(obj_source, "mode"))
-    return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
-        tx, [mode_var], {}
-    )
+    return SourcelessBuilder.create_internal_torch_ctx_manager(
+        obj.__class__
+    ).call_function(tx, [mode_var], {})
 
 
 def is_generic_ctx_manager_cls(cls: type) -> bool:
@@ -391,6 +394,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # this case, we don't want to allow mutation in the class because there
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
+
+    @classmethod
+    def create_new(cls, value: type[object]) -> "UserDefinedClassVariable":
+        return cls(value, mutation_type=ValueMutationNew())
 
     def get_value_for_setattr(self) -> object | None:
         mod = getattr(self.value, "__module__", None) or ""
@@ -687,10 +694,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if meta_getattr is not NO_SUCH_SUBOBJ and isinstance(
                 meta_getattr, types.FunctionType
             ):
-                return variables.UserMethodVariable(
-                    variables.UserFunctionVariable(meta_getattr, source=None),
-                    self,
-                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, meta_getattr).call_function(
+                    tx,
+                    [self, variables.ConstantVariable.create(name)],
+                    {},
+                )
 
         # Step 7: AttributeError.
         raise_observed_exception(
@@ -781,6 +791,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
+        from .builder import VariableBuilder
+
         if (
             source is not None
             and name == "from_tensor"
@@ -827,7 +839,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return cm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
+            cmd_vt = variables.ClassMethodDescriptorVariable.create(cls_attr, source)
             return cmd_vt.tp_descr_get_impl(tx, self, self)
 
         # property_descr_get with obj=NULL returns self.
@@ -838,7 +850,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return variables.PropertyVariable(cls_attr, source=descriptor_source)
+            return variables.PropertyVariable.create(cls_attr, descriptor_source)
 
         # member_get with obj=NULL returns self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
@@ -848,8 +860,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return variables.MemberDescriptorVariable(
-                cls_attr, source=descriptor_source
+            return variables.MemberDescriptorVariable.create(
+                cls_attr, descriptor_source
             )
 
         if isinstance(cls_attr, _collections._tuplegetter):
@@ -858,7 +870,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
+            tg_vt = variables.TupleGetterVariable.create(cls_attr, descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
 
         # TODO(tp_descr_get) - Comparison dunders must be checked before
@@ -879,7 +891,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            return variables.WrapperDescriptorVariable(
+            return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
                 source=source,
@@ -891,7 +903,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            return variables.MethodDescriptorVariable(
+            return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
                 source=source,
@@ -955,6 +967,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Trace a class-MRO descriptor's __get__(None, cls) call."""
+        from .builder import VariableBuilder
         from .constant import ConstantVariable
 
         descriptor_source = None
@@ -964,11 +977,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
             descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
         else:
-            descriptor_var = UserDefinedObjectVariable(descriptor)
+            descriptor_var = VariableBuilder.create_internal_user_defined_object(
+                descriptor
+            )
 
         none_var = ConstantVariable.create(None)
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 # descriptor_get_source is type(descriptor).__get__, which is
                 # already the function; it has no __func__ to unwrap.
                 descriptor.__get__.__func__,  # type: ignore[union-attr]
@@ -979,11 +994,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ).call_function(tx, [none_var, self], {})
 
     def len_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         m = self._maybe_get_baseclass_method("__len__")
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__len__")
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(tx, f"object of type {self.python_type_name()} has no length")
@@ -1003,21 +1020,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return super().sq_contains_impl(tx, item)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         m = self._maybe_get_baseclass_method("__iter__")
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__iter__")
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, [], {})
         return super().tp_iter_impl(tx)
 
     def nb_negative_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         m = self._maybe_get_baseclass_method("__neg__")
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__neg__")
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -1025,11 +1046,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         )
 
     def nb_positive_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         m = self._maybe_get_baseclass_method("__pos__")
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__pos__")
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -1037,11 +1060,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         )
 
     def nb_absolute_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         m = self._maybe_get_baseclass_method("__abs__")
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__abs__")
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -1050,11 +1075,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         )
 
     def nb_invert_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         m = self._maybe_get_baseclass_method("__invert__")
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__invert__")
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -1068,6 +1095,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         key: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         # Class-level __setitem__ / __delitem__: looked up on the metaclass.
         # `cls[k] = v` invokes type(cls).__setitem__(cls, k, v); `del cls[k]`
         # invokes __delitem__. value=None signals delete (CPython NULL).
@@ -1078,7 +1107,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source = self.source and AttrSource(TypeSource(self.source), attr)
             args = [key] if is_delete else [key, value]
             variables.UserMethodVariable(
-                variables.UserFunctionVariable(m, source=source),
+                VariableBuilder.create_internal_user_function(m, source=source),
                 self,
             ).call_function(tx, args, {})
             return variables.ConstantVariable.create(None)
@@ -1164,7 +1193,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         if (
             name == "__subclasses__"
@@ -1252,15 +1281,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name == "fromkeys"
             and self.lookup_cls_mro_attr(name) is torch._frozendict.__dict__[name]
         ):
-            return variables.FrozenDictBuiltinVariable().fromkeys(
-                tx, args, kwargs, cls=self
+            builtin = cast(
+                variables.FrozenDictBuiltinVariable,
+                VariableTracker.build(tx, torch._frozendict),
             )
+            return builtin.fromkeys(tx, args, kwargs, cls=self)
         elif (
             torch._has_frozendict
             and name == "__new__"
             and self.value.__new__ is torch._frozendict.__new__
         ):
-            return variables.FrozenDictBuiltinVariable().call_method(
+            return VariableTracker.build(tx, torch._frozendict).call_method(
                 tx, name, args, kwargs
             )
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
@@ -1341,7 +1372,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             TypeSource(self.source), name
                         )
                         return variables.UserMethodVariable(
-                            variables.UserFunctionVariable(method, source=fn_source),
+                            VariableBuilder.create_internal_user_function(
+                                method, source=fn_source
+                            ),
                             self,
                         ).call_function(tx, args, kwargs)
                     break
@@ -1367,7 +1400,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         )
 
         from ..side_effects import SideEffects
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builder import (
+            SourcelessBuilder,
+            SourcelessUserDefinedObjectBuilder,
+            VariableBuilder,
+            wrap_fx_proxy,
+        )
         from .ctx_manager import (
             CurrentDeviceContextVariable,
             GenericContextWrappingVariable,
@@ -1411,7 +1449,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # than device_arg itself to keep that true. The rank-relative device
                 # is not a constant, so without this branch the call falls through to
                 # device.__new__, which Dynamo skips.
-                return CurrentDeviceVariable(device_arg.value)
+                return CurrentDeviceVariable.create(device_arg.value)
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
@@ -1428,7 +1466,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # import here to avoid circular dependency
             from .ctx_manager import NullContextVariable
 
-            return NullContextVariable(*args, **kwargs)
+            return NullContextVariable(*args, **kwargs)  # noqa: RVT001
         elif self.value is collections.defaultdict:
             # defaultdict construction — use track_new_user_defined_object
             # which creates DefaultDictVariable. __init__ handler extracts
@@ -1532,7 +1570,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             cm_obj = args[1].cm_obj
             fn = getattr(cm_obj, args[0].get_name()).__func__
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn, source=self.source and AttrSource(self.source, "__func__")
                 ),
                 args[1],
@@ -1543,7 +1581,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 callback = args[1]
             else:
                 callback = variables.ConstantVariable.create(None)
-            return variables.WeakRefVariable(args[0], callback)
+            return variables.WeakRefVariable.create(args[0], callback)
         elif self.value is functools.partial:
             if not args:
                 unimplemented(
@@ -1560,7 +1598,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             rest_args = args[1:]
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
+            return variables.functions.FunctoolsPartialVariable(  # noqa: RVT001
                 fn, args=rest_args, keywords=kwargs
             )
         elif self.value is warnings.catch_warnings and not args:
@@ -1578,7 +1616,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # context manager, as eager does. The index it returns is the
                 # compiling rank's, so it must not be captured.
                 variable_cls._get_device_index_fn(args[0].value, optional=True)
-                return CurrentDeviceContextVariable(args[0].value.type, self.value)
+                return CurrentDeviceContextVariable.create(
+                    args[0].value.type, self.value
+                )
             if not args[0].is_python_constant():
                 raise_type_error(tx, f"{name} requires a constant argument")
             arg = args[0].as_python_constant()
@@ -1611,7 +1651,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     # graph. Dynamo's own reconstruct at a graph break re-enters
                     # through here, so this is what stops a resumed frame from
                     # pinning the compiling rank.
-                    return CurrentDeviceContextVariable(cur.type, self.value)
+                    return CurrentDeviceContextVariable.create(cur.type, self.value)
             return variable_cls.create(tx, arg)
         elif (
             issubclass(type(self.value), type)
@@ -1695,7 +1735,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # supported in dynamo
                 # pyrefly: ignore[unsupported-operation]
                 arg_new = [
-                    FunctionDecoratedByContextlibContextManagerVariable(
+                    FunctionDecoratedByContextlibContextManagerVariable.create(
                         args[0], source=args[0].source
                     )
                 ] + args[1:]
@@ -1860,7 +1900,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     if uses_current_device and _coor_device_index_is_current(
                         stream.device
                     ):
-                        current_device = CurrentDeviceVariable(
+                        current_device = CurrentDeviceVariable.create(
                             torch.device(stream.device.type)
                         )
                 reconstruct_args = list(args)
@@ -1937,7 +1977,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 seed = None
             random_object = random.Random(seed)
-            return RandomVariable(random_object)
+            return SourcelessUserDefinedObjectBuilder.create(tx, random_object)
         elif self.value is types.MappingProxyType and len(args) == 1:
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
@@ -3186,6 +3226,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from .. import trace_rules
         from . import UserMethodVariable
+        from .builder import VariableBuilder
         from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
@@ -3232,7 +3273,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and not trace_rules.is_polyfilled_callable(method)
             ):
                 # Dispatch C descriptors such as `copy = dict.copy` through their defining type.
-                return variables.MethodDescriptorVariable(
+                return VariableBuilder.create_internal_method_descriptor(
                     method, owner=VariableTracker.build(tx, method.__objclass__)
                 ).call_function(tx, [self, *args], kwargs)
 
@@ -3265,8 +3306,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
+                # Preserve the MRO-selected function and source. GenerationTracker
+                # intentionally makes them differ for torch.nn.Module.__init__.
                 return UserMethodVariable(
-                    variables.UserFunctionVariable(
+                    VariableBuilder.create_internal_user_function(
                         method,
                         source=source_fn or (source and AttrSource(source, "__func__")),
                     ),
@@ -3285,10 +3328,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 wrapped: Any = polyfill_handlers.get(method)  # type: ignore[arg-type]
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
-                    return variables.UserMethodVariable(
-                        variables.UserFunctionVariable(traceable_fn, source=None),
-                        self,
-                    ).call_function(tx, args, kwargs)
+                    from .builder import SourcelessBuilder
+
+                    return SourcelessBuilder.create(tx, traceable_fn).call_function(
+                        tx, [self, *args], kwargs
+                    )
 
         if name == "__call__":
             unimplemented(
@@ -3910,6 +3954,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
+        self.install_accessor_guard(tx, "__getattribute__")
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3920,14 +3967,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # Keep this off VariableTracker.build. The builder installs
-                    # a guard on the accessor eagerly; constructing directly
-                    # records the source and leaves the guard to whoever
-                    # consumes it. This path is generic, but an nn.Module
-                    # reaching it with an eager guard here made the guard
-                    # manager tag-unsafe (test/dynamo/test_guard_manager.py,
-                    # test_nn_module_tag_overridden_getattr_safe).
-                    variables.UserFunctionVariable(
+                    # The accessor is guarded through the class above. Building
+                    # another instance-bound function guard here would disable
+                    # recursive module dictionary tag checks.
+                    VariableBuilder.create_internal_user_function(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
                     ),
@@ -3948,6 +3991,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
+
         # TODO - Check what is this _is_c_defined_property and if this handling should be moved inside the PropertyVariable.
         if isinstance(type_attr, property) and not self._is_c_defined_property(
             type_attr
@@ -3957,7 +4001,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the property wrapper.
             if self.source:
                 source = self.get_source_by_walking_mro(tx, name)
-            prop_vt = variables.PropertyVariable(type_attr, source=source)
+            prop_vt = variables.PropertyVariable.create(type_attr, source)
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3975,7 +4019,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
                 return result
-            md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+            md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
             return md_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3994,13 +4038,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
                 return result
-            gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+            gs_vt = variables.GetSetDescriptorVariable.create(type_attr, source)
             return gs_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
 
         if isinstance(type_attr, _collections._tuplegetter):
-            tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+            tg_vt = variables.TupleGetterVariable.create(type_attr, source)
             return tg_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -4045,18 +4089,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return descriptor.__qualname__
         return None
 
-    def install_method_load_guards(self) -> None:
+    def install_accessor_guard(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        # TYPE_MATCH cannot detect replacing an accessor on the same class.
+        # Attribute reads and LOAD_METHOD binding must share this guard policy.
         if self.cls_source:
-            for attr in ("__getattribute__", "__getattr__"):
-                if self.lookup_class_mro_attr(attr) is NO_SUCH_SUBOBJ:
-                    guard = self.cls_source.make_guard(
-                        functools.partial(GuardBuilder.HASATTR, attr=attr)
-                    )
-                else:
-                    guard = AttrSource(self.cls_source, attr).make_guard(
-                        GuardBuilder.FUNCTION_MATCH
-                    )
-                install_guard(guard)
+            # Keep class guards separate from module instances so they do not
+            # disable recursive instance-dictionary tag checks.
+            cls_source = GlobalWeakRefSource(
+                tx.store_global_weakref_by_id("__accessor_class", type(self.value))
+            )
+            source = mro_attr_source(tx, type(self.value), cls_source, name)
+            if source is None:
+                guard = cls_source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            else:
+                guard = source.make_guard(GuardBuilder.FUNCTION_MATCH)
+            install_guard(guard)
+
+    def install_method_load_guards(self, tx: "InstructionTranslatorBase") -> None:
+        for name in ("__getattribute__", "__getattr__"):
+            self.install_accessor_guard(tx, name)
 
     def resolve_type_attr(
         self,
@@ -4067,6 +4122,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         """Handle non-data descriptors and plain class attributes from the type MRO."""
         from ..mutation_guard import unpatched_nn_module_init
+        from .builder import VariableBuilder
 
         if (
             type_attr is unpatched_nn_module_init
@@ -4092,13 +4148,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and self.lookup_method_descriptor(type_attr) is not None
             ):
                 if self.cls_source:
-                    # TYPE_MATCH cannot detect class edits such as
-                    # Mapping.__getattribute__ = custom_getattribute.
-                    install_guard(
-                        AttrSource(self.cls_source, "__getattribute__").make_guard(
-                            GuardBuilder.FUNCTION_MATCH
-                        )
-                    )
                     install_guard(
                         self.get_source_by_walking_mro(tx, name).make_guard(
                             GuardBuilder.FUNCTION_MATCH
@@ -4134,35 +4183,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+            cmd_vt = variables.ClassMethodDescriptorVariable.create(type_attr, source)
             return cmd_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.WrapperDescriptorType):
             class_vt = self.tp_getattro_impl(tx, "__class__")
-            wd_vt = variables.WrapperDescriptorVariable(
+            wd_vt = VariableBuilder.create_internal_wrapper_descriptor(
                 type_attr, owner=class_vt, source=source
             )
             return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
             class_vt = self.tp_getattro_impl(tx, "__class__")
-            md_vt = variables.MethodDescriptorVariable(
+            md_vt = VariableBuilder.create_internal_method_descriptor(
                 type_attr, owner=class_vt, source=source
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
-            fn_vt = variables.WrapperUserFunctionVariable(
+            fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                 type_attr, "__wrapped__", source=source
             )
-            return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
+            return variables.WrapperUserMethodVariable.create(
+                fn_vt, self, source=source
+            )
         elif isinstance(type_attr, types.FunctionType):
             if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
                 if can_use_mro_source:
                     source = self.get_source_by_walking_mro(tx, name)
-                fn_vt = variables.WrapperUserFunctionVariable(
+                fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                     type_attr, "_torchdynamo_inline", source=source
                 )
-                return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
+                return variables.WrapperUserMethodVariable.create(
+                    fn_vt, self, source=source
+                )
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
             if can_use_mro_source:
@@ -4178,7 +4231,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 self.source and AttrSource(TypeSource(self.source), name)
             )
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(type_attr, source=fn_source),
+                VariableBuilder.create_internal_user_function(
+                    type_attr, source=fn_source
+                ),
                 self,
                 source=source,
             )
@@ -4214,6 +4269,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Trace a descriptor's __get__(instance, owner) call."""
+        from .builder import VariableBuilder
+
         descriptor_source = None
         descriptor_get_source = None
         if self.cls_source:
@@ -4221,11 +4278,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
             descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
         else:
-            descriptor_var = UserDefinedObjectVariable(descriptor)
+            descriptor_var = VariableBuilder.create_internal_user_defined_object(
+                descriptor
+            )
 
-        owner_var = UserDefinedClassVariable(type(self.value))
+        owner_var = VariableTracker.build(tx, type(self.value))
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 # descriptor_get_source is type(descriptor).__get__, which is
                 # already the function; it has no __func__ to unwrap.
                 descriptor.__get__.__func__,  # type: ignore[union-attr]
@@ -4268,6 +4327,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
+        from .builder import VariableBuilder
+
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
             if (
@@ -4285,7 +4346,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 out = variables.UserMethodVariable(
                     # See the note in tp_getattro_impl above: off the builder so
                     # the accessor guard is not installed eagerly.
-                    variables.UserFunctionVariable(
+                    VariableBuilder.create_internal_user_function(
                         getattr_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
                     ),
@@ -5070,6 +5131,10 @@ class IntWrapperVariable(UserDefinedObjectVariable):
 class RemovableHandleVariable(VariableTracker):
     REMOVED = -1
 
+    @staticmethod
+    def create() -> "RemovableHandleVariable":
+        return RemovableHandleVariable(mutation_type=ValueMutationNew())
+
     def __init__(
         self,
         mutation_type: MutationType | None = None,
@@ -5373,10 +5438,12 @@ class DefaultDictVariable(ConstDictVariable):
             return variables.ConstantVariable.create(NotImplemented)
 
         cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
-        new = cast(
-            ConstDictVariable, cls.call_function(tx, [self_.default_factory, left], {})
-        )
-        new.install_dict_keys_match_guard()
+        new = cls.call_function(tx, [self_.default_factory, left], {})
+        if not isinstance(new, ConstDictVariable):
+            # PyDict_Update rejects a non-dict returned by the subclass constructor.
+            raise_observed_exception(
+                SystemError, tx, args=["bad argument to internal function"]
+            )
         tx.output.side_effects.mutation(new)
         new.dict_merge(tx, right)
         return new
@@ -6036,8 +6103,13 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             collections.abc.Mapping.get,
             dict.get,
         ):
+            from .builder import SourcelessBuilder
+
+            fn_vt = SourcelessBuilder.create_internal_user_function(
+                polyfills.mapping_get
+            )
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(polyfills.mapping_get, source=None),
+                fn_vt,
                 self,
             )
         return None
@@ -6048,10 +6120,6 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
         return super().mp_length_impl(tx)
-
-
-class RandomVariable(UserDefinedObjectVariable):
-    pass
 
 
 class SimpleNamespaceVariable(UserDefinedObjectVariable):

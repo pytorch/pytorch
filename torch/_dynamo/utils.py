@@ -3276,6 +3276,10 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
+
+
 def enumerate_items_with_dict_position(
     obj: dict[K, V],
 ) -> Iterable[tuple[int, K, V | Any]]:
@@ -3290,39 +3294,14 @@ def enumerate_items_with_dict_position(
     dict_type: type[dict[K, V]] = type(obj)
     if issubclass(dict_type, OrderedDict):
         items = list(dict.items(obj))
-        if all(type(key) is str for key, _ in items):
-            keys: list[K] = list(OrderedDict.keys(cast(OrderedDict[K, V], obj)))
-        else:
-            from .exc import unimplemented
-
-            state = OrderedDict.__dict__["__dict__"].__get__(obj)
-            if type(state) is not dict:
-                unimplemented(
-                    gb_type="Unsupported OrderedDict instance dictionary",
-                    context="OrderedDict.__dict__",
-                    explanation="A dictionary subclass used as instance state could also be a linked key, so Dynamo cannot inspect the order without invoking user hashes.",
-                    hints=[],
-                    skip_frame=True,
-                )
-            # OrderedDict iteration hashes keys. CPython's odict_traverse visits
-            # instance state, then linked keys, then dict_traverse's two references
-            # per general-table entry. Raw dict writes can leave extra entries
-            # without linked nodes. Exact dict state cannot itself be a key.
-            refs = gc.get_referents(obj)
-            end = len(refs) - 2 * len(items)
-            start = max(i for i in range(end) if refs[i] is state) + 1
-            keys = refs[start:end]
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
         positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
-        if len(keys) != len(items) or any(id(key) not in positions for key in keys):
-            from .exc import unimplemented
-
-            unimplemented(
-                gb_type="OrderedDict storage differs from linked keys",
-                context="OrderedDict input snapshot",
-                explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
-                hints=[],
-                skip_frame=True,
-            )
+        if (
+            keys is None
+            or len(keys) != len(items)
+            or any(id(key) not in positions for key in keys)
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
         return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
     return ((i, k, v) for i, (k, v) in enumerate(items))
@@ -6345,7 +6324,8 @@ def is_pybind11_enum_member(value: object) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslatorBase, f: Callable[..., Any]
+    tx: InstructionTranslatorBase,
+    f: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
@@ -6354,11 +6334,11 @@ def _make_inlined(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
         from torch._dynamo.trace_rules import _force_inline
-        from torch._dynamo.variables.functions import UserFunctionVariable
+        from torch._dynamo.variables.builder import SourcelessBuilder
 
         with _force_inline():
             return tx.inline_user_function_return(
-                UserFunctionVariable(f),
+                SourcelessBuilder.create_internal_user_function(f),
                 list(args),
                 dict(kwargs),
             )
