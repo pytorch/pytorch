@@ -2097,9 +2097,7 @@ class CachingAutotuner(KernelInterface):
                 )
 
         best_launcher = builtins.min(timings, key=timings.get)
-        self._release_static_launchers_except(best_launcher)
-        self.launchers = [best_launcher]
-        self._prune_compile_results_to_launcher(best_launcher)
+        self._keep_launcher(best_launcher)
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
@@ -2277,6 +2275,46 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
         return launcher
+
+    def use_first_config(self, stream):
+        """Keep the first config without launching the kernel, and store its
+        binary when one is needed (AOTI). Returns whether autotuning would have
+        had a choice to make.
+
+        For a kernel that the compile-time autotune block cannot launch on its
+        generated tensors.
+        """
+        if not self.launchers:
+            self.precompile()
+        had_choices = self.has_tuning_choices()
+        launcher = self.launchers[0]
+        self._keep_launcher(launcher)
+        TritonBundler.put_winner(launcher.cache_hash)
+        if launcher.store_cubin:
+            self._save_kernel_binary(stream, launcher)
+        return had_choices
+
+    def has_tuning_choices(self):
+        """Whether autotuning would choose among several configs, or refine one
+        with coordinate descent."""
+        return len(self.compile_results) > 1 or bool(
+            self.inductor_meta.get("coordinate_descent_tuning")
+            and self._should_coordesc_tune
+        )
+
+    def _keep_launcher(self, launcher):
+        """Drop every launcher and compile result except `launcher`."""
+        self._release_static_launchers_except(launcher)
+        self.launchers = [launcher]
+        self._prune_compile_results_to_launcher(launcher)
+
+    def _save_kernel_binary(self, stream, launcher):
+        """Save the binary of `launcher` for AOTI packaging."""
+        if self.device_props.type == "cpu":
+            if not self.cpu_kernel_saved:
+                self.save_cpu_kernel(launcher)
+        else:
+            self.save_gpu_kernel(stream, launcher)
 
     def save_gpu_kernel(self, stream, launcher):
         """Save the selected GPU kernel binary and assembly for AOTI packaging."""
@@ -2729,11 +2767,7 @@ class CachingAutotuner(KernelInterface):
         # autotuning entirely, this is the only call site that records the winner.
         TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
-            if self.device_props.type == "cpu":
-                if not self.cpu_kernel_saved:
-                    self.save_cpu_kernel(launcher)
-            else:
-                self.save_gpu_kernel(stream, launcher)
+            self._save_kernel_binary(stream, launcher)
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
