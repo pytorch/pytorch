@@ -878,6 +878,56 @@ class TestFloat6E2M3FNx4(TestCase):
         scalar.zero_()
         self.assertEqual(_as_bytes(x[1, 2]).tolist(), [0, 0, 0])
 
+    def test_transposed_copies(self, device):
+        # Large enough for the CUDA tiled transpose; the reference permutes the
+        # [..., 3] bytes view on the CPU, which never takes that kernel.
+        profile = (
+            torch.device(device).type == "cuda" and torch.autograd.kineto_available()
+        )
+
+        def copy_(dst, src, tiled):
+            if not profile:
+                return dst.copy_(src)
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA]
+            ) as prof:
+                dst.copy_(src)
+                torch.cuda.synchronize()
+            used = any("transpose_copy_3byte_kernel" in e.name for e in prof.events())
+            self.assertEqual(used, tiled, f"{tuple(src.shape)} {src.stride()}")
+            return dst
+
+        def check(src, *dims, tiled=True):
+            if not dims:  # swap the last two dims
+                dims = (*range(src.dim() - 2), src.dim() - 1, src.dim() - 2)
+            src = src.permute(dims)
+            out = copy_(
+                torch.empty(src.shape, dtype=self.dtype, device=device), src, tiled
+            )
+            ref = _as_bytes(src).cpu().contiguous()
+            self.assertEqual(_as_bytes(out).cpu(), ref)
+
+        for shape in ((256, 512), (260, 516), (1, 512, 520)):
+            check(self._random(*shape, device=device))
+        # extents that are not multiples of 4 take the generic path
+        check(self._random(257, 515, device=device), tiled=False)
+        x = self._random(272, 520, device=device)
+        # strided sources: row pitch, word-aligned and unaligned storage offsets
+        check(x[:, 4:516])
+        check(x[4:, :512])
+        check(x[:, 1:513], tiled=False)
+        # batched, with odd slice sizes and non-contiguous outer dims
+        b = self._random(3, 132, 264, device=device)
+        check(b)
+        check(b[:, :128, 4:260])
+        check(b, 2, 0, 1)
+        check(self._random(132, 3, 264, device=device).transpose(0, 1))
+        check(self._random(2, 2, 136, 400, device=device)[:, 1])
+        # a transposed destination
+        out = torch.empty(520, 272, dtype=self.dtype, device=device)
+        copy_(out.t(), x, tiled=True)
+        self.assertEqual(_as_bytes(out).cpu(), _as_bytes(x).cpu().transpose(0, 1))
+
     def test_zeros(self, device):
         # large enough to skip the CPU memset fast path
         for shape in ((4, 8), (1024, 1024)):
