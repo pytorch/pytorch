@@ -2549,6 +2549,82 @@ class TestOmitSkippedTests(TestCase):
 
         self.assertEqual(_get_test_names_for_test_class(TestKept), ['TestKept.test_skipped'])
 
+    def test_skipped_device_type_tests_are_omitted(self):
+        test_op_info = OpInfo(
+            "test_op",
+            op=lambda x: -x,
+            dtypes=(torch.float32, torch.float64),
+            sample_inputs_func=lambda _: [],
+            decorators=[
+                DecorateInfo(
+                    unittest.skip("never runs here"),
+                    "TestDeviceOmitted",
+                    "test_op_skipped_dtype",
+                    dtypes=[torch.float64],
+                )
+            ],
+        )
+
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", True):
+
+            class TestDeviceOmitted(TestCase):
+                def test_runs(self, device):
+                    pass
+
+                @unittest.skip("never runs here")
+                def test_skipped(self, device):
+                    pass
+
+                @parametrize("x", [subtest(1, decorators=[unittest.skip("never runs here")]), 2])
+                def test_partly_skipped(self, device, x):
+                    pass
+
+                @decorateIf(unittest.skip("never runs here"), lambda p: p["dtype"] == torch.float64)
+                @dtypes(torch.float32, torch.float64)
+                def test_dtype_partly_skipped(self, device, dtype):
+                    pass
+
+                @ops([test_op_info])
+                def test_op_skipped_dtype(self, device, dtype, op):
+                    pass
+
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestDeviceOmitted, locals_dict, only_for="cpu")
+
+        self.assertEqual(
+            _get_test_names_for_test_class(locals_dict["TestDeviceOmittedCPU"]),
+            [
+                "TestDeviceOmittedCPU.test_dtype_partly_skipped_cpu_float32",
+                "TestDeviceOmittedCPU.test_op_skipped_dtype_test_op_cpu_float32",
+                "TestDeviceOmittedCPU.test_partly_skipped_x_2_cpu",
+                "TestDeviceOmittedCPU.test_runs_cpu",
+            ],
+        )
+
+    def test_skipped_device_type_tests_are_kept_by_default(self):
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+
+            class TestDeviceKept(TestCase):
+                @unittest.skip("never runs here")
+                def test_skipped(self, device):
+                    pass
+
+                @decorateIf(unittest.skip("never runs here"), lambda p: p["dtype"] == torch.float64)
+                @dtypes(torch.float32, torch.float64)
+                def test_dtype_partly_skipped(self, device, dtype):
+                    pass
+
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestDeviceKept, locals_dict, only_for="cpu")
+
+        self.assertEqual(
+            _get_test_names_for_test_class(locals_dict["TestDeviceKeptCPU"]),
+            [
+                "TestDeviceKeptCPU.test_dtype_partly_skipped_cpu_float32",
+                "TestDeviceKeptCPU.test_dtype_partly_skipped_cpu_float64",
+                "TestDeviceKeptCPU.test_skipped_cpu",
+            ],
+        )
 
 class TestTestParametrizationDeviceType(TestCase):
     def test_unparametrized_names(self, device):
@@ -2771,7 +2847,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -2794,7 +2871,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
