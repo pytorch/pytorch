@@ -215,6 +215,7 @@ from .variables.object_protocol import (
     generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_getmethod,
     generic_is_true,
     generic_setitem,
     pyiter_send,
@@ -3380,7 +3381,7 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
+        self._load_attr(inst.argval, method=True)
         obj = self.pop()
         if sys.version_info >= (3, 13):
             self.push(obj)
@@ -3392,10 +3393,14 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
             self.push(obj)
 
-    def _load_attr(self, attr: Any) -> None:
+    def _load_attr(self, attr: Any, *, method: bool = False) -> None:
         obj = self.pop().realize()
         try:
-            result = generic_getattr(self, obj, attr)
+            result = (
+                generic_getmethod(self, obj, attr)
+                if method
+                else generic_getattr(self, obj, attr)
+            )
         except Unsupported:
             if not obj.is_python_constant():
                 raise
@@ -3421,7 +3426,7 @@ class InstructionTranslatorBase(
                     "LOAD_ATTR method variant should have been normalized by "
                     "remove_load_attr_method_variant in cleaned_instructions"
                 )
-        self._load_attr(inst.argval)
+        self._load_attr(inst.argval, method=inst.is_method_load)
 
     @break_graph_if_unsupported(
         push=False,

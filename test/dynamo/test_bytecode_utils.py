@@ -9,6 +9,10 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 def coalesced_co_lines(code):
@@ -27,6 +31,53 @@ def coalesced_co_lines(code):
 
 
 class BytecodeTests(torch._dynamo.test_case.TestCase):
+    @skipIfNotPy312
+    def test_method_call_binding_roundtrip(self):
+        class Mapping(dict):
+            pass
+
+        def fn(obj):
+            try:
+                obj.popitem(1)
+            except TypeError as exc:
+                return str(exc)
+
+        code, _ = bytecode_transformation.transform_code_object(
+            fn.__code__, lambda instructions, options: None
+        )
+        rewritten = type(fn)(code, fn.__globals__)
+        self.assertEqual(rewritten(Mapping()), fn(Mapping()))
+
+    @skipIfNotPy312
+    @parametrize("target", ["jump", "start", "handler", "end"])
+    def test_method_call_binding_control_flow(self, target):
+        create = bytecode_transformation.create_instruction
+        load = create("LOAD_ATTR", arg=1, argval="popitem")
+        instructions = [load]
+        bytecode_transformation.remove_load_attr_method_variant(instructions)
+        helper = instructions[-1]
+        handler = create("NOP")
+        instructions.append(handler)
+        if target == "jump":
+            instructions.append(create("JUMP_FORWARD", target=helper))
+        else:
+            load.exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+                start=helper if target == "start" else load,
+                end=helper,
+                target=helper if target == "handler" else handler,
+                depth=0,
+                lasti=False,
+            )
+        original = list(instructions)
+        bytecode_transformation.restore_load_attr_method_variant(instructions)
+        if target == "end":
+            self.assertEqual(instructions, [load, handler])
+            self.assertEqual(load.arg, 1)
+            self.assertIs(load.exn_tab_entry.end, load)
+        else:
+            self.assertEqual(instructions, original)
+            self.assertEqual(load.arg, 0)
+
     def test_get_const_index_uses_identity(self):
         first = []
         equal_but_distinct = []
@@ -607,6 +658,9 @@ def fn():
             return instructions
 
         bytecode_transformation.transform_code_object(fn.__code__, transformations)
+
+
+instantiate_parametrized_tests(BytecodeTests)
 
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):

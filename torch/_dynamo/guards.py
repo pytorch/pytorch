@@ -263,6 +263,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 
 
 def _sequence_length(value: object) -> int:
+    if issubclass(type(value), dict):
+        return dict.__len__(cast(dict[Any, Any], value))
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
@@ -1861,8 +1863,8 @@ class GuardBuilder(GuardBuilderBase):
         source_name = source.name
         if source_name == "":
             return False
-        obj_id = id(self.get(source))
-        return obj_id in self.key_order_guarded_dict_ids
+        value = self.get(source)
+        return id(value) in self.key_order_guarded_dict_ids
 
     def get_guard_manager_type(
         self,
@@ -3526,12 +3528,14 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not isinstance(value, dict):
+        if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if isinstance(value, set):
+        if issubclass(type(value), dict):
+            code.append(f"dict.__len__({ref}) == {length}")
+        elif isinstance(value, set):
             code.append(f"set.__len__({ref}) == {length}")
         elif isinstance(value, frozenset):
             code.append(f"frozenset.__len__({ref}) == {length}")
@@ -3541,7 +3545,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
-        if isinstance(value, dict):
+        if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
                 get_verbose_code_parts(code, guard),
