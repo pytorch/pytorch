@@ -1412,15 +1412,25 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         self.assertEqual(name, "nccl")
         self.assertNotIn(pg, _world.pg_flight_recorder_hooks)
 
-        before = len(self._entries("nccl"))
         dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
         torch.cuda.synchronize()
-        # Nothing in the hook's instance, and the native recording that made
-        # the hook unnecessary is still there.
-        self.assertEqual(self._entries("nccl")[before:], [])
+
+        # The generic dump under the backend's own name serves the native
+        # recording that made the hook unnecessary, so callers can dump
+        # whatever "nccl" built without knowing which kind it is.
+        def ids(entries):
+            return [(e["record_id"], e["profiling_name"]) for e in entries]
+
         native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
-        names = [e["profiling_name"] for e in native.get("entries", [])]
-        self.assertIn("nccl:all_reduce", names)
+        native_ids = ids(native.get("entries", []))
+        self.assertIn("nccl:all_reduce", [name for _, name in native_ids])
+        self.assertEqual(ids(self._entries(name)), native_ids)
+        trace = pickle.loads(torch._C._distributed_c10d._dump_fr_trace(backend=name))
+        self.assertEqual(ids(trace["entries"]), native_ids)
+
+        torch._C._distributed_c10d._reset_fr_trace(backend=name)
+        native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
+        self.assertEqual(native.get("entries", []), [])
 
 
 if __name__ == "__main__":

@@ -6109,30 +6109,13 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
         self._start_processes(wrap)
 
-    def _create_process_group_nccl(self, backend=NCCL_BACKEND):
-        if backend != NCCL_BACKEND:
-            self._retire_nccl2_on_wait()
+    def _create_process_group_nccl(self):
         store = dist.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend, world_size=self.world_size, rank=self.rank, store=store
+            NCCL_BACKEND, world_size=self.world_size, rank=self.rank, store=store
         )
         pg = c10d.distributed_c10d._get_default_group()
         return pg
-
-    def _retire_nccl2_on_wait(self):
-        # nccl2 groups created after this retire completed work, and so their
-        # FlightRecorderHook entries, inside Work.wait() instead of on the
-        # watchdog.
-        os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
-
-    def _wait_for_pending_works(self, pg, backend):
-        if backend == NCCL_BACKEND:
-            pg._wait_for_pending_works()
-            return
-        # nccl2 has no waitForPendingWorks; _retire_nccl2_on_wait made the
-        # last Work.wait() retire everything.
-        t = json.loads(torch._C._distributed_c10d._dump_fr_trace_json(backend=backend))
-        self.assertTrue(all(e["state"] == "completed" for e in t.get("entries", [])))
 
     def tearDown(self):
         os.environ.pop("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", None)
@@ -6166,19 +6149,14 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     hw_classification = HardwareClassification.CUDA
 
-    def _verify_trace(
-        self, t, include_collectives, timing_enabled, is_json, backend=NCCL_BACKEND
-    ):
-        legacy = backend == NCCL_BACKEND
+    def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.10")
-        # FlightRecorderHook records no comm lib version.
-        if legacy:
-            comm_lib_version = t["comm_lib_version"]
-            torch_comm_lib_version = torch.cuda.nccl.version()
-            self.assertEqual(
-                comm_lib_version, ".".join(str(v) for v in torch_comm_lib_version)
-            )
+        comm_lib_version = t["comm_lib_version"]
+        torch_comm_lib_version = torch.cuda.nccl.version()
+        self.assertEqual(
+            comm_lib_version, ".".join(str(v) for v in torch_comm_lib_version)
+        )
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -6187,13 +6165,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertIn("ranks", default_pg_info)
         pg_status = t["pg_status"]
         self.assertEqual(len(pg_status), 1)
-        # FlightRecorderHook reports the 0-based hook op_id and no starts.
-        last_seq = "2" if legacy else "1"
-        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), last_seq)
-        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), last_seq)
+        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), "2")
+        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "2")
         self.assertEqual(
             str(pg_status["0"]["last_started_collective"]),
-            "2" if timing_enabled and legacy else "-1",
+            "2" if timing_enabled else "-1",
         )
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
@@ -6204,10 +6180,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(last["thread_id"], str(threading.current_thread().ident))
             self.assertEqual(last["thread_name"], "fr_test_thread")
             self.assertEqual(last["process_group"], ("0", "default_pg"))
-            self.assertEqual(
-                last["profiling_name"],
-                "nccl:all_reduce" if legacy else "nccl2:all_reduce",
-            )
             self.assertEqual(last["state"], "completed")
             s = last["time_discovered_started_ns"]
             f = last["time_discovered_completed_ns"]
@@ -6272,11 +6244,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
-    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
-    def test_short_json(self, timing_enabled, include_collectives, backend):
+    def test_short_json(self, timing_enabled, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl(backend)
+        pg = self._create_process_group_nccl()
         if timing_enabled:
             pg._enable_collectives_timing()
         device = self.local_device
@@ -6286,13 +6257,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        self._wait_for_pending_works(pg, backend)
+        pg._wait_for_pending_works()
         t = json.loads(
             torch._C._distributed_c10d._dump_nccl_trace_json(
                 includeCollectives=include_collectives
             )
         )
-        self._verify_trace(t, include_collectives, timing_enabled, True, backend)
+        self._verify_trace(t, include_collectives, timing_enabled, True)
         dist.destroy_process_group()
 
     @requires_nccl()
@@ -6329,11 +6300,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
-    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
-    def test_fr_record_reset(self, timing_enabled, backend):
+    def test_fr_record_reset(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl(backend)
+        pg = self._create_process_group_nccl()
         if timing_enabled:
             pg._enable_collectives_timing()
         device = self.local_device
@@ -6343,86 +6313,15 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        self._wait_for_pending_works(pg, backend)
+        pg._wait_for_pending_works()
         torch._C._distributed_c10d._reset_fr_recording_nccl()
         for _ in range(4):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        self._wait_for_pending_works(pg, backend)
+        pg._wait_for_pending_works()
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 4)
-        dist.destroy_process_group()
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_dump_mixed_legacy_and_nccl2(self):
-        if self.rank == self.MAIN_PROCESS_RANK:
-            return
-        pg = self._create_process_group_nccl()
-        self._retire_nccl2_on_wait()
-        groups = {
-            "default_pg": (pg, NCCL_BACKEND),
-            "nccl2_pg": (
-                c10d.new_group(backend="nccl2", group_desc="nccl2_pg"),
-                "nccl2",
-            ),
-            "lazy_pg": (
-                c10d.new_group(backend="nccl-lazy", group_desc="lazy_pg"),
-                "nccl-lazy",
-            ),
-        }
-        device = self.local_device
-        a = torch.full((3, 4), float(self.rank), device=device)
-        for group, _ in groups.values():
-            dist.all_reduce(a, group=group)
-        torch.cuda.synchronize(device=device)
-        for group, backend in groups.values():
-            self._wait_for_pending_works(group, backend)
-        traces = [
-            pickle.loads(torch._C._distributed_c10d._dump_nccl_trace()),
-            json.loads(torch._C._distributed_c10d._dump_nccl_trace_json()),
-        ]
-        for t in traces:
-            self.assertEqual(
-                sorted(c["desc"] for c in t["pg_config"].values()), sorted(groups)
-            )
-            self.assertEqual(
-                sorted(e["profiling_name"] for e in t["entries"]),
-                ["nccl-lazy:all_reduce", "nccl2:all_reduce", "nccl:all_reduce"],
-            )
-            # pg_status is keyed by str(pg_id).
-            pg_ids = {e["process_group"][1]: e["pg_id"] for e in t["entries"]}
-            self.assertEqual(len(set(pg_ids.values())), len(groups))
-            self.assertEqual(
-                sorted(t["pg_status"]), sorted(str(i) for i in pg_ids.values())
-            )
-            for e in t["entries"]:
-                status = t["pg_status"][str(e["pg_id"])]
-                self.assertEqual(
-                    str(status["last_completed_collective"]),
-                    str(status["last_enqueued_collective"]),
-                )
-        for t in [
-            pickle.loads(
-                torch._C._distributed_c10d._dump_nccl_trace(includeCollectives=False)
-            ),
-            json.loads(
-                torch._C._distributed_c10d._dump_nccl_trace_json(
-                    includeCollectives=False
-                )
-            ),
-        ]:
-            self.assertNotIn("entries", t)
-            self.assertEqual(
-                sorted(c["desc"] for c in t["pg_config"].values()), sorted(groups)
-            )
-            self.assertEqual(
-                sorted(t["pg_status"]), sorted(str(i) for i in pg_ids.values())
-            )
-        torch._C._distributed_c10d._reset_fr_recording_nccl()
-        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(t["entries"], [])
         dist.destroy_process_group()
 
     @requires_nccl()
