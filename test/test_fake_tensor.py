@@ -2165,6 +2165,32 @@ assert not torch.cuda.is_initialized()
             delattr(torch, backend_name)
             del sys.modules[f"torch.{backend_name}"]
 
+    @skipIfTorchDynamo(
+        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
+    )
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_to_unavailable_device_with_privateuse1_backend(self):
+        # With an available privateuse1 backend, avoid_device_init is False,
+        # but device conversion to an *unavailable* backend (cuda here) must
+        # still produce a fake tensor instead of running the real kernel.
+        class _DummyPrivateUse1Module:
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        backend_name = "privateuseone"
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+            x = torch.zeros(2)
+            with FakeTensorMode(allow_non_fake_inputs=True):
+                y = x.to("cuda:0")
+                self.assertEqual(y.device, torch.device("cuda:0"))
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
+
     def test_unique_output_dtype(self):
         shape_env = ShapeEnv()
         for input_dtype in [torch.float32, torch.float16, torch.bfloat16]:
