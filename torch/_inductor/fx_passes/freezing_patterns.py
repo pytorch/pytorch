@@ -198,6 +198,9 @@ def addmm_patterns_init():
                 return False
         return True
 
+    def check_transposed_weights(weights: list[torch.Tensor]) -> bool:
+        return all(w.dim() == 2 and w.t().is_contiguous() for w in weights)
+
     def int8_woq_fusion_pattern(inp, w1, w2, w3, s1, s2, s3):
         return ((inp @ w1) * s1, (inp @ w2) * s2, (inp @ w3) * s3)
 
@@ -225,10 +228,21 @@ def addmm_patterns_init():
     def matmul_fuse_pattern(inp, w1, w2, w3):
         return (inp @ w1, inp @ w2, inp @ w3)
 
-    def matmul_replacement(inp, w1, w2, w3):
-        weights = (w1, w2, w3)
-        cat_t = torch.cat(weights, dim=1)
-        mm = inp @ cat_t
+    def cat_weights(weights: list[torch.Tensor]) -> torch.Tensor:
+        # Keep column-major weights column-major (on GPU): cat their row-major
+        # transposes along dim 0 and transpose back instead of copying into row-major.
+        preserve_layout = config.freezing_weights_concat_preserve_layout
+        cpu = weights[0].is_cpu
+        if preserve_layout and not cpu and check_transposed_weights(weights):
+            return torch.cat([w.t() for w in weights], dim=0).t()
+        return torch.cat(weights, dim=1)
+
+    def matmul_replacement(
+        inp: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, w3: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        weights = [w1, w2, w3]
+        cat_w = cat_weights(weights)
+        mm = inp @ cat_w
         return mm.split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
@@ -248,10 +262,12 @@ def addmm_patterns_init():
     def matmul_fuse_pattern_two(inp, w1, w2):
         return (inp @ w1, inp @ w2)
 
-    def matmul_replacement_two(inp, w1, w2):
-        weights = (w1, w2)
-        cat_t = torch.cat(weights, dim=1)
-        mm = inp @ cat_t
+    def matmul_replacement_two(
+        inp: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        weights = [w1, w2]
+        cat_w = cat_weights(weights)
+        mm = inp @ cat_w
         return mm.split([w.size(1) for w in weights], dim=1)
 
     register_replacement(
@@ -275,9 +291,17 @@ def addmm_patterns_init():
             aten.addmm(b3, inp, w3),
         )
 
-    def addmm_fuse_replacement_second(inp, w1, w2, w3, b1, b2, b3):
-        weights = (w1, w2, w3)
-        cat_w = torch.cat(weights, dim=1)
+    def addmm_fuse_replacement_second(
+        inp: torch.Tensor,
+        w1: torch.Tensor,
+        w2: torch.Tensor,
+        w3: torch.Tensor,
+        b1: torch.Tensor,
+        b2: torch.Tensor,
+        b3: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        weights = [w1, w2, w3]
+        cat_w = cat_weights(weights)
         cat_b = torch.cat((b1, b2, b3))
         return aten.addmm(cat_b, inp, cat_w).split([w.size(1) for w in weights], dim=1)
 

@@ -1871,6 +1871,13 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
+# Frozen GEMM weights that multiply a common input are concatenated into one weight,
+# trading several GEMMs for a single bigger one. If this flag is set and all of the
+# weights are column-major (transposed), the concatenated weight stays column-major
+# instead of being copied into row-major (on GPU only); mixed layouts still become
+# row-major.
+freezing_weights_concat_preserve_layout: bool = False
+
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 

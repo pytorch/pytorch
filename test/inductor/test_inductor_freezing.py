@@ -80,6 +80,74 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
+class ConcatMM(torch.nn.Module):
+    def __init__(self, weights: list[torch.Tensor], biases: list[torch.Tensor]) -> None:
+        super().__init__()
+        self.weights = nn.ParameterList(weights)
+        self.biases = nn.ParameterList(biases)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        if not self.biases:
+            return tuple(x @ w for w in self.weights)
+        return tuple(aten.addmm(b, x, w) for b, w in zip(self.biases, self.weights))
+
+
+# ConcatMM with (K, N) weights for each N in out_sizes, stored column-major
+# (transposed) or row-major.
+def _concat_mm(
+    out_sizes: tuple[int, ...], transposed: bool = False, bias: bool = False
+) -> ConcatMM:
+    k = 10
+    if transposed:
+        weights = [torch.rand(n, k).t() for n in out_sizes]
+    else:
+        weights = [torch.rand(k, n) for n in out_sizes]
+    biases = [torch.rand(n) for n in out_sizes] if bias else []
+    return ConcatMM(weights, biases)
+
+
+# Checks that the matmuls in mod are fused into a single mm whose concatenated
+# weight is column-major or row-major.
+def _check_fused_mm(self: TestCase, mod: ConcatMM, column_major: bool = False) -> None:
+    k = mod.weights[0].size(0)
+    n = sum(w.size(1) for w in mod.weights)
+    size = (k, n)
+    stride = (1, k) if column_major else (n, 1)
+    kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
+    mm_invoke = "mm("
+    # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1263
+    mkldnn_weight_pack_init = (
+        torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
+    )
+    if self.device == "cpu" and mkldnn_weight_pack_init:
+        if torch.ops.mkldnn._is_mkldnn_acl_supported():
+            # for aarch64 with acl supported, use mkldnn weight prepack
+            # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1176-L1184
+            mm_invoke = "mkldnn._linear_pointwise.default("
+        elif torch._C.has_mkl:
+            mm_invoke = "mkl_linear.default("
+
+    mod = mod.to(self.device)
+    inp = torch.rand([10, k]).to(self.device)
+
+    @torch.compile()
+    def compiled_forward(
+        mod: torch.nn.Module, inp: torch.Tensor
+    ) -> tuple[torch.Tensor, ...]:
+        return mod(inp)
+
+    with torch.no_grad():
+        out = mod(inp)
+        out_compiled, code = run_and_get_code(compiled_forward, mod, inp)
+        FileCheck().check_not(kernel_invoke).check_count(
+            mm_invoke, count=1, exactly=True
+        ).run(code[0])
+        # Prepacked weights (mkl/mkldnn on CPU) hide the fused weight layout.
+        if mm_invoke == "mm(":
+            FileCheck().check(f"{size} {stride}").run(code[0])
+        self.assertEqual(out, out_compiled)
+
+
 class ConvBN(torch.nn.Module):
     def __init__(self, in_channels, out_channels, bias=False, **kwargs):
         super().__init__()
@@ -303,96 +371,45 @@ class OptimizeForInferenceTemplate(TestCase):
     @torch._inductor.config.patch(
         {"cpp.enable_concat_linear": True, "shape_padding": False}
     )
-    def test_mm_concat(self):
-        class MM(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
+    def test_mm_concat(self) -> None:
+        # matmul_replacement
+        _check_fused_mm(self, _concat_mm((10, 10, 10)))
+        _check_fused_mm(self, _concat_mm((15, 20, 10)))
+        _check_fused_mm(self, _concat_mm((15, 20, 10), transposed=True))
 
-                self.t1 = torch.nn.Parameter(torch.rand(10, 10))
-                self.t2 = torch.nn.Parameter(torch.rand(10, 10))
-                self.t3 = torch.nn.Parameter(torch.rand(10, 10))
+        # matmul_replacement_two
+        _check_fused_mm(self, _concat_mm((15, 20)))
+        _check_fused_mm(self, _concat_mm((15, 20), transposed=True))
 
-            def forward(self, x):
-                return x @ self.t1, x @ self.t2, x @ self.t3
+        # addmm_fuse_replacement_second
+        _check_fused_mm(self, _concat_mm((15, 20, 10), bias=True))
+        _check_fused_mm(self, _concat_mm((15, 20, 10), transposed=True, bias=True))
 
-        class MM2(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
+    @torch._inductor.config.patch(
+        {
+            "cpp.enable_concat_linear": True,
+            "shape_padding": False,
+            "freezing_weights_concat_preserve_layout": True,
+        }
+    )
+    def test_mm_concat_preserve_layout(self) -> None:
+        three = _concat_mm((15, 20, 10), transposed=True)
+        two = _concat_mm((15, 20), transposed=True)
+        addmm = _concat_mm((15, 20, 10), transposed=True, bias=True)
+        column_major = self.device != "cpu"
+        _check_fused_mm(self, three, column_major=column_major)
+        _check_fused_mm(self, two, column_major=column_major)
+        _check_fused_mm(self, addmm, column_major=column_major)
 
-                self.t1 = torch.nn.Parameter(torch.rand(10, 10))
-                self.t2 = torch.nn.Parameter(torch.rand(10, 10))
+        # Row-major and mixed layouts are not affected by the flag.
+        _check_fused_mm(self, _concat_mm((15, 20, 10)))
+        mixed = ConcatMM([torch.rand(15, 10).t(), torch.rand(10, 20)], [])
+        _check_fused_mm(self, mixed)
 
-            def forward(self, x):
-                return x @ self.t1, x @ self.t2
-
-        class AddMM(MM):
-            def __init__(self) -> None:
-                super().__init__()
-
-                self.b1 = torch.nn.Parameter(torch.rand([10]))
-                self.b2 = torch.nn.Parameter(torch.rand([10]))
-                self.b3 = torch.nn.Parameter(torch.rand([10]))
-
-            def forward(self, x):
-                return [
-                    aten.addmm(b, x, p)
-                    for b, p in [
-                        (self.b1, self.t1),
-                        (self.b2, self.t2),
-                        (self.b3, self.t3),
-                    ]
-                ]
-
-        for mod_fn in [
-            lambda: MM().to(self.device),
-            lambda: MM2().to(self.device),
-            lambda: AddMM().to(self.device),
-        ]:
-            mod = mod_fn()
-            inp = torch.rand([10, 10]).to(self.device)
-
-            @torch.compile()
-            def foo(mod, inp):
-                return mod(inp)
-
-            kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
-            mm_invoke = "mm("
-            # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1263
-            mkldnn_weight_pack_init = (
-                torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
-            )
-            if self.device == "cpu" and mkldnn_weight_pack_init:
-                if torch.ops.mkldnn._is_mkldnn_acl_supported():
-                    # for aarch64 with acl supported, use mkldnn weight prepack
-                    # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1176-L1184
-                    mm_invoke = "mkldnn._linear_pointwise.default("
-                elif torch._C.has_mkl:
-                    mm_invoke = "mkl_linear.default("
-
-            with torch.no_grad():
-                out_eager = mod(inp)
-                out, code = run_and_get_code(foo, mod, inp)
-                FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=1, exactly=True
-                ).run(code[0])
-                self.assertEqual(out_eager, out)
-
-            mod2 = mod_fn()
-            mod2.t1 = torch.nn.Parameter(torch.rand([10, 15], device=self.device))
-            mod2.t2 = torch.nn.Parameter(torch.rand([10, 20], device=self.device))
-
-            if hasattr(mod2, "b1"):
-                mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
-                mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
-
-            # fused: weights share same dim 0 (in_features), different dim 1 is OK
-            with torch.no_grad():
-                out_eager = mod2(inp)
-                out, code = run_and_get_code(foo, mod2, inp)
-                FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=1, exactly=True
-                ).run(code[0])
-                self.assertEqual(out_eager, out)
+        # A (K, 1) weight has stride (1, 1) whether it is stored row- or column-major,
+        # so it must not prevent the other weights from staying column-major.
+        single_col = ConcatMM([torch.rand(15, 10).t(), torch.rand(10, 1)], [])
+        _check_fused_mm(self, single_col, column_major=column_major)
 
     def test_static_indices_cudagraph(self):
         if self.device != "cuda":
