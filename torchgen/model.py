@@ -2866,6 +2866,24 @@ def gets_generated_out_inplace_wrapper(
     )
 
 
+def gets_generated_inplace_meta_kernel(
+    f: NativeFunction | NativeFunctionsGroup, b: BackendIndex
+) -> bool:
+    if isinstance(f, NativeFunctionsGroup):
+        if f.inplace is None:
+            return False
+        f = f.inplace
+    return (
+        b.dispatch_key == DispatchKey.Meta
+        and f.func.kind() is SchemaKind.inplace
+        and not b.has_kernel(f)
+        # Defer to composites for meta implementation
+        and not f.has_composite_kernel
+        # Inplace list operations are not supported
+        and len(f.func.returns) == 1
+    )
+
+
 # NativeFunction objects that are views (f.is_view_op returns True)
 # are added into a `NativeFunctionsViewGroup`, which we can use to
 # easily access the generated (optional) view_copy NativeFunction.

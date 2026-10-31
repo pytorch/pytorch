@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 import typing
 import unittest
 import unittest.mock
@@ -9,6 +10,7 @@ from collections import defaultdict
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
 from tools.pyi.gen_pyi import generate_type_hints
+from tools.test.codegen_test_utils import gen_register_dispatch_key
 
 from torchgen import dest
 from torchgen.api.python import PythonSignatureGroup, signature
@@ -20,9 +22,11 @@ from torchgen.dest.native_functions import (
     validate_cpu_dll_cuda_kernels,
 )
 from torchgen.gen import (
+    get_grouped_native_functions,
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
+    parse_native_yaml_struct,
     static_dispatch,
 )
 from torchgen.model import (
@@ -568,6 +572,93 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
                 AssertionError, "kernel_removed_from_native_functions_yaml"
             ):
                 validate_cpu_dll_cuda_kernels(backend_indices)
+
+
+class TestRegisterMetaHeaders(unittest.TestCase):
+    def test_generated_inplace_meta_kernel_includes_dispatch_header(self) -> None:
+        # RegisterMeta defines at::meta:: wrappers for unstructured inplace ops,
+        # which are only exported if they see their TORCH_API declaration.
+        parsed = parse_native_yaml_struct(
+            yaml.load(
+                """
+- func: foo(Tensor self) -> Tensor
+  dispatch:
+    CPU: foo
+- func: foo_(Tensor(a!) self) -> Tensor(a!)
+  dispatch:
+    CPU: foo_
+- func: foo.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: foo_out
+- func: _fill_mem_eff_dropout_mask_(Tensor(a!) self, float dropout_p, int seed, int offset) -> Tensor(a!)
+  dispatch:
+    CUDA: _fill_mem_eff_dropout_mask_
+  tags: nondeterministic_seeded
+- func: own(Tensor self) -> Tensor
+  dispatch:
+    CPU: own
+- func: own_(Tensor(a!) self) -> Tensor(a!)
+  dispatch:
+    CPU: own_
+    Meta: own_meta_
+- func: own.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: own_out
+- func: comp(Tensor self) -> Tensor
+  dispatch:
+    CPU: comp
+- func: comp_(Tensor(a!) self) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: comp_
+- func: comp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: comp_out
+- func: lst(Tensor[] self) -> Tensor[]
+  dispatch:
+    CPU: lst
+- func: lst_(Tensor(a!)[] self) -> ()
+  dispatch:
+    CPU: lst_
+- func: lst.out(Tensor[] self, *, Tensor(a!)[] out) -> ()
+  dispatch:
+    CPU: lst_out
+- func: baz(Tensor self) -> Tensor
+  dispatch:
+    CPU: baz
+""",
+                Loader=LineLoader,
+            ),
+            {"nondeterministic_seeded"},
+            path="test",
+            skip_native_fns_gen=True,
+        )
+        register_meta = gen_register_dispatch_key(
+            parsed, DispatchKey.Meta, per_operator_headers=True
+        )
+        included = set(re.findall(r"<ATen/ops/(\w+)_meta_dispatch\.h>", register_meta))
+        # _fill_mem_eff_dropout_mask_ is the one ungrouped op in native_functions.yaml
+        # that gets a generated Meta kernel.
+        lone = "_fill_mem_eff_dropout_mask"
+        self.assertEqual(included, {"foo", lone, "own"})
+        # foo_ and the lone op get the generated kernel; own_ keeps its own.
+        self.assertEqual(register_meta.count("Cannot inplace into non-meta tensor"), 2)
+
+        # <op>_meta_dispatch.h is only written for ops with a Meta declaration.
+        gen_decls = dest.RegisterDispatchKey(
+            parsed.backend_indices[DispatchKey.Meta],
+            Target.NAMESPACED_DECLARATION,
+            SelectiveBuilder.get_nop_selector(),
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+        )
+        decls: dict[str, list[str]] = defaultdict(list)
+        for g in get_grouped_native_functions(parsed.native_functions):
+            decls[g.root_name] += gen_decls(g)
+        self.assertEqual({name for name, d in decls.items() if d}, included)
+        foo_decl = "TORCH_API at::Tensor & foo_(at::Tensor & self);\n"
+        self.assertEqual(decls["foo"], [foo_decl])
 
 
 class TestGenNativeFunctionDeclaration(unittest.TestCase):
