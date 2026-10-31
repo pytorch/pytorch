@@ -4957,6 +4957,20 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served", out.stdout)
         return out.stdout
 
+    def test_a_cpp_wrapper_set_after_capture_began_does_not_change_the_record(self):
+        single = self.mod.single
+        options = {"triton.cudagraphs": True, "graph_partition": True}
+        with self._capture(single, options=options) as cap:
+            # The calls compile under the cpp_wrapper capture() read.
+            with torch._inductor.config.patch(cpp_wrapper=True):
+                y = cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            meta = _parse_artifact_metadata(f.read())
+        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        # Under crossref the guards hold only inside the harness's mode.
+        if not TEST_WITH_CROSSREF:
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
+
     def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
         single = self.mod.single
         # cpp_wrapper compiles no CUDA graphs under graph_partition.

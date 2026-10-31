@@ -1971,6 +1971,9 @@ class PrecompileSession(Generic[_P, _R]):
         # graph_partition is in it because post-compile picks the wrapper for a
         # partitioned graph by it, while the graph was partitioned at compile.
         self._cudagraph_config: dict[str, bool] = {}
+        # What each captured call compiles under: the record, and the cpp_wrapper
+        # it was derived from.
+        self._call_config: dict[str, bool] = {}
         if self._backend_name == "inductor":
             from torch._inductor import config as inductor_config
 
@@ -1991,6 +1994,7 @@ class PrecompileSession(Generic[_P, _R]):
                 config["graph_partition"]
             ):
                 config["triton.cudagraphs"] = False
+            self._call_config = {**config, "cpp_wrapper": cpp_wrapper}
             _check_cudagraph_policy(config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
@@ -2113,7 +2117,7 @@ class PrecompileSession(Generic[_P, _R]):
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
-                torch._inductor.config.patch(self._cudagraph_config),
+                torch._inductor.config.patch(self._call_config),
             ):
                 _check_cudagraph_policy(self._cudagraph_config)
                 return self._compiled(*args, **kwargs)
