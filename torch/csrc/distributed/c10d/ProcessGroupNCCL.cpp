@@ -1033,6 +1033,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
   init();
+  // Names the file fr_dump_file?backend=nccl writes, as dumpDebuggingInfo does.
+  FlightRecorderCUDA::get()->setRank(globalRank());
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());

@@ -432,8 +432,8 @@ class FlightRecorderHandler(DebugHandler):
                     self._dump_tables(title, backend_addrs, list(backend_resps))
                 )
             except Exception:
-                # Debug level: builds without a backend fail its fetch on every
-                # periodic dump.
+                # Debug level: builds without NCCL fail the NCCL fetch on every
+                # periodic dump. The nccl2 one is just empty without a group.
                 logger.debug("Failed to fetch %s trace", name, exc_info=True)
                 parts.append(f"=== {title} ===\nFailed to fetch {name} trace")
 
