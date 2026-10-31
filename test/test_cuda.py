@@ -7,6 +7,7 @@ import functools
 import gc
 import importlib.util
 import json
+import mmap
 import os
 import pickle
 import random
@@ -12958,8 +12959,19 @@ class TestGDS(TestCase):
         # local filesystem (ext4/xfs) for the temp file the transfer targets.
         if not torch.cuda.gds.is_available():
             self.skipTest("GDS (cuFile/hipFile) not built into this install")
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+        if self._get_tmp_dir_fs_type() in ("ext4", "xfs"):
+            return
+        if not TEST_WITH_ROCM:
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        # hipFile's compat mode falls back to POSIX I/O on other filesystems, but
+        # we should skip the test if compat mode was disabled
+        # (HIPFILE_ALLOW_COMPAT_MODE=false), so probe for it.
+        try:
+            with TemporaryFileName() as f:
+                file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+                file.save_storage(torch.empty(1, device="cuda").untyped_storage())
+        except (OSError, RuntimeError):
+            self.skipTest("hipFile requires compat mode on this filesystem")
 
     def test_gds_is_available(self):
         # is_available() must be callable and return a bool even when GDS is off.
@@ -12997,6 +13009,53 @@ class TestGDS(TestCase):
             file.save_storage(src.untyped_storage())
             file.load_storage(dest.untyped_storage())
         self.assertEqual(src, dest)
+
+    def test_gds_stream_ordered(self):
+        # The blocking transfers wait for the kernels already enqueued on the
+        # current (side) stream before transferring.
+        self._require_gds()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream), TemporaryFileName() as f:
+            src = torch.empty(4096, device="cuda")
+            dest = torch.empty_like(src)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            # Each kernel is enqueued while the device sleeps, so a transfer
+            # that does not wait for it would save stale data from src, or have
+            # its loaded data overwritten by dest.zero_().
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage(src.untyped_storage())
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            dest.zero_()
+            file.load_storage(dest.untyped_storage())
+            self.assertEqual(src, dest)
+
+    def test_gds_graph_capture_unsupported(self):
+        # Waiting for the stream would invalidate the capture, and the stream
+        # APIs do not support CUDA graphs. Each call is rejected before touching
+        # the stream, so the capture remains usable.
+        self._require_gds()
+        storage = torch.empty(1024, device="cuda").untyped_storage()
+        x = torch.zeros(1, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            transfers = (
+                file.save_storage,
+                file.load_storage,
+                file.save_storage_async,
+                file.load_storage_async,
+            )
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                for transfer in transfers:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "not supported during CUDA graph capture"
+                    ):
+                        transfer(storage)
+                # Continue recording work within the CUDA graph.
+                x.add_(1)
+        g.replay()
+        self.assertEqual(x.item(), 1)
 
     @parametrize("dtype", [torch.float32, torch.float64, torch.int64, torch.uint8])
     def test_gds_dtypes(self, dtype):
@@ -13044,10 +13103,147 @@ class TestGDS(TestCase):
                 AssertionError, "Cannot load data from a file that is not registered"
             ):
                 file.load_storage(storage)
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot save data to a file that is not registered"
+            ):
+                file.save_storage_async(storage)
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot load data from a file that is not registered"
+            ):
+                file.load_storage_async(storage)
             # Re-registering restores usability.
             file.register_handle()
             self.assertIsNotNone(file.handle)
             file.save_storage(storage)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "hipFile transfer size limit")
+    @largeTensorTest("3GB", "cuda")
+    def test_gds_hipfile_transfer_size_limit(self):
+        # hipFile silently truncates transfers to MAX_RW_COUNT, so GdsFile
+        # rejects larger storages. If the truncation check below fails, hipFile
+        # supports larger transfers: remove check_transfer_size from
+        # GdsFile.cpp along with this test.
+        self._require_gds()
+        max_nbytes = 2**31 - mmap.PAGESIZE
+        # Keep the size O_DIRECT aligned, or hipFile's fastpath refuses it and
+        # the transfer fails rather than truncating when compat mode is off.
+        storage = torch.UntypedStorage(2**31, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            transfers = (
+                file.save_storage,
+                file.load_storage,
+                file.save_storage_async,
+                file.load_storage_async,
+            )
+            for transfer in transfers:
+                with self.assertRaisesRegex(RuntimeError, "transfers at most"):
+                    transfer(storage)
+            # Bypass the check by calling hipFile directly. Find the loaded
+            # library rather than naming its soname, which can change.
+            with open("/proc/self/maps") as maps:
+                path = next(s.split()[-1] for s in maps if "/libhipfile.so" in s)
+            write = ctypes.CDLL(path).hipFileWrite
+            write.restype = ctypes.c_ssize_t
+            ptr, off = ctypes.c_void_p, ctypes.c_int64
+            write.argtypes = [ptr, ptr, ctypes.c_size_t, off, off]
+            written = write(file.handle, storage.data_ptr(), storage.nbytes(), 0, 0)
+            self.assertEqual(written, max_nbytes)
+            # A storage at the limit is not rejected.
+            del storage
+            storage = torch.UntypedStorage(max_nbytes, device="cuda")
+            file.load_storage(storage)
+
+    def test_gds_async_stream_ordered(self):
+        # The transfers run on the current (side) stream after the kernels that
+        # produce src.
+        self._require_gds()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream), TemporaryFileName() as f:
+            src = torch.empty(4096, device="cuda")
+            dest = torch.zeros_like(src)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            # The work to modify src will be enqueued while the device sleeps,
+            # and the data will be stale until the sleep finishes.
+            # If the save_storage/load_storage calls are not stream ordered,
+            # they will read stale data from src.
+            src.normal_()
+            bytes_written = file.save_storage_async(src.untyped_storage())
+            bytes_read = file.load_storage_async(dest.untyped_storage())
+            stream.synchronize()
+            self.assertEqual(src, dest)
+        self.assertEqual(bytes_written.item(), src.nbytes)
+        self.assertEqual(bytes_read.item(), src.nbytes)
+
+    def test_gds_async_deregister_waits(self):
+        # Deregistering the handle waits for pending async I/O on it, and the
+        # I/O does not depend on the caller keeping the returned count alive.
+        self._require_gds()
+        src = torch.empty(4096, device="cuda")
+        dest = torch.empty_like(src)
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage_async(src.untyped_storage())
+            file.deregister_handle()
+            # Deregistering the handle should wait for pending async I/O.
+            self.assertTrue(torch.cuda.current_stream().query())
+            file.register_handle()
+            file.load_storage(dest.untyped_storage())
+            self.assertEqual(src, dest)
+            # Deleting the file deregisters the handle, so it waits too.
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            file.save_storage_async(src.untyped_storage())
+            del file
+            self.assertTrue(torch.cuda.current_stream().query())
+
+    def test_gds_async_deregister_buffer_waits(self):
+        # Deregistering a buffer waits for pending async I/O on it. hipFile
+        # rejects deregistering a buffer with operations outstanding.
+        self._require_gds()
+        src = torch.empty(4096, device="cuda")
+        torch.cuda.gds.gds_register_buffer(src.untyped_storage())
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage_async(src.untyped_storage())
+            torch.cuda.gds.gds_deregister_buffer(src.untyped_storage())
+            self.assertTrue(torch.cuda.current_stream().query())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_gds_async_deregister_waits_multi_gpu(self):
+        # Each device's default stream has the same file handle, so the pending
+        # I/O on both must still be waited for.
+        self._require_gds()
+        storages = [
+            torch.empty(4096, device=f"cuda:{i}").untyped_storage() for i in range(2)
+        ]
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            with torch.cuda.device(0):
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            file.save_storage_async(storages[0])
+            file.save_storage_async(storages[1], offset=storages[0].nbytes())
+            file.deregister_handle()
+            for i in range(2):
+                self.assertTrue(torch.cuda.current_stream(i).query())
+
+    def test_gds_async_failure_reported(self):
+        # Writing through a read-only fd must not report success: the error
+        # is raised at enqueue or reported as a negative byte count.
+        self._require_gds()
+        storage = torch.empty(4096, device="cuda").untyped_storage()
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_RDONLY)
+            try:
+                written = file.save_storage_async(storage)
+            except RuntimeError:
+                return
+            torch.cuda.current_stream().synchronize()
+            self.assertLess(written.item(), 0)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
