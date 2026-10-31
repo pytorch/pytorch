@@ -1236,8 +1236,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 base_tensors_dct,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V2,
-                result_alias_guard=lambda arg, mutated_arg, all_args: candidate_result_escapes(
-                    node, arg, mutated_arg, all_args
+                result_alias_guard=(
+                    lambda arg, mutated_arg, all_args: candidate_result_escapes(
+                        node, arg, mutated_arg, all_args
+                    )
                 ),
             )
             # Stash the metadata. There is a pass later on where we decompose
@@ -1258,8 +1260,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V1,
-                result_alias_guard=lambda arg, mutated_arg, all_args: candidate_result_escapes(
-                    node, arg, mutated_arg, all_args
+                result_alias_guard=(
+                    lambda arg, mutated_arg, all_args: candidate_result_escapes(
+                        node, arg, mutated_arg, all_args
+                    )
                 ),
             )
 
@@ -1436,8 +1440,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["kwargs"],
                 kernel_name,
                 ReInplaceTrigger.TRITON_OPS,
-                result_alias_guard=lambda arg, mutated_arg, all_args: candidate_result_escapes(
-                    node, arg, mutated_arg, all_args, triton=True
+                result_alias_guard=(
+                    lambda arg, mutated_arg, all_args: candidate_result_escapes(
+                        node, arg, mutated_arg, all_args, triton=True
+                    )
                 ),
             )
 
