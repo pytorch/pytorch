@@ -1212,7 +1212,11 @@ class FSDPTestMixin:
 
     def _root_fsdp_kwargs(self, fsdp_kwargs):
         root_kwargs = fsdp_kwargs.copy()
-        if "device_id" not in root_kwargs:
+        cpu_offload = root_kwargs.get("cpu_offload")
+        # Preserve the existing CPU-offload constructor path.
+        if "device_id" not in root_kwargs and not (
+            cpu_offload is not None and cpu_offload.offload_params
+        ):
             root_kwargs["device_id"] = self._selected_device()
         return root_kwargs
 
