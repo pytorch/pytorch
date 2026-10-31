@@ -80,6 +80,7 @@ install_almalinux() {
     # pre-10.0 rocSHMEM's dlopen("libnuma.so") resolves. The copy fails the
     # wheel build if numactl-libs is missing.
     yum install -y numactl-libs
+    yum install -y xz-devel
 
     # The manywheel build intentionally uses only the common ROCm environment.
     # Its produced wheel resolves ROCm at runtime via RPATH (see repair_wheel.py),
