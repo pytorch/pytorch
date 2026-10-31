@@ -5554,7 +5554,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the recorder instance to dump: "gloo" for ProcessGroupGloo, "nccl" for ProcessGroupNCCL (on builds with NCCL), or the backend name with ':' replaced by '_' for backends the flight recorder hook records (e.g. "nccl2"). Default is "gloo", the instance ProcessGroupGloo records into.
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5580,7 +5580,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the recorder instance to dump: "gloo" for ProcessGroupGloo, "nccl" for ProcessGroupNCCL (on builds with NCCL), or the backend name with ':' replaced by '_' for backends the flight recorder hook records (e.g. "nccl2"). Each has its own instance, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
@@ -5608,14 +5608,16 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
       R"(
             Dumps the pickled work traces to the file the registered
             DebugInfoWriter points at, which defaults to
-            <TORCH_FR_DUMP_TEMP_FILE><rank>.
+            <TORCH_FR_DUMP_TEMP_FILE><rank>. Every backend's dump and
+            ProcessGroupNCCL's timeout dump write that file, so this
+            overwrites any earlier dump there, including the watchdog's.
 
             Arguments:
-                rank(int): Rank used to name the per-rank output file.
+                rank(int): Rank used to name the per-rank output file, only if no earlier dump in this process created the file.
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
+                backend (str, optional): Name of the backend whose recorder instance to dump, as for ``_dump_fr_trace``. Default is "gloo".
         )");
   module.def(
       "_reset_fr_trace",
@@ -5627,7 +5629,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
             counterpart of _reset_fr_recording_nccl.
 
             Arguments:
-                backend (str, optional): Name of the backend whose recorder instance to reset. Default is "gloo".
+                backend (str, optional): Name of the backend whose recorder instance to reset, as for ``_dump_fr_trace``. Default is "gloo".
         )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(

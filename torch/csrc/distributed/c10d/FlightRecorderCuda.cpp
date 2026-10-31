@@ -101,6 +101,18 @@ control_plane::RegisterHandler jsonDumpHandler{
           "application/json");
     }};
 
+// Serves dump_fr_trace*(backend="nccl") from ProcessGroupNCCL's recorder,
+// which libtorch_cpu cannot reach.
+[[maybe_unused]] static const bool registeredDumper = [] {
+  registerFlightRecorderDumper(
+      NCCL_BACKEND_NAME,
+      {dump_nccl_trace, dump_nccl_trace_json, reset_nccl_trace, [] {
+         auto* recorder = FlightRecorder<at::cuda::CUDAEvent>::get();
+         return recorder->enabled_ ? recorder->getRank() : -1;
+       }});
+  return true;
+}();
+
 /* Helper used by work::getDuration() and nccl flight recorder */
 template <>
 float getDurationFromEvent<at::cuda::CUDAEvent>(

@@ -285,6 +285,8 @@ class FlightRecorderHandler(DebugHandler):
             NavLink("/fr_trace_json", "(JSON)"),
             NavLink("/fr_trace_nccl", "FlightRecorder NCCL"),
             NavLink("/fr_trace_nccl_json", "(JSON)"),
+            NavLink("/fr_trace?backend=nccl2", "FlightRecorder nccl2"),
+            NavLink("/fr_trace_json?backend=nccl2", "(JSON)"),
             NavLink("/fr_dump_file", "FlightRecorder Dump"),
         ]
 
@@ -388,6 +390,22 @@ class FlightRecorderHandler(DebugHandler):
             resps=resps,
         )
 
+    def _dump_tables(
+        self, title: str, addrs: list[str], resps: list[Response]
+    ) -> list[str]:
+        db = self._build_db(addrs, resps)
+        return [
+            f"=== {title} ===",
+            "--- Groups ---",
+            tabulate(db.groups, headers=Group._fields, tablefmt="plain"),
+            "--- Memberships ---",
+            tabulate(db.memberships, headers=Membership._fields, tablefmt="plain"),
+            "--- Collectives ---",
+            tabulate(db.collectives, headers=Collective._fields, tablefmt="plain"),
+            "--- NCCL Calls ---",
+            tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="plain"),
+        ]
+
     def dump(self) -> str | None:
         parts = []
 
@@ -396,54 +414,32 @@ class FlightRecorderHandler(DebugHandler):
         if summary:
             parts.append(summary)
             parts.append("")
-        db = self._build_db(addrs, resps)
-        parts.extend(
-            [
-                "=== FR Trace ===",
-                "--- Groups ---",
-                tabulate(db.groups, headers=Group._fields, tablefmt="plain"),
-                "--- Memberships ---",
-                tabulate(db.memberships, headers=Membership._fields, tablefmt="plain"),
-                "--- Collectives ---",
-                tabulate(db.collectives, headers=Collective._fields, tablefmt="plain"),
-                "--- NCCL Calls ---",
-                tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="plain"),
-            ]
-        )
+        parts.extend(self._dump_tables("FR Trace", addrs, list(resps)))
 
-        try:
-            nccl_addrs, nccl_resps = fetch_all(
-                "dump_nccl_trace_json", "onlyactive=true", timeout=self.fetch_timeout
-            )
-            nccl_db = self._build_db(nccl_addrs, nccl_resps)
-            parts.extend(
-                [
-                    "",
-                    "=== FR Trace NCCL ===",
-                    "--- Groups ---",
-                    tabulate(nccl_db.groups, headers=Group._fields, tablefmt="plain"),
-                    "--- Memberships ---",
-                    tabulate(
-                        nccl_db.memberships,
-                        headers=Membership._fields,
-                        tablefmt="plain",
-                    ),
-                    "--- Collectives ---",
-                    tabulate(
-                        nccl_db.collectives,
-                        headers=Collective._fields,
-                        tablefmt="plain",
-                    ),
-                    "--- NCCL Calls ---",
-                    tabulate(
-                        nccl_db.ncclcalls,
-                        headers=NCCLCall._fields,
-                        tablefmt="plain",
-                    ),
-                ]
-            )
-        except Exception:
-            parts.append("\n=== FR Trace NCCL ===\nFailed to fetch NCCL trace")
+        # Backend.NCCL is nccl2 by default, which records into its own
+        # instance rather than the stock ProcessGroupNCCL one ("nccl"). The
+        # list is closed since recorder names can't be enumerated; other
+        # backends are reachable via fr_trace_json?backend=<name>.
+        for name, backend in (
+            ("NCCL", "nccl"),
+            ("nccl2", "nccl2"),
+            ("nccl-lazy", "nccl-lazy"),
+        ):
+            title = f"FR Trace {name}"
+            parts.append("")
+            try:
+                backend_addrs, backend_resps = fetch_all(
+                    "fr_trace_json", f"backend={backend}", timeout=self.fetch_timeout
+                )
+                parts.extend(
+                    self._dump_tables(title, backend_addrs, list(backend_resps))
+                )
+            except Exception:
+                # Debug level: hit on every periodic dump while no worker
+                # returns a usable trace (e.g. all time out). Without a group
+                # the section is just empty.
+                logger.debug("Failed to fetch %s trace", name, exc_info=True)
+                parts.append(f"=== {title} ===\nFailed to fetch {name} trace")
 
         return "\n".join(parts)
 
