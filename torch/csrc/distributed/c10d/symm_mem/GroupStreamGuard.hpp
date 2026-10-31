@@ -2,7 +2,6 @@
 
 #include <c10/cuda/CUDAStream.h>
 #include <c10/macros/Export.h>
-#include <c10/util/intrusive_ptr.h>
 
 #include <memory>
 #include <mutex>
@@ -15,11 +14,13 @@ class ProcessGroup;
 
 namespace c10d::symmetric_memory {
 
-// RAII guard that orders the built-in CUDA-backend symmetric-memory
-// operations touching the signal pad within a (process group, device) pair:
-// barrier, put_signal and wait_signal, the collectives in
-// CUDASymmetricMemoryOps.cu, the NCCL backend's barrier, and the signal ops in
-// nccl_extension.cu. Not covered: ncclPutSignal/ncclWaitSignal, the NVSHMEM
+// RAII guard that orders the built-in symmetric-memory operations that
+// synchronize ranks through a group's signal pad or NCCL device communicator,
+// within a (process group, device) pair: barrier, put_signal and wait_signal,
+// the collectives in CUDASymmetricMemoryOps.cu, the NCCL backend's barrier,
+// the signal ops in nccl_extension.cu, and nccl_reduce_scatter_offset and
+// nccl_all_to_all_nd, whose LSA barriers belong to the group's device
+// communicator. Not covered: ncclPutSignal/ncclWaitSignal, the NVSHMEM
 // backend, and user kernels on a raw get_signal_pad() tensor.
 //
 // One guarded scope is one pad operation: construct, launch the kernel, let
@@ -30,24 +31,25 @@ namespace c10d::symmetric_memory {
 // two host threads cannot interleave reading the stream with launching.
 //
 // State is keyed by (ProcessGroup identity, device), with a weak reference to
-// the group as the liveness check. The group_name arguments only resolve the
-// group when the caller has not already.
+// the group as the liveness check.
 //
 // Under graph capture the record and wait become graph nodes, ordering
-// streams forked inside one capture. The event belongs to the capture it was
-// recorded in, so the wait is skipped when the next operation runs in a
-// different capture context. A program that warms up on one stream and then
-// captures on another hits that on its first captured operation, which is the
-// normal pattern and not something a caller can act on, so the skip is logged
-// at debug level rather than warned about.
+// streams forked inside one capture. An event can only be waited on from the
+// capture context it was recorded in, so the ordering is per context: eager
+// operations are ordered among themselves, and so are the operations of the
+// capture in progress, each keeping its own previous stream and event. A
+// captured operation therefore never drops the ordering between two eager
+// operations, even when a capture starts without synchronizing the device
+// first (a raw CUDAGraph::capture_begin). Not ordered: captured operations
+// against eager ones, and a graph replay against eager operations or other
+// replays; callers order replays themselves. One capture is tracked at a
+// time, so captures interleaved from several threads are not ordered within
+// themselves.
 class TORCH_API GroupStreamGuard {
  public:
   struct State;
 
   explicit GroupStreamGuard(const std::string& group_name);
-  GroupStreamGuard(
-      const std::string& group_name,
-      const c10::intrusive_ptr<c10d::ProcessGroup>& pg);
   ~GroupStreamGuard();
   GroupStreamGuard(const GroupStreamGuard&) = delete;
   GroupStreamGuard& operator=(const GroupStreamGuard&) = delete;
@@ -55,17 +57,15 @@ class TORCH_API GroupStreamGuard {
   GroupStreamGuard& operator=(GroupStreamGuard&&) = delete;
 
  private:
-  void init_(
-      const std::string& group_name,
-      const c10::intrusive_ptr<c10d::ProcessGroup>& pg);
+  struct LastOp;
 
   std::shared_ptr<State> state_;
   // Held until destruction, which is after the kernel launch at every call
   // site. Do not shorten this scope: see the class comment.
   std::unique_lock<std::mutex> lock_;
-  // The stream this operation launched on; the event is recorded here on
-  // destruction.
-  std::optional<c10::cuda::CUDAStream> stream_;
+  // This operation's context in state_, whose stream is the one it launched
+  // on. The event is recorded there on destruction.
+  LastOp* last_ = nullptr;
 };
 
 } // namespace c10d::symmetric_memory
