@@ -491,8 +491,10 @@ class TestOptimRenewed(TestCase):
                 self.assertEqual(weight, weight_c)
                 self.assertEqual(bias, bias_c)
 
-            # Asking for foreach explicitly is still unsupported.
-            if not kwargs.get("capturable", False):
+            # Asking for foreach explicitly is still unsupported, but a Tensor
+            # lr is rejected ahead of the betas, so skip the configs with one.
+            tensor_lr = isinstance(kwargs.get("lr"), torch.Tensor)
+            if not (tensor_lr or kwargs.get("capturable", False)):
                 with self.assertRaisesRegex(
                     ValueError, r"betas\[0\] as a Tensor is not supported"
                 ):
