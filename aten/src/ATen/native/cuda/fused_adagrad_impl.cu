@@ -21,15 +21,6 @@ void _fused_adagrad_cuda_impl_(
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
-  const auto step_dtype = state_steps[0].scalar_type();
-  TORCH_CHECK(
-      std::all_of(
-          state_steps.begin(),
-          state_steps.end(),
-          [step_dtype](const at::Tensor& step) {
-            return step.scalar_type() == step_dtype;
-          }),
-      "Fused optimizer step tensors must have the same dtype");
   auto tensor_lists =
       c10::make_nested<Tensor>(params.vec(), grads.vec(), state_sums.vec());
 

@@ -1131,7 +1131,11 @@ class TestOptimRenewed(TestCase):
         params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
         for param in params:
             param.grad = torch.full_like(param, 0.25)
-        lr = torch.tensor(0.01, device=device, dtype=torch.float32) if tensor_lr else 0.01
+        lr = (
+            torch.tensor(0.01, device=device, dtype=torch.float32)
+            if tensor_lr
+            else 0.01
+        )
         optimizer = optim_info.optim_cls(params, fused=True, lr=lr)
         optimizer.step()
         step_dtypes = (
@@ -1140,7 +1144,9 @@ class TestOptimRenewed(TestCase):
             else (torch.float64, torch.float32)
         )
         for param, step_dtype in zip(params, step_dtypes, strict=True):
-            optimizer.state[param]["step"] = optimizer.state[param]["step"].to(step_dtype)
+            optimizer.state[param]["step"] = optimizer.state[param]["step"].to(
+                step_dtype
+            )
         expected = [param.clone() for param in params]
         with self.assertRaisesRegex(
             RuntimeError, "Fused optimizer step tensors must have the same dtype"

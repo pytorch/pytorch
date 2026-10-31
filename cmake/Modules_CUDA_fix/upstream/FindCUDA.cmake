@@ -905,7 +905,7 @@ if(CUDA_USE_STATIC_CUDA_RUNTIME)
   endif()
 endif()
 
-cuda_find_library_local_first(CUDA_cupti_LIBRARY cupti "\"cupti\" library")
+cuda_find_library_local_first_with_path_ext(CUDA_cupti_LIBRARY cupti "\"cupti\" library" "extras/CUPTI/")
 mark_as_advanced(CUDA_cupti_LIBRARY)
 
 # Set the CUDA_LIBRARIES variable.  This is the set of stuff to link against if you are
