@@ -16,8 +16,8 @@ class UserDefinedTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if func is torch.divmod:
-            UserDefinedTensor.intercepted = True
+        if func in (torch.Tensor.__divmod__, torch.divmod):
+            cls.intercepted = True
 
         return super().__torch_function__(func, types, args, kwargs)
 
@@ -201,17 +201,17 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
 
     def test_divmod_compile_subclass_preserve_type(self):
         x, y = (
-            UserDefinedTensor(torch.tensor([10.0, 20.0])),
-            UserDefinedTensor(torch.tensor([3.0, 4.0])),
+            torch.tensor([10.0, 20.0]).as_subclass(UserDefinedTensor),
+            torch.tensor([3.0, 4.0]).as_subclass(UserDefinedTensor),
         )
 
         def fn(_x, _y):
             return divmod(_x, _y)
 
         def _assert(q, r):
-            self.assertTrue(UserDefinedTensor.intercepted)
             self.assertIsInstance(q, UserDefinedTensor)
             self.assertIsInstance(r, UserDefinedTensor)
+            self.assertTrue(UserDefinedTensor.intercepted)
 
         eager_q, eager_r = fn(x, y)
         _assert(eager_q, eager_r)
