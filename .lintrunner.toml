@@ -210,7 +210,7 @@ exclude_patterns = [
     'c10/xpu/XPUMacros.h',
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
-    'c10/util/complex_math.h',
+    'torch/headeronly/util/complex_math.h',
     'torch/headeronly/util/complex_utils.h',
     'torch/headeronly/cuda/Atomic.h',
     'torch/headeronly/cuda/KernelUtils.h',
