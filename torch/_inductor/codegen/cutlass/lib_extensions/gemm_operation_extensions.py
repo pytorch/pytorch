@@ -16,7 +16,9 @@ if try_import_cutlass():
     class EmitGemmUniversal3xInstanceWithEVT:
         """Responsible for emitting a CUTLASS 3.x template definition"""
 
-        def __init__(self, operation_suffix="", evt_name=None, device_type="cuda"):
+        # device_type is required so that a missing argument fails at the call site
+        # instead of silently emitting CUDA-shaped code for another backend.
+        def __init__(self, operation_suffix="", evt_name=None, *, device_type):
             self.operation_suffix = operation_suffix
             self.includes = [
                 "cutlass/cutlass.h",
