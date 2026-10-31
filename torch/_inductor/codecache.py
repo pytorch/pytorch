@@ -1117,6 +1117,7 @@ class CacheabilityValidator:
         self._check_nested_region_inductor_config_patches()
         self._check_frozen_params()
         self._check_runtime_constant_folding()
+        self._check_tunableop_tune_mode()
         self._check_compiler_bisector()
         self._check_shape_env()
         self.validate_graph(include_constants=True)
@@ -1252,6 +1253,15 @@ class CacheabilityValidator:
                 "Runtime constant folding can introduce constants that aren't "
                 "static across runs"
             )
+
+    def _check_tunableop_tune_mode(self) -> None:
+        # Tuning happens while lowering, so a cache hit records nothing: a second
+        # tune pass against a warm cache would write an empty results file.
+        # Imported here because tunableop pulls in ir, which imports this module.
+        from torch._inductor import tunableop
+
+        if tunableop.is_tune_mode():
+            self.bypass("TunableOp tune mode must lower every GEMM")
 
     def _check_compiler_bisector(self) -> None:
         from torch._inductor.compiler_bisector import CompilerBisector
