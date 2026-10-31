@@ -457,8 +457,10 @@ TORCH_API void dump_fr_trace_file(
     bool onlyActive,
     const std::string& backend = kDefaultFRBackend);
 
-// Global rank the backend's recorder was told about (at hook attach, or by
-// the dumper), or -1 if none. Names the file the dump-to-file paths write.
+// Global rank of the backend's recorder, or -1 if none: set at hook attach,
+// or for nccl by ProcessGroupNCCL at construction and reported by its dumper.
+// The dump-to-file paths pass it to DebugInfoWriter, whose file name is fixed
+// by the first dump in the process.
 TORCH_API int fr_trace_rank(const std::string& backend = kDefaultFRBackend);
 
 // dump_fr_trace_file for fr_trace_rank(backend).
