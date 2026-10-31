@@ -9237,6 +9237,80 @@ class AOTInductorTestsTemplate:
         self.assertEqual(expected, output_before_swap)
         self.assertEqual(new_expected, output_after_swap)
 
+    def test_update_constant_buffer_rejects_wrong_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
+
+        # Every constant is provided, so the full-update check passes, but the
+        # dtype does not match the exported float32 constants.
+        bad_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device).half(),
+            "L__self___bias": torch.randn(N, device=self.device).half(),
+        }
+        for args in (
+            (bad_weights, True, True),  # inactive buffer
+            (bad_weights, False, False),  # active buffer
+            (bad_weights, True, False, True),  # user managed
+        ):
+            with self.assertRaises(RuntimeError):
+                runner.update_constant_buffer(*args)
+
+        # The active constants were not touched.
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
+
+        # A correctly typed update still works, and a map that mixes a valid
+        # constant with a wrong-dtype one is rejected before anything is
+        # copied, whichever of the two the container visits first.
+        new_weights = {name: w.float() for name, w in bad_weights.items()}
+        runner.update_constant_buffer(new_weights, True, True)
+        for valid_name in bad_weights:
+            mixed_weights = dict(bad_weights)
+            mixed_weights[valid_name] = torch.randn_like(new_weights[valid_name])
+            with self.assertRaises(RuntimeError):
+                runner.update_constant_buffer(mixed_weights, True, True)
+
+        new_expected = torch.nn.functional.linear(
+            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
+        )
+        runner.swap_constant_buffer()
+        output_after_swap = runner_call(test_inputs)
+        self.assertEqual(new_expected, output_after_swap)
+
     def test_free_inactive_buffer(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")

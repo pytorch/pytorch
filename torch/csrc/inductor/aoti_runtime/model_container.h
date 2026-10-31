@@ -668,6 +668,15 @@ class AOTInductorModelContainer {
       if (it == constants_map.end()) {
         continue;
       }
+      int32_t expected_dtype = model.constant_dtype(static_cast<int64_t>(idx));
+      int32_t tensor_dtype = 0;
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_dtype(it->second, &tensor_dtype));
+      AOTI_RUNTIME_CHECK(
+          tensor_dtype == expected_dtype,
+          "update_constant_buffer: constant '" + constant_name +
+              "' has dtype " + std::to_string(tensor_dtype) +
+              " but expected dtype " + std::to_string(expected_dtype));
       int32_t expected_const_device_type =
           model.constant_device_type(static_cast<int64_t>(idx));
       int32_t tensor_device_type = 0;
