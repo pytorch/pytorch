@@ -649,6 +649,10 @@ _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 # fault; more lets a reproducible hang charge the budget once per layer.
 _TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
 
+# Least budget worth giving a bucket. Below this a timeout says more about the
+# deadline than the rung, and it would kill the worker and charge a fault.
+_TUNABLEOP_MIN_BUCKET_BUDGET = 60.0
+
 # ExternKernelChoice names the ladder covers, matched by string. bias_addmm
 # rewrites its own bias (inp[0]) before dispatching, so the rebuilt meta is not
 # what aten receives. addmm_dtype is ROCm-only: on CUDA it stays on the cublasLt
@@ -677,12 +681,10 @@ _TUNABLEOP_MIN_DYN_DIM = 8
 # 512 GiB in one operand alone. Each fault can cost a cold worker restart.
 _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 
-# Ceiling on the SYMBOL, not the dim. A declared range reports what a symbol MAY
-# take, not what it does -- every symbol here reports [2, 2**31-1] -- so without a
-# cap the ladder runs orders of magnitude past the traced hint. Capping in symbol
-# space also leaves an expression dim like 200*s free to reach the size it is
-# actually served at, which a dim-space ceiling would truncate. Expression dims
-# are bounded instead by the served-dim ceiling below.
+# Ceiling on the SYMBOL, not the dim: a declared range says what a symbol MAY
+# take (every one here reports [2, 2**31-1]), so without a cap the ladder runs
+# orders of magnitude past the hint. In symbol space an expression dim like
+# 200*s can still reach its served size; the dim ceiling below bounds those.
 _TUNABLEOP_MAX_DYN_SYM = 16384
 
 
@@ -843,11 +845,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if len(symbols) != 1:
         return
     s = next(iter(symbols))
-    # optimization_hint() does not raise for an unbacked symbol: it returns
-    # config.unbacked_symint_fallback (8192). The ladder treats the hint as the
-    # size runtime is known to ask for -- it leads the shared budget and sets
-    # both ceilings -- so a data-dependent dim would spend the budget on a size
-    # nothing asked for. Honour an explicit hint if the user set one.
+    # optimization_hint() invents config.unbacked_symint_fallback for an
+    # unbacked symbol rather than raising, and the ladder treats the hint as
+    # the served size. Honour an explicit hint if the user set one.
     if not V.graph.sizevars.all_unbacked_explicitly_hinted(s):
         return
 
@@ -1073,7 +1073,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        if remaining < _TUNABLEOP_MIN_BUCKET_BUDGET:
             log.warning(
                 "TunableOp range pre-tune for %s exhausted its %.0fs budget after "
                 "%d/%d sizes; skipping the rest.",
@@ -1085,7 +1085,8 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             break
         bucket_start = time.monotonic()
         # The whole remaining budget: a slot below the 15-40s cold-start cost
-        # would make the restart cold, time out and be killed again.
+        # would make the restart cold, time out and be killed again. The floor
+        # above keeps a truncated rung from being charged as a fault.
         outcome = submit(
             BenchmarkJob(bmreq, tuning=True, measure=False), timeout=remaining
         )
