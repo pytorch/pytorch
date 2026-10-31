@@ -1069,7 +1069,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger, result_alias_guard=None
+        old_tensors_to_clone,
+        kwargs,
+        node_name,
+        trigger,
+        result_alias_guard=None,
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
