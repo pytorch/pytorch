@@ -47,6 +47,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
+    expectedFailureDynamic,
     rand_strided,
     reset_rng_state,
     same,
@@ -6942,6 +6943,121 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
         assertGeneratedKernelCountEqual(self, 0)
+
+    def test_adaptive_avg_pool2d_backward(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(1, 1, 4, 5), torch.randn(1, 1, 8, 10)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @expectedFailureDynamic  # Symbolic sizes cannot prove divisibility.
+    @expectedFailureCodegenDynamic
+    def test_adaptive_avg_pool2d_backward_upsampling_shortcut(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(1, 1, 25, 25), torch.randn(1, 1, 5, 5)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_adaptive_avg_pool2d_backward_non_divisible(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(3, 3, 4), torch.randn(3, 7, 9)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @expectedFailureCodegenDynamic  # Fallbacks emit no kernel.
+    @parametrize("output_size", [(1, 26), (26, 1), (16, 16)])
+    def test_adaptive_avg_pool2d_backward_fallback(self, output_size):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(1, 1, *output_size), torch.randn(1, 1, 1, 1)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    @parametrize(
+        "input_size,output_size,dtype,layout",
+        [
+            ((7, 9), (3, 4), torch.float32, "channels_last"),
+            ((7, 9), (3, 4), torch.float32, "strided"),
+            ((7, 9), (3, 4), torch.bfloat16, "strided"),
+            ((2, 3), (16, 16), torch.float32, "strided"),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward_layouts(
+        self, input_size, output_size, dtype, layout
+    ):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        height, width = input_size
+        if layout == "channels_last":
+            x = torch.randn(2, 3, height, width, device=self.device, dtype=dtype)
+            x = x.contiguous(memory_format=torch.channels_last)
+        else:
+            x = torch.randn(2, 3, height, width * 2, device=self.device, dtype=dtype)
+            x = x[..., ::2]
+        grad_output = torch.randn(
+            2, 3, output_size[1], output_size[0], device=self.device, dtype=dtype
+        ).transpose(-1, -2)
+
+        self.common(
+            fn,
+            (grad_output, x),
+            check_lowp=False,
+            exact_stride=True,
+        )
+
+    def test_adaptive_avg_pool2d_backward_training(self):
+        def fn(x):
+            return F.adaptive_avg_pool2d(x, (3, 4)).sum()
+
+        x = torch.randn(2, 3, 7, 9, device=self.device, requires_grad=True)
+        expected = fn(x)
+        expected_grad = torch.autograd.grad(expected, x)[0]
+        compiled = torch.compile(fn, fullgraph=True)
+        actual, (_, bw_code) = run_fw_bw_and_get_code(lambda: compiled(x))
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, expected_grad)
+        self.assertNotIn("aten._adaptive_avg_pool2d_backward.default(", bw_code)
+        self.assertNotIn("extern_kernels.", bw_code)
+
+    @skipCPUIf(True, "CPU eager does not support empty spatial dimensions")
+    @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
+    @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0)])
+    def test_adaptive_avg_pool2d_backward_empty_input(self, input_size):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.empty(input_size, device=self.device)
+        grad_output = torch.empty(input_size[0], 2, 2, 3, device=self.device)
+        self.common(fn, (grad_output, x), check_lowp=False)
+
+    @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
+    def test_adaptive_avg_pool2d_backward_empty_batch(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.empty(0, 2, 3, 4, device=self.device)
+        grad_output = torch.empty(0, 2, 2, 3, device=self.device)
+        self.common(fn, (grad_output, x), check_lowp=False)
 
     @xfail_if_mps  # float64 is not supported on MPS
     @requires_gpu()
