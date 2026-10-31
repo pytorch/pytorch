@@ -643,6 +643,40 @@ class TestProvenanceTracingStackTraces(TestCase):
                         lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
 
+    @torch._inductor.config.patch(
+        {"trace.provenance_tracking_level": 2, "provenance_profiler_markers": True}
+    )
+    def test_provenance_profiler_markers_cpu(self):
+        model = Model4()
+        example_inputs = (
+            torch.randn(8, 10),
+            torch.randn(10, 20),
+            torch.randn(20, 30),
+            torch.randn(10, 30),
+        )
+        torch._dynamo.reset()
+        reset_inductor_kernel_provenance_debug_handle()
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            _, (code,) = run_and_get_code(compiled, *example_inputs)
+            handles = set(json.loads(payload_buffer.getvalue().strip()))
+
+        FileCheck().check("[Provenance debug handles] cpp_fused_mul_0:2").check_next(
+            "if torch.autograd.profiler._is_profiler_enabled:"
+        ).check_next(
+            "with torch._C._profiler._RecordFunctionFast('inductor_provenance:cpp_fused_mul_0:2'): pass"
+        ).run(code)
+
+        with torch.profiler.profile() as prof:
+            compiled(*example_inputs)
+        prefix = "inductor_provenance:"
+        markers = {
+            e.name.removeprefix(prefix)
+            for e in prof.events()
+            if e.name.startswith(prefix)
+        }
+        self.assertEqual(markers, handles)
+
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_gpu_and_triton
     @config.patch("shape_padding", False)
@@ -1154,6 +1188,51 @@ class TestProvenanceTracingStackTraces(TestCase):
             )
             self.assertNotIn("output_shape", non_tensor_output_metadata)
             self.assertNotIn("output_dtype", non_tensor_output_metadata)
+
+
+class RuntimeSymbolValuesFilter(logging.Filter):
+    def filter(self, record):
+        artifact = record.metadata.get("artifact", {})
+        return artifact.get("name") == "inductor_runtime_symbol_values"
+
+
+class TestRuntimeSymbolValues(TestCase):
+    @config.patch("runtime_symbol_values", True)
+    def test_runtime_symbol_values(self):
+        def f(x, y):
+            return torch.cat([x, y]).sin()
+
+        payload_buffer = io.StringIO()
+        handler = logging.StreamHandler(payload_buffer)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(StructuredTracePayloadFormatter())
+        handler.addFilter(RuntimeSymbolValuesFilter())
+        trace_log.addHandler(handler)
+        torch._dynamo.reset()
+        compiled = torch.compile(f, dynamic=True)
+        sizes = [(n, n + 1) for n in range(2, 18)]
+        try:
+            with torch.profiler.profile() as prof:
+                for n, m in sizes:
+                    compiled(torch.randn(n), torch.randn(m))
+        finally:
+            trace_log.removeHandler(handler)
+
+        lines = payload_buffer.getvalue().splitlines()
+        (payload,) = [json.loads(line) for line in lines]
+        self.assertFalse(payload["is_backward"])
+        self.assertEqual(len(payload["symbols"]), 2)
+        self.assertEqual([row[0] for row in payload["calls"]], list(range(len(sizes))))
+        by_call = {row[0]: sorted(row[1:]) for row in payload["calls"]}
+        self.assertEqual(by_call, {i: sorted(s) for i, s in enumerate(sizes)})
+
+        prefix = f"inductor_runtime_call:{payload['cache_key']}:"
+        calls = sorted(
+            int(e.name.removeprefix(prefix))
+            for e in prof.events()
+            if e.name.startswith(prefix)
+        )
+        self.assertEqual(calls, list(range(len(sizes))))
 
 
 class ProvenanceTracingKernelContextTemplate:
