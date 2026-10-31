@@ -77,11 +77,11 @@ Args:
 mm = _add_docstr(
     _sparse._sparse_mm,
     r"""
-    Performs a matrix multiplication of the sparse matrix :attr:`mat1`
-    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, if :attr:`mat1` is a
-    :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
+    Performs a matrix multiplication of the sparse matrix :attr:`sparse`
+    and the (sparse or strided) matrix :attr:`dense`. Similar to :func:`torch.mm`, if :attr:`sparse` is a
+    :math:`(n \times m)` tensor, :attr:`dense` is a :math:`(m \times p)` tensor, out will be a
     :math:`(n \times p)` tensor.
-    When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
+    When :attr:`sparse` is a COO tensor it must have `sparse_dim = 2`.
 
     Supports both CSR and COO storage formats.
 
@@ -108,8 +108,8 @@ where :math:`\bigoplus` defines the reduce operator. :attr:`reduce` is implement
 CSR storage format on CPU device.
 
 Args:
-    mat1 (Tensor): the first sparse matrix to be multiplied
-    mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
+    sparse (Tensor): the first sparse matrix to be multiplied
+    dense (Tensor): the second matrix to be multiplied, which could be sparse or dense
     reduce (str, optional): the reduction operation to apply for non-unique indices
         (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`). Default :obj:`"sum"`.
 

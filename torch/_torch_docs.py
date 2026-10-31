@@ -1897,14 +1897,14 @@ Example::
 add_docstr(
     torch.broadcast_to,
     r"""
-broadcast_to(input, shape) -> Tensor
+broadcast_to(input, size) -> Tensor
 
-Broadcasts :attr:`input` to the shape :attr:`\shape`.
-Equivalent to calling ``input.expand(shape)``. See :meth:`~Tensor.expand` for details.
+Broadcasts :attr:`input` to the shape :attr:`size`.
+Equivalent to calling ``input.expand(size)``. See :meth:`~Tensor.expand` for details.
 
 Args:
     {input}
-    shape (list, tuple, or :class:`torch.Size`): the new shape.
+    size (list, tuple, or :class:`torch.Size`): the new shape.
 
 Example::
 
@@ -2221,7 +2221,7 @@ on inplace modification of the outputs.
 add_docstr(
     torch.unsafe_split,
     r"""
-unsafe_split(tensor, split_size_or_sections, dim=0) -> List of Tensors
+unsafe_split(input, split_size, dim=0) -> List of Tensors
 
 Works like :func:`torch.split` but without enforcing the autograd restrictions
 on inplace modification of the outputs.
@@ -2789,7 +2789,7 @@ In-place version of :func:`torch.reciprocal`
 add_docstr(
     torch.cholesky_solve,
     r"""
-cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
+cholesky_solve(input, input2, upper=False, *, out=None) -> Tensor
 
 Computes the solution of a system of linear equations with complex Hermitian
 or real symmetric positive-definite lhs given its Cholesky decomposition.
@@ -2815,9 +2815,9 @@ Also supports batches of matrices, and if :math:`A` or :math:`B` is a batch of m
 then the output has the same batch dimensions.
 
 Args:
-    B (Tensor): right-hand side tensor of shape `(*, n, k)`
+    input (Tensor): right-hand side tensor of shape `(*, n, k)`
         where :math:`*` is zero or more batch dimensions
-    L (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input2 (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
         consisting of lower or upper triangular Cholesky decompositions of
         symmetric or Hermitian positive-definite matrices.
     upper (bool, optional): flag that indicates whether :math:`L` is lower triangular
@@ -2854,7 +2854,7 @@ Example::
 add_docstr(
     torch.cholesky_inverse,
     r"""
-cholesky_inverse(L, upper=False, *, out=None) -> Tensor
+cholesky_inverse(input, upper=False, *, out=None) -> Tensor
 
 Computes the inverse of a complex Hermitian or real symmetric
 positive-definite matrix given its Cholesky decomposition.
@@ -2876,7 +2876,7 @@ Also supports batches of matrices, and if :math:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
 Args:
-    L (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
         consisting of lower or upper triangular Cholesky decompositions of
         symmetric or Hermitian positive-definite matrices.
     upper (bool, optional): flag that indicates whether :math:`L` is lower triangular
@@ -3620,12 +3620,12 @@ Example::
 add_docstr(
     torch.dequantize,
     r"""
-dequantize(tensor) -> Tensor
+dequantize(input) -> Tensor
 
 Returns an fp32 Tensor by dequantizing a quantized Tensor
 
 Args:
-    tensor (Tensor): A quantized Tensor
+    input (Tensor): A quantized Tensor
 
 .. function:: dequantize(tensors) -> sequence of Tensors
    :noindex:
@@ -8911,12 +8911,12 @@ Alias for :func:`torch.linalg.householder_product`.
 add_docstr(
     torch.ormqr,
     r"""
-ormqr(input, tau, other, left=True, transpose=False, *, out=None) -> Tensor
+ormqr(input, input2, input3, left=True, transpose=False, *, out=None) -> Tensor
 
 Computes the matrix-matrix multiplication of a product of Householder matrices with a general matrix.
 
-Multiplies a :math:`m \times n` matrix `C` (given by :attr:`other`) with a matrix `Q`,
-where `Q` is represented using Householder reflectors `(input, tau)`.
+Multiplies a :math:`m \times n` matrix `C` (given by :attr:`input3`) with a matrix `Q`,
+where `Q` is represented using Householder reflectors `(input, input2)`.
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 If :attr:`left` is `True` then `op(Q)` times `C` is computed, otherwise the result is `C` times `op(Q)`.
@@ -8928,19 +8928,19 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
 .. seealso::
-        :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
+        :func:`torch.geqrf` can be used to form the Householder representation `(input, input2)` of matrix `Q`
         from the QR decomposition.
 
 .. note::
-        This function supports backward but it is only fast when ``(input, tau)`` do not require gradients
-        and/or ``tau.size(-1)`` is very small.
+        This function supports backward but it is only fast when ``(input, input2)`` do not require gradients
+        and/or ``input2.size(-1)`` is very small.
         ``
 
 Args:
     input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
                     and `mn` equals to `m` or `n` depending on the :attr:`left`.
-    tau (Tensor): tensor of shape `(*, min(mn, k))` where `*` is zero or more batch dimensions.
-    other (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    input2 (Tensor): tensor of shape `(*, min(mn, k))` where `*` is zero or more batch dimensions.
+    input3 (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     left (bool): controls the order of multiplication.
     transpose (bool): controls whether the matrix `Q` is conjugate transposed or not.
 
@@ -14650,12 +14650,12 @@ Args:
 add_docstr(
     torch.searchsorted,
     r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side=None, out=None, sorter=None) -> Tensor
+searchsorted(sorted_sequence, input, *, out_int32=False, right=False, side=None, out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
-corresponding values in :attr:`values` were inserted before the indices, when sorted, the order
+corresponding values in :attr:`input` were inserted before the indices, when sorted, the order
 of the corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
-Return a new tensor with the same size as :attr:`values`. More formally,
+Return a new tensor with the same size as :attr:`input`. More formally,
 the returned index satisfies the following rules:
 
 .. list-table::
@@ -14667,23 +14667,23 @@ the returned index satisfies the following rules:
      - *returned index satisfies*
    * - 1-D
      - False
-     - ``sorted_sequence[i-1] < values[m][n]...[l][x] <= sorted_sequence[i]``
+     - ``sorted_sequence[i-1] < input[m][n]...[l][x] <= sorted_sequence[i]``
    * - 1-D
      - True
-     - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
+     - ``sorted_sequence[i-1] <= input[m][n]...[l][x] < sorted_sequence[i]``
    * - N-D
      - False
-     - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
+     - ``sorted_sequence[m][n]...[l][i-1] < input[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
    * - N-D
      - True
-     - ``sorted_sequence[m][n]...[l][i-1] <= values[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
+     - ``sorted_sequence[m][n]...[l][i-1] <= input[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
 
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension unless :attr:`sorter` is provided, in which case the sequence does not
                               need to be sorted. PyTorch does not validate this condition when :attr:`sorter` is
                               not provided, and the behavior is undefined if the sequence is not sorted.
-    values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
+    input (Tensor): N-D tensor containing the search values.
 
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
@@ -14692,14 +14692,14 @@ Keyword args:
                             last such index. If no suitable index found, return 0 for non-numerical value
                             (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
                             (one pass the last index of the *innermost* dimension). In other words, if False,
-                            gets the lower bound index for each value in :attr:`values` on the corresponding
+                            gets the lower bound index for each value in :attr:`input` on the corresponding
                             *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
                             bound index instead. Default value is False. :attr:`side` does the same and is
                             preferred. It will error if :attr:`side` is set to "left" while this is True.
     side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
                             and "right" corresponds to True for :attr:`right`. It will error if this is set to
                             "left" while :attr:`right` is True. Default value is None.
-    out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
+    out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
     sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
                             :attr:`sorted_sequence` containing a sequence of indices that sort it in the
                             ascending order on the innermost dimension
@@ -14728,6 +14728,12 @@ Example::
     >>> torch.searchsorted(sorted_sequence_1d, values)
     tensor([[1, 3, 4],
             [1, 3, 4]])
+
+.. function:: searchsorted(sorted_sequence, self, *, out_int32=False, right=False, side=None, out=None, sorter=None) -> Tensor
+   :noindex:
+
+Equivalent to the overload above, but accepts a Scalar as the second argument.
+When passed by keyword, this argument is named ``self`` instead of ``input``.
 """,
 )
 
