@@ -1363,6 +1363,14 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    # Whether to generate a DeviceGuard in the registration wrapper for this operator.
+    # When True, it ensures that the active device context is switched to the
+    # appropriate device before executing the kernel.
+    # Note: This is an operator-level setting. A DeviceGuard is only generated
+    # if both the global backend-level device_guard option and this
+    # operator-specific metadata.device_guard are True.
+    device_guard: bool = True
+
     def supports_symint(self) -> bool:
         return "_symint" in self.kernel
 

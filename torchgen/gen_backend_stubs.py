@@ -39,6 +39,23 @@ ParsedExternalYaml = namedtuple(
     ["backend_key", "autograd_key", "class_name", "cpp_namespace", "backend_indices"],
 )
 
+# Per-op keys in a supported-op dict entry; every other key is the operator name.
+_SUPPORTED_OP_OPTION_KEYS = frozenset({"structured", "device_guard"})
+
+
+def _require_bool_option(
+    op_name: str, opts: dict[str, object], key: str, default: bool
+) -> bool:
+    val = opts.get(key, default)
+    if not isinstance(val, bool):
+        # A quoted YAML scalar like "false" parses to a truthy str, not a bool; reject it
+        # rather than silently treat the op as structured/guarded.
+        raise AssertionError(
+            f"Operator '{op_name}' option '{key}' must be a boolean (true/false), "
+            f"but got {type(val).__name__}: {val!r}."
+        )
+    return val
+
 
 def parse_backend_yaml(
     backend_yaml_path: str,
@@ -145,16 +162,92 @@ def parse_backend_yaml(
     ) -> BackendIndex:
         metadata: dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
+            structured = False
+            device_guard = use_device_guard
+            if isinstance(op, dict):
+                # An op with options is a single-key mapping whose value is the option dict
+                # (the "nested" form):
+                #   - minimum.out:
+                #       structured: true
+                # The "flat" form (options as siblings of the op name) is rejected: it is a
+                # footgun -- one extra space silently turns an option into the op's value.
+                if len(op) != 1:
+                    raise AssertionError(
+                        f"Each 'supported' entry must be a single operator mapping whose value "
+                        f"holds the options, but got keys {sorted(op)}. Indent the options under "
+                        f"the operator name."
+                    )
+                _op, opts = next(iter(op.items()))
+                opts = opts or {}
+                if not isinstance(opts, dict):
+                    raise AssertionError(
+                        f"Operator '{_op}' options must be a mapping of option keys to "
+                        f"booleans, but got {type(opts).__name__}: {opts!r}."
+                    )
+                unknown = set(opts) - _SUPPORTED_OP_OPTION_KEYS
+                if unknown:
+                    raise AssertionError(
+                        f"Operator '{_op}' has unknown option keys {sorted(unknown)}. "
+                        f"Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
+                    )
+                structured = _require_bool_option(_op, opts, "structured", False)
+                device_guard = _require_bool_option(
+                    _op, opts, "device_guard", use_device_guard
+                )
+                if device_guard and not use_device_guard:
+                    # Every emit site ANDs the per-op device_guard with the backend-level flag, so
+                    # a per-op True under a False backend flag is silently dropped; reject it.
+                    raise AssertionError(
+                        f"Operator '{_op}' sets 'device_guard: True' but the backend sets "
+                        "'device_guard: False'. A per-op device_guard can only disable the "
+                        "backend-level guard, not enable it; set the backend-level "
+                        "device_guard: True and disable it per-op where unwanted."
+                    )
+                if structured and backend != "PrivateUse1":
+                    raise AssertionError(
+                        f"Operator '{_op}' sets 'structured: True', which is only supported "
+                        f"for backend PrivateUse1 (got {backend})."
+                    )
+                if structured and use_device_guard and not device_guard:
+                    raise AssertionError(
+                        f"Operator '{_op}' sets 'structured: True' with 'device_guard: False'. "
+                        "A structured kernel always guards set_output to place its outputs on "
+                        "the input's device, as in-tree; remove device_guard for this op."
+                    )
+                if structured and not use_out_as_primary:
+                    raise AssertionError(
+                        f"Operator '{_op}' has 'structured: True' but the backend sets "
+                        "'use_out_as_primary: False'. Structured kernels are out-primary; set "
+                        "use_out_as_primary: True so the functional/inplace are derived from the out."
+                    )
+                op = _op
             op_name = OperatorName.parse(op)
             if op_name not in native_functions_map:
                 raise AssertionError(f"Found an invalid operator name: {op_name}")
             # See Note [External Backends Follow Dispatcher API]
-            kernel_name = dispatcher.name(native_functions_map[op_name].func)
-            if op in symint_ops:
-                kernel_name += "_symint"
-            # TODO: allow structured external backends later.
+            native_function = native_functions_map[op_name]
+            if structured:
+                if not native_function.structured:
+                    raise AssertionError(
+                        f"Operator '{op_name}' is marked as 'structured: true' in the backend YAML, "
+                        f"but it is not defined as a structured operator in native_functions.yaml."
+                    )
+                kernel_name = str(native_function.func.name).replace(".", "_")
+                # NB: do NOT append "_symint" here. For a structured op, kernel_name becomes the
+                # generated struct name (structured_<kernel>), which must match the hand-written
+                # TORCH_PRIVATEUSE1_IMPL_FUNC(<op>) symbol. SymInt is carried by the meta/impl
+                # signature, not the kernel name -- in-tree structured structs never carry a
+                # _symint suffix.
+            else:
+                kernel_name = dispatcher.name(native_function.func)
+                if op in symint_ops:
+                    kernel_name += "_symint"
+            # structured external backends is supported as structured
             m = BackendMetadata(
-                kernel=kernel_name, structured=False, cpp_namespace=cpp_namespace
+                kernel=kernel_name,
+                structured=structured,
+                cpp_namespace=cpp_namespace,
+                device_guard=device_guard,
             )
             metadata[op_name] = m
         return BackendIndex(
@@ -315,17 +408,24 @@ def error_on_missing_kernels(
     # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
     # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
     # here, then we get a nicer error message. If we miss it, you get a linker error.
-    kernel_defn_regex = rf"(.*){class_name}::\s*([\w\d]*)\("
+    # A structured kernel is defined as `Class::structured_<kernel>::impl(`; count it
+    # under <kernel>, the name the backend index expects.
+    kernel_defn_regex = (
+        rf"(.*){class_name}::\s*(?:structured_([\w\d]+)::impl|([\w\d]*))\("
+    )
+    # The PrivateUse1 helper macros define kernels without spelling the class.
+    macro_defn_regex = r"TORCH_PRIVATEUSE1(?:_IMPL)?_FUNC\((\w+)\)\s*\("
     actual_backend_kernel_name_counts = Counter(
         # A bit unwieldy (this could probably be moved into regex),
         # but we don't want to include kernel names that come from function calls,
         # like "return torch_xla::XLANativeFunctions::empty_strided_symint(...)".
         # Easy check is to ignore any lines with colons before the class name.
         [
-            y
-            for (x, y) in re.findall(kernel_defn_regex, backend_defns)
+            structured or plain
+            for (x, structured, plain) in re.findall(kernel_defn_regex, backend_defns)
             if not x.endswith(":")
         ]
+        + re.findall(macro_defn_regex, backend_defns)
     )
 
     missing_kernels_err_msg = ""
@@ -389,6 +489,27 @@ def gen_dispatchkey_nativefunc_headers(
         "Autogenerated file by gen_backend_stubs.py. Do not edit directly!"
     )
 
+    # Check structured usage
+    backend_index = backend_indices[backend_dispatch_key]
+    meta_includes = []
+
+    # Generate {op}_meta.h for each op this backend registered as *structured*. We must gate on
+    # the op's own metadata.structured (not just g.structured, the aten-native structured-ness):
+    # an op can be structured in aten but registered non-structured here (out-as-primary only),
+    # in which case the generated struct does not inherit at::meta::structured_X and the meta
+    # header would be an unused include leaking into the generated header.
+    for g in grouped_native_functions:
+        if isinstance(g, NativeFunctionsGroup) and g.structured:
+            metadata = backend_index.get_kernel(g.out)
+            if metadata is not None and metadata.structured:
+                base_name = g.functional.func.name.name.base
+                meta_includes.append(f"#include <ATen/ops/{base_name}_meta.h>")
+
+    # Remove duplicated '#include'
+    meta_include_str = "\n".join(sorted(set(meta_includes)))
+    if meta_include_str:
+        meta_include_str = f"\n{meta_include_str}\n"
+
     # Convert to a set first to remove duplicate kernel names.
     # Backends are allowed to repeat kernel names; only generate the declaration once!
     # Sort for deterministic output.
@@ -415,13 +536,14 @@ def gen_dispatchkey_nativefunc_headers(
         )
     )
 
-    ns_helper = NamespaceHelper(cpp_namespace)
+    ns_helper = NamespaceHelper(cpp_namespace, max_level=len(cpp_namespace.split("::")))
     fm.write_with_template(
         f"{backend_dispatch_key}NativeFunctions.h",
         "DispatchKeyNativeFunctions.h",
         lambda: {
             "generated_comment": generated_comment,
-            "namespace_prologue": ns_helper.prologue,
+            "namespace_prologue": meta_include_str
+            + ns_helper.prologue,  # prepend headers
             "class_name": class_name,
             "namespace_epilogue": ns_helper.epilogue,
             "dispatch_declarations": backend_declarations + autograd_declarations,
