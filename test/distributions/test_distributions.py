@@ -3876,6 +3876,39 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(Kumaraswamy(1.0, 1.0).sample().size(), ())
         self.assertEqual(Kumaraswamy(1.0, 1.0).sample((1,)).size(), (1,))
 
+    def test_kumaraswamy_mode(self):
+        # The mode maximizes the density; it is only defined (and interior)
+        # when concentration1 >= 1, concentration0 >= 1, and not both are 1.
+        xs = torch.linspace(1e-4, 1 - 1e-4, 20001, dtype=torch.double)
+        for a, b in [(2.0, 3.0), (5.0, 5.0), (1.5, 1.0), (1.0, 2.0)]:
+            d = Kumaraswamy(torch.tensor(a).double(), torch.tensor(b).double())
+            expected = xs[d.log_prob(xs).argmax()]
+            self.assertEqual(d.mode, expected, atol=1e-3, rtol=0)
+        for a, b in [(0.5, 3.0), (3.0, 0.5), (1.0, 1.0)]:
+            d = Kumaraswamy(torch.tensor(a), torch.tensor(b))
+            self.assertTrue(torch.isnan(d.mode))
+
+    def test_weibull_mode(self):
+        # The closed form holds for concentration >= 1. For concentration < 1 the
+        # density is unbounded at 0 (outside the support), so the mode is undefined.
+        scale = torch.tensor([2.0, 2.0, 2.0], dtype=torch.double)
+        conc = torch.tensor([1.0, 2.0, 3.5], dtype=torch.double)
+        xs = torch.linspace(1e-4, 10, 100001, dtype=torch.double)
+        expected = torch.stack(
+            [xs[Weibull(s, c).log_prob(xs).argmax()] for s, c in zip(scale, conc)]
+        )
+        self.assertEqual(Weibull(scale, conc).mode, expected, atol=1e-3, rtol=0)
+        self.assertEqual(Weibull(scale, conc).mode[0], torch.tensor(0.0).double())
+        for c in (0.2, 0.25, 0.5, 0.7):
+            d = Weibull(torch.tensor(2.0), torch.tensor(c))
+            self.assertTrue(torch.isnan(d.mode))
+
+        # the nan must not leak into the gradients
+        scale = torch.tensor([2.0, 2.0], dtype=torch.double, requires_grad=True)
+        conc = torch.tensor([0.5, 2.0], dtype=torch.double)
+        Weibull(scale, conc).mode.nansum().backward()
+        self.assertTrue(torch.isfinite(scale.grad).all())
+
     # Kumaraswamy distribution is not implemented in SciPy
     # Hence these tests are explicit
     def test_kumaraswamy_mean_variance(self):
