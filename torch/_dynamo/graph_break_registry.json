@@ -3673,14 +3673,6 @@
       ]
     }
   ],
-  "GB2214": [
-    {
-      "Gb_type": "Unsupported OrderedDict instance dictionary",
-      "Context": "OrderedDict.__dict__",
-      "Explanation": "A dictionary subclass used as instance state could also be a linked key, so Dynamo cannot inspect the order without invoking user hashes.",
-      "Hints": []
-    }
-  ],
   "GB8395": [
     {
       "Gb_type": "mapping proxy of class with pending attribute mutation",

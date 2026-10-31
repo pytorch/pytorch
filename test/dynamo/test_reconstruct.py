@@ -3,10 +3,8 @@
 import collections
 import contextlib
 import dis
-import enum
 import functools
 import inspect
-import sys
 import types
 import unittest
 from unittest import mock
@@ -84,84 +82,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
-
-    @parametrize("mapping_type", [dict, collections.OrderedDict])
-    def test_dict_input_key_snapshot_reused(self, mapping_type):
-        def hook(instructions):
-            self.assertEqual(
-                sum(
-                    i.opname == "LOAD_ATTR" and i.argval == "keys" for i in instructions
-                ),
-                1,
-            )
-
-        def fn(mapping):
-            a, b, c = mapping.values()
-            return a + b * c
-
-        mapping = mapping_type((object(), torch.full((1,), i)) for i in range(1, 4))
-        if mapping_type is collections.OrderedDict:
-            mapping.move_to_end(next(iter(mapping)))
-        with self.register_bytecode_hook(hook):
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(compiled(mapping), fn(mapping))
-
-    def test_sourced_dict_key_in_constant_aggregates(self):
-        def fn(x, mapping):
-            key = next(iter(mapping.copy()))
-            return x + 1, ((key,),), frozenset((key,)), slice(key, None)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        keys = [b"layer0weight".decode() for _ in range(2)]
-        self.assertIsNot(keys[0], keys[1])
-        x = torch.ones(1)
-        for key in keys:
-            mapping = collections.OrderedDict.fromkeys([key], 1)
-            result = compiled(x, mapping)
-            self.assertEqual(result, fn(x, mapping))
-            self.assertIs(result[1][0][0], key)
-            self.assertIs(next(iter(result[2])), key)
-            self.assertIs(result[3].start, key)
-        self.assertEqual(counter.frame_count, 1)
-
-    @parametrize("container_type", [list, dict, set])
-    @parametrize("nested", [False, True])
-    def test_sourced_dict_key_in_mutable_slice(self, container_type, nested):
-        def fn(x, mapping):
-            key = next(iter(mapping.copy()))
-            contents = {key: None} if container_type is dict else container_type((key,))
-            value = slice(contents, None)
-            if nested:
-                value = ((slice(value, None),),)
-            return x + 1, value
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        keys = [b"layer0weight".decode() for _ in range(2)]
-        self.assertIsNot(keys[0], keys[1])
-        previous = None
-        for key in keys:
-            mapping = collections.OrderedDict.fromkeys([key], 1)
-            result = compiled(torch.ones(1), mapping)[1]
-            contents = result[0][0].start.start if nested else result.start
-            self.assertIs(next(iter(contents)), key)
-            self.assertIsNot(contents, previous)
-            previous = contents
-
-    @unittest.skipIf(sys.version_info < (3, 12), "Enum value containment added in 3.12")
-    def test_enum_membership_creates_combined_flag(self):
-        class Flags(enum.Flag):
-            A = 1
-            B = 2
-            C = 4
-
-        def fn(x):
-            return x + int(7 in Flags)
-
-        x = torch.ones(1)
-        # Compile before eager membership populates the enum's member cache.
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(result, fn(x))
 
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""

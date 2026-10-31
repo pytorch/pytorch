@@ -415,13 +415,6 @@ class RootGuardManager(GuardManager):
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
-    def add_ordered_dict_order_guard(
-        self,
-        get_value: Callable[[dict[str, Any]], Any],
-        order: Sequence[int],
-        verbose_code_parts: list[str],
-        user_stack: traceback.StackSummary | None,
-    ) -> None: ...
     def clone_manager(
         self, clone_filter_fn: Callable[[GuardManager], bool]
     ) -> RootGuardManager: ...
