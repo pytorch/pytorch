@@ -5831,6 +5831,8 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
             torch.ops.aten._local_scalar_dense.default,
             # `x.stride(dim)` returns a SymInt too; same symbolic handling as sym_size.
             torch.ops.aten.sym_stride.int,
+            # `x.storage_offset()` also needs its symbolic lowering in lite mode.
+            torch.ops.aten.sym_storage_offset.default,
         ]
     )
 
