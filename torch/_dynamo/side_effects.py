@@ -558,6 +558,9 @@ class SideEffects:
             isinstance(item.mutation_type, AttributeMutationExisting)
             and not is_side_effect_safe(item.mutation_type)
             and not isinstance(item, AutogradFunctionContextVariable)
+            # Snapshotting reads cell_contents, which raises ValueError for an
+            # empty cell from inside store_attr.
+            and not isinstance(item, variables.CellVariable)
             and not self.should_allow_side_effects_in_hop()
             and not self.should_allow_externally_visible_side_effects_in_subtracer()
             and value.is_python_constant()

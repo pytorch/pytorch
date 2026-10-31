@@ -2418,7 +2418,16 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self._cellvar(inst.argval)
+        name = inst.argval
+        cell = self._cellvar(name)
+        if isinstance(cell, CellVariable) and cell._current_contents(self) is None:
+            cell.graph_break_if_empty_before_tracing(self)
+            # format_exc_unbound: an empty free var cell raises NameError, an
+            # empty cell var UnboundLocalError.
+            if name in self.f_code.co_freevars:
+                msg = f"cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
+                raise_observed_exception(NameError, self, args=[msg])
+            self._raise_unbound_local_error(name)
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 
@@ -3457,7 +3466,11 @@ class InstructionTranslatorBase(
         # side effects. We intentionally avoid tp_getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            attr_var = self.output.side_effects.load_attr(obj, name)
+            # del on an emptied cell is not an error, unlike a deleted attribute.
+            deleted_ok = isinstance(obj, CellVariable)
+            attr_var = self.output.side_effects.load_attr(
+                obj, name, deleted_ok=deleted_ok
+            )
             if isinstance(attr_var, TensorVariable):
                 self._maybe_emit_sync_dealloc(attr_var)
 

@@ -1488,6 +1488,16 @@
       ]
     }
   ],
+  "GB4172": [
+    {
+      "Gb_type": "Read a cell that was empty before tracing",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot guard that a cell from before tracing stays empty.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0092": [
     {
       "Gb_type": "Reconstruction failure",

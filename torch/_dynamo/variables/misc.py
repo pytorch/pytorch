@@ -75,6 +75,8 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
+    AttributeMutationNew,
+    GetSet,
     getset_build,
     Member,
     Method,
@@ -672,9 +674,84 @@ class CellVariable(VariableTracker):  # noqa: RVT001
             )
         else:
             contents = self.pre_existing_contents
-        if contents is None or isinstance(contents, DeletedVariable):
+        # type.__instancecheck__ so a LazyVariableTracker is not realized
+        if contents is None or type.__instancecheck__(DeletedVariable, contents):
             return None
         return contents
+
+    def graph_break_if_empty_before_tracing(
+        self, tx: "InstructionTranslatorBase"
+    ) -> None:
+        # No guard keeps a cell from before tracing empty, so an exception
+        # observed here would stay in the cached graph after the cell is filled.
+        if isinstance(
+            self.mutation_type, AttributeMutationNew
+        ) or tx.output.side_effects.has_pending_mutation_of_attr(self, "cell_contents"):
+            return
+        unimplemented(
+            gb_type="Read a cell that was empty before tracing",
+            context=str(self),
+            explanation="Dynamo cannot guard that a cell from before tracing stays empty.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def _get_cell_contents(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        contents = self._current_contents(tx)
+        if contents is None:
+            self.graph_break_if_empty_before_tracing(tx)
+            raise_value_error(tx, "Cell is empty")
+        return contents
+
+    def _set_cell_contents(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> None:
+        # cell_set_contents: deleting an already-empty cell is not an error.
+        stored = DeletedVariable() if value is None else value
+        tx.output.side_effects.store_cell(self, stored)
+
+    tp_getset = {
+        "cell_contents": GetSet(_get_cell_contents, _set_cell_contents),
+    }
+
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable | None:
+        # Defer to the cell_contents getter: hasattr() on an empty cell raises
+        # ValueError rather than returning False.
+        return None
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from .object_protocol import mro_lookup
+
+        # cell has no __dict__, so anything not on the type does not exist.
+        if mro_lookup(types.CellType, name) is NO_SUCH_SUBOBJ:
+            raise_observed_exception(
+                AttributeError, tx, args=[f"'cell' object has no attribute '{name}'"]
+            )
+        return super().tp_getattro_impl(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # cell has no __dict__, so cell_contents is the only writable attribute.
+        nargs = {"__setattr__": 2, "__delattr__": 1}.get(name)
+        if nargs == len(args) and not kwargs and args[0].is_python_constant():
+            attr_name = args[0].as_python_constant()
+            getset = self.lookup_tp_getset_member(attr_name)
+            if getset is None:
+                msg = f"'cell' object has no attribute '{attr_name}'"
+                if sys.version_info >= (3, 13):
+                    msg += " and no __dict__ for setting new attributes"
+                raise_observed_exception(AttributeError, tx, args=[msg])
+            getset.setter(self, tx, args[1] if nargs == 2 else None)
+            return ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
