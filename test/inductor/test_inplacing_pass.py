@@ -19,6 +19,7 @@ from torch._inductor.fx_passes.reinplace import (
     _multi_output_aliases,
     _result_escapes_graph,
     inplaceable_foreach_ops,
+    inplaceable_ops,
     inplaceable_triton_ops,
     reinplace_inplaceable_ops_core,
 )
@@ -192,6 +193,24 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(_multi_output_aliases(waited, {}), {0: x, 1: y})
             waited_y = graph.call_function(operator.getitem, (waited, 1))
             self.assertEqual(_alias_sources(waited_y, {}), [y])
+
+        coalesced = next(
+            (
+                op for op in inplaceable_ops.values()
+                if "all_reduce_coalesced_" in str(op.inplace_op)
+            ),
+            None,
+        )
+        if coalesced is not None:
+            collective = graph.call_function(
+                coalesced.inplace_op, args=([x, y],)
+            )
+            self.assertEqual(
+                _multi_output_aliases(
+                    collective, {coalesced.inplace_op: coalesced.mutated_args}
+                ),
+                {0: x, 1: y},
+            )
 
         triton_wrapper = next(iter(inplaceable_triton_ops))
         wrapped = graph.call_function(
