@@ -3,6 +3,7 @@
 import sys
 import tempfile
 from typing import Any, IO
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -150,6 +151,33 @@ class TestDistributedStateDictSaveLoad(TestCase):
                 no_dist=True,
             )
 
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+    def test_read_write_only_tensor_mmap(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=FileSystemWriter(path=path, thread_count=1),
+                no_dist=True,
+            )
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+            load_zip_region = torch.serialization._load_zip_region
+
+            with mock.patch.object(
+                torch.serialization,
+                "_load_zip_region",
+                wraps=load_zip_region,
+            ) as mocked_load_zip_region:
+                load_state_dict(
+                    state_dict=state_dict_to_load_to,
+                    storage_reader=FileSystemReader(path=path, mmap=True),
+                    no_dist=True,
+                )
+
+            self.assertGreater(mocked_load_zip_region.call_count, 0)
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
 
