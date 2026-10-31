@@ -2027,10 +2027,14 @@ class TestBinaryUfuncsDevice(TestCase):
 
     @dtypes(torch.bfloat16, torch.float16, torch.complex32)
     def test_add_sub_reduced_precision_alpha(self, device, dtype):
+        # Values from #199449: for these inputs, computing in opmath_t (single-rounding)
+        # differs from double-rounding (alpha rounded to the reduced dtype first) by at least 1 ulp.
         g = complex(0.052978515625, 0.052978515625) if dtype.is_complex else 0.052978515625
         p = complex(-0.53125, -0.53125) if dtype.is_complex else -0.53125
         alpha = 0.1
 
+        # Tensor sizes cover scalar-only (< vector size), vector boundary, scalar tail, and large tail paths:
+        # e.g., 1 (scalar), 31 (scalar tail), 32 (exact vector size), 33 (vector body + scalar tail), 4096 + 67.
         for n in [1, 31, 32, 33, 4096 + 67]:
             x = torch.full((n,), g, device=device, dtype=dtype)
             y = torch.full((n,), p, device=device, dtype=dtype)

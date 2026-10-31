@@ -567,6 +567,7 @@
   structured_inherits: TensorIteratorBase
   ufunc_inner_loop:
     Generic: add (AllAndComplex, BFloat16, Half)
+    # ComplexHalf is ScalarOnly because convert_to_float in ufunc/add.h does not support c10::complex<c10::Half>
     ScalarOnly: add (Bool, ComplexHalf)
   dispatch:
     SparseCPU, SparseMeta: add_out_sparse_cpu

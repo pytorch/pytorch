@@ -185,8 +185,9 @@ def ufunctor_arguments(
 # which do the actual computation in question.  E.g.,
 #
 # template <typename T>
-# C10_HOST_DEVICE T add(T self, T other, T alpha) __ubsan_ignore_undefined__ {
-#   return self + alpha * other;
+# C10_HOST_DEVICE T add(T self, T other, at::opmath_type<T> alpha) __ubsan_ignore_undefined__ {
+#   using opmath_t = at::opmath_type<T>;
+#   return static_cast<opmath_t>(self) + alpha * static_cast<opmath_t>(other);
 # }
 #
 # In this file, we refer to T as compute_t which is bound by caller
