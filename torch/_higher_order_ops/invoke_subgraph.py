@@ -52,6 +52,7 @@ _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
         "fallback_by_default",
         "max_autotune",
+        "triton.cudagraphs",
     }
 )
 
