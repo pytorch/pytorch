@@ -127,10 +127,13 @@ def check_quack_fp32_operand(gemm_arg: TensorBox) -> None:
 
 def check_quack_sm90_operands(gemm_arg: TensorBox, blockscaled: bool) -> None:
     """Reject operands QuACK's SM90 (WGMMA) mainloop cannot compute."""
+    device = gemm_arg.get_device_or_error()
+    if device.type != "cuda":
+        return
+    # Imports CuTeDSL, which CPU-only builds may lack.
     from torch._vendor.quack.cute_dsl_utils import get_device_capacity
 
-    device = gemm_arg.get_device_or_error()
-    if device.type != "cuda" or get_device_capacity(device)[0] != 9:
+    if get_device_capacity(device)[0] != 9:
         return
     if blockscaled:
         raise NotImplementedError(
@@ -624,9 +627,14 @@ def validate_bmm_capture_views(
         if source_meta.dtype != result_meta.dtype or not statically_known_shape_equal(
             shapes[0], shapes[1]
         ):
+            fix = (
+                "return GEMM-derived views directly from the epilogue"
+                if node in gemm_derived
+                else "reshape or reinterpret captures before the FlexGEMM call"
+            )
             raise NotImplementedError(
                 "FlexGEMM bmm epilogue views must preserve batch, row, and column axes "
-                "and dtype; reshape or reinterpret captures before the FlexGEMM call"
+                f"and dtype; {fix}"
             )
 
 
@@ -721,6 +729,7 @@ def flex_gemm_quack_configs(
     )
     if (
         isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.group == 2
         and get_device_capacity(device)[0] == 9
     ):
         # Grouped-main stores need a full tile along N, and SM90 tiles are wide.
