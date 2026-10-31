@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_CUDA,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -1947,6 +1947,31 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, y)
         self.assertEqual(x_ref.grad, x.grad)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
+    @requires_gpu_and_triton
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "This platform doesn't support efficient attention",
+    )
+    def test_sac_reduce_overhead_cached_output(self, device):
+        # SAC must not copy outputs inside a cudagraph-wrapped graph: copies
+        # made during warmup would land in the cudagraph pool.
+        op = torch.ops.aten._scaled_dot_product_efficient_attention.default
+
+        def fn(x):
+            return op(x, x, x, None, True, dropout_p=0.0)[0]
+
+        opt_fn = torch.compile(fn, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+        context_fn = functools.partial(create_selective_checkpoint_contexts, [op])
+        x = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
+        ref = fn(x)
+        (ref_grad,) = torch.autograd.grad(ref.sum(), x)
+        for _ in range(2):
+            out = checkpoint(opt_fn, x, use_reentrant=False, context_fn=context_fn)
+            (grad,) = torch.autograd.grad(out.sum(), x)
+            self.assertEqual(out, ref)
+            self.assertEqual(grad, ref_grad)
+
     @requires_gpu_and_triton
     def test_error_msg(self, device):
         class MockModule(torch.nn.Module):
@@ -3029,6 +3054,205 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         # Confirms dynamic shapes were actually exercised: one compile
         # covering both sequence lengths, not a silent recompile.
         self.assertEqual(cnt.frame_count, 1)
+
+
+@unittest.skipIf(not HAS_CPU, "requires a C++ compiler")
+class EagerSACCompiledRegionTests(torch._dynamo.test_case.TestCase):
+    """Eager SAC around an Inductor-compiled function caches outputs of the ops
+    the compiled wrapper dispatches. Inductor reuses their buffers later in the
+    graph. See https://github.com/pytorch/pytorch/issues/201158."""
+
+    # At the default budget the partitioner saves the sin output, so its buffer
+    # is never reused. At 0.37 only the mm output is saved, and mm reuses the
+    # buffer the cached view_as_complex output aliases.
+    @torch._functorch.config.patch(activation_memory_budget=0.37)
+    def test_checkpoint_gradients(self):
+        def fn(x, w):
+            z = torch.view_as_complex(x.sin())
+            y = torch.view_as_real(z).reshape(64, 128)
+            return (y.cos() @ w).sin().sum()
+
+        args = [
+            torch.randn(64, 64, 2, requires_grad=True),
+            torch.randn(128, 128, requires_grad=True),
+        ]
+        expected = torch.autograd.grad(fn(*args), args)
+        compiled = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts,
+            [torch.ops.aten.view_as_complex.default],
+        )
+        out = checkpoint(compiled, *args, use_reentrant=False, context_fn=context_fn)
+        self.assertEqual(torch.autograd.grad(out, args), expected, atol=1e-4, rtol=1e-4)
+
+    def test_mutable_op_fresh_output(self):
+        # The op mutates count but returns a fresh tensor, and s.cos() is
+        # computed in place into its buffer.
+        with torch.library._scoped_library("test_sac_copy", "FRAGMENT"):
+
+            @torch.library.custom_op("test_sac_copy::sin", mutates_args={"count"})
+            def sin(x: torch.Tensor, count: torch.Tensor) -> torch.Tensor:
+                count.add_(1)
+                return x.sin()
+
+            @sin.register_fake
+            def _(x, count):
+                return torch.empty_like(x)
+
+            count = torch.zeros(())
+
+            def fn(x, w1, w2):
+                s = sin(x @ w1, count)
+                return ((s.cos() + 1) @ w2).sin().sum()
+
+            x, w1 = torch.randn(64, 128), torch.randn(128, 128)
+            w2 = torch.randn(128, 128, requires_grad=True)
+            expected = torch.autograd.grad(fn(x, w1, w2), w2)
+            compiled = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                [torch.ops.test_sac_copy.sin.default],
+            )
+            out = checkpoint(
+                compiled, x, w1, w2, use_reentrant=False, context_fn=context_fn
+            )
+            self.assertEqual(
+                torch.autograd.grad(out, w2), expected, atol=1e-4, rtol=1e-4
+            )
+
+    def test_saved_mutation_of_cached_output(self):
+        # Replay skips a saved op that writes into a cached output, so the
+        # cached copy must see the write: the cache-mutation check raises, and
+        # with allow_cache_entry_mutation=True replay returns the written value.
+        with torch.library._scoped_library("test_sac_copy", "FRAGMENT"):
+
+            @torch.library.custom_op("test_sac_copy::twice", mutates_args=())
+            def twice(x: torch.Tensor) -> torch.Tensor:
+                return x * 2
+
+            twice.register_fake(lambda x: torch.empty_like(x))
+
+            @torch.library.custom_op("test_sac_copy::add_one_", mutates_args={"y"})
+            def add_one_(y: torch.Tensor) -> None:
+                y.add_(1)
+
+            add_one_.register_fake(lambda y: None)
+
+            # add_one_ writes into the twice output inside the graph.
+            def in_graph(x, w0, w):
+                a = twice(x @ w0)
+                add_one_(a)
+                return (a.sin() * w).sin().sum()
+
+            def region(x, w0):
+                return twice(x @ w0)
+
+            compiled_region = torch.compile(region, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+
+            # Eager code writes into the twice output the graph returns.
+            def after_graph(region, x, w0, w):
+                a = region(x, w0)
+                a.mul_(2)
+                return (a.sin() * w).sin().sum()
+
+            x, w0 = torch.randn(64, 128), torch.randn(128, 128)
+            w = torch.randn(64, 128, requires_grad=True)
+            for fn, compiled, mutating_op in (
+                (
+                    in_graph,
+                    torch.compile(in_graph, fullgraph=True),  # noqa: UNSPECIFIED_BACKEND
+                    torch.ops.test_sac_copy.add_one_.default,
+                ),
+                (
+                    functools.partial(after_graph, region),
+                    functools.partial(after_graph, compiled_region),
+                    torch.ops.aten.mul_.Tensor,
+                ),
+            ):
+                expected = torch.autograd.grad(fn(x, w0, w), w)
+                for allow in (False, True):
+                    context_fn = functools.partial(
+                        create_selective_checkpoint_contexts,
+                        [torch.ops.test_sac_copy.twice.default, mutating_op],
+                        allow_cache_entry_mutation=allow,
+                    )
+                    out = checkpoint(
+                        compiled, x, w0, w, use_reentrant=False, context_fn=context_fn
+                    )
+                    if allow:
+                        self.assertEqual(
+                            torch.autograd.grad(out, w), expected, atol=1e-4, rtol=1e-4
+                        )
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+                            torch.autograd.grad(out, w)
+
+    def test_out_op_cache_mutation_still_raises(self):
+        # SAC does not copy outputs that alias a written input. mm.out bumps
+        # the version of its out buffer after SAC records it, so replay raises.
+        def fn(x, w):
+            return ((x @ w).sin() @ w).cos()
+
+        x = torch.randn(32, 32, requires_grad=True)
+        w = torch.randn(32, 32, requires_grad=True)
+        compiled = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, [torch.ops.aten.mm.out]
+        )
+        out = checkpoint(compiled, x, w, use_reentrant=False, context_fn=context_fn)
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            out.sum().backward()
+
+    def test_copy_keeps_layout(self):
+        from torch.utils.checkpoint import _in_inductor_graph
+
+        op = torch.ops.aten.alias.default
+        for src in (
+            torch.ones(1).expand(64, 64),
+            torch.randn(64, 64)[::2, 1::3],
+            torch.empty(3, 0),
+        ):
+            forward, _ = create_selective_checkpoint_contexts([op])
+            prev = getattr(_in_inductor_graph, "value", False)
+            _in_inductor_graph.value = True
+            try:
+                with forward:
+                    op(src)
+            finally:
+                _in_inductor_graph.value = prev
+            cached = forward.storage[op][0].val
+            self.assertEqual(cached, src)
+            self.assertEqual(cached.stride(), src.stride())
+            if src.numel() > 0:
+                # Only the storage span src covers is copied.
+                span = 1 + sum((n - 1) * s for n, s in zip(src.shape, src.stride()))
+                self.assertEqual(
+                    cached.untyped_storage().nbytes(), span * src.element_size()
+                )
+
+    def test_eager_does_not_copy(self):
+        from torch.utils.checkpoint import _in_inductor_graph
+
+        compiled = torch.compile(torch.sin)  # noqa: UNSPECIFIED_BACKEND
+        op = torch.ops.aten.alias.default
+        src = torch.randn(64, 64)
+        forward, _ = create_selective_checkpoint_contexts([op])
+        with forward:
+            # A graph that runs inside another graph must leave the flag set.
+            prev = getattr(_in_inductor_graph, "value", False)
+            _in_inductor_graph.value = True
+            try:
+                compiled(src)
+                self.assertTrue(_in_inductor_graph.value)
+            finally:
+                _in_inductor_graph.value = prev
+            # A compiled graph that ran before must not leave the flag set.
+            compiled(src)
+            op(src)
+        cached = forward.storage[op][0].val
+        self.assertEqual(
+            cached.untyped_storage().data_ptr(), src.untyped_storage().data_ptr()
+        )
 
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):

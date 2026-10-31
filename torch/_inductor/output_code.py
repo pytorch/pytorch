@@ -60,6 +60,7 @@ from torch._inductor.utils import (
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+from torch.utils.checkpoint import _in_inductor_graph
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -816,6 +817,17 @@ class CompiledFxGraph(OutputCode):
             if has_active_autotune_cache_bundler
             else contextlib.nullcontext()
         )
+        # SAC copies the outputs it caches while this graph runs. Copies made
+        # during cudagraph warmup or recording would land in the cudagraph
+        # pool, so skip any graph compiled with cudagraph info, even if it
+        # later runs without capture. SAC is a dispatch mode, so the flag is
+        # only needed while this thread has one active (checked per thread;
+        # is_in_torch_dispatch_mode() is process-global).
+        has_dispatch_mode = torch._C._len_torch_dispatch_stack() > 0
+        prev_in_graph = False
+        if has_dispatch_mode:
+            prev_in_graph = getattr(_in_inductor_graph, "value", False)
+            _in_inductor_graph.value = self.cudagraph_info is None
         # Autotune cache writes happen during the first call. End the bundler
         # while its saved compile context is restored, then clear the saved
         # context after leaving the compile_context manager.
@@ -836,6 +848,8 @@ class CompiledFxGraph(OutputCode):
                     if has_active_autotune_cache_bundler:
                         AutotuneCacheBundler.end_compile()
         finally:
+            if has_dispatch_mode:
+                _in_inductor_graph.value = prev_in_graph
             if (
                 has_active_autotune_cache_bundler
                 and not AutotuneCacheBundler.has_active_compile(

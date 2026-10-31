@@ -5,6 +5,7 @@ import contextlib
 import functools
 import itertools
 import platform
+import threading
 import uuid
 import warnings
 import weakref
@@ -16,8 +17,9 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn, overload, ParamSpec, TypeVar
@@ -1583,6 +1585,12 @@ def _sac_storage_key(func, args):
     return func
 
 
+# Set while an Inductor graph compiled without cudagraphs runs, so that SAC
+# copies the outputs it caches there (see
+# https://github.com/pytorch/pytorch/issues/201158).
+_in_inductor_graph = threading.local()
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1600,6 +1608,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         # the new/old behavior explicitly.
         self.respect_saved_tensors_hooks: bool | None = None
         self.func_counter: Dict[Any, int] = defaultdict(int)
+        # Weak references to (original output, cached copy) for each copied
+        # output.
+        self.copies: list[tuple[ReferenceType, ReferenceType]] = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1647,6 +1658,38 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 for node in itertools.islice(reversed(graph.nodes), num_new):
                     node.meta["recompute"] = policy
 
+        if (
+            self.copies
+            and policy in _SAVE_POLICIES
+            and not is_compiling
+            and isinstance(func, torch._ops.OpOverload)
+        ):
+            # Replay skips this saved op, so a copied entry whose original it
+            # writes would keep the value from before the write. Refresh the
+            # copy and bump its version, as the write did for the original.
+            written = set()
+            for i, a in enumerate(func._schema.arguments):
+                if a.alias_info is not None and a.alias_info.is_write:
+                    v = args[i] if i < len(args) else kwargs.get(a.name)
+                    written.update(
+                        t.untyped_storage().data_ptr()
+                        for t in tree_leaves(v)
+                        if type(t) is torch.Tensor and torch._C._has_storage(t)
+                    )
+            for orig_ref, cached_ref in self.copies:
+                orig, cached = orig_ref(), cached_ref()
+                if (
+                    orig is not None
+                    and cached is not None
+                    and orig.untyped_storage().data_ptr() in written
+                ):
+                    n = cached.untyped_storage().nbytes() // cached.element_size()
+                    with no_dispatch():
+                        cached.as_strided((n,), (1,), 0).copy_(
+                            orig.as_strided((n,), (1,), orig.storage_offset())
+                        )
+                    torch.autograd.graph.increment_version(cached)
+
         if policy in _SAVE_POLICIES or is_compiling:
             # SAC caches these tensors outside the autograd graph, bypassing
             # SavedVariable, so simulate pack/unpack with the user's
@@ -1681,8 +1724,39 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 if not respects:
                     user_hooks = None
 
+            # Inductor reuses a buffer after its last use in the graph, which
+            # would overwrite the cached value, so cache a copy of op outputs
+            # instead. Not copied: HOP outputs (inductor_compiled_code returns
+            # graph outputs, which are never reused); outputs that alias a
+            # written input (out=, in-place), since replay would not write the
+            # buffer the wrapper reads; and functional collectives, whose output
+            # is filled asynchronously until wait_tensor.
+            copy = (
+                getattr(_in_inductor_graph, "value", False)
+                and not is_compiling
+                and isinstance(func, torch._ops.OpOverload)
+                and func.namespace
+                not in ("_c10d_functional", "_c10d_functional_autograd")
+                and not any(
+                    r.alias_info is not None and r.alias_info.is_write
+                    for r in func._schema.returns
+                )
+            )
+
             def wrap(x):
+                orig = None
+                if copy and isinstance(x, torch.Tensor) and x.numel() > 0:
+                    # Copy only the storage span x covers, so the cached
+                    # tensor keeps x's exact strides (including expanded dims).
+                    # Other modes do not see these internal ops.
+                    orig = x
+                    span = 1 + sum((n - 1) * st for n, st in zip(x.shape, x.stride()))
+                    with no_dispatch():
+                        flat = x.as_strided((span,), (1,), x.storage_offset()).clone()
+                        x = flat.as_strided(x.size(), x.stride())
                 x = _detach_helper(x)
+                if orig is not None:
+                    self.copies.append((weakref.ref(orig), weakref.ref(x)))
                 if user_hooks is not None and isinstance(x, torch.Tensor):
                     return _VersionWrapper(user_hooks[0](x), unpack_hook=user_hooks[1])
                 return _VersionWrapper(x)
