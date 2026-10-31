@@ -9865,7 +9865,7 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     def codegen_outputs(self) -> Sequence[Any]:
-        if self.outputs:
+        if self.outputs or isinstance(self.layout, MultiOutputLayout):
             return self.outputs
         if isinstance(self.layout, Layout):
             return [self]

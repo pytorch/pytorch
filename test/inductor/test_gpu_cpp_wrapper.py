@@ -25,7 +25,7 @@ from torch._inductor.codegen.mps_device_op_overrides import MPSDeviceOpOverrides
 from torch._inductor.codegen.mtia.device_op_overrides import MTIADeviceOpOverrides
 from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
+from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -109,6 +109,103 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
+
+    @parametrize("empty_middle", [False, True])
+    def test_nested_tensor_list_fallback(self, empty_middle):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("gpu_nested_fallback", "FRAGMENT") as lib:
+            torch.library.define(
+                "gpu_nested_fallback::lists",
+                "(Tensor x) -> (Tensor[], Tensor[], Tensor[])",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "gpu_nested_fallback::lists", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("gpu_nested_fallback::lists", lib=lib)
+            def lists(x):
+                return [x + 1, x * 2], [] if empty_middle else [x - 3], [x.square()]
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    first, middle, last = torch.ops.gpu_nested_fallback.lists(x.sin())
+                    result = first[0] * first[1] + last[0]
+                    if not empty_middle:
+                        result = result + middle[0]
+                    return result
+
+            model = Model()
+            compiled = torch.compile(
+                model,
+                fullgraph=True,
+                dynamic=True,
+                options={
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": False,
+                },
+            )
+            x = torch.randn(4, 16, device=self.device)
+            actual, code = run_and_get_code(compiled, x)
+            self.assertEqual(actual, model(x))
+            code = "\n".join(code)
+            self.assertIn('findSchemaOrThrow("gpu_nested_fallback::lists", "")', code)
+            self.assertIn(".callBoxed(", code)
+            self.assertIn(".toTensorList()", code)
+            self.assertNotIn("custom_op_wrapper", code)
+            self.assertNotIn("PyObject_CallObject", code)
+            for batch in (7, 12):
+                x = torch.randn(batch, 16, device=self.device)
+                self.assertEqual(compiled(x), model(x))
+
+    @parametrize("optional_present", [False, True])
+    @parametrize("empty_list", [False, True])
+    def test_mixed_tensor_list_fallback(self, optional_present, empty_list):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("gpu_mixed_fallback", "FRAGMENT") as lib:
+            lib.define(
+                "lists(Tensor x, bool optional_present, bool empty_list) "
+                "-> (Tensor[], Tensor?, Tensor[], Tensor)"
+            )
+
+            @torch.library.impl(
+                "gpu_mixed_fallback::lists", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("gpu_mixed_fallback::lists", lib=lib)
+            def lists(x, optional_present, empty_list):
+                return (
+                    [x + 1, x + 5],
+                    x + 2 if optional_present else None,
+                    [] if empty_list else [x + 3],
+                    x + 4,
+                )
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.gpu_mixed_fallback.lists(
+                        x.sin(), optional_present, empty_list
+                    )
+
+            model = Model()
+            compiled = torch.compile(
+                model,
+                fullgraph=True,
+                dynamic=True,
+                options={
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": False,
+                },
+            )
+            for batch in (4, 7, 12):
+                x = torch.randn(batch, 16, device=self.device)
+                expected = model(x)
+                actual = compiled(x)
+                self.assertEqual(actual, expected)
 
     def test_cpp_wrapper_compile_timing_recorded(self):
         if not RUN_GPU:
