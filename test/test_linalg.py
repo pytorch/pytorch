@@ -11110,6 +11110,53 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @dtypes(torch.float)
+    def test_addmm_lt_follows_blas_backend_switch(self, device, dtype):
+        # The first addmm in a process ran under rocBLAS; switching to hipBLASLt afterwards must still route
+        # linear+bias through the Lt GemmAndBias path (#186873). Run in a fresh process so this addmm is the first.
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        script = textwrap.dedent(
+            f"""
+            import torch
+
+            x = torch.rand(4, 2, device={device!r}, dtype={dtype})
+            w = torch.rand(8, 2, device={device!r}, dtype={dtype})
+            bias = torch.rand(8, device={device!r}, dtype={dtype})
+            torch.backends.cuda.preferred_blas_library("cublas")
+            torch.nn.functional.linear(x, w, bias)
+
+            if torch.backends.cuda.preferred_blas_library("cublaslt") != torch._C._BlasBackend.Cublaslt:
+                raise AssertionError("switching to hipBLASLt did not take effect")
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.enable(True)
+            torch.nn.functional.linear(x, w, bias)
+            torch.cuda.tunable.enable(False)
+            for result in torch.cuda.tunable.get_results():
+                print(result[0])
+            """
+        )
+        # DISABLE_ADDMM_CUDA_LT overrides the preferred backend, and PYTORCH_TUNABLEOP_*
+        # override the tunable setters below (and can preload results), so keep them
+        # out of the child.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTORCH_TUNABLEOP_")}
+        env.pop("DISABLE_ADDMM_CUDA_LT", None)
+        # TunableOp writes its results file into the cwd at exit.
+        cmd = [sys.executable, "-c", script]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        op_sigs = result.stdout.split()
+        self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
+
     @dtypes(torch.float)
     def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
         # Regression test for https://github.com/ROCm/TheRock/issues/5553
