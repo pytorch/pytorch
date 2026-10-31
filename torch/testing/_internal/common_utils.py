@@ -4317,17 +4317,20 @@ class TestCase(expecttest.TestCase):
             hasattr(self, '_prev_fp32_precision')
             and os.environ.get('PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK') != '1'
         ):
+            prev = self._prev_fp32_precision
             current = _snapshot_fp32_precision()
-            if current != self._prev_fp32_precision:
-                _restore_fp32_precision(self._prev_fp32_precision)
-                specs = _fp32_precision_flag_specs()
+            if current != prev:
+                _restore_fp32_precision(prev)
                 mismatches = [
-                    f"  {label}: was {prev!r}, became {cur!r}"
-                    for (label, _, _), prev, cur in zip(specs, self._prev_fp32_precision, current)
-                    if prev != cur
+                    f"  {_FP32_PRECISION_STATE_LABELS[key]}: was {prev[key]!r}, became {current[key]!r}"
+                    for key in prev
+                    if prev[key] != current[key]
                 ]
                 raise AssertionError(
-                    "fp32 precision flag leak detected:\n" + "\n".join(mismatches)
+                    "fp32 precision flag leak detected:\n" + "\n".join(mismatches) + "\n"
+                    "'none' and 'default' mean the setting inherits from its parent ('default' "
+                    "falls back to tf32). Assigning back a value read from a getter does not "
+                    "restore inheritance; use recover_orig_fp32_precision or a flags() context manager."
                 )
 
     @staticmethod
@@ -6760,74 +6763,32 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
-# The legacy getter cross-checks the Float32MatmulPrecision enum against the
-# new backend-specific values and raises when they disagree, so a snapshot
-# taken while a test has them out of sync would throw from setUp/tearDown
-# instead of reporting the leak. Report a sentinel instead; restoring the
-# backend-specific values is what puts the pair back in sync.
-_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
+# Public names for the keys of torch.backends._get_fp32_precision_state(), for leak
+# reports.
+_FP32_PRECISION_STATE_LABELS = {
+    "generic.all": "torch.backends.fp32_precision",
+    "cuda.all": "torch.backends.cudnn.fp32_precision",
+    "cuda.conv": "torch.backends.cudnn.conv.fp32_precision",
+    "cuda.rnn": "torch.backends.cudnn.rnn.fp32_precision",
+    "cuda.matmul": "torch.backends.cuda.matmul.fp32_precision",
+    "mkldnn.all": "torch.backends.mkldnn.fp32_precision",
+    "mkldnn.conv": "torch.backends.mkldnn.conv.fp32_precision",
+    "mkldnn.rnn": "torch.backends.mkldnn.rnn.fp32_precision",
+    "mkldnn.matmul": "torch.backends.mkldnn.matmul.fp32_precision",
+    "float32_matmul_precision": "torch.get_float32_matmul_precision()",
+    "cudnn_allow_tf32": "torch.backends.cudnn.allow_tf32",
+}
 
 
-def _get_legacy_float32_matmul_precision():
-    try:
-        return torch.get_float32_matmul_precision()
-    except RuntimeError:
-        return _INCONSISTENT_MATMUL_PRECISION
-
-
-def _set_legacy_float32_matmul_precision(value):
-    if value != _INCONSISTENT_MATMUL_PRECISION:
-        torch.set_float32_matmul_precision(value)
-
-
-# Single source of truth for which globals count as "fp32 precision state".
-# Add a new flag here and both recover_orig_fp32_precision and the TestCase
-# leak detector pick it up automatically.
-def _fp32_precision_flag_specs():
-    return (
-        # Must stay first: set_float32_matmul_precision also writes the cuda
-        # and mkldnn matmul entries, so it has to be restored before them.
-        ("torch.get_float32_matmul_precision()",
-            _get_legacy_float32_matmul_precision,
-            _set_legacy_float32_matmul_precision),
-        ("torch.backends.cuda.matmul.fp32_precision",
-            lambda: torch.backends.cuda.matmul.fp32_precision,
-            lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
-        ("torch.backends.cudnn.conv.fp32_precision",
-            lambda: torch.backends.cudnn.conv.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.cudnn.conv, "fp32_precision", v)),
-        ("torch.backends.cudnn.rnn.fp32_precision",
-            lambda: torch.backends.cudnn.rnn.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.cudnn.rnn, "fp32_precision", v)),
-        ("torch.backends.mkldnn.matmul.fp32_precision",
-            lambda: torch.backends.mkldnn.matmul.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.mkldnn.matmul, "fp32_precision", v)),
-        ("torch.backends.mkldnn.conv.fp32_precision",
-            lambda: torch.backends.mkldnn.conv.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.mkldnn.conv, "fp32_precision", v)),
-        ("torch.backends.mkldnn.rnn.fp32_precision",
-            lambda: torch.backends.mkldnn.rnn.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.mkldnn.rnn, "fp32_precision", v)),
-    )
-
-
-def _snapshot_fp32_precision():
-    return tuple(get() for _, get, _ in _fp32_precision_flag_specs())
+# The snapshot is the stored state, not the values the getters resolve to:
+# writing a resolved value back through a setter pins a setting that was
+# inheriting from its parent, a leak that only shows once the parent changes.
+def _snapshot_fp32_precision(*keys):
+    return torch.backends._get_fp32_precision_state(*keys)
 
 
 def _restore_fp32_precision(snapshot):
-    specs = _fp32_precision_flag_specs()
-    if not isinstance(snapshot, tuple) or len(snapshot) != len(specs):
-        # Catches accidental shadowing of self._prev_fp32_precision by a
-        # subclass (e.g. assigning a scalar); without this check zip() would
-        # silently iterate over the wrong sequence.
-        raise TypeError(
-            f"fp32 precision snapshot must be a {len(specs)}-tuple, "
-            f"got {type(snapshot).__name__} of length "
-            f"{len(snapshot) if hasattr(snapshot, '__len__') else 'unknown'}"
-        )
-    for (_, _, set_), value in zip(specs, snapshot):
-        set_(value)
+    torch.backends._set_fp32_precision_state(snapshot)
 
 
 def recover_orig_fp32_precision(fn):

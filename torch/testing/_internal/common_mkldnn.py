@@ -25,21 +25,22 @@ def tf32_is_not_fp32():
 
 @contextlib.contextmanager
 def reduced_f32_off():
-    old_matmul_precision = torch.backends.mkldnn.matmul.fp32_precision
-    old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
+    old_fp32_precision = torch.backends._get_fp32_precision_state(
+        "mkldnn.matmul", "mkldnn.conv"
+    )
     try:
         torch.backends.mkldnn.matmul.fp32_precision = "ieee"
         torch.backends.mkldnn.conv.fp32_precision = "ieee"
         yield
     finally:
-        torch.backends.mkldnn.matmul.fp32_precision = old_matmul_precision
-        torch.backends.mkldnn.conv.fp32_precision = old_conv_precision
+        torch.backends._set_fp32_precision_state(old_fp32_precision)
 
 
 @contextlib.contextmanager
 def bf32_on(self, bf32_precision=1e-2):
-    old_matmul_precision = torch.backends.mkldnn.matmul.fp32_precision
-    old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
+    old_fp32_precision = torch.backends._get_fp32_precision_state(
+        "mkldnn.matmul", "mkldnn.conv"
+    )
     old_precision = self.precision
     try:
         torch.backends.mkldnn.matmul.fp32_precision = "bf16"
@@ -47,15 +48,15 @@ def bf32_on(self, bf32_precision=1e-2):
         self.precision = bf32_precision
         yield
     finally:
-        torch.backends.mkldnn.matmul.fp32_precision = old_matmul_precision
-        torch.backends.mkldnn.conv.fp32_precision = old_conv_precision
+        torch.backends._set_fp32_precision_state(old_fp32_precision)
         self.precision = old_precision
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_matmul_precision = torch.backends.mkldnn.matmul.fp32_precision
-    old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
+    old_fp32_precision = torch.backends._get_fp32_precision_state(
+        "mkldnn.matmul", "mkldnn.conv"
+    )
     old_precision = self.precision
     try:
         torch.backends.mkldnn.matmul.fp32_precision = "tf32"
@@ -63,8 +64,7 @@ def tf32_on(self, tf32_precision=1e-5):
         self.precision = tf32_precision
         yield
     finally:
-        torch.backends.mkldnn.matmul.fp32_precision = old_matmul_precision
-        torch.backends.mkldnn.conv.fp32_precision = old_conv_precision
+        torch.backends._set_fp32_precision_state(old_fp32_precision)
         self.precision = old_precision
 
 
