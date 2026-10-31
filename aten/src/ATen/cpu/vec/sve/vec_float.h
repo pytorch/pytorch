@@ -112,6 +112,11 @@ template <>
 struct is_vec_specialized_for<float> : std::bool_constant<true> {};
 
 template <>
+struct VecBoolType<float> {
+  using type = SveVecBool<float>;
+};
+
+template <>
 class Vectorized<float> {
  private:
   vls_float32_t values;
@@ -129,6 +134,9 @@ class Vectorized<float> {
   Vectorized(float val) {
     values = svdup_n_f32(val);
   }
+  // A comparison result as a mask: all bits set in a true lane.
+  Vectorized(VecBool<float> p)
+      : values(svsel_f32(p, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK)) {}
   template <
       typename... Args,
       typename = std::enable_if_t<(sizeof...(Args) == size())>>
@@ -165,6 +173,12 @@ class Vectorized<float> {
       const Vectorized<float>& mask_) {
     svbool_t mask =
         svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
+    return svsel_f32(mask, b, a);
+  }
+  static Vectorized<float> blendv(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      VecBool<float> mask) {
     return svsel_f32(mask, b, a);
   }
   template <typename step_t>
@@ -221,10 +235,8 @@ class Vectorized<float> {
     }
     return mask;
   }
-  Vectorized<float> isnan() const {
-    // NaN check
-    svbool_t mask = svcmpuo_f32(ptrue, values, ZERO_F32);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> isnan() const {
+    return svcmpuo_f32(ptrue, values, ZERO_F32);
   }
   bool has_inf_nan() const {
     return svptest_any(
@@ -244,6 +256,10 @@ class Vectorized<float> {
   }
   float reduce_max() const {
     return svmaxv_f32(ptrue, values);
+  }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<float> or_nan_if(VecBool<float> mask) const {
+    return svsel_f32(mask, ALL_F32_TRUE_MASK, values);
   }
   Vectorized<float> abs() const {
     return svabs_f32_x(ptrue, values);
@@ -623,34 +639,28 @@ class Vectorized<float> {
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vectorized<float> operator==(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpeq_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> operator==(const Vectorized<float>& other) const {
+    return svcmpeq_f32(ptrue, values, other);
   }
 
-  Vectorized<float> operator!=(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpne_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> operator!=(const Vectorized<float>& other) const {
+    return svcmpne_f32(ptrue, values, other);
   }
 
-  Vectorized<float> operator<(const Vectorized<float>& other) const {
-    svbool_t mask = svcmplt_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> operator<(const Vectorized<float>& other) const {
+    return svcmplt_f32(ptrue, values, other);
   }
 
-  Vectorized<float> operator<=(const Vectorized<float>& other) const {
-    svbool_t mask = svcmple_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> operator<=(const Vectorized<float>& other) const {
+    return svcmple_f32(ptrue, values, other);
   }
 
-  Vectorized<float> operator>(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpgt_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> operator>(const Vectorized<float>& other) const {
+    return svcmpgt_f32(ptrue, values, other);
   }
 
-  Vectorized<float> operator>=(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpge_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  VecBool<float> operator>=(const Vectorized<float>& other) const {
+    return svcmpge_f32(ptrue, values, other);
   }
 
   Vectorized<float> eq(const Vectorized<float>& other) const;
@@ -760,32 +770,32 @@ Vectorized<float> inline operator^(
 
 Vectorized<float> inline Vectorized<float>::eq(
     const Vectorized<float>& other) const {
-  return (*this == other) & Vectorized<float>(1.0f);
+  return svsel_f32(*this == other, ONE_F32, ZERO_F32);
 }
 
 Vectorized<float> inline Vectorized<float>::ne(
     const Vectorized<float>& other) const {
-  return (*this != other) & Vectorized<float>(1.0f);
+  return svsel_f32(*this != other, ONE_F32, ZERO_F32);
 }
 
 Vectorized<float> inline Vectorized<float>::gt(
     const Vectorized<float>& other) const {
-  return (*this > other) & Vectorized<float>(1.0f);
+  return svsel_f32(*this > other, ONE_F32, ZERO_F32);
 }
 
 Vectorized<float> inline Vectorized<float>::ge(
     const Vectorized<float>& other) const {
-  return (*this >= other) & Vectorized<float>(1.0f);
+  return svsel_f32(*this >= other, ONE_F32, ZERO_F32);
 }
 
 Vectorized<float> inline Vectorized<float>::lt(
     const Vectorized<float>& other) const {
-  return (*this < other) & Vectorized<float>(1.0f);
+  return svsel_f32(*this < other, ONE_F32, ZERO_F32);
 }
 
 Vectorized<float> inline Vectorized<float>::le(
     const Vectorized<float>& other) const {
-  return (*this <= other) & Vectorized<float>(1.0f);
+  return svsel_f32(*this <= other, ONE_F32, ZERO_F32);
 }
 
 template <>

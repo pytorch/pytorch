@@ -3066,12 +3066,25 @@ class GuardBuilder(GuardBuilderBase):
                 return False
 
         metadata = value.__tensor_flatten__()[1]
+        cls = type(value)
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        ref = self.arg_ref(guard)
         has_custom_guard = hasattr(value, "__metadata_guard__")
         if has_custom_guard:
             verify_guard_fn_signature(value)
-            cls = type(value)
+            reason = (
+                f"{class_name}.__metadata_guard__() rejected the metadata "
+                f"for {ref}. Keep the metadata stable or change the check "
+                "if this difference is safe."
+            )
         else:
-            _validate_default_subclass_metadata_guard(metadata, type(value))
+            _validate_default_subclass_metadata_guard(metadata, cls)
+            reason = (
+                f"Metadata from {class_name}.__tensor_flatten__() for "
+                f"{ref} no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe."
+            )
 
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
@@ -3096,7 +3109,7 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker,
-            get_verbose_code_parts(global_name, guard),
+            get_verbose_code_parts(global_name, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -3549,18 +3562,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         t = type(value)
+        remaining = tuple_iterator_len(value)
 
         code = []
-        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        code.append(f"___tuple_iterator_len({ref}) == {remaining}")
         self._set_guard_export_info(guard, code)
+        item_word = "item" if remaining == 1 else "items"
+        reason = (
+            f"Iterator {ref} must be a tuple iterator with {remaining} {item_word} left; "
+            "Dynamo specialized the compiled code on the tuple iterator type and remaining count."
+        )
 
-        t = type(value)
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value),
+            remaining,
             obj_id,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -4651,7 +4669,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # A concrete C++ backend such as ProcessGroupNCCL is bound as
         # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
         # alone let an unguarded one fail the whole frame with "cannot pickle".
         # The C++ Backend is also the Python backend extension point (a Python
@@ -5236,14 +5254,18 @@ class GuardsStatePickler(FunctionPicklerBase):
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
             is_fake = is_fake_tensor(obj)
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
+            # For FakeTensors, record the real tensor's type. This is important
+            # for cross-compilation where we compile with fake tensors but run
+            # with real tensors. Only from_meta_and_device sets pytype; a fake
+            # Parameter without one carries the Parameter marker. Guards on a
+            # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                is_param = isinstance(obj, torch.nn.Parameter)
+                default = torch.nn.Parameter if is_param else torch.Tensor
+                pytype = obj.pytype or default
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the

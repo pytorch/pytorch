@@ -4173,9 +4173,7 @@ module_db: list[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool3d,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
@@ -4906,7 +4904,8 @@ module_db: list[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                decorators=[
-                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=1e-3)}),
+                   # M1-M4 fp16 linear rounds strided and contiguous inputs differently
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-1, rtol=1e-3)}),
                                 'TestModule', 'test_non_contiguous_tensors',
                                 device_type='mps')],
                skips=(
@@ -4949,10 +4948,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.PReLU,
                module_inputs_func=module_inputs_torch_nn_PReLU,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
