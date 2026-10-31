@@ -21,7 +21,8 @@ from typing import Any
 from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, precisionOverride,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS,
+     dtypesIfXPU, onlyCPU, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
@@ -412,77 +413,6 @@ class TestSparseOnlyCPU(TestSparseBase):
 
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
-
-    @coalescedonoff
-    # adding a graph break before self.assertFalse(weight._indices().is_contiguous())
-    # makes the test pass so some existent sparse related bug
-    @skipIfTorchDynamo("skip")
-    @dtypes(torch.double, torch.cdouble)
-    def test_sspaddmm(self, device, dtype, coalesced):
-
-        def test_shape(di, dj, dk, nnz):
-            x = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)[0]
-            t = self._gen_sparse(2, nnz, [di, dk], dtype, device, coalesced)[0]
-            y = torch.randn(dj, dk, dtype=dtype, device=device)
-            alpha = random.random()
-            beta = random.random()
-
-            res = t.sspaddmm(x, y, beta=beta, alpha=alpha)
-            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y, beta=beta, alpha=alpha)
-            self.assertEqual(self.safeToDense(res), expected)
-
-            res = t.sspaddmm(x, y)
-            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y)
-            self.assertEqual(self.safeToDense(res), expected)
-
-        test_shape(7, 5, 3, 20)
-        test_shape(1000, 100, 100, 20)
-        test_shape(3000, 64, 300, 20)
-        test_shape(0, 100, 100, 0)
-        test_shape(1000, 0, 100, 0)
-        test_shape(1000, 100, 0, 0)
-
-        # Test code from issue https://github.com/pytorch/pytorch/issues/45113
-        batch_size, input_size, hidden_size = 5, 3, 7
-
-        # Create coalesced sparse tensor with non-contiguous indices
-        weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
-        self.assertTrue(weight.is_coalesced())
-        non_contig_indices = weight.indices().mT.contiguous().mT
-        weight = torch.sparse_coo_tensor(
-            indices=non_contig_indices, values=weight.values(), size=weight.shape)
-        weight._coalesced_(True)
-        self.assertFalse(weight._indices().is_contiguous())
-        # Create un/coalesced sparse tensor
-        bias = torch.randn((hidden_size, 1), dtype=dtype, device=device).to_sparse()
-        bias = torch.cat([bias] * batch_size, dim=1)
-
-        if coalesced:
-            bias = bias.coalesce()
-
-        x = torch.randn(input_size, batch_size, dtype=dtype, device=device)
-        res = bias.sspaddmm(weight, x)
-
-        true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
-        self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
-
-    @dtypes(torch.double, torch.cdouble)
-    def test_sspaddmm_wrong_mat_types_error_messages(self, device, dtype):
-        m, k, n = 2, 2, 2
-        self_sp = self._gen_sparse(2, 4, [m, n], dtype, device, True)[0]
-        mat1_dense = torch.randn(m, k, dtype=dtype, device=device)
-        mat2_dense = torch.randn(k, n, dtype=dtype, device=device)
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout Strided"):
-            self_sp.sspaddmm(mat1_dense, mat2_dense)
-
-        mat1_sparse = self._gen_sparse(2, 3, [m, k], dtype, device, True)[0]
-        mat2_sparse = self._gen_sparse(2, 3, [k, n], dtype, device, True)[0]
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
-            self_sp.sspaddmm(mat1_sparse, mat2_sparse)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -4405,6 +4335,78 @@ class TestSparse(TestSparseBase):
             run_test(shape, 0)
             run_test(shape, max(shape))
             run_test(shape, shape[0] * shape[1])
+
+    @skipCUDAIf(True, "CUDA sspaddmm is not implemented")
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfXPU(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_sspaddmm(self, device, dtype, coalesced):
+
+        def test_shape(di, dj, dk, nnz):
+            x = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)[0]
+            t = self._gen_sparse(2, nnz, [di, dk], dtype, device, coalesced)[0]
+            y = torch.randn(dj, dk, dtype=dtype, device=device)
+            alpha = random.random()
+            beta = random.random()
+
+            res = t.sspaddmm(x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y, beta=beta, alpha=alpha)
+            self.assertEqual(self.safeToDense(res), expected)
+
+            res = t.sspaddmm(x, y)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y)
+            self.assertEqual(self.safeToDense(res), expected)
+
+        test_shape(7, 5, 3, 20)
+        test_shape(1000, 100, 100, 20)
+        test_shape(3000, 64, 300, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(1000, 0, 100, 0)
+        test_shape(1000, 100, 0, 0)
+
+        # Test code from issue https://github.com/pytorch/pytorch/issues/45113
+        batch_size, input_size, hidden_size = 5, 3, 7
+
+        # Create coalesced sparse tensor with non-contiguous indices
+        weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
+        self.assertTrue(weight.is_coalesced())
+        non_contig_indices = weight.indices().mT.contiguous().mT
+        weight = torch.sparse_coo_tensor(
+            indices=non_contig_indices, values=weight.values(), size=weight.shape)
+        weight._coalesced_(True)
+        self.assertFalse(weight._indices().is_contiguous())
+        # Create un/coalesced sparse tensor
+        bias = torch.randn((hidden_size, 1), dtype=dtype, device=device).to_sparse()
+        bias = torch.cat([bias] * batch_size, dim=1)
+
+        if coalesced:
+            bias = bias.coalesce()
+
+        x = torch.randn(input_size, batch_size, dtype=dtype, device=device)
+        res = bias.sspaddmm(weight, x)
+
+        true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
+        self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
+
+    @skipCUDAIf(True, "CUDA sspaddmm is not implemented")
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfXPU(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_sspaddmm_wrong_mat_types_error_messages(self, device, dtype):
+        m, k, n = 2, 2, 2
+        self_sp = self._gen_sparse(2, 4, [m, n], dtype, device, True)[0]
+        mat1_dense = torch.randn(m, k, dtype=dtype, device=device)
+        mat2_dense = torch.randn(k, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout Strided"):
+            self_sp.sspaddmm(mat1_dense, mat2_dense)
+
+        mat1_sparse = self._gen_sparse(2, 3, [m, k], dtype, device, True)[0]
+        mat2_sparse = self._gen_sparse(2, 3, [k, n], dtype, device, True)[0]
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
+            self_sp.sspaddmm(mat1_sparse, mat2_sparse)
 
 
 class TestSparseOneOff(TestCase):
