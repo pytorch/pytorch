@@ -2486,7 +2486,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
     @parametrize("actual_type", [dict, object])
     @parametrize(
         "reported_type",
-        [dict, OrderedDict, defaultdict],
+        [dict, OrderedDict, defaultdict, getattr(builtins, "frozendict", dict)],
     )
     def test_input_object_reporting_mapping_class(self, actual_type, reported_type):
         class Mapping(actual_type):

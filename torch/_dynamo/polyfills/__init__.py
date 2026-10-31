@@ -593,6 +593,8 @@ def frozendict_fromkeys(
 ) -> C:
     if not torch._has_frozendict:
         raise AssertionError("requires builtins.frozendict")
+    if cls is not torch._frozendict:
+        return dict_fromkeys(cls, iterable, value)
     # Use identity checks: tuple membership can invoke a metaclass's `__eq__`.
     if any(
         type(iterable) is kind for kind in (dict, torch._frozendict, set, frozenset)
