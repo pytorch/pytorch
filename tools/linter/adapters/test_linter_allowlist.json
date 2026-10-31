@@ -228,7 +228,6 @@
   "test/distributed/test_inductor_collectives.py",
   "test/distributed/test_inductor_compile_collectives.py",
   "test/distributed/test_local_tensor.py",
-  "test/distributed/test_multi_threaded_pg.py",
   "test/distributed/test_multigpu_marker.py",
   "test/distributed/test_multiproc_continuous_harness.py",
   "test/distributed/test_nan_check.py",
