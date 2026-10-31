@@ -16,6 +16,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import _ordered_dict_order
 from torch._dynamo.testing import CompileCounter
 from torch._library.fake_class_registry import FakeScriptObject
@@ -187,6 +188,50 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
         root.add_ordered_dict_order_guard(get_mapping, (0, 1), [], None)
         self.assertFalse(root.check({}))
         self.assertFalse(root.check_verbose({}).result)
+
+    @parametrize("copy", [False, True])
+    def test_ordered_dict_unlinked_key_invalidates_guard(self, copy):
+        def fn(x, mapping):
+            result = mapping.copy() if copy else mapping
+            return x + 1, tuple(result.items())
+
+        x = torch.ones(1)
+        mapping = OrderedDict(a=1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        unlinked = OrderedDict()
+        dict.__setitem__(unlinked, "a", 1)
+        with self.assertRaisesRegex(
+            Unsupported, "OrderedDict storage differs from linked keys"
+        ):
+            compiled(x, unlinked)
+
+    @parametrize("position", ["before", "after"])
+    @parametrize("key_type", [str, int])
+    @parametrize("linked_count", [0, 1, 2])
+    def test_ordered_dict_unlinked_input_keys(self, position, key_type, linked_count):
+        mapping = OrderedDict()
+        if position == "before":
+            dict.__setitem__(mapping, key_type(0), 0)
+        for key in range(1, linked_count + 1):
+            mapping[key_type(key)] = key
+        if position == "after":
+            dict.__setitem__(mapping, key_type(0), 0)
+
+        def fn(x, mapping):
+            return x + 1, tuple(mapping.values())
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            Unsupported, "OrderedDict storage differs from linked keys"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        # Linking an existing storage key must not reuse the incomplete snapshot.
+        mapping[key_type(0)] = 0
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
 
     @parametrize("nested", [False, True])
     def test_ordered_dict_order_guard_after_version_shortcut(self, nested):
