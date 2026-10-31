@@ -4261,6 +4261,36 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
+    def _install_generic_dict_presence_guard(self, name: str, present: bool) -> None:
+        """Guard that the instance dict keeps the presence a caller just read.
+
+        Skipped where Dynamo's view of the dict differs from the live object's,
+        which means a store or delete earlier in the frame decided the answer.
+        The input's dict is then not what produced it, and a guard on the input
+        would fail on this very frame.
+        """
+        obj_dict = getattr(self.value, "__dict__", None)
+        if self.source is None or obj_dict is None or present != (name in obj_dict):
+            return
+        builder = (
+            GuardBuilder.PRESENT_IN_GENERIC_DICT
+            if present
+            else GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT
+        )
+        install_guard(self.source.make_guard(functools.partial(builder, attr=name)))
+
+    def _protocol_member_is_none(self, entry: VariableTracker) -> bool:
+        """Whether a Protocol member read off the object is None, which opts a
+        method member out of the Protocol."""
+        if isinstance(entry, variables.LazyVariableTracker) and not entry.is_realized():
+            if entry.source is None:
+                raise AssertionError("unrealized member without a source")
+            # The type tells None apart; realizing the entry would guard on its
+            # value, so distinct functions would not share a graph.
+            install_guard(entry.source.make_guard(GuardBuilder.TYPE_MATCH))
+            return entry.peek_value() is None
+        return entry.is_constant_none()
+
     def isinstance_runtime_protocol(
         self, tx: "InstructionTranslatorBase", proto: type, members: frozenset[str]
     ) -> bool:
@@ -4269,99 +4299,115 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         typing._ProtocolMeta.__instancecheck__: the ABC check, which reads the
         object's class, then a walk over the members.
 
-        A member the instance provides is read from Dynamo's view of the
-        object, so attributes stored earlier in the frame count, and the input
-        is guarded on it. A member the class provides is read without tracing
-        its descriptor: 3.12+ takes the class attribute itself, as
-        inspect.getattr_static does, and earlier versions run the descriptor on
-        the real object, as hasattr() does there, unguarded as before.
+        How the walk reads a member follows what typing does on the running
+        version. Before 3.12 that is hasattr() and getattr(), which run
+        __getattr__ and any descriptor, so the walk goes through
+        tp_getattro_impl, which traces both and guards whatever they read. From
+        3.12 it is inspect.getattr_static, which reads the instance dict and
+        the class MRO and runs neither, so the walk reads Dynamo's view of the
+        instance dict and guards each member's presence in it. Either way an
+        attribute stored earlier in the frame counts.
         """
         value = self.value
-        # Attribute hooks and threading.local's per-thread dict make hasattr()
-        # and the instance dict disagree with the Protocol's lookup, so the real
-        # object answers for these, as before.
-        if (
-            self._object_has_getattribute
-            or self._check_for_getattr() is not None
-            or isinstance(value, threading.local)
-        ):
+        # A custom __getattribute__ is on neither of typing's paths, so the
+        # real object answers for it, as before.
+        if self._object_has_getattribute:
             return isinstance(value, proto)
+        # A dict that is empty when traced drops every guard installed on it,
+        # since DictGuardManager answers for a size of zero without running
+        # its accessors, so nothing read off one here can be guarded.
+        if self.source is not None and isinstance(value, dict) and not value:
+            unimplemented(
+                gb_type="Protocol isinstance() on an empty dict subclass",
+                context=f"isinstance({self}, {proto})",
+                explanation="Dynamo cannot guard what a runtime_checkable "
+                "Protocol reads off a dict that is empty while tracing, so the "
+                "answer would be reused for objects it does not hold for.",
+                hints=[
+                    "Pass the object as a non-empty dict, or move the "
+                    "isinstance() check out of the compiled region.",
+                ],
+            )
         if abc.ABCMeta.__instancecheck__(proto, value):
             return True
         non_methods = getattr(proto, "__non_callable_proto_members__", None)
         if non_methods is None:  # before 3.12.2
             non_methods = {m for m in members if not callable(getattr(proto, m, None))}
-        has_dict = hasattr(value, "__dict__")
-        # Before 3.12 the check is hasattr(), which sees whether a slot is set.
-        reads_slots = sys.version_info < (3, 12)
         # Sorted so the installed guards do not depend on set order.
-        for member in sorted(members):
+        sorted_members = sorted(members)
+        if sys.version_info < (3, 12):
+            for member in sorted_members:
+                class_attr = self.lookup_class_mro_attr(member)
+                if class_attr is NO_SUCH_SUBOBJ or isinstance(
+                    class_attr, types.MemberDescriptorType
+                ):
+                    # Nothing on the class produces the value, so hasattr() is
+                    # a question about the instance dict, a slot or
+                    # __getattr__, and the HASATTR guard it installs answers it
+                    # for later inputs.
+                    if not self.call_obj_hasattr(tx, member).as_python_constant():
+                        return False
+                    if member in non_methods:
+                        continue
+                    entry = self.tp_getattro_impl(tx, member)
+                else:
+                    # hasattr() and getattr() both run the class's descriptor
+                    # here. Tracing it guards whatever it reads, where a
+                    # HASATTR guard would re-run the getter every time the
+                    # guards are built and turn anything it raises other than
+                    # AttributeError into a Dynamo error. Tracing it once
+                    # rather than twice is the one place this does not follow
+                    # typing, which calls hasattr() and then getattr().
+                    try:
+                        entry = self.tp_getattro_impl(tx, member)
+                    except ObservedAttributeError:
+                        handle_observed_exception(tx)
+                        return False
+                    if member in non_methods:
+                        continue
+                # Setting a method member to None opts out of the Protocol.
+                if self._protocol_member_is_none(entry):
+                    return False
+            return True
+        # getattr_static does not reach threading.local's per-thread dict, so
+        # from 3.12 the answer for one depends on nothing but its class, which
+        # the type guard on the object already covers.
+        if isinstance(value, threading.local):
+            return isinstance(value, proto)
+        has_dict = hasattr(value, "__dict__")
+        for member in sorted_members:
             is_method = member not in non_methods
             class_attr = self.lookup_class_mro_attr(member)
             # An instance dict entry shadows any class attribute but a data
             # descriptor.
             shadowable = has_dict and not is_data_descriptor(class_attr)
-            if class_attr is NO_SUCH_SUBOBJ or (
-                reads_slots and isinstance(class_attr, types.MemberDescriptorType)
-            ):
-                # Only the instance can provide it; this guards on its presence.
-                if not self.call_obj_hasattr(tx, member).as_python_constant():
+            if class_attr is NO_SUCH_SUBOBJ:
+                # Only the instance can provide it, and getattr_static reads the
+                # dict instead of calling __getattr__, so a hook that would
+                # synthesize the member does not make it present.
+                if not shadowable:
+                    return False
+                present = self.has_key_in_generic_dict(tx, member)
+                self._install_generic_dict_presence_guard(member, present)
+                if not present:
                     return False
                 from_instance = True
             else:
                 from_instance = shadowable and self.has_key_in_generic_dict(tx, member)
             if from_instance:
-                # Setting a method member to None opts out of the Protocol.
-                if is_method:
-                    entry = self.tp_getattro_impl(tx, member)
-                    if (
-                        isinstance(entry, variables.LazyVariableTracker)
-                        and not entry.is_realized()
-                    ):
-                        if entry.source is None:
-                            raise AssertionError("unrealized member without a source")
-                        # The type tells None apart; realizing the entry would
-                        # guard on its value.
-                        install_guard(entry.source.make_guard(GuardBuilder.TYPE_MATCH))
-                        if entry.peek_value() is None:
-                            return False
-                    elif entry.is_constant_none():
-                        return False
+                if is_method and self._protocol_member_is_none(
+                    self.tp_getattro_impl(tx, member)
+                ):
+                    return False
                 continue
-            if sys.version_info >= (3, 12):
-                matches = not (is_method and class_attr is None)
-            else:
-                get = getattr(type(class_attr), "__get__", None)
-                try:
-                    found = (
-                        class_attr
-                        if get is None
-                        else get(class_attr, value, type(value))
-                    )
-                except AttributeError:
-                    matches = False
-                else:
-                    matches = not (is_method and found is None)
-            # An instance entry on another input could change the answer: it
-            # can supply an absent member, or set a method member to None. A
-            # data member the class provides is present whatever the dict
-            # holds. Checked after the descriptor ran, since
-            # functools.cached_property fills the dict.
-            if (
-                (is_method or not matches)
-                and shadowable
-                and self.source
-                and member not in vars(value)
-            ):
-                install_guard(
-                    self.source.make_guard(
-                        functools.partial(
-                            GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=member
-                        )
-                    )
-                )
-            if not matches:
-                return False
+            # A data member the class provides is present whatever the dict
+            # holds, but an instance entry can set a method member to None, so
+            # the answer for one needs the dict to stay as it is.
+            if is_method:
+                if shadowable:
+                    self._install_generic_dict_presence_guard(member, False)
+                if class_attr is None:
+                    return False
         return True
 
     def is_hashable(self) -> bool:

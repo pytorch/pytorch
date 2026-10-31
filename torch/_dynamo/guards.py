@@ -2477,6 +2477,39 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "attr"),
+        eval_fn=lambda value, metadata: metadata in value.__dict__,
+    )
+    def PRESENT_IN_GENERIC_DICT(self, guard: Guard, attr: str | None = None) -> None:
+        if attr is None:
+            raise AssertionError(
+                "attr must not be None for PRESENT_IN_GENERIC_DICT guard"
+            )
+        ref = self.arg_ref(guard)
+        val = self.get(guard)
+
+        base_manager = self.get_guard_manager(guard)
+
+        code = f"___dict_contains({attr!r}, {ref}.__dict__)"
+        if code in self.already_added_code_parts:
+            return
+
+        mod_dict_source = f"{guard.name}.__dict__"
+        mod_generic_dict_manager = base_manager.get_generic_dict_manager(
+            source=mod_dict_source,
+            example_value=self._get_generic_dict_manager_example_value(val.__dict__),
+            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+        )
+
+        mod_generic_dict_manager.add_dict_contains_guard(
+            True,
+            attr,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: type(value),
         eval_fn=lambda value, metadata: type(value) is metadata,
     )
