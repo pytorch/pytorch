@@ -206,13 +206,13 @@ def _kl_bernoulli_bernoulli(p, q):
         torch.nn.functional.softplus(-q.logits)
         - torch.nn.functional.softplus(-p.logits)
     )
-    t1[q.probs == 0] = inf
-    t1[p.probs == 0] = 0
+    t1 = torch.where(q.probs == 0, inf, t1)
+    t1 = torch.where(p.probs == 0, 0.0, t1)
     t2 = (1 - p.probs) * (
         torch.nn.functional.softplus(q.logits) - torch.nn.functional.softplus(p.logits)
     )
-    t2[q.probs == 1] = inf
-    t2[p.probs == 1] = 0
+    t2 = torch.where(q.probs == 1, inf, t2)
+    t2 = torch.where(p.probs == 1, 0.0, t2)
     return t1 + t2
 
 
@@ -484,7 +484,7 @@ def _kl_pareto_pareto(p, q):
     t1 = q.alpha * scale_ratio.log()
     t2 = -alpha_ratio.log()
     result = t1 + t2 + alpha_ratio - 1
-    result[p.support.lower_bound < q.support.lower_bound] = inf
+    result = torch.where(p.support.lower_bound < q.support.lower_bound, inf, result)
     return result
 
 
@@ -505,7 +505,7 @@ def _kl_transformed_transformed(p, q):
 @register_kl(Uniform, Uniform)
 def _kl_uniform_uniform(p, q):
     result = ((q.high - q.low) / (p.high - p.low)).log()
-    result[(q.low > p.low) | (q.high < p.high)] = inf
+    result = torch.where((q.low > p.low) | (q.high < p.high), inf, result)
     return result
 
 
@@ -571,7 +571,9 @@ def _kl_beta_normal(p, q):
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
+    result = torch.where(
+        (q.low > p.support.lower_bound) | (q.high < p.support.upper_bound), inf, result
+    )
     return result
 
 
@@ -806,7 +808,7 @@ def _kl_pareto_exponential(p, q):
     t2 = p.alpha.reciprocal()
     t3 = p.alpha * scale_rate_prod / (p.alpha - 1)
     result = t1 - t2 + t3 - 1
-    result[p.alpha <= 1] = inf
+    result = torch.where(p.alpha <= 1, inf, result)
     return result
 
 
@@ -818,7 +820,7 @@ def _kl_pareto_gamma(p, q):
     t3 = (1 - q.concentration) * common_term
     t4 = q.rate * p.alpha * p.scale / (p.alpha - 1)
     result = t1 + t2 + t3 + t4 - 1
-    result[p.alpha <= 1] = inf
+    result = torch.where(p.alpha <= 1, inf, result)
     return result
 
 
@@ -834,7 +836,7 @@ def _kl_pareto_normal(p, q):
     t3 = p.alpha * common_term.pow(2) / (p.alpha - 2)
     t4 = (p.alpha * common_term - q.loc).pow(2)
     result = t1 - t2 + (t3 + t4) / var_normal - 1
-    result[p.alpha <= 2] = inf
+    result = torch.where(p.alpha <= 2, inf, result)
     return result
 
 
@@ -864,7 +866,9 @@ def _kl_uniform_beta(p, q):
         - (q.concentration1 + q.concentration0).lgamma()
     )
     result = t3 + t4 - t1 - t2
-    result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = inf
+    result = torch.where(
+        (p.high > q.support.upper_bound) | (p.low < q.support.lower_bound), inf, result
+    )
     return result
 
 
@@ -889,7 +893,7 @@ def _kl_uniform_continuous_bernoulli(p, q):
 @register_kl(Uniform, Exponential)
 def _kl_uniform_exponetial(p, q):
     result = q.rate * (p.high + p.low) / 2 - ((p.high - p.low) * q.rate).log()
-    result[p.low < q.support.lower_bound] = inf
+    result = torch.where(p.low < q.support.lower_bound, inf, result)
     return result
 
 
@@ -905,7 +909,7 @@ def _kl_uniform_gamma(p, q):
     )
     t4 = q.rate * (p.high + p.low) / 2
     result = -t1 + t2 + t3 + t4
-    result[p.low < q.support.lower_bound] = inf
+    result = torch.where(p.low < q.support.lower_bound, inf, result)
     return result
 
 
@@ -937,7 +941,7 @@ def _kl_uniform_pareto(p, q):
     t1 = (q.alpha * q.scale.pow(q.alpha) * (support_uniform)).log()
     t2 = (_x_log_x(p.high) - _x_log_x(p.low) - support_uniform) / support_uniform
     result = t2 * (q.alpha + 1) - t1
-    result[p.low < q.support.lower_bound] = inf
+    result = torch.where(p.low < q.support.lower_bound, inf, result)
     return result
 
 

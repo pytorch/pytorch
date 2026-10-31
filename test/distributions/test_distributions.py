@@ -6117,6 +6117,48 @@ class TestKLDevice(DistributionsTestCase):
                     ),
                 )
 
+    def test_kl_broadcast_batch_shapes(self):
+        # kl_divergence must agree with the result for explicitly expanded
+        # arguments when p and q have different, broadcast-compatible batch shapes
+        # (it used to raise IndexError or place `inf` on the wrong elements).
+        torch.manual_seed(0)
+
+        def r(*shape):
+            return torch.rand(*shape) * 0.8 + 0.1
+
+        factories = {
+            "bernoulli": lambda *s: Bernoulli(probs=r(*s)),
+            "bernoulli_edge": lambda *s: Bernoulli(
+                probs=torch.tensor([0.0, 0.5, 1.0]).expand(*s)
+            ),
+            "pareto": lambda *s: Pareto(r(*s) + 0.5, r(*s) * 3 + 2.5),
+            "beta": lambda *s: Beta(r(*s) + 1, r(*s) + 1),
+            "uniform": lambda *s: Uniform(-r(*s), r(*s) + 1.0),
+            "exponential": lambda *s: Exponential(r(*s) + 0.5),
+            "gamma": lambda *s: Gamma(r(*s) + 1, r(*s) + 1),
+            "normal": lambda *s: Normal(r(*s), r(*s) + 0.5),
+        }
+        pairs = [
+            ("bernoulli", "bernoulli"),
+            ("bernoulli_edge", "bernoulli"),
+            ("bernoulli", "bernoulli_edge"),
+            ("beta", "uniform"),
+            ("uniform", "beta"),
+            ("uniform", "exponential"),
+            ("uniform", "gamma"),
+            ("pareto", "exponential"),
+            ("pareto", "gamma"),
+            ("pareto", "normal"),
+        ]
+        out_shape = (4, 3)
+        for p_name, q_name in pairs:
+            for p_shape, q_shape in [((4, 3), (3,)), ((3,), (4, 3)), ((4, 3), (1, 3))]:
+                p = factories[p_name](*p_shape)
+                q = factories[q_name](*q_shape)
+                expected = kl_divergence(p.expand(out_shape), q.expand(out_shape))
+                actual = kl_divergence(p, q)
+                self.assertEqual(actual, expected)
+
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
             self.assertTrue(
