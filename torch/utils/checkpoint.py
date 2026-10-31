@@ -1951,7 +1951,7 @@ def _checkpoint_without_reentrant_generator_impl(
             f"but got {determinism_check}"
         )
 
-    device_type = _infer_device_type(*args)
+    device_type = _infer_device_type(args, kwargs)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
     # SAC caches some tensors outside the autograd graph; this tells its caching
@@ -1982,7 +1982,7 @@ def _checkpoint_without_reentrant_generator_impl(
         had_device_in_fwd = False
         if getattr(device_module, "_initialized", False):
             had_device_in_fwd = True
-            fwd_devices, fwd_device_states = get_device_states(*args)
+            fwd_devices, fwd_device_states = get_device_states(args, kwargs)
 
     from torch.overrides import _get_current_function_mode_stack
     from torch.utils._device import DeviceContext
