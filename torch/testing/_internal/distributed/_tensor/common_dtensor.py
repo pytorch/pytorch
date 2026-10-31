@@ -1225,7 +1225,7 @@ class LocalDTensorTestBase(DTensorTestBase):
 
 def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
-    def wrapped(self):
+    def wrapped(self, *args, **kwargs):
         torch._dynamo.reset()
         stack = contextlib.ExitStack()
         for ctx in ctxs:
@@ -1234,12 +1234,20 @@ def make_wrapped(fn, ctxs):
             else:
                 stack.enter_context(ctx)
         try:
-            out = fn(self)
+            out = fn(self, *args, **kwargs)
         finally:
             stack.close()
         return out
 
     return wrapped
+
+
+def make_skipped(fn):
+    @functools.wraps(fn)
+    def skipped(self, *args, **kwargs):
+        self.skipTest("Skipped test")
+
+    return skipped
 
 
 def create_local_tensor_test_class(
@@ -1254,7 +1262,7 @@ def create_local_tensor_test_class(
         if not callable(fn):
             continue
         elif name in skipped_tests:
-            dct[name] = lambda self: self.skipTest("Skipped test")
+            dct[name] = make_skipped(fn)
         elif name.startswith("test_"):
             ctxs = [
                 lambda test: test._get_local_tensor_mode(),
