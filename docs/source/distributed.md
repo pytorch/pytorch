@@ -1764,7 +1764,12 @@ curl -X POST \
 ```
 
 **``fr_dump_file``** — Starts a Flight Recorder dump for one backend. The
-``backend`` query parameter selects the backend-specific recorder.
+``backend`` query parameter selects the backend-specific recorder. The dump,
+without stack traces, goes to the same per-rank file
+(``<TORCH_FR_DUMP_TEMP_FILE><rank>``, prefix ``~/.cache/torch/comm_lib_trace_rank_``
+if unset) that every backend's dump and ProcessGroupNCCL's timeout dump write,
+so it overwrites any earlier dump there, including the watchdog's. Copy that
+file first to keep it.
 
 ```bash
 curl -X POST \
@@ -1857,7 +1862,7 @@ Handlers that support dumping:
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``PySpyHandler``                   | ``pyspy_dump``         | py-spy stack dumps (nonblocking) for all ranks.   |
 +------------------------------------+------------------------+---------------------------------------------------+
-| ``FlightRecorderHandler``          | ``fr_trace``           | CPU, NCCL and nccl2 flight-recorder tables.       |
+| ``FlightRecorderHandler``          | ``fr_trace``           | CPU, NCCL, nccl2 and nccl-lazy FR tables.         |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
 +------------------------------------+------------------------+---------------------------------------------------+

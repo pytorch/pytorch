@@ -112,6 +112,7 @@ class TestDebug(TestCase):
             self.assertIn("=== FR Trace ===", out)
             self.assertIn("=== FR Trace NCCL ===", out)
             self.assertIn("=== FR Trace nccl2 ===", out)
+            self.assertIn("=== FR Trace nccl-lazy ===", out)
             self.assertNotIn("Failed to fetch", out)
 
         with self.subTest("error codes"):
@@ -439,6 +440,7 @@ class TestHandlerPartialDumps(TestCase):
             ("fr_trace_json",): "cpu",
             ("fr_trace_json", "backend=nccl"): "nccl",
             ("fr_trace_json", "backend=nccl2"): "nccl2",
+            ("fr_trace_json", "backend=nccl-lazy"): "nccl-lazy",
         }
 
         def fetch(*args, timeout):
@@ -455,6 +457,7 @@ class TestHandlerPartialDumps(TestCase):
             ("FR Trace", "cpu"),
             ("FR Trace NCCL", "nccl"),
             ("FR Trace nccl2", "nccl2"),
+            ("FR Trace nccl-lazy", "nccl-lazy"),
         ):
             self.assertIn(f"=== {title} === {payload}\n", content + "\n")
         self.assertNotIn("Failed to fetch", content)

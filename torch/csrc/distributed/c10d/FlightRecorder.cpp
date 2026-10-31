@@ -87,9 +87,11 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   writer_ = std::move(writer);
 }
 
+// Leaked so fr_dump_file workers joined during static destruction can still
+// lock it.
 std::mutex& DebugInfoWriter::writeMutex() {
-  static std::mutex mutex;
-  return mutex;
+  static auto* mutex = new std::mutex();
+  return *mutex;
 }
 
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
