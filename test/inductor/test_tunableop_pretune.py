@@ -50,6 +50,7 @@ class _FakeSizevars:
         self._hint = hint
         self.shape_env = mock.Mock()
         self.shape_env.bound_sympy = lambda expr: ValueRanges(*declared)
+        self.shape_env.var_to_hint_override = {}
 
     def optimization_hint(self, expr):
         return int(sympy.sympify(expr).subs(self._sym, self._hint))
@@ -383,6 +384,24 @@ class TestTunableOpPretune(TestCase):
                 len(submitted), first, "a different output stride must not be memoed"
             )
 
+    def test_unbacked_symbol_is_skipped(self):
+        # optimization_hint() does not raise for an unbacked symbol, it returns
+        # config.unbacked_symint_fallback. Tuning around that invented size
+        # would spend the budget -- hint rung first -- on a size nothing asked
+        # for. Unbacked ints are the "u" prefix (torch/utils/_sympy/symbol.py).
+        u = sympy.Symbol("u0", positive=True, integer=True)
+        self.assertEqual(_run(self._mm_winner("mm", u), sym=u), [])
+
+    def test_unbacked_symbol_with_a_user_hint_is_tuned(self):
+        # An explicit hint via var_to_hint_override is a real size, so the
+        # ladder runs rather than being turned away.
+        u = sympy.Symbol("u1", positive=True, integer=True)
+        winner = self._mm_winner("mm", u)
+        with _ladder(u) as submitted:
+            V.graph.sizevars.shape_env.var_to_hint_override = {u: 512}
+            tunableop.maybe_range_pretune(winner)
+        self.assertTrue(submitted, "an explicit hint must re-enable the ladder")
+
     def test_choice_variants_produce_buckets(self):
         # Matching runs on winner.choice.name, which covers the _dtype
         # out-variants and _scaled_mm_v2.
@@ -714,11 +733,12 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     The tests above stop at what the ladder decides. This is the only one that
     sends a real ExternKernelGPUBenchmarkRequest through the pipe, so it is what
     proves the rebuilt metas describe shapes hipBLASLt accepts and that each one
-    reaches the file runtime reads. The fx graph cache is left on, so it also
-    covers the tune-mode bypass end to end.
+    reaches the file runtime reads.
 
     InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it.
+    per test and clears _pretuned_gemms with it. That also means the compile
+    always starts cold, so this does not exercise the tune-mode cache bypass;
+    test_enabled_modes_bypass_the_fx_graph_cache covers that directly.
     """
 
     hw_classification = HardwareClassification.CUDA

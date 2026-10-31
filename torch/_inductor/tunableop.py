@@ -26,6 +26,7 @@ import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
@@ -724,7 +725,8 @@ def _declared(expr: Any) -> tuple[int | None, int | None]:
     try:
         vr = V.graph.sizevars.shape_env.bound_sympy(expr)
     except (AttributeError, TypeError, ValueError, KeyError):
-        # No usable range: unbacked symbol, or no shape env at all.
+        # No shape env, or an expression bound_sympy cannot evaluate. Unbacked
+        # symbols do have a range here, through var_to_range.
         return None, None
     lo = hi = None
     try:
@@ -858,6 +860,15 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if len(symbols) != 1:
         return
     s = next(iter(symbols))
+    # optimization_hint() does not raise for an unbacked symbol: it returns
+    # config.unbacked_symint_fallback (8192). The ladder treats the hint as the
+    # size runtime is known to ask for -- it leads the shared budget and sets
+    # both ceilings -- so a data-dependent dim would spend the budget on a size
+    # nothing asked for. Honour an explicit hint if the user set one.
+    if free_unbacked_symbols(s) and s not in getattr(
+        V.graph.sizevars.shape_env, "var_to_hint_override", {}
+    ):
+        return
 
     # Never bucket the reduction dim K: a solution is only valid for the exact K
     # it was tuned at. This also rejects attention-style ops where one symbol
@@ -914,7 +925,8 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     try:
         sym_hint = V.graph.sizevars.optimization_hint(s)
     except (AttributeError, TypeError, ValueError, KeyError):
-        # No hint for this symbol, so there is no traced size to anchor on.
+        # No hint at all. Unbacked symbols do not land here -- they are turned
+        # away above, since optimization_hint() invents a fallback for them.
         return
     sym_lo, sym_hi = _declared(s)
     # A declared bound narrower than the cap wins. The cap is raised to the
