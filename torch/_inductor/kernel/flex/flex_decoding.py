@@ -2,7 +2,7 @@
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import sympy
 
@@ -159,7 +159,9 @@ flex_decoding_template = TritonTemplate(
 )
 
 
-def get_split_k(B: int, H: int, Mk: int, device: torch.device) -> int:
+def get_split_k(
+    B: int, H: int, Mk: int, device: torch.device, block_n: Optional[int] = None
+) -> int:
     interface = get_interface_for_device(device)
     num_SM = interface.get_multi_processor_count(device)
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
@@ -169,6 +171,9 @@ def get_split_k(B: int, H: int, Mk: int, device: torch.device) -> int:
     # TODO: workload evening at runtime for splits fully masked out.
     # Before we have runtime workload evening, assign 2 splits per SM.
     split_k = max(split_k, 1)
+
+    if block_n is not None and isinstance(Mk, (int, sympy.Integer)):
+        split_k = max(min(split_k, ceildiv(int(Mk), block_n)), 1)
 
     return split_k
 
@@ -282,7 +287,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     kernel_options.setdefault("SM_SCALE", scale)
     if "SPLIT_KV" not in kernel_options:
-        kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv, device)
+        min_block_n = min((c.block_n for c in configs), default=None)
+        kernel_options["SPLIT_KV"] = get_split_k(
+            B, Hkv, seq_len_kv, device, block_n=min_block_n
+        )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers
