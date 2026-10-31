@@ -29,54 +29,13 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
-    parametrize,
     run_tests,
     skipIfHpu,
-    TEST_CUDA,
-    TEST_HPU,
     TEST_WITH_ROCM,
-    TEST_XPU,
     TestCase,
 )
-
-
-# NOTE: Instructions for adding new device types to this test file
-#
-# This test file contains two types of tests:
-# 1. Tests that run on both CPUs and accelerators
-# 2. Tests that run only on accelerators
-#
-# We use two variables to manage device types:
-# - `devices`: A list containing device types for both CPU and accelerator tests
-# - `DEVICE`: A string containing only the accelerator type for accelerator-only tests
-#
-# To add a new device type:
-# 1. Add a new `elif` statement in the if-else ladder below
-# 2. Check for the presence of your device (e.g., TEST_NEW_DEVICE)
-# 3. Append your device type to the `devices` list
-# 4. Assign your device type string to `DEVICE`
-#
-# Example:
-# elif TEST_NEW_DEVICE:
-#     devices.append("new_device")
-#     DEVICE = "new_device"
-
-DEVICE = "cuda"
-devices = ["cpu"]
-if TEST_HPU:
-    devices.append("hpu")
-    DEVICE = "hpu"
-elif TEST_XPU:
-    devices.append("xpu")
-    DEVICE = "xpu"
-elif TEST_CUDA:
-    devices.append("cuda")
-elif acc := torch.accelerator.current_accelerator(check_available=True):
-    # Any other accelerator, for example an out-of-tree backend.
-    devices.append(acc.type)
-    DEVICE = acc.type
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -103,6 +62,8 @@ def new_subgroups(group_size: int, pg_tag=None):
 
 @skipIfHpu
 class TestExpand(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 4
@@ -193,6 +154,8 @@ class TestExpand(MultiThreadedTestCase):
 
 @skipIfHpu
 class TestPgTag(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 4
@@ -270,9 +233,10 @@ class TestPgTag(MultiThreadedTestCase):
         self.assertEqual(dist.group.WORLD, pg)
 
 
-@instantiate_parametrized_tests
 @skipIfHpu
 class TestTraceableCollectives(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -281,12 +245,17 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    @parametrize("device", devices)
-    def test_broadcast(self, device):
-        if device != "cpu":
+    def _setup_device(self, device):
+        """Return the device type, and bind the thread of this rank to its device."""
+        device_type = torch.device(device).type
+        if device_type != "cpu":
             if torch.accelerator.device_count() < self.world_size:
                 self.skipTest("Not enough accelerator devices")
             torch.accelerator.set_device_index(dist.get_rank())
+        return device_type
+
+    def test_broadcast(self, device):
+        device = self._setup_device(device)
 
         if dist.get_rank() == 0:
             tensor = torch.ones([4], device=device)
@@ -297,12 +266,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res = ft_c.broadcast(tensor, 0, mesh)
         self.assertEqual(res, torch.ones([4], device=device))
 
-    @parametrize("device", devices)
     def test_all_reduce_eager(self, device):
-        if device != "cpu":
-            if torch.accelerator.device_count() < self.world_size:
-                self.skipTest("Not enough accelerator devices")
-            torch.accelerator.set_device_index(dist.get_rank())
+        device = self._setup_device(device)
 
         tensor = torch.ones([4], device=device)
         mesh = dt.DeviceMesh(device, torch.arange(4))
@@ -314,12 +279,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
 
-    @parametrize("device", devices)
     def test_all_reduce_coalesced_eager(self, device):
-        if device != "cpu":
-            if torch.accelerator.device_count() < self.world_size:
-                self.skipTest("Not enough accelerator devices")
-            torch.accelerator.set_device_index(dist.get_rank())
+        device = self._setup_device(device)
 
         t0 = torch.ones([4], device=device)
         t1 = torch.ones([6], device=device) + 2
@@ -329,12 +290,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(res[0], t0 * 4)
         self.assertEqual(res[1], t1 * 4)
 
-    @parametrize("device", devices)
     def test_all_gather_tensor(self, device):
-        if device != "cpu":
-            if torch.accelerator.device_count() < self.world_size:
-                self.skipTest("Not enough accelerator devices")
-            torch.accelerator.set_device_index(dist.get_rank())
+        device = self._setup_device(device)
 
         # testing 1d/2d mesh
         mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
@@ -351,12 +308,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 )
                 self.assertEqual(gathered_tensor, torch.ones(output_size))
 
-    @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced(self, device):
-        if device != "cpu":
-            if torch.accelerator.device_count() < self.world_size:
-                self.skipTest("Not enough accelerator devices")
-            torch.accelerator.set_device_index(dist.get_rank())
+        device = self._setup_device(device)
 
         tensors = [torch.ones([4], device=device), torch.ones([4], device=device) + 1]
         mesh = dt.DeviceMesh(device, torch.arange(4))
@@ -368,12 +321,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
             torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1]
         )
 
-    @parametrize("device", devices)
     def test_reduce_scatter_tensor(self, device):
-        if device != "cpu":
-            if torch.accelerator.device_count() < self.world_size:
-                self.skipTest("Not enough accelerator devices")
-            torch.accelerator.set_device_index(dist.get_rank())
+        device = self._setup_device(device)
 
         # testing 1d/2d mesh
         mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
@@ -392,12 +341,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 )
                 self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
 
-    @parametrize("device", devices)
     def test_reduce_scatter_into_tensor_coalesced(self, device):
-        if device != "cpu":
-            if torch.accelerator.device_count() < self.world_size:
-                self.skipTest("Not enough accelerator devices")
-            torch.accelerator.set_device_index(dist.get_rank())
+        device = self._setup_device(device)
         tensors = [
             torch.ones([4], dtype=torch.int64, device=device),
             torch.ones([4], dtype=torch.int64, device=device) + 1,
@@ -411,6 +356,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 
 
 class TestPublicAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_public_module(self):
         import torch.distributed.functional_collectives as funcol
 
@@ -431,6 +378,8 @@ class TestPublicAPI(TestCase):
 
 
 class TestMetaCollectives(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
         out = ft_c.all_reduce(x, "sum", "0")
@@ -439,6 +388,8 @@ class TestMetaCollectives(TestCase):
 
 @skipIfHpu
 class TestGradCollectives(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 2
@@ -456,6 +407,8 @@ class TestGradCollectives(MultiThreadedTestCase):
 
 
 class TestMakeFx(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # make_fx is not thread-safe due to patching nd mutating global states
@@ -500,6 +453,8 @@ class TestMakeFx(TestCase):
 
 
 class TestAllGatherViewOptimization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Validate that all_gather_tensor delays wait() when the view optimization
     applies and calls wait() early when the fallback path is needed."""
 
@@ -536,18 +491,6 @@ class TestAllGatherViewOptimization(TestCase):
         self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
 
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-
-# Adding support for HCCL backend
-# To add a different backend
-# add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
-# And then set the BACKEND variable appropriately.
-if TEST_HPU:
-    BACKEND = dist.Backend.HCCL
-elif TEST_XPU:
-    BACKEND = dist.Backend.XCCL
-
-
 # allows you to check for multiple accelerator irrespective of device type
 # to add new device types to this check simply follow the same format
 # and append an elif with the conditional and appropriate device count function for your new device
@@ -563,13 +506,16 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        # The injected device can carry an index, such as "cuda:0". Use the type.
+        device = torch.device(kwargs["device"]).type
         if (
-            BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
-        ) and torch.accelerator.device_count() < self.world_size:
+            dist.get_default_backend_for_device(device) != dist.Backend.GLOO
+            and torch.accelerator.device_count() < self.world_size
+        ):
             sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
-        kwargs["device"] = DEVICE
-        self.pg = self.create_pg(device=DEVICE)
+        kwargs["device"] = device
+        self.pg = self.create_pg(device=device)
         try:
             return func(self, *args, **kwargs)
         finally:
@@ -579,6 +525,8 @@ def with_comms(func=None):
 
 
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
         exit_if_lt_x_accelerators(self.world_size)
@@ -653,7 +601,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_tracing_with_fakepg(self, device=DEVICE):
+    def test_tracing_with_fakepg(self, device):
         exit_if_lt_x_accelerators(self.world_size)
 
         def allreduce(t, pg):
@@ -692,6 +640,8 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
 class TestDistributedBackendCollectivesWithWorldSize4(
     TestCollectivesWithDistributedBackend
 ):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -726,6 +676,8 @@ class TestDistributedBackendCollectivesWithWorldSize4(
 
 
 class TestFunctionalAutograd(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.world_size = 2
@@ -821,6 +773,8 @@ class TestFunctionalAutograd(TestCase):
 
 
 class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms()
     def test_all_to_all_single(self, device) -> None:
         group = self.pg
@@ -840,20 +794,23 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
-# Update the supported devices in DEVICE
+instantiate_device_type_tests(TestTraceableCollectives, globals(), allow_xpu=True)
 instantiate_device_type_tests(
-    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
+    TestCollectivesWithDistributedBackend,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestDistributedBackendCollectivesWithWorldSize4,
     globals(),
-    only_for=DEVICE,
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFunctionalAutogradWithDistributedBackend,
     globals(),
-    only_for=DEVICE,
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
