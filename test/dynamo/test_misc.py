@@ -9442,7 +9442,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return torch.sin(a + b)
 
         x = torch.tensor(2.0)
-        with self.assertRaisesRegex(AssertionError, "Can't unpack scalar tensors"):
+        with self.assertRaisesRegex(TypeError, "iteration over a 0-d tensor"):
             f1(x)
 
         x = torch.tensor([2.0])
@@ -9457,11 +9457,65 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return torch.sin(a + 1)
 
         x = torch.tensor(2.0)
-        with self.assertRaisesRegex(AssertionError, "Can't unpack scalar tensors"):
+        with self.assertRaisesRegex(TypeError, "iteration over a 0-d tensor"):
             f2(x)
 
         x = torch.tensor([2.0])
         self.assertTrue(same(f2(x), torch.sin(x[0] + 1)))
+
+    def test_unpack_0d_tensor_caught_type_error(self):
+        def unpack(x):
+            try:
+                a, b = x
+            except TypeError:
+                return x * 2
+            return a + b
+
+        def to_tuple(x):
+            try:
+                return tuple(x)
+            except TypeError:
+                return x * 3
+
+        def to_list(x):
+            try:
+                return list(x)
+            except TypeError:
+                return x * 4
+
+        def to_dict(x):
+            try:
+                return dict(x)
+            except TypeError:
+                return x * 5
+
+        for fn, x in (
+            (unpack, torch.tensor(3.0)),
+            (to_tuple, torch.tensor(3.0)),
+            (to_list, torch.tensor(3.0)),
+            (to_dict, torch.tensor([1.0, 2.0])),
+        ):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(x), fn(x))
+
+    def test_list_tensor_recompiles_on_length_change(self):
+        def fn(x):
+            try:
+                return list(x)
+            except TypeError:
+                return [x * 4]
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        for x in (
+            torch.tensor(3.0),
+            torch.tensor([1.0, 2.0]),
+            torch.tensor([1.0, 2.0, 3.0]),
+            torch.tensor(4.0),
+        ):
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_if_cond_user_defined_object3(self):
         # obj.__bool__ is not existed, but obj.__len__ exists
