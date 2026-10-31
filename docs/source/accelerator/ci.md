@@ -42,11 +42,7 @@ Participation is governed by a four-tier allowlist:
 
 Downstream repos advance through levels by meeting documented requirements around hardware verification, CI reliability, and success rates.
 
-For a deeper dive into the architecture and design decisions, see the [RFC-0050: Cross-Repository CI Relay for PyTorch Out-of-Tree Backends](https://github.com/fffrog/rfcs/blob/5e138470e962b0f9c5092e564f35bd7fb13b0b2f/RFC-0050-Cross-Repository-CI-Relay-for-PyTorch-Out-of-Tree-Backends.md).
-
-```{note}
-The CRCR currently supports **L1 (Silent)** integration only.
-```
+For a deeper dive into the architecture and design decisions, see the [RFC-0050: Cross-Repository CI Relay for PyTorch Out-of-Tree Backends](https://github.com/pytorch/rfcs/blob/master/RFC-0050-Cross-Repository-CI-Relay-for-PyTorch-Out-of-Tree-Backends.md).
 
 ## Integration Steps
 
@@ -56,18 +52,27 @@ Install the [PyTorch Cross-Repo CI Relay](https://github.com/apps/pytorch-fdn-cr
 
 ### Step 2: Add Your Repository to the Allowlist
 
-Submit a pull request to ``pytorch/pytorch`` adding your repository to ``.github/allowlist.yml`` under the ``L1`` key:
+Submit a pull request to ``pytorch/pytorch`` adding or upgrading your repository in ``.github/allowlist.yml``.
 
 ```{eval-rst}
 .. code-block:: yaml
 
    L1:
-     - your-org/your-accelerator
+     - org1/downstream-repo1
+   L2:
+     - org2/downstream-repo2
+   L3:
+     <LABEL_NAME>:
+       org3/downstream-repo3: [oncall1, oncall2]
+   L4:
+     - org4/downstream-repo4: [oncall1, oncall2]
 ```
 
-See [#180352](https://github.com/pytorch/pytorch/pull/180352) for a reference example. The PyTorch team will review and merge the PR to complete the onboarding.
+```{note}
+All downstream repositories must start from L1. For promotion and demotion criteria, please refer to [Criteria for Every Level](https://github.com/pytorch/rfcs/blob/master/RFC-0050-Cross-Repository-CI-Relay-for-PyTorch-Out-of-Tree-Backends.md#criteria-for-every-level).
+```
 
-### Step 3: Create the Workflow File
+### Step 3: Create the Workflow File (L2+ only)
 
 Create a GitHub Actions workflow in your repository to receive ``repository_dispatch`` events:
 
@@ -89,7 +94,7 @@ Create a GitHub Actions workflow in your repository to receive ``repository_disp
 
    on:
      repository_dispatch:
-       types: [pull_request, push]
+       types: [pull_request]  # or [push]; pick one, see below
 
    concurrency:
      group: >-
@@ -130,12 +135,33 @@ Create a GitHub Actions workflow in your repository to receive ``repository_disp
              echo "Running tests against PyTorch..."
 ```
 
-### Step 4: Test the Integration
+The ``types`` filter decides which upstream events trigger your workflow. Choose **one** of the two trigger types based on your CI bandwidth and testing requirements:
+
+| Trigger | When it fires | Trade-off |
+| ------- | ------------- | --------- |
+| ``pull_request`` | Whenever a PR is opened, synchronized, reopened or closed | Fast, incremental feedback as the PR evolves, but requires higher CI capacity |
+| ``push`` | Only when a change is merged into trunk, e.g. via ``@pytorchbot merge`` | Greatly reduces CI resource usage, but failures are only discovered at the very end |
+
+```{note}
+Please do not listen to both ``pull_request`` and ``push`` at the same time. Keeping them separate is especially critical for L3+, but we encourage you to make the choice from L2 onward.
+```
+
+```{note}
+To support AI agent analysis of workflow failures, use `triage-verdict` to upload the report as formatted JSON. Refer to this [example](https://github.com/pytorch/test-infra/blob/main/.github/actions/cross-repo-ci-relay-callback/action.yml#L59-L98).
+```
+
+### Step 4: Create a Label (L3+ only)
+
+For L3 repositories and above, workflows from downstream are allowed to create the corresponding non-blocking check runs in `pytorch/pytorch` PRs with the `ciflow/crcr/<repo_name>` labeled. Beforehand, L3 repositories should create the labels first in `pytorch/pytorch`.
+
+### Step 5: Test the Integration
 
 Verify your integration works correctly:
 
 1. Create a test PR in PyTorch (or ask maintainers to trigger a test dispatch)
 2. Confirm your workflow triggers correctly
+3. Workflow records show on the [HUD](https://hud.pytorch.org/crcr) (L2+ only)
+4. Workflows create check runs on the PR with a specific label (L3+ only)
 
 ## Event Payload
 
