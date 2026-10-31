@@ -143,16 +143,10 @@ std::
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// Only works for inputs in the range: [-2^51, 2^51]
-// From: https://stackoverflow.com/a/41148578
 template <>
 Vectorized<int64_t> inline convert_to_int_of_same_size<double>(
     const Vectorized<double>& src) {
-  svfloat64_t x = svadd_f64_x(ptrue, src, svdup_n_f64(0x0018000000000000));
-  return svsub_s64_x(
-      ptrue,
-      svreinterpret_s64_f64(x),
-      svreinterpret_s64_f64(svdup_n_f64(0x0018000000000000)));
+  return svcvt_s64_f64_x(ptrue, src);
 }
 
 template <>

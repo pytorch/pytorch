@@ -2387,18 +2387,35 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
-test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+test_vec() {
+  # Test the vectorized instructions for DEFAULT and each CPU capability this
+  # machine supports; the binaries for capabilities it lacks would hit SIGILL.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
-    pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
-    for vec256_exec in $vec256_tests
-    do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
+    echo "Testing vectorized instructions"
+    local cpu_capability
+    cpu_capability=$(cd test && python -c "import torch; print(torch.backends.cpu.get_cpu_capability())")
+    # get_cpu_capability spells ZVECTOR as "Z VECTOR".
+    cpu_capability=${cpu_capability// /}
+    local capabilities=(DEFAULT "$cpu_capability")
+    if [[ "$cpu_capability" == AVX512 ]]; then
+      capabilities+=(AVX2)
+    fi
+    TEST_REPORTS_DIR=$(pwd)/test/test-reports/vec
+    mkdir -p "$TEST_REPORTS_DIR"
+    # Run every capability before failing so one report shows all of them.
+    local failed=()
+    for capability in $(printf '%s\n' "${capabilities[@]}" | sort -u); do
+      vec_exec="$BUILD_BIN_DIR/vec_test_all_types_${capability}"
+      if [[ -x "$vec_exec" ]]; then
+        LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" "$vec_exec" \
+          --gtest_output=xml:"$TEST_REPORTS_DIR/vec_test_all_types_${capability}.xml" ||
+          failed+=("$capability")
+      fi
     done
-    popd
+    if [[ ${#failed[@]} -gt 0 ]]; then
+      echo "vec_test_all_types failed for: ${failed[*]}"
+      return 1
+    fi
     assert_git_not_dirty
   fi
 }
@@ -2796,6 +2813,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
@@ -2856,7 +2874,7 @@ else
   test_cpuset_num_threads
   test_python
   test_aten
-  test_vec256
+  test_vec
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
