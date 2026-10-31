@@ -25,12 +25,15 @@ static_assert(
     "exceeds the Metal threadgroup size limit");
 
 // Prefill tiles (padded head dims); PrefillAttention.h and MppAttention.h
-// instantiate the kernels for each. Head dims above 256 (the widest tile) run
-// on 128 (kChunkTile): the QK dim in 128-wide chunks, V/O in 128-wide column
-// slabs, one launch per slab.
+// instantiate the kernels for each. Head dims above the widest tile run on
+// 128 (kChunkTile): the QK dim in 128-wide chunks, V/O in 128-wide column
+// slabs. The 256 MPP tile (kMppWideTile) is register-bound on Apple10, where
+// the chunked 128 tile runs faster, so it only serves an exact 256 head dim
+// on earlier GPUs.
 C10_METAL_CONSTEXPR ::c10::metal::array<int, 9> kPrefillTiles =
     {32, 64, 72, 80, 96, 128, 160, 192, 256};
-C10_METAL_CONSTEXPR ::c10::metal::array<int, 4> kMppTiles = {64, 96, 128, 256};
+C10_METAL_CONSTEXPR ::c10::metal::array<int, 3> kMppTiles = {64, 96, 128};
+C10_METAL_CONSTEXPR int kMppWideTile = 256;
 C10_METAL_CONSTEXPR int kChunkTile = 128;
 
 // A prefill threadgroup takes a block of query rows and loops over the keys in

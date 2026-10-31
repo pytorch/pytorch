@@ -1,7 +1,6 @@
 {
   "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, PR-only labels, and labels requiring human decision.",
   "repo": "pytorch/pytorch",
-  "count": 284,
   "labels": [
     {
       "name": "better-on-discuss-forum",
@@ -1032,10 +1031,6 @@
       "description": "Add this issue/PR to distributed oncall triage queue"
     },
     {
-      "name": "oncall: distributed checkpointing",
-      "description": "Oncall label should be attached to any issues related to distributed checkpointing."
-    },
-    {
       "name": "oncall: export",
       "description": "Add this issue/PR to Export oncall triage queue"
     },
@@ -1062,10 +1057,6 @@
     {
       "name": "oncall: r2p",
       "description": "Add this issue/PR to R2P (elastic) oncall triage queue"
-    },
-    {
-      "name": "oncall: releng",
-      "description": "In support of CI and Release Engineering"
     },
     {
       "name": "oncall: speech_infra",

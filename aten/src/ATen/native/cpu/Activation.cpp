@@ -234,7 +234,7 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
           auto [b0, b1] = convert_to_float<scalar_t>(b);
           auto cmp0 = (b0 > zero_vec);
           auto cmp1 = (b1 > zero_vec);
-          auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
+          auto get_res_masked = [&](const VecBool<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
             if (is_result) {
               return !cmp.zero_mask() ? a * poscoef_vec :
                 Vectorized<float>::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);

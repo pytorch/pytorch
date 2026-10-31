@@ -25,20 +25,8 @@ namespace {
     at::Tensor const& input,
     IntArrayRef output_size)
   {
-    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+    adaptive_avg_pool_check(input, output, output_size, /*pooling_dims=*/2, "adaptive_avg_pool2d()");
     int64_t ndim = input.dim();
-    TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
-    for (const auto i : {-2, -1}) {
-      TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
-        "empty");
-    }
-
-    TORCH_CHECK(input.dtype() == output.dtype(),
-      "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
-
     int64_t channels  = input.size(-3);
     int64_t output_height = output_size[0];
     int64_t output_width = output_size[1];
@@ -62,16 +50,8 @@ namespace {
     const Tensor& grad_output,
     const Tensor& input)
   {
-    adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool2d_backward");
-    int64_t ndim = grad_output.dim();
-    TORCH_CHECK(input.dim() == ndim,
-      __func__, ": Expected dimensions ", input.dim(), " for `grad_output` but got dimensions ", ndim);
-    TORCH_CHECK((ndim == 3 || ndim == 4),
-      __func__, ": Expected 3D or 4D tensor, but got ", input.sizes());
-    TORCH_CHECK(input.dtype() == grad_output.dtype(),
-      __func__, ": Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
-    TORCH_CHECK(input.dtype() == grad_input.dtype(),
-      __func__, ": Expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
+    adaptive_avg_pool_backward_check(
+      grad_input, grad_output, input, /*pooling_dims=*/2, "adaptive_avg_pool2d_backward()");
 
     grad_input.resize_(input.sizes(), input.suggest_memory_format());
     grad_input.zero_();

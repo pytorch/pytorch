@@ -3,6 +3,8 @@
 import logging
 from torch.testing._internal.common_utils import run_tests
 
+log = logging.getLogger(__name__)
+
 # Quantization core tests. These include tests for
 # - quantized kernels
 # - quantized functional operators
@@ -20,6 +22,14 @@ from quantization.core.test_quantized_op import TestDynamicQuantizedOps  # noqa:
 from quantization.core.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.core.test_quantized_op import TestPadding  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
+try:
+    from quantization.core.test_quantized_op import TestQuantizedMaxPool2dPT2EDeviceCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_quantized_op import TestQuantizedMaxPool2dPT2EDeviceXPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
 from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
@@ -59,8 +69,6 @@ from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  #
 from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F401
 from quantization.eager.test_bias_correction_eager import TestBiasCorrectionEager  # noqa: F401
 
-
-log = logging.getLogger(__name__)
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
 # using fx quantization.
 try:
@@ -72,6 +80,14 @@ try:
 except ImportError as e:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
+    log.warning(e)
+try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxDeviceCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxDeviceXPU  # noqa: F401
+except ImportError as e:
     log.warning(e)
 
 try:

@@ -405,7 +405,9 @@ fi
 output_flag="--load -t ${tmp_tag}"
 cache_flag=""
 if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
-  output_flag="--push"
+  # Provenance makes each push 3 ECR images instead of 1, and ECR caps a repo
+  # at 100000 images.
+  output_flag="--push --provenance=false"
   # Remote BuildKit pods are ephemeral with pod-private caches, so share a cache
   # via a per-image (hence per-arch) tag in the same registry. mode=max caches
   # intermediate stages; image-manifest/oci-mediatypes keep it ECR-compatible.

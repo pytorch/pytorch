@@ -96,6 +96,18 @@ if is_available():
         Work as _Work,
     )
 
+    def _c10d_getattr(name: str):
+        # FakeProcessGroup moved from C++ to Python; keep the old path working.
+        if name == "FakeProcessGroup":
+            from torch.distributed._backends.fake import FakeProcessGroup
+
+            return FakeProcessGroup
+        raise AttributeError(
+            f"module 'torch._C._distributed_c10d' has no attribute '{name}'"
+        )
+
+    torch._C._distributed_c10d.__getattr__ = _c10d_getattr  # type: ignore[attr-defined]
+
     def _make_distributed_pdb():
         """
         Supports using PDB from inside a multiprocessing child process.

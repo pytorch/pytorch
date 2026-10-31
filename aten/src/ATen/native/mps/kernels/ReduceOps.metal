@@ -838,36 +838,13 @@ kernel void reduction_flat(
   using TA = typename OP::acc_t;
   const uint E = params.y;
   device const TI* in = input + tgid * E;
-  const uint n_quads = E / 4;
-
-  metal::array<TA, NCHAINS> acc;
-  for (uint j = 0; j < NCHAINS; j++) {
-    acc[j] = OP::identity();
-  }
-  const uint stride = tptg * NCHAINS;
-  uint i = tid;
-  for (; i + (NCHAINS - 1) * tptg < n_quads; i += stride) {
-    for (uint j = 0; j < NCHAINS; j++) {
-      const uint base = (i + j * tptg) * 4;
-#pragma unroll
-      for (uint k = 0; k < 4; k++) {
-        acc[j] = OP::combine(acc[j], OP::load(in[base + k]));
-      }
-    }
-  }
-  for (; i < n_quads; i += tptg) {
-#pragma unroll
-    for (uint k = 0; k < 4; k++) {
-      acc[0] = OP::combine(acc[0], OP::load(in[i * 4 + k]));
-    }
-  }
-  for (uint k = n_quads * 4 + tid; k < E; k += tptg) {
-    acc[0] = OP::combine(acc[0], OP::load(in[k]));
-  }
-  TA val = acc[0];
-  for (uint j = 1; j < NCHAINS; j++) {
-    val = OP::combine(val, acc[j]);
-  }
+  TA val = thread_reduce_flat<NCHAINS>(
+      [&](uint i) { return OP::load(in[i]); },
+      [](TA a, TA b) { return OP::combine(a, b); },
+      OP::identity(),
+      E,
+      tid,
+      tptg);
   threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
   val = OP::threadgroup_reduce(shared, val, tid, tptg);
   if (tid == 0) {
@@ -1604,3 +1581,55 @@ REGISTER_ARG_REDUCTIONS_FOR_TYPE(int);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(short);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(char);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(uchar);
+
+template <typename T, bool STRIDED>
+[[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
+kernel void dot_reduce(
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device opmath_t<T>* partials [[buffer(2)]],
+    constant DotParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  using ACC = opmath_t<T>;
+  const long a_stride = STRIDED ? params.a_stride : 1;
+  const long b_stride = STRIDED ? params.b_stride : 1;
+  const uint grid_size = static_cast<uint>(params.num_tgs) * tptg;
+  const long block = static_cast<long>(DOT_BLOCK_ELEMS_PER_THREAD) * grid_size;
+  ACC val = 0;
+  for (long begin = 0; begin < params.numel; begin += block) {
+    device const T* a_block = a + begin * a_stride;
+    device const T* b_block = b + begin * b_stride;
+    val += thread_reduce_flat<SUM_NCHAINS>(
+        [&](uint i) {
+          const auto x = static_cast<ACC>(a_block[i * a_stride]);
+          const auto y = static_cast<ACC>(b_block[i * b_stride]);
+          return mul(params.a_conj ? conj(x) : x, params.b_conj ? conj(y) : y);
+        },
+        [](ACC x, ACC y) { return x + y; },
+        ACC(0),
+        static_cast<uint>(::metal::min(params.numel - begin, block)),
+        tgid * tptg + tid,
+        grid_size);
+  }
+  threadgroup ACC shared[MAX_THREADGROUP_SIZE / simdgroup_size];
+  const ACC sum = threadgroup_sum(shared, val, tid, tptg);
+  if (tid == 0) {
+    partials[tgid] = sum;
+  }
+}
+
+#define INSTANTIATE_DOT_REDUCE(T)                                   \
+  INSTANTIATE_KERNEL("dot_reduce_dense_" #T, dot_reduce, T, false); \
+  INSTANTIATE_KERNEL("dot_reduce_strided_" #T, dot_reduce, T, true)
+
+INSTANTIATE_DOT_REDUCE(float);
+INSTANTIATE_DOT_REDUCE(half);
+INSTANTIATE_DOT_REDUCE(bfloat);
+INSTANTIATE_DOT_REDUCE(float2);
+INSTANTIATE_DOT_REDUCE(long);
+INSTANTIATE_DOT_REDUCE(int);
+INSTANTIATE_DOT_REDUCE(short);
+INSTANTIATE_DOT_REDUCE(char);
+INSTANTIATE_DOT_REDUCE(uchar);
