@@ -2924,6 +2924,19 @@ class TestBinaryUfuncsDevice(TestCase):
         x *= y
         self.assertEqual(x, 4.5)
 
+    @dtypes(torch.bfloat16, torch.half)
+    def test_mul__scalar_matches_mul_scalar(self, device, dtype):
+        # In-place mul_(Scalar) must round like out-of-place mul(Scalar): the scalar
+        # is applied at opmath precision, not first rounded to the tensor dtype.
+        torch.manual_seed(0)
+        x = (torch.rand(4103, device=device, dtype=torch.float32) * 2 - 1).to(dtype)
+        for s in (0.95, 0.999, 1e-3):
+            expected = torch.ops.aten.mul.Scalar(x, s)
+            self.assertEqual(torch.ops.aten.mul_.Scalar(x.clone(), s), expected, atol=0, rtol=0)
+            ys = [x.clone()]
+            torch._foreach_mul_(ys, s)
+            self.assertEqual(ys[0], expected, atol=0, rtol=0)
+
     # TODO: reconcile with minimum/maximum tests
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
