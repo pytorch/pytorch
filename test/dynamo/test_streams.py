@@ -502,6 +502,90 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
 
+    def _record_reconstructed_types(self):
+        """Build a (seen, record) pair where record appends the runtime type of
+        each argument. record is dynamo-disabled so it runs eagerly on whatever
+        the graph actually reconstructed instead of being traced."""
+        seen = []
+
+        @torch._dynamo.disable
+        def record(*objs):
+            seen.extend(type(obj) for obj in objs)
+
+        return seen, record
+
+    def _allow_in_graph_classes(self, *classes):
+        original = UserDefinedClassVariable._in_graph_classes
+        return patch.object(
+            UserDefinedClassVariable,
+            "_in_graph_classes",
+            staticmethod(lambda: original() | set(classes)),
+        )
+
+    def test_stream_event_subclass_preserved_across_graph_break(self):
+        # A stream/event created inside the graph is rebuilt from emitted
+        # bytecode in the resumed frame. The subclass has to survive that
+        # rebuild: backends downcast the result to their own stream/event type.
+        class MyStream(torch.Stream):
+            pass
+
+        class MyEvent(torch.Event):
+            pass
+
+        seen, record = self._record_reconstructed_types()
+
+        def fn(x):
+            stream = MyStream()
+            event = MyEvent()
+            torch._dynamo.graph_break()
+            record(stream, event)
+            return x + 1
+
+        with self._allow_in_graph_classes(MyStream, MyEvent):
+            compiled = torch.compile(fn, backend="eager", fullgraph=False)
+            x = torch.ones(2, 2)
+            self.assertEqual(compiled(x), x + 1)
+
+        self.assertEqual(seen, [MyStream, MyEvent])
+
+    def test_stream_subclass_change_recompiles_and_reconstructs(self):
+        class FirstStream(torch.Stream):
+            pass
+
+        class SecondStream(torch.Stream):
+            pass
+
+        class MyEvent(torch.Event):
+            pass
+
+        seen, record = self._record_reconstructed_types()
+        stream_cls = FirstStream
+
+        def fn(x):
+            stream = stream_cls()
+            event = MyEvent()
+            torch._dynamo.graph_break()
+            record(stream, event)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with self._allow_in_graph_classes(FirstStream, SecondStream, MyEvent):
+            compiled = torch.compile(fn, backend=counter, fullgraph=False)
+            x = torch.ones(2, 2)
+            self.assertEqual(compiled(x), x + 1)
+            frame_count = counter.frame_count
+            self.assertEqual(compiled(x), x + 1)
+            self.assertEqual(counter.frame_count, frame_count)
+            self.assertEqual(seen, [FirstStream, MyEvent] * 2)
+
+            # Rebinding the cell must invalidate the guard, and the rebuilt
+            # graph must reconstruct the new subclass rather than the old one.
+            stream_cls = SecondStream
+            self.assertEqual(compiled(x), x + 1)
+            self.assertGreater(counter.frame_count, frame_count)
+
+        self.assertEqual(seen[-2:], [SecondStream, MyEvent])
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
