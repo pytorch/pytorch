@@ -1823,9 +1823,22 @@ class TagSafetyChecks(RecursiveDictTagTests):
             self.assertTrue(mod_mgr.is_tag_safe())
             self.assertTrue(mod_mgr.is_tag_safe_root())
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        from torch._dynamo.testing import CompileCounter
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4, 4)
         with install_guard_manager_testing_hook(hook):
-            opt_fn(torch.randn(4, 4))
+            opt_fn(x)
+
+        # The tag-safe root must not hide the guards: rebinding either class
+        # function still recompiles.
+        Mod.helper = lambda self, x: x * 9
+        self.assertEqual(opt_fn(x), x * 9)
+        self.assertEqual(cnt.frame_count, 2)
+        Mod.forward = lambda self, x: self.helper(x) + 1
+        self.assertEqual(opt_fn(x), x * 9 + 1)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):

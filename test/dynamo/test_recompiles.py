@@ -1035,11 +1035,12 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x * 9.0)
         self.assertEqual(cnt.frame_count, 2)
 
-    @parametrize("method", ("forward", "helper"))
+    @parametrize("method", ("forward", "helper", "__call__"))
     @parametrize("mutation", ("code", "rebind"))
     def test_nn_module_method_mutation_recompiles(self, mutation, method):
-        # forward is short-circuited past _call_impl and helper goes through
-        # resolve_type_attr; both must guard the class function's __code__.
+        # forward is short-circuited past _call_impl, a user __call__ is inlined
+        # directly, and helper goes through resolve_type_attr; all must guard
+        # the class function's __code__.
         def two(self, x):
             return x * 2.0
 
@@ -1052,8 +1053,8 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             def forward(self, x):
                 return self.helper(x)
 
-        if method == "forward":
-            Mod.forward = two
+        if method in ("forward", "__call__"):
+            setattr(Mod, method, two)
         mod = Mod()
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(lambda x: mod(x), backend=cnt, fullgraph=True)

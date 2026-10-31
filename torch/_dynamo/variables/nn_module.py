@@ -1476,10 +1476,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
-                # forward skips _call_impl, so guard its __code__ here the way
-                # resolve_type_attr does for other methods; this catches
-                # class-level patching of forward.
-                if name == "forward" and source is not None:
+                # This call skips resolve_type_attr, so guard the class
+                # function's __code__ here the same way (forward, or a
+                # user-defined __call__).
+                if source is not None:
                     fn_vt = variables.UserFunctionVariable.create_with_source(
                         fn, source
                     )
