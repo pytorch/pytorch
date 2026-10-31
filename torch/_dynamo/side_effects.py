@@ -51,7 +51,12 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .codegen import PyCodegen
-from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
+from .exc import (
+    collapse_resume_frames,
+    get_stack_above_dynamo,
+    raise_observed_exception,
+    unimplemented,
+)
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import (
     is_frozen_dataclass,
@@ -881,6 +886,9 @@ class SideEffects:
         base_cls_vt: VariableTracker,
         cls_vt: VariableTracker,
         init_args: list[VariableTracker],
+        *,
+        tx: "InstructionTranslatorBase",
+        init_kwargs: dict[str, VariableTracker],
     ) -> Any:
         user_cls = cls_vt.value  # type: ignore[attr-defined]
         if issubclass(user_cls, torch.nn.Module):
@@ -913,15 +921,10 @@ class SideEffects:
                 example_args = [arg.as_python_constant() for arg in init_args]
                 try:
                     obj = base_cls.__new__(  # pyrefly: ignore[bad-specialization]
-                        user_cls, *example_args
+                        user_cls, *example_args, **init_kwargs
                     )
-                except Exception:
-                    # __new__ can raise (e.g., exceeding int str digit limits).
-                    # Fall back to creating without args — the example value is
-                    # only used for tracing, not for correctness.
-                    obj = base_cls.__new__(  # pyrefly: ignore[bad-specialization]
-                        user_cls
-                    )
+                except Exception as exc:
+                    raise_observed_exception(type(exc), tx, args=list(exc.args))
             else:
                 try:
                     obj = base_cls.__new__(user_cls)
@@ -945,7 +948,8 @@ class SideEffects:
         cls_vt: VariableTracker,
         init_args: list[VariableTracker],
         *,
-        tx: "InstructionTranslatorBase | None" = None,
+        tx: "InstructionTranslatorBase",
+        init_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """
         Creates a UserDefinedObjectVariable (or its subclass) variable tracker
@@ -958,7 +962,13 @@ class SideEffects:
         cls_source = cls_vt.source
         user_cls = cls_vt.value  # type: ignore[attr-defined]
         variable_cls = self.get_variable_cls(user_cls)
-        obj = self.get_example_value(base_cls_vt, cls_vt, init_args)
+        obj = self.get_example_value(
+            base_cls_vt,
+            cls_vt,
+            init_args,
+            tx=tx,
+            init_kwargs=init_kwargs,
+        )
 
         kwargs: dict[str, Any] = {}
         if tx is not None:
