@@ -125,6 +125,28 @@ def check_quack_fp32_operand(gemm_arg: TensorBox) -> None:
     )
 
 
+def check_quack_sm90_operands(gemm_arg: TensorBox, blockscaled: bool) -> None:
+    """Reject operands QuACK's SM90 (WGMMA) mainloop cannot compute."""
+    device = gemm_arg.get_device_or_error()
+    if device.type != "cuda":
+        return
+    # Imports CuTeDSL, which CPU-only builds may lack.
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+
+    if get_device_capacity(device)[0] != 9:
+        return
+    if blockscaled:
+        raise NotImplementedError(
+            "FlexGEMM QUACK block-scaled GEMMs require SM100 or SM120; "
+            "SM90 has no block-scaled MMA"
+        )
+    if gemm_arg.get_dtype() is torch.float32:
+        raise NotImplementedError(
+            "FlexGEMM QUACK float32 (TF32) GEMMs are not supported on SM90; "
+            "use bfloat16/float16 operands"
+        )
+
+
 def has_flex_gemm_quack() -> bool:
     """Whether the vendored QuACK backend can import its CuTeDSL dependency."""
     return importlib.util.find_spec("cutlass") is not None
@@ -682,7 +704,8 @@ def flex_gemm_quack_configs(
         selection_callback,
     )
     from torch._inductor.virtualized import V
-    from torch._vendor.quack.gemm_config import cta_tile_shape_m
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+    from torch._vendor.quack.gemm_config import cta_tile_shape_m, get_all_configs
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
     output_transform = template_config.output_transform
@@ -704,6 +727,18 @@ def flex_gemm_quack_configs(
         varlen_m=template_config.varlen_axis == "m",
         varlen_k=template_config.varlen_axis == "k",
     )
+    if (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.group == 2
+        and get_device_capacity(device)[0] == 9
+    ):
+        # Grouped-main stores need a full tile along N, and SM90 tiles are wide.
+        min_tile_n = min(c.tile_n for c in get_all_configs() if c.device_capacity == 9)
+        if problem.n < min_tile_n:
+            raise NotImplementedError(
+                f"FlexGEMM grouped main outputs on SM90 need GEMM N >= {min_tile_n} "
+                f"(the smallest SM90 tile_n), got {problem.n}"
+            )
     legal = legal_mod_configs(
         epimod, device, problem, preferred_config=flex_gemm_preferred_config(problem)
     )
@@ -867,6 +902,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
+    check_quack_sm90_operands(gemm_args[mat1_index], blockscaled is not None)
     check_quack_fp32_operand(gemm_args[mat1_index])
     if grouped_mm:
         # QuACK's varlen path reads [0, *offs]; pad in-graph so Inductor owns
