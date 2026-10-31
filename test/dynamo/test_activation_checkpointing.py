@@ -4158,6 +4158,31 @@ def forward(self, x_1):
         )
 
 
+class ActivationCheckpointingEagerExecutionTests(torch._dynamo.test_case.TestCase):
+    """Checkpoint behavior when the captured graph is executed without AOTAutograd."""
+
+    def test_preserve_rng_state_with_eager_execution(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199251:
+        # when the compiled graph is executed without AOTAutograd/Inductor
+        # (backend="eager"), nothing functionalizes RNG, so the checkpoint
+        # recompute used to draw a different dropout mask than the forward.
+        def gn(t):
+            return torch.nn.functional.dropout(t * 1.0, 0.3, training=True)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+
+        for backend in ("eager", lambda gm, _: gm.forward):
+            for seed in (0, 1):
+                torch._dynamo.reset()
+                torch.manual_seed(seed)
+                # strictly positive inputs: gradient zeros must match output zeros
+                x = (torch.rand(64, 256) + 0.5).requires_grad_()
+                out = torch.compile(fn, backend=backend)(x)
+                out.sum().backward()
+                self.assertEqual(out != 0, x.grad != 0)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
