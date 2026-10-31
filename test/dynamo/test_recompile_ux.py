@@ -255,6 +255,97 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(FailOnRecompileLimitHit):
             func(torch.randn(5), False)
 
+    @torch._dynamo.config.patch(recompile_limit=2)
+    def test_closure_code_recompile_hint(self):
+        failures = []
+
+        def helper(x):
+            return x + 1
+
+        def changed(x):
+            return x + 2
+
+        def fn(x):
+            return helper(x)
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(failures, [])
+
+        helper.__code__ = changed.__code__
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(helper.__code__", failures[0])
+        self.assertIn(
+            "(HINT: Function helper must keep the same code object to reuse this compiled version; its code can affect the compiled result, so avoid redefining or replacing it between calls.)",
+            failures[0],
+        )
+
+    @torch._dynamo.config.patch(recompile_limit=2)
+    def test_closure_rebound_recompile_hint(self):
+        failures = []
+
+        def original_helper(x):
+            return x + 1
+
+        helper = original_helper
+
+        def fn(x):
+            return helper(x)
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), x + 1)
+
+        helper = torch.relu
+        self.assertEqual(compiled(x), x)
+        self.assertEqual(len(failures), 1)
+        self.assertIn(
+            "CodeGuardAccessor: Not a function on helper.__code__", failures[0]
+        )
+        self.assertIn(
+            "(HINT: Dynamo compiled using the original Python function's code object. Restore that function to reuse this compiled version.)",
+            failures[0],
+        )
+
+    def test_closure_callable_identity_recompile_hint(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        class Forward:
+            def __call__(self, x):
+                return x + 2
+
+        module = Module()
+        module.forward = Forward()
+
+        def fn(module, x):
+            return module(x)
+
+        compiled = torch._dynamo.optimize("eager")(fn)
+        x = torch.ones(2)
+        self.assertEqual(compiled(module, x), x + 2)
+        entries = torch._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 1)
+
+        module.forward = Forward()
+        failure = entries[0].guard_manager.check_verbose({"module": module, "x": x})
+        self.assertFalse(failure.result)
+        self.assertEqual(len(failure.verbose_code_parts), 1)
+        self.assertIn(
+            "___check_obj_id(L['module'].forward", failure.verbose_code_parts[0]
+        )
+        self.assertIn(
+            "(HINT: Callable L['module'].forward must remain the same object; Dynamo specialized the compiled code on which callable runs. Reuse that callable to avoid recompilation.)",
+            failure.verbose_code_parts[0],
+        )
+
     @torch._dynamo.config.patch("recompile_limit", 32)
     def test_multiple_guard_fails(self):
         failure_reasons = []

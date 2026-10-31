@@ -3315,7 +3315,16 @@ class GuardBuilder(GuardBuilderBase):
         elif val is None:
             self.NONE_MATCH(guard)
         elif istype(val, types.CodeType):
-            self.ID_MATCH(guard)
+            if isinstance(guard.originating_source, CodeSource):
+                ref = guard.originating_source.base.name
+                hint = (
+                    f"Function {ref} must keep the same code object to reuse this "
+                    "compiled version; its code can affect the compiled result, "
+                    "so avoid redefining or replacing it between calls."
+                )
+                self.ID_MATCH(guard, recompile_hint=hint)
+            else:
+                self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
 
@@ -3391,10 +3400,10 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
-    def FUNCTION_MATCH(self, guard: Guard) -> None:
+    def FUNCTION_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         """things like torch.add and user defined functions"""
         # Serialized only when is_portable_identity_guard accepts the function.
-        return self.ID_MATCH(guard)
+        return self.ID_MATCH(guard, recompile_hint=recompile_hint)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
@@ -3436,7 +3445,13 @@ class GuardBuilder(GuardBuilderBase):
             # accessor installed by CONSTANT_MATCH implicitly guards hasattr.
             self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            self.FUNCTION_MATCH(guard)
+            ref = self.arg_ref(guard)
+            hint = (
+                f"Callable {ref} must remain the same object; Dynamo specialized "
+                "the compiled code on which callable runs. Reuse that callable "
+                "to avoid recompilation."
+            )
+            self.FUNCTION_MATCH(guard, recompile_hint=hint)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
