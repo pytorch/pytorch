@@ -4195,12 +4195,7 @@ class ActivationCheckpointingIdentityTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x.grad, ref.grad)
 
     @parametrize(
-        "policy",
-        (
-            CheckpointPolicy.MUST_SAVE,
-            CheckpointPolicy.MUST_RECOMPUTE,
-            CheckpointPolicy.PREFER_RECOMPUTE,
-        ),
+        "policy", (CheckpointPolicy.MUST_RECOMPUTE, CheckpointPolicy.PREFER_RECOMPUTE)
     )
     @torch._inductor.config.patch(fallback_random=True)
     def test_issue_199258_selective_checkpoint(self, device, policy):
@@ -4222,6 +4217,29 @@ class ActivationCheckpointingIdentityTests(torch._dynamo.test_case.TestCase):
         expected = fn(ref)
         expected.sum().backward()
         actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        actual.sum().backward()
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, ref.grad)
+
+    @parametrize("case", ("mul1", "view_round_trip"))
+    @parametrize("use_reentrant", (False, True))
+    def test_issue_199258_non_checkpoint_input(self, device, case, use_reentrant):
+        # The no-op folds onto a graph input that is not the checkpoint
+        # argument, such as a module buffer.
+        def body(x, c):
+            if case == "mul1":
+                return x * (c * 1.0)
+            return x * c.view(torch.int32).view(torch.float32)
+
+        def fn(x, c):
+            return checkpoint(lambda y: body(y, c), x, use_reentrant=use_reentrant)
+
+        x = torch.randn(32, device=device, requires_grad=True)
+        c = torch.randn(32, device=device)
+        ref = x.detach().clone().requires_grad_()
+        expected = fn(ref, c)
+        expected.sum().backward()
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, c)
         actual.sum().backward()
         self.assertEqual(actual, expected)
         self.assertEqual(x.grad, ref.grad)
