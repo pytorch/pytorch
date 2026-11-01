@@ -2870,38 +2870,41 @@ class TestPredispatchSerialization(TestCase):
     def test_predispatch_flat_apply_save_refuses_what_load_cannot_find(self):
         from torch.testing._internal.two_tensor import TwoTensor
 
-        class LocalTwoTensor(TwoTensor):
-            pass
+        def builds(subclass):
+            class Foo(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.buffer = torch.nn.Buffer(
+                        TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                    )
 
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buffer = torch.nn.Buffer(
-                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
-                )
+                def forward(self, x):
+                    return (x + subclass(x, x) + self.buffer).a
 
-            def forward(self, x):
-                return (x + LocalTwoTensor(x, x) + self.buffer).a
+            return export(Foo(), (torch.randn(4, 4),), strict=False)
 
         with self.subTest("class defined inside a function"):
             # Even in an imported module, it cannot be found by name.
-            LocalTwoTensor.__module__ = TwoTensor.__module__
-            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+            class Local(TwoTensor):
+                pass
+
+            Local.__module__ = TwoTensor.__module__
             with self.assertRaisesRegex(SerializeError, "defined inside a function"):
-                torch.export.save(ep, io.BytesIO())
+                torch.export.save(builds(Local), io.BytesIO())
 
         with self.subTest("name that finds a different class"):
+
+            class Renamed(TwoTensor):
+                pass
 
             class Other(TwoTensor):
                 pass
 
             module = self._import_test_module(Sub=Other)
-            Other.__module__, Other.__qualname__ = module.__name__, "Sub"
-            LocalTwoTensor.__module__ = module.__name__
-            LocalTwoTensor.__qualname__ = "Sub"
-            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+            for cls in (Renamed, Other):
+                cls.__module__, cls.__qualname__ = module.__name__, "Sub"
             with self.assertRaisesRegex(SerializeError, "names a different object"):
-                torch.export.save(ep, io.BytesIO())
+                torch.export.save(builds(Renamed), io.BytesIO())
 
         with self.subTest("autograd function defined in the main script"):
             # It runs in memory, but another process could not find it.
@@ -2926,6 +2929,11 @@ class TestPredispatchSerialization(TestCase):
             class Config:
                 factor: int
 
+            # Removing a type without a serialized name also removes the
+            # placeholder entry that other such types share, so restore it.
+            serialized_types = patch.dict(pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE)
+            serialized_types.start()
+            self.addCleanup(serialized_types.stop)
             pytree.register_constant(Config)
             self.addCleanup(pytree._deregister_pytree_node, Config)
 

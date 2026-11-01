@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["oncall: export"]
+import io
 import math
 import operator
 import unittest
@@ -1043,6 +1044,12 @@ def forward(self, sin, cos):
                 torch.autograd.grad(out.sum(), x),
                 torch.autograd.grad(expected.sum(), x),
             )
+        # The region body with its cond can be saved, loaded and decomposed.
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.export.load(buffer).module()(x), expected)
+        self.assertEqual(ep.run_decompositions().module()(x), expected)
 
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted
