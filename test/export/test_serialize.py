@@ -3,8 +3,11 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
+import collections
+
 # Owner(s): ["oncall: export"]
 import copy
+import enum
 import importlib.util
 import io
 import json
@@ -2723,12 +2726,8 @@ class TestPredispatchSerialization(TestCase):
         self.assertTrue(torch.allclose(exp_out, actual_out))
 
     def test_predispatch_flat_apply_serialize_roundtrip(self):
-        """Test that flat_apply calls can be saved and then loaded in a new process."""
-        from torch._dynamo._trace_wrapped_higher_order_op import (
-            ModIndex,
-            TransformGetItemToIndex,
-        )
-        from torch._export.serde.serialize import _FLAT_APPLY_MODULES
+        """Test that flat_apply calls can be saved and loaded."""
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from torch.testing._internal.two_tensor import TwoTensor
 
         class M(torch.nn.Module):
@@ -2772,37 +2771,12 @@ class TestPredispatchSerialization(TestCase):
             len({n.args[0].target for n in flat_apply_nodes if n.graph is ep.graph}), 1
         )
 
-        with TemporaryFileName(suffix=".pt2") as path:
-            torch.export.save(ep, path)
-            loaded_ep = torch.export.load(path)
-            self.assertEqual(expected, loaded_ep.module()(*inp))
-            torch.export.save(loaded_ep, io.BytesIO())
-
-            # Load and run in a new process. Load imports the modules in its
-            # table, such as the one of ModIndex, which the indexing calls use,
-            # but not the module that defines TwoTensor, so the process
-            # imports that first.
-            self.assertIn(ModIndex.__module__, _FLAT_APPLY_MODULES)
-            # Packaged fbcode test binaries cannot start a plain Python with torch.
-            if not IS_FBCODE:
-                script = (
-                    "import torch, torch.testing._internal.two_tensor;"
-                    f"ep = torch.export.load({path!r});"
-                    "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
-                    "print([t.tolist() for t in out])"
-                )
-                p = subprocess.run(
-                    [sys.executable, "-c", script],
-                    cwd=os.path.dirname(os.path.realpath(__file__)),
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                )
-                self.assertEqual(p.returncode, 0, p.stderr)
-                self.assertEqual(
-                    p.stdout.strip().splitlines()[-1],
-                    str([t.tolist() for t in expected]),
-                )
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        self.assertEqual(expected, loaded_ep.module()(*inp))
+        torch.export.save(loaded_ep, io.BytesIO())
 
         # A spec that lives on a submodule, as in a hand-built graph, is read
         # with its dotted get_attr target.
@@ -2815,6 +2789,48 @@ class TestPredispatchSerialization(TestCase):
         torch.export.save(ep, buffer)
         buffer.seek(0)
         self.assertEqual(expected, torch.export.load(buffer).module()(*inp))
+
+    @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
+    def test_predispatch_flat_apply_load_in_new_process(self):
+        # Load imports the modules in its table, such as the one of ModIndex,
+        # which indexing inside vmap uses, but not the module that defines
+        # TwoTensor, so the new process imports that one first.
+        from torch._dynamo._trace_wrapped_higher_order_op import (
+            ModIndex,
+            TransformGetItemToIndex,
+        )
+        from torch._export.serde.serialize import _FLAT_APPLY_MODULES
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class M(torch.nn.Module):
+            def forward(self, types, x):
+                q = torch.arange(types.shape[1])
+                with TransformGetItemToIndex():
+                    mask = torch.vmap(lambda i: types[0, i])(q)
+                return mask, TwoTensor(x, x * 2).b
+
+        self.assertIn(ModIndex.__module__, _FLAT_APPLY_MODULES)
+        inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
+        expected = M()(*inp)
+        with TemporaryFileName(suffix=".pt2") as path:
+            torch.export.save(export(M(), inp, strict=False), path)
+            script = (
+                "import torch, torch.testing._internal.two_tensor;"
+                f"ep = torch.export.load({path!r});"
+                "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
+                "print([t.tolist() for t in out])"
+            )
+            p = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(
+            p.stdout.strip().splitlines()[-1], str([t.tolist() for t in expected])
+        )
 
     def test_predispatch_flat_apply_save_load_by_name(self):
         from torch._export.wrappers import allow_in_pre_dispatch_graph
@@ -2957,7 +2973,7 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "error when deserializing") as cm:
             torch.export.load(io.BytesIO(saved["Bar"]))
         self.assertIsInstance(cm.exception.__cause__, SerializeError)
-        self.assertIn("import it first", str(cm.exception.__cause__))
+        self.assertIn("import that module before loading", str(cm.exception.__cause__))
 
     def test_predispatch_flat_apply_load_rejects_other_functions(self):
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
@@ -2975,8 +2991,9 @@ class TestPredispatchSerialization(TestCase):
             b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
         )
         cls_name = b'"torch._dynamo._trace_wrapped_higher_order_op.ModIndex"'
-        self.assertIn(func_name, artifact.exported_program)
-        self.assertIn(cls_name, artifact.exported_program)
+        # The cases below replace these strings, so each must appear once.
+        self.assertEqual(artifact.exported_program.count(func_name), 1)
+        self.assertEqual(artifact.exported_program.count(cls_name), 1)
         deserialize(artifact)
 
         def load(payload):
@@ -3087,6 +3104,22 @@ class TestPredispatchSerialization(TestCase):
                 self.assertRaisesRegex(SerializeError, "name as the first input"),
             ):
                 load(json.dumps(program).encode())
+
+        # Loading an enum or a defaultdict factory would import its module.
+        class Color(enum.Enum):
+            RED = 0
+
+        for args_and_kwargs in [
+            (("name", {Color.RED: 0}), {}),
+            (("name", collections.defaultdict(int, a=0)), {}),
+        ]:
+            spec = pytree.tree_flatten(args_and_kwargs)[1]
+            node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
+            with (
+                self.subTest(args_and_kwargs=args_and_kwargs),
+                self.assertRaisesRegex(SerializeError, "enums or defaultdicts"),
+            ):
+                load(json.dumps(program).encode())
         node["inputs"][1]["arg"]["as_string"] = "not a treespec"
         with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
             load(json.dumps(program).encode())
@@ -3101,8 +3134,19 @@ class TestPredispatchSerialization(TestCase):
             for n in program["graph_module"]["graph"]["nodes"]
             if n["target"] == "torch.ops.higher_order.flat_apply"
         ]
-        node["inputs"][-1]["arg"] = {"as_operator": "torch.os.system"}
+        last = node["inputs"][-1]
+        last["arg"] = {"as_operator": "torch.os.system"}
         with self.assertRaisesRegex(SerializeError, "values, not functions"):
+            load(json.dumps(program).encode())
+        # A dict of arguments could hold one too, and export passes neither
+        # dicts nor keyword arguments through flat_apply.
+        last["arg"] = {
+            "as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}
+        }
+        with self.assertRaisesRegex(SerializeError, "as_string_to_argument"):
+            load(json.dumps(program).encode())
+        last["arg"], last["kind"] = {"as_int": 0}, 2
+        with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
             load(json.dumps(program).encode())
 
         # Export calls the helper only through flat_apply. Called directly, it

@@ -736,9 +736,7 @@ def _find_imported(name: str) -> Any:
     ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
     Names in ``__main__`` modules are refused too, because a script differs
     between processes. That includes ``__mp_main__``, the main script of a
-    multiprocessing child. This covers names only: like any pytree spec in a
-    saved program, the input spec of a flat_apply node is loaded with
-    ``treespec_loads``, which can import the module of an enum it names.
+    multiprocessing child.
     """
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
@@ -749,9 +747,9 @@ def _find_imported(name: str) -> Any:
     if module is None:
         raise SerializeError(
             f"{name} is not a top-level class or function of an imported "
-            "module. If its module is not imported, import it first: load does "
-            "not import modules named in a saved program, because importing "
-            "runs their code."
+            "module. Define it at the top level of a module, and import that "
+            "module before loading: load does not import it, because importing "
+            "a module runs its code."
         )
     # Reading an attribute can run code: getattr calls a module __getattr__,
     # and any attribute read on a lazily loaded module loads it. So the lookup
@@ -766,6 +764,51 @@ def _find_imported(name: str) -> Any:
     return obj
 
 
+# The kinds of saved inputs that export passes through flat_apply. Load turns
+# other kinds, such as graphs or dicts of arguments, into objects that the
+# function could call.
+_FLAT_APPLY_INPUT_KINDS = frozenset(
+    {
+        "as_none",
+        "as_tensor",
+        "as_int",
+        "as_float",
+        "as_bool",
+        "as_string",
+        "as_complex",
+        "as_sym_int",
+        "as_sym_float",
+        "as_sym_bool",
+        "as_scalar_type",
+        "as_memory_format",
+        "as_layout",
+        "as_device",
+        "as_operator",
+    }
+)
+
+
+def _check_flat_apply_in_spec(in_spec_str: str) -> None:
+    """
+    Refuse the parts of a flat_apply input spec that make ``treespec_loads``
+    import a module, enums and defaultdict factories, so that loading the spec
+    runs no code from a module that the file names. A defaultdict factory would
+    also reach the function as a callable.
+    """
+    _, root = json.loads(in_spec_str)
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        context = node["context"]
+        if node["type"] == "collections.defaultdict" or (
+            isinstance(context, str) and "__enum__" in context
+        ):
+            raise SerializeError(
+                "a flat_apply input spec cannot contain enums or defaultdicts"
+            )
+        stack.extend(node["children_spec"])
+
+
 def _find_flat_apply_func(
     name: str, in_spec: pytree.TreeSpec, flat_args: Sequence[Any]
 ) -> Any:
@@ -777,10 +820,12 @@ def _find_flat_apply_func(
     argument, so that name must find a torch.autograd.Function. Both names
     are found with ``_find_imported``.
     """
-    # Export passes these functions values only. A function among the inputs,
-    # which load can resolve from an operator name in the file, could make an
-    # accepted class run it.
-    if any(callable(arg) for arg in flat_args):
+    # Export passes these functions values and operators. Another function
+    # among the inputs could make an accepted class run it.
+    if any(
+        callable(arg) and not isinstance(arg, torch._ops.OpOverload)
+        for arg in flat_args
+    ):
         raise SerializeError("flat_apply inputs must be values, not functions")
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
@@ -1406,16 +1451,23 @@ class GraphModuleSerializer(metaclass=Final):
             )
         try:
             in_spec_str = self.serialize_treespec(in_spec_value)
+            _check_flat_apply_in_spec(in_spec_str)
         except Exception as e:
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 f"cannot be saved: {e}"
             ) from e
-        constant_func = pytree._retrieve_constant(func_spec).func
-        func_name = ".".join(
-            getattr(constant_func, attr, "") for attr in ("__module__", "__qualname__")
-        )
-        found = _find_flat_apply_func(func_name, in_spec_value, flat_args)
+        try:
+            constant_func = pytree._retrieve_constant(func_spec).func
+            func_name = ".".join(
+                getattr(constant_func, attr, "")
+                for attr in ("__module__", "__qualname__")
+            )
+            found = _find_flat_apply_func(func_name, in_spec_value, flat_args)
+        except Exception as e:
+            raise SerializeError(
+                f"Cannot serialize flat_apply node {node.name}: {e}"
+            ) from e
         if found is not constant_func:
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: {func_name} names "
@@ -3324,11 +3376,21 @@ class GraphModuleDeserializer(metaclass=Final):
         func_input, in_spec_input, *flat_inputs = inputs
         func_name = func_input.arg.as_operator
         try:
+            _check_flat_apply_in_spec(in_spec_input.arg.as_string)
             in_spec = treespec_loads(in_spec_input.arg.as_string)
         except Exception as e:
             raise SerializeError(
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
             ) from e
+        for inp in flat_inputs:
+            if (
+                inp.kind == ArgumentKind.KEYWORD
+                or inp.arg.type not in _FLAT_APPLY_INPUT_KINDS
+            ):
+                raise SerializeError(
+                    f"flat_apply node {serialized_node.name} has an input that "
+                    f"export does not pass to its function: {inp.arg.type}"
+                )
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
         func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
