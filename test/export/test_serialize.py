@@ -3148,6 +3148,14 @@ class TestPredispatchSerialization(TestCase):
         class Color(enum.Enum):
             RED = 0
 
+        def with_node(node):
+            # The spec of (("name", node), {}), as save writes it.
+            protocol, root = json.loads(spec_of((("name", 0), {})))
+            root["children_spec"][0]["children_spec"][1] = node
+            return json.dumps([protocol, root])
+
+        leaf = {"type": None, "context": None, "children_spec": []}
+        no_name = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
         enum_spec = spec_of((("name", {Color.RED: 0}), {}))
         # JSON allows other spellings of the key, which load decodes too.
         escaped_enum_spec = enum_spec.replace("__enum__", "\\\\u005f_enum__")
@@ -3172,6 +3180,25 @@ class TestPredispatchSerialization(TestCase):
                 "defaultdict",
                 set_spec(spec_of((("name", defaultdict(int, a=0)), {}))),
                 "enums or defaultdicts",
+            ),
+            # Save never writes the name of a type without a serialized name.
+            (
+                "type without a name",
+                set_spec(with_node({**leaf, "type": no_name, "context": "{}"})),
+                "no serialized type name",
+            ),
+            (
+                "namedtuple without a name",
+                set_spec(
+                    with_node(
+                        {
+                            "type": "collections.namedtuple",
+                            "context": no_name,
+                            "children_spec": [leaf],
+                        }
+                    )
+                ),
+                "no serialized type name",
             ),
             (
                 "not a treespec",

@@ -819,8 +819,10 @@ def _check_flat_apply_in_spec(in_spec_str: str) -> None:
     Refuse the parts of a flat_apply input spec that make ``treespec_loads``
     import a module that the file names: enum classes, and defaultdict
     factories, which would also reach the function as callables that the file
-    chooses. A pytree type registered with its own context decoder decodes its
-    context with the code that registered it.
+    chooses. Also refuse the name that pytree gives every type registered
+    without a serialized type name, which save never writes. A pytree type
+    registered with its own context decoder decodes its context with the code
+    that registered it.
     """
     message = "a flat_apply input spec cannot contain enums or defaultdicts"
 
@@ -835,6 +837,12 @@ def _check_flat_apply_in_spec(in_spec_str: str) -> None:
         node = stack.pop()
         if node["type"] == "collections.defaultdict":
             raise SerializeError(message)
+        # A namedtuple node names its type in its context.
+        if pytree.NO_SERIALIZED_TYPE_NAME_FOUND in (node["type"], node["context"]):
+            raise SerializeError(
+                "a flat_apply input spec cannot name a pytree type that has no "
+                "serialized type name"
+            )
         # Decode the context as treespec_loads does, so that no spelling of the
         # enum key gets past this check. It decodes JSON, with the hook that
         # imports enum modules, only for types without their own decoder.
