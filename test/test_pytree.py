@@ -1232,6 +1232,35 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         with self.assertRaisesRegex(NotImplementedError, reason):
             python_pytree.treespec_loads(json.dumps([protocol, node]))
 
+    def test_deregister_pytree_node_keeps_other_types(self):
+        # Removing a type must not remove the name of another type, whether the
+        # two were registered without a name or under the same name.
+        @dataclass(frozen=True)
+        class First:
+            pass
+
+        @dataclass(frozen=True)
+        class Second:
+            pass
+
+        python_pytree.register_constant(First)
+        python_pytree.register_constant(Second)
+        python_pytree._deregister_pytree_node(First)
+        python_pytree._deregister_pytree_node(Second)
+        self.assertNotIn(Second, python_pytree.SUPPORTED_NODES)
+
+        name = "test_pytree.test_deregister_pytree_node_keeps_other_types"
+        for cls in (First, Second):
+            python_pytree.register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: None,
+                serialized_type_name=name,
+            )
+        self.addCleanup(python_pytree._deregister_pytree_node, Second)
+        python_pytree._deregister_pytree_node(First)
+        self.assertIs(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[name], Second)
+
     @parametrize(
         "value,reason",
         [
