@@ -14,6 +14,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+#include <c10/util/string_view.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -33,10 +34,21 @@ namespace at::native {
 namespace {
 
 // Below this many output pixels per SM, upsample_bilinear2d_out_frame leaves
-// the device idle and the one-thread-per-element kernels are faster. Measured
-// on gfx942: they win 1.4-2.2x at 216 pixels/SM, tie at 431, and lose from
-// 1010 up.
-constexpr int64_t kPlaneKernelMinPixelsPerSM = 256;
+// the device idle and the one-thread-per-element kernels are faster. One value
+// is used everywhere, except on architectures where a sweep put the tie
+// elsewhere. gfx942: the new kernels win 1.4-2.2x at 216 pixels/SM, tie at
+// 431, and lose from 1010 up. gfx950: they win up to 1.9x at 384 pixels/SM;
+// at 512 they trail by up to 14% with N*C <= 32 and win 1.2-1.4x with 256
+// planes; from 768 up they mostly tie or lose.
+int64_t plane_kernel_min_pixels_per_sm(
+    [[maybe_unused]] const cudaDeviceProp* props) {
+#ifdef USE_ROCM
+  if (c10::basic_string_view<char>(props->gcnArchName).starts_with("gfx950")) {
+    return 512;
+  }
+#endif
+  return 256;
+}
 
 // One thread per output pixel, looping over all N*C planes, so the source
 // coordinates are computed once per pixel. Only fast when OH*OW alone fills
@@ -553,9 +565,7 @@ static void upsample_bilinear2d_out_cuda_template(
       if (numel == 0) {
         return;
       }
-      constexpr int64_t num_threads = 256;
-      const int64_t max_blocks =
-          at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+      const auto* props = at::cuda::getCurrentDeviceProperties();
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -568,6 +578,24 @@ static void upsample_bilinear2d_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
+      const int64_t plane_numel =
+          static_cast<int64_t>(output_height) * output_width;
+      const bool use_plane_kernel = plane_numel >=
+          static_cast<int64_t>(props->multiProcessorCount) *
+              plane_kernel_min_pixels_per_sm(props);
+
+      if (use_plane_kernel) {
+        const int64_t plane_threads =
+            std::min<int64_t>(props->maxThreadsPerBlock, 1024);
+        upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
+            <<<ceil_div(plane_numel, plane_threads), plane_threads, 0, stream>>>(
+                plane_numel, rheight, rwidth, align_corners, idata, odata);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        return;
+      }
+
+      constexpr int64_t num_threads = 256;
+      const int64_t max_blocks = props->maxGridSize[0];
       const bool use_32bit_indexing =
           canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
       // vec4 helps only when upsampling: when downsampling, the input read
@@ -576,23 +604,9 @@ static void upsample_bilinear2d_out_cuda_template(
           output_width % 4 == 0 &&
           reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
                   (4 * sizeof(scalar_t)) == 0 &&
-          static_cast<int64_t>(input_height) * input_width <=
-              static_cast<int64_t>(output_height) * output_width;
+          static_cast<int64_t>(input_height) * input_width <= plane_numel;
 
-      const auto* props = at::cuda::getCurrentDeviceProperties();
-      const int64_t plane_numel =
-          static_cast<int64_t>(output_height) * output_width;
-      const bool use_plane_kernel = plane_numel >=
-          static_cast<int64_t>(props->multiProcessorCount) *
-              kPlaneKernelMinPixelsPerSM;
-
-      if (use_plane_kernel) {
-        const int64_t plane_threads =
-            std::min<int64_t>(props->maxThreadsPerBlock, 1024);
-        upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
-            <<<ceil_div(plane_numel, plane_threads), plane_threads, 0, stream>>>(
-                plane_numel, rheight, rwidth, align_corners, idata, odata);
-      } else if (use_vec4) {
+      if (use_vec4) {
         const int64_t numel4 = numel / 4;
         const int64_t num_blocks =
             std::min(ceil_div(numel4, num_threads), max_blocks);

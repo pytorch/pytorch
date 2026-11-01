@@ -9496,11 +9496,12 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.half, torch.bfloat16)
-    # The device computes source coordinates in float, the reference in double.
-    # The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
+    @dtypes(torch.double, torch.float, torch.half, torch.bfloat16)
+    # Below double, the device computes source coordinates in float and the
+    # reference in double. The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
     # times the step between neighbouring inputs, so inputs stay in [-1, 1].
-    @toleranceOverride({torch.float: tol(atol=1e-4, rtol=1e-5),
+    @toleranceOverride({torch.double: tol(atol=1e-7, rtol=1e-7),
+                        torch.float: tol(atol=1e-4, rtol=1e-5),
                         torch.half: tol(atol=1e-2, rtol=1e-2),
                         torch.bfloat16: tol(atol=5e-2, rtol=5e-2)})
     @parametrize_test("align_corners", [False, True])
