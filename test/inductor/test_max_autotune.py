@@ -2076,11 +2076,6 @@ class TestMaxAutotune(TestCase):
             )
 
     @unittest.skipIf(
-        config.cpp_wrapper,
-        "cpp_wrapper kernel launches need a current CUDA context, which the "
-        "autograd thread running the backward may not have",
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -847,6 +848,50 @@ class TestGpuWrapper(InductorTestCase):
         opt_fn = torch.compile(options={"cpp_wrapper": True})(fn)
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
+
+    @unittest.skipIf(torch.version.hip is not None, "CUDA driver contexts only")
+    def test_cpp_wrapper_runs_on_thread_without_current_context(self):
+        # A thread whose first CUDA work is the C++ wrapper, such as autograd's
+        # device threads, has no current context for its driver-API launches.
+        if not RUN_GPU or GPU_TYPE != "cuda":
+            self.skipTest("CUDA not available")
+
+        def run_on_new_thread(fn):
+            result = {}
+
+            def target():
+                try:
+                    result["out"] = fn()
+                except Exception as e:
+                    result["error"] = e
+
+            thread = threading.Thread(target=target)
+            thread.start()
+            thread.join()
+            if "error" in result:
+                raise result["error"]
+            return result["out"]
+
+        # LayerNorm first, so a Triton kernel launches before cuBLAS would bind
+        # the context.
+        model = torch.nn.Sequential(
+            torch.nn.LayerNorm(64), torch.nn.Linear(64, 64), torch.nn.GELU()
+        ).to(self.device)
+        x = torch.randn(32, 64, device=self.device)
+        compiled = torch.compile(model, options={"cpp_wrapper": True})
+        # Compiles and loads the kernels on this thread.
+        expected = compiled(x)
+
+        side_stream = torch.cuda.Stream()
+
+        def run_on_side_stream():
+            with torch.cuda.stream(side_stream):
+                out = compiled(x)
+            side_stream.synchronize()
+            return out
+
+        self.assertEqual(run_on_new_thread(lambda: compiled(x)), expected)
+        self.assertEqual(run_on_new_thread(run_on_side_stream), expected)
 
     def test_cuda_cpp_wrapper_skips_vec_isa_for_device_only_code(self):
         if not RUN_GPU:

@@ -1679,6 +1679,14 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def _codegen_entry_impl_prologue(self):
         super()._codegen_entry_impl_prologue()
+        # Every kernel load and launch happens inside this entry call, on the
+        # calling thread, so one check here covers them all. As with kernel
+        # launches, AOTI uses the runtime-assigned device.
+        ensure_context = get_device_op_overrides(self.device).cpp_ensure_current_context
+        jit_device_idx = str(next(iter(V.graph.device_idxs), 0))
+        if ensure_context(jit_device_idx):
+            self.prefix.writeline_jit(ensure_context(jit_device_idx))
+            self.prefix.writeline_aot(ensure_context("this->device_idx_"))
         # ensure_triton_kernel_compiles_started() is JIT-only; AOTI has no
         # Python-dependent lazy compile flow.
         self.prefix.writeline_jit(
