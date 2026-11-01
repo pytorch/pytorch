@@ -1898,6 +1898,22 @@ def get_cpp_torch_options(
     )
     cflags = sys_libs_cflags + omp_cflags
     ldflags = sys_libs_ldflags + omp_ldflags
+    # Unless the compiler asks the linker to link as needed, as Ubuntu's GCC
+    # does by default, the OpenMP added above makes the linker record libgomp
+    # even when the model calls no OpenMP function. The shared library then
+    # fails to load without torch on a machine that has no libgomp. Dropping
+    # libraries nothing references cannot drop one the model uses. Links with
+    # libtorch are left alone, because a library there can matter without
+    # being referenced, when its static initializers register something. A
+    # static library is linked later by the program that uses it, so there
+    # the program's own link flags decide.
+    if (
+        _IS_LINUX
+        and aot_mode
+        and not config.aot_inductor.link_libtorch
+        and config.aot_inductor.cross_target_platform is None
+    ):
+        ldflags.append("Wl,--as-needed")
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
@@ -2345,22 +2361,6 @@ def get_cpp_torch_device_options(
         # referenced, because a static initializer in it registers something.
         if _IS_MACOS and aot_mode and not link_libtorch:
             ldflags.append("Wl,-dead_strip_dylibs")
-
-    # _get_openmp_args adds OpenMP to every Linux link too, and unless the
-    # compiler asks the linker to link as needed, as Ubuntu's GCC does by
-    # default, the linker records libgomp even when the model calls no OpenMP
-    # function. The shared library then fails to load without torch on a
-    # machine that has no libgomp. As above, dropping libraries nothing
-    # references cannot drop one the model uses, and links with libtorch are
-    # left alone. A static library is linked later by the program that uses
-    # it, so there the program's own link flags decide.
-    if (
-        _IS_LINUX
-        and aot_mode
-        and not link_libtorch
-        and config.aot_inductor.cross_target_platform is None
-    ):
-        ldflags.append("Wl,--as-needed")
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)

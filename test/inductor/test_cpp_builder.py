@@ -380,12 +380,14 @@ class TestCppBuilder(TestCase):
     def test_libtorch_free_aot_link_drops_unused_libraries(self) -> None:
         # Ubuntu's GCC links as needed by default, so the built library cannot
         # show a lost flag there. Check the link command and the CMake project.
-        def builder(aot_mode: bool, link_libtorch: bool) -> cpp_builder.CppBuilder:
+        def builder(
+            aot_mode: bool, link_libtorch: bool, device_type: str = "cpu"
+        ) -> cpp_builder.CppBuilder:
             with mock.patch.object(
                 cpp_builder.config.aot_inductor, "link_libtorch", link_libtorch
             ):
                 options = cpp_builder.CppTorchDeviceOptions(
-                    device_type="cpu", aot_mode=aot_mode
+                    device_type=device_type, aot_mode=aot_mode
                 )
             return cpp_builder.CppBuilder("model", "model.cpp", options)
 
@@ -404,6 +406,17 @@ class TestCppBuilder(TestCase):
         for aot_mode, link_libtorch in ((False, False), (True, True)):
             command = builder(aot_mode, link_libtorch).get_command_line()
             self.assertNotIn("--as-needed", command)
+
+        # A device that supplies its own options still gets OpenMP.
+        class MockDeviceInterface(DeviceInterface):
+            @staticmethod
+            def get_cpp_device_options(aot_mode, compile_only):
+                return ([], [], [], [], [], [], [])
+
+        self.addCleanup(device_interfaces.pop, "mock_own_options", None)
+        register_interface_for_device("mock_own_options", MockDeviceInterface)
+        command = builder(True, False, "mock_own_options").get_command_line()
+        self.assertIn("-Wl,--as-needed", command.split())
 
 
 if __name__ == "__main__":
