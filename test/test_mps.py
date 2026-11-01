@@ -10135,7 +10135,7 @@ def _conformance_read_metal_header(rel_path):
         stripped = line.strip()
         if stripped == "#pragma once":
             continue
-        if stripped.startswith("#include <c10/metal/"):
+        if stripped.startswith("#include <c10/"):
             continue
         cleaned.append(line)
     return "\n".join(cleaned)
@@ -10143,6 +10143,7 @@ def _conformance_read_metal_header(rel_path):
 
 def _conformance_compose_metal_source():
     return "\n".join([
+        _conformance_read_metal_header("c10/util/IntegerDivider.h"),
         _conformance_read_metal_header("c10/metal/float8.h"),
         _conformance_read_metal_header("c10/metal/common.h"),
         _conformance_read_metal_header("c10/metal/utils.h"),
@@ -10321,21 +10322,12 @@ class TestBinaryDispatchRouting(TestCaseMPS):
         self._assert_kernel(
             self._probe(a, b), "probe_dense_scalar_float2_float2")
 
-    def test_dense_broadcast(self):
-        # other broadcasts -> kernel name has no _rhs/_lhs suffix. The smaller
-        # tensor must stay contiguous (no `expand`) for is_dense_broadcastable
-        # to accept it; TI handles the actual broadcast.
+    def test_broadcast_strided(self):
+        # A broadcasting operand has no dedicated kernel: the strided kernel
+        # divides by host-precomputed magic numbers (DimDivider) instead.
         a = torch.empty(4, 4, dtype=torch.float32, device="mps")
         b = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
-        self._assert_kernel(self._probe(a, b), "probe_dense_broadcast_float_float")
-
-    def test_dense_broadcast_lhs(self):
-        # input broadcasts -> dispatcher emits "_rhs" suffix (mirrors the
-        # other-broadcast kernel signature with operands swapped).
-        a = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
-        b = torch.empty(4, 4, dtype=torch.float32, device="mps")
-        self._assert_kernel(
-            self._probe(a, b), "probe_dense_broadcast_rhs_float_float")
+        self._assert_kernel(self._probe(a, b), "probe_strided_float_float")
 
     def test_dense_ilp(self):
         # Force ILP path with a threshold of 1: any contiguous, no-cast,
