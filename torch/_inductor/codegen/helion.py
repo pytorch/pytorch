@@ -12,7 +12,8 @@ from torch._subclasses.fake_impls import _compute_stride
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
-from .. import config
+from .. import config, metrics
+from ..dependencies import MemoryDep
 from ..ir import (
     FixedLayout,
     IRNode,
@@ -28,6 +29,7 @@ from ..virtualized import V
 from .common import PythonPrinter
 from .simd import SIMDKernel
 from .simd_kernel_features import DisableReduction, EnableReduction, SIMDKernelFeatures
+from .triton import TritonScheduling
 
 
 if TYPE_CHECKING:
@@ -134,6 +136,8 @@ class HelionKernel(DefaultHandler):
         ] = {self.reduction_body: {}, self.epilogue: {}}
         self.counter = itertools.count()
         self.dots_emitted: OrderedSet[str] = OrderedSet()
+        self.executable = False
+        self.kernel_name: str | None = None
 
     @staticmethod
     def compute_dtype(dtype: torch.dtype) -> torch.dtype:
@@ -165,8 +169,20 @@ class HelionKernel(DefaultHandler):
         # coordinates need the full rank, e.g. x.reshape([1, 1, tile_x]).
         if not value.depending_indices or value.depending_indices == depending_indices:
             return value.name
-        if not OrderedSet(value.depending_indices).issubset(depending_indices):
-            raise NotImplementedError("Helion preview cannot drop a tensor axis")
+        dropped = tuple(
+            axis for axis in value.depending_indices if axis not in depending_indices
+        )
+        if dropped:
+            if any(self.tiling[axis] != 1 for axis in dropped):
+                raise NotImplementedError("Helion preview cannot drop a tensor axis")
+            name = value.name
+            for dim in reversed(range(len(value.depending_indices))):
+                if value.depending_indices[dim] in dropped:
+                    name += f".squeeze({dim})"
+            value = HelionValue(
+                name,
+                tuple(axis for axis in value.depending_indices if axis not in dropped),
+            )
         order = tuple(
             axis for axis in depending_indices if axis in value.depending_indices
         )
@@ -187,7 +203,13 @@ class HelionKernel(DefaultHandler):
     def simplify_index(self, index: sympy.Expr) -> sympy.Expr:
         # Expose quotient/remainder cancellation before inferring tensor axes:
         # x % B + B * (x // B) becomes x, so it no longer needs two indices.
-        index = sympy.sympify(index)
+        index = sympy.sympify(index).xreplace(
+            {
+                self.symbols[axis]: sympy.S.Zero
+                for axis, size in self.tiling.items()
+                if size == 1
+            }
+        )
         expanded = index.replace(
             ModularIndexing,
             lambda base, divisor, modulus: FloorDiv(base, divisor)
@@ -206,6 +228,10 @@ class HelionKernel(DefaultHandler):
         *,
         index: sympy.Expr | None = None,
     ) -> HelionTensorArg:
+        r"""tensor_arg(operand, alias=None, *, index=None) -> HelionTensorArg
+
+        Preserve storage views and recover logical tile axes for a tensor argument.
+        """
         while isinstance(operand, MutableBox):
             operand = operand.data
         layout = operand.get_layout()
@@ -213,7 +239,11 @@ class HelionKernel(DefaultHandler):
             # Drop constant singleton coordinates through a caller view:
             # input[g, 0, y, x] becomes input_squeezed[g, y, x]. Keeping the
             # unused dimension can change Helion's advanced-index result rank.
-            active = [dim for dim, size in enumerate(layout.size) if size != 1]
+            active = [
+                dim
+                for dim, size in enumerate(layout.size)
+                if size != 1 or any(self.tiling[axis] == 1 for axis in self.outer_axes)
+            ]
             if len(active) != len(layout.size):
                 layout = FixedLayout(
                     layout.device,
@@ -230,7 +260,9 @@ class HelionKernel(DefaultHandler):
             # inside the kernel as buffer[tile_y, tile_x].
             symbols = index.free_symbols
             axes = tuple(
-                axis for axis in self.outer_axes if self.symbols[axis] in symbols
+                axis
+                for axis in self.outer_axes
+                if self.symbols[axis] in symbols or self.tiling[axis] == 1
             )
             old_size, old_stride = list(layout.size), list(layout.stride)
             size = [self.tiling[axis] for axis in axes]
@@ -304,7 +336,9 @@ class HelionKernel(DefaultHandler):
                 for axis, stride in zip(axes, layout.stride)
                 if axis is not None
             )
-            if V.graph.sizevars.statically_known_equals(index, expected):
+            if V.graph.sizevars.statically_known_equals(
+                index, self.simplify_index(expected)
+            ):
                 return (
                     [self.tiles[axis] if axis is not None else "0" for axis in axes]
                     or ["()"],
@@ -397,6 +431,10 @@ class HelionKernel(DefaultHandler):
         # Helion's tensor indexing handles negative-index wrapping.
         # For wrap_neg=False, this preview assumes valid nonnegative indices;
         # it does not yet emit Inductor's runtime index checks.
+        if self.executable:
+            raise NotImplementedError(
+                "Executable Helion matmul does not support indirect indexing"
+            )
         symbol = sympy.Symbol(
             f"helion_indirect{len(self.indirect_indices)}", integer=True
         )
@@ -418,7 +456,9 @@ class HelionKernel(DefaultHandler):
                 if operand.get_name() != name:
                     continue
                 expected = operand.make_indexer()([self.symbols[axis] for axis in axes])
-                if V.graph.sizevars.statically_known_equals(index, expected):
+                if V.graph.sizevars.statically_known_equals(
+                    index, self.simplify_index(expected)
+                ):
                     argument = self.tensor_arg(
                         operand, alias + (str(number) if number else "")
                     )
@@ -607,37 +647,42 @@ class HelionKernel(DefaultHandler):
     def store_reduction(self, name: str, index: sympy.Expr, value: HelionValue) -> None:
         self.store(name, index, value)
 
+    binary_ops = {
+        "add": "+",
+        "sub": "-",
+        "mul": "*",
+        "truediv": "/",
+        "eq": "==",
+        "ne": "!=",
+        "lt": "<",
+        "le": "<=",
+        "gt": ">",
+        "ge": ">=",
+        "bitwise_and": "&",
+        "and_": "&",
+    }
+    torch_ops = OrderedSet(
+        [
+            "relu",
+            "erf",
+            "tanh",
+            "neg",
+            "sigmoid",
+            "exp",
+            "expm1",
+            "abs",
+            "log",
+            "logical_not",
+            "where",
+            "minimum",
+            "maximum",
+            "logical_and",
+        ]
+    )
+
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        binary = {
-            "add": "+",
-            "sub": "-",
-            "mul": "*",
-            "truediv": "/",
-            "eq": "==",
-            "ne": "!=",
-            "lt": "<",
-            "le": "<=",
-            "gt": ">",
-            "ge": ">=",
-            "bitwise_and": "&",
-            "and_": "&",
-        }
-        unary = OrderedSet(
-            [
-                "relu",
-                "erf",
-                "tanh",
-                "neg",
-                "sigmoid",
-                "exp",
-                "expm1",
-                "abs",
-                "log",
-                "logical_not",
-            ]
-        )
-        torch_ops = OrderedSet(["where", "minimum", "maximum", "logical_and"])
-        if not kwargs and (name in binary or name in unary or name in torch_ops):
+        binary = self.binary_ops
+        if not kwargs and (name in binary or name in self.torch_ops):
             # Operand order must not set axis order: bias[x] + acc[y, x]
             # keeps [y, x], and batched values keep [z, y, x].
             axes = OrderedSet().union(*(value.depending_indices for value in args))
@@ -654,8 +699,10 @@ class HelionKernel(DefaultHandler):
             return self.emit(expression, depending_indices)
         raise NotImplementedError(f"Unsupported Helion preview op: {name}")
 
-    def codegen_kernel(self) -> str:
+    def codegen_kernel(self, *, executable: bool = False) -> str:
         """Replay the SIMD schedule and emit the kernel plus its metadata-view caller."""
+
+        self.executable = executable
 
         def set_ranges(*ranges):
             # SIMD may split y into batch/row: y//M and y%M, without another loop.
@@ -705,10 +752,22 @@ class HelionKernel(DefaultHandler):
                 "from torch._C._dynamo.guards import _reinterpret_tensor as reinterpret_tensor"
             )
             code.writeline("")
-        code.writeline('@helion.kernel(static_shapes=True, dot_precision="ieee")')
-        name = "helion_" + "_".join(
+        if executable:
+            code.writeline(
+                "from torch._inductor.runtime.helion import HelionKernelWrapper"
+            )
+            backend = {"triton": "triton", "cutedsl": "cute"}[config.helion_backend]
+            code.writeline(
+                f'@helion.kernel(backend="{backend}", static_shapes=True, '
+                f'autotune_effort="{config.helion_autotune_effort}", '
+                "ref_mode=helion.RefMode.OFF)"
+            )
+        else:
+            code.writeline("@helion.kernel(static_shapes=True)")
+        self.kernel_name = "helion_" + "_".join(
             node.get_name() for node in self.features.scheduler_nodes()
         )
+        name = self.kernel_name
         signature = ", ".join(f"{arg.name}: torch.Tensor" for arg in tensor_args)
         code.writeline(f"def {name}({signature}) -> None:")
         with code.indent():
@@ -722,6 +781,8 @@ class HelionKernel(DefaultHandler):
                 with code.indent():
                     code.splice(self.reduction_body)
                 code.splice(self.epilogue)
+        if executable:
+            code.writeline(f"{name} = HelionKernelWrapper({name})")
         code.writeline("")
         signature = ", ".join(
             f"{arg}: torch.Tensor" for arg in (*self.inputs, *self.outputs)
@@ -738,3 +799,140 @@ class HelionKernel(DefaultHandler):
             )
             code.writeline(f"{name}({arguments})")
         return code.getvalue()
+
+
+class HelionScheduling(TritonScheduling):
+    """Use Helion for native matmul schedules and Triton for other work."""
+
+    @staticmethod
+    def format_kernel_definition(name: str, source: str, caller: str) -> str:
+        escaped = source.replace("\\", "\\\\").replace('"""', '\\"""')
+        return (
+            f'{name}_source = """\\\n{escaped}"""\n'
+            f"{name} = PyCodeCache.load({name}_source).{caller}"
+        )
+
+    def can_fuse(self, node1, node2):
+        if node1.is_native_matmul() or node2.is_native_matmul():
+            supported = (
+                OrderedSet(HelionKernel.binary_ops)
+                | HelionKernel.torch_ops
+                | OrderedSet(
+                    [
+                        "load",
+                        "store",
+                        "store_reduction",
+                        "constant",
+                        "to_dtype",
+                        "dot",
+                        "reduction",
+                        "index_expr",
+                        "masked",
+                        "output",
+                    ]
+                )
+            )
+            for node in (*node1.get_nodes(), *node2.get_nodes()):
+                if not isinstance(node, SchedulerNode):
+                    return False
+                if OrderedSet(node._body.op_counts) - supported:
+                    return False
+                if node.is_reduction() and not node.is_native_matmul():
+                    return False
+                if any(
+                    isinstance(dep, MemoryDep) and dep.is_indirect()
+                    for dep in node.read_writes.reads_and_writes()
+                ):
+                    return False
+        return super().can_fuse(node1, node2)
+
+    can_fuse_vertical = can_fuse
+    can_fuse_horizontal = can_fuse
+
+    def codegen_combo_kernel(self, node):
+        if node.is_native_matmul():
+            raise NotImplementedError(
+                "Helion matmul cannot be emitted as a Triton combo kernel"
+            )
+        with config.patch(cuda_backend="triton"):
+            return super().codegen_combo_kernel(node)
+
+    def generate_combo_kernel_code(self, subkernel_nodes, *args, **kwargs):
+        if any(node.is_native_matmul() for node in subkernel_nodes):
+            raise NotImplementedError(
+                "Helion matmul cannot be emitted as a Triton combo kernel"
+            )
+        with config.patch(cuda_backend="triton"):
+            return super().generate_combo_kernel_code(subkernel_nodes, *args, **kwargs)
+
+    def generate_kernel_code_from_nodes(self, nodes, *args, **kwargs):
+        if any(node.is_native_matmul() for node in nodes):
+            raise NotImplementedError(
+                "Helion matmul does not support Triton fusion benchmarking"
+            )
+        with config.patch(cuda_backend="triton"):
+            return super().generate_kernel_code_from_nodes(nodes, *args, **kwargs)
+
+    def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
+        if not kernel_features.is_native_matmul():
+            # The non-matmul half of this backend is ordinary Triton codegen.
+            with config.patch(cuda_backend="triton"):
+                return super().codegen_node_schedule(kernel_features)
+        if V.graph.cpp_wrapper or V.graph.fx_wrapper:
+            raise NotImplementedError(
+                "Helion native matmul requires the Python wrapper"
+            )
+        matmul = next(
+            V.graph.helion_matmul_inputs[name]
+            for node in kernel_features.scheduler_nodes()
+            for name in node.get_buffer_names()
+            if name in V.graph.helion_matmul_inputs
+        )
+        lhs, rhs = matmul
+        tiling = {
+            "y": sympy.sympify(lhs.get_size()[-2]),
+            "x": sympy.sympify(rhs.get_size()[-1]),
+            "r0_": sympy.sympify(lhs.get_size()[-1]),
+        }
+        if len(lhs.get_size()) == 3:
+            tiling = {"z": sympy.sympify(lhs.get_size()[0]), **tiling}
+        kernel = HelionKernel(kernel_features, tiling)
+        source = kernel.codegen_kernel(executable=True)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {"name": "helion_code", "encoding": "string"},
+            payload_fn=lambda: source,
+        )
+        V.debug.helion_code(source)
+        wrapper = V.graph.wrapper_code
+        if source not in wrapper.src_to_kernel:
+            name = f"helion_{wrapper.next_kernel_suffix()}"
+            wrapper.src_to_kernel[source] = name
+            wrapper.add_import_once("from torch._inductor.codecache import PyCodeCache")
+            wrapper.define_kernel(
+                name,
+                self.format_kernel_definition(
+                    name, source, f"call_{kernel.kernel_name}"
+                ),
+                gpu=False,
+                standalone=True,
+            )
+            # pyrefly: ignore [bad-assignment]
+            metrics.generated_kernel_count += 1
+        name = wrapper.src_to_kernel[source]
+        nodes = list(kernel_features.scheduler_nodes())
+        for node in nodes:
+            for output in node.get_outputs():
+                if (
+                    output.get_name() not in kernel.outputs
+                    and not output.get_mutations()
+                    and not output.get_aliases()
+                ):
+                    V.graph.removed_buffers.add(output.get_name())
+            node.mark_run()
+        self.codegen_comment(nodes, name)
+        with wrapper.kernel_profile_scope(name, nodes):
+            wrapper.writeline(
+                wrapper.wrap_kernel_call(name, [*kernel.inputs, *kernel.outputs])
+            )
+        self.free_buffers_in_scheduler()

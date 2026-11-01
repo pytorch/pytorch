@@ -424,6 +424,34 @@ class GraphLowering(torch.fx.Interpreter):
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
     ) -> None:
         super().__init__(gm)
+        if (
+            config.native_matmul_helion
+            and example_inputs is not None
+            and any(
+                isinstance(inp, torch.Tensor) and inp.device.type == "cuda"
+                for inp in example_inputs
+            )
+        ):
+            if not torch._dynamo.config.assume_static_by_default:
+                raise NotImplementedError(
+                    "Helion native matmul does not support dynamic input settings; "
+                    "use torch.compile(..., dynamic=False)"
+                )
+            if any(
+                isinstance(inp, torch.SymInt)
+                or (
+                    isinstance(inp, torch.Tensor)
+                    and any(
+                        not isinstance(value, (int, sympy.Integer))
+                        for value in (*inp.size(), *inp.stride())
+                    )
+                )
+                for inp in example_inputs
+            ):
+                raise NotImplementedError(
+                    "Helion native matmul requires static shapes and strides; "
+                    "dynamic inputs are not supported"
+                )
         self.get_decomp_fn = get_decomp_fn
         self.example_inputs = example_inputs
         self.layout_opt = (
@@ -1464,6 +1492,26 @@ class GraphLowering(torch.fx.Interpreter):
 
     @typing_extensions.override
     def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg]
+        if (
+            config.native_matmul_helion
+            and isinstance(target, torch._ops.OpOverload)
+            and target._schema.name
+            in (
+                "aten::_int_mm",
+                "aten::_scaled_mm",
+                "aten::_scaled_mm_v2",
+                "aten::_sparse_semi_structured_mm",
+            )
+            and any(
+                isinstance(arg, ir.IRNode)
+                and (device := arg.get_device()) is not None
+                and device.type == "cuda"
+                for arg in args
+            )
+        ):
+            raise NotImplementedError(
+                f"Helion requires native matmul; unsupported operator: {target}"
+            )
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
