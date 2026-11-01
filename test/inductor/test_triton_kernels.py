@@ -1299,6 +1299,112 @@ def forward(self, x_1, output_1):
         clone = torch.ops.aten.clone.default
         self.assertEqual(len(gm.graph.find_nodes(op="call_function", target=clone)), 1)
 
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_cse_keeps_written_buffers(self):
+        # CSE does not merge the buffers that any DSL's functional HOP writes, so two
+        # identical calls on new buffers stay two calls, each on its own buffer.
+        from torch._functorch.compile_utils import fx_graph_cse
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def f(x):
+            return [
+                scale_kernel_wrapper_functional(
+                    scale=2,
+                    kwargs={"x": x, "out": torch.empty_like(x)},
+                    tensors_to_clone=["out"],
+                )["out"]
+                for _ in range(2)
+            ]
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(4))
+        hop = scale_kernel_wrapper_functional
+        nodes = fx_graph_cse(gm.graph).find_nodes(op="call_function", target=hop)
+        self.assertEqual(len({n.kwargs["kwargs"]["out"] for n in nodes}), 2)
+
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_mutation_is_canonicalization_barrier(self):
+        # Canonicalizing a graph does not reorder any DSL's mutation HOP, which writes
+        # through its kwargs, so a read of the written tensor stays after it.
+        from torch._dynamo.output_graph import _canonicalize_graph
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def f(x):
+            out = torch.zeros_like(x)
+            scale_kernel_wrapper_mutation(scale=2, kwargs={"x": x, "out": out})
+            return out.neg()
+
+        x = torch.randn(4)
+        gm = make_fx(f)(x)
+        hop = scale_kernel_wrapper_mutation
+        (node,) = gm.graph.find_nodes(op="call_function", target=hop)
+        self.assertFalse(_is_safe_to_reorder(node))
+        _canonicalize_graph(gm.graph)
+        gm.recompile()
+        self.assertEqual(gm(x), -2 * x)
+
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_dict_expanded_before_sync(self):
+        # A sync between any DSL's functional HOP and its getitem gets a control_deps
+        # passing through a getitem inserted before the sync instead of the dict.
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+        scale_functional = scale_kernel_wrapper_functional
+
+        def f(x, out):
+            return scale_functional(
+                scale=2, kwargs={"x": x, "out": out}, tensors_to_clone=["out"]
+            )["out"]
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(4), torch.empty(4))
+        graph = gm.graph
+        (hop,) = graph.find_nodes(op="call_function", target=scale_functional)
+        with graph.inserting_after(hop):
+            graph.call_function(torch.ops.streams.record_event.default, (0, 0))
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        (ctrl,) = graph.find_nodes(op="call_function", target=control_deps)
+        (getitem,) = ctrl.args[2:]
+        self.assertEqual(getitem.args, (hop, "out"))
+        self.assertLess(getitem, ctrl)
+
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_counts_as_user_kernel_wrapper(self):
+        # _graph_contains_user_kernel_wrappers, which keeps such graphs out of a
+        # compile subprocess, finds either HOP of any registered DSL.
+        from torch._inductor.compile_fx_ext import (
+            _graph_contains_user_kernel_wrappers as contains,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def mutation(x):
+            out = torch.empty_like(x)
+            scale_kernel_wrapper_mutation(scale=2, kwargs={"x": x, "out": out})
+            return out
+
+        def functional(x):
+            kwargs = {"x": x, "out": torch.empty_like(x)}
+            return scale_kernel_wrapper_functional(
+                scale=2, kwargs=kwargs, tensors_to_clone=["out"]
+            )["out"]
+
+        def trace(f):
+            return make_fx(f, tracing_mode="fake")(torch.randn(4))
+
+        self.assertTrue(contains(trace(mutation)))
+        self.assertTrue(contains(trace(functional)))
+
     @requires_gpu
     @inductor_config.patch(use_post_grad_passes=False)
     @mock.patch.dict(_user_kernel_hops)
@@ -1376,6 +1482,54 @@ def forward(self, x_1, output_1):
             self.assertRaisesRegex(AssertionError, msg),
         ):
             decompose_user_kernel_wrapper_functional(gm.graph)
+
+    @common_utils.parametrize("include", [False, True])
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_is_non_builtin_to_include(self, include):
+        # Min-cut's denylist mode recomputes a kernel of any DSL when that is cheaper
+        # than saving its output, unless is_non_builtin_to_include is set.
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def joint(x, tangents):
+            buf = x.new_empty(64, 4)
+            out = scale_kernel_wrapper_functional(
+                scale=2, kwargs={"x": x, "out": buf}, tensors_to_clone=["out"]
+            )["out"]
+            return out, tangents * out
+
+        gm = make_fx(joint, tracing_mode="fake")(torch.randn(4), torch.randn(64, 4))
+        with torch._functorch.config.patch(
+            ban_recompute_not_in_allowlist=False, is_non_builtin_to_include=include
+        ):
+            _, bw = min_cut_rematerialization_partition(gm, None, num_fwd_outputs=1)
+        bw_targets = [n.target for n in bw.graph.nodes]
+        self.assertEqual(scale_kernel_wrapper_functional in bw_targets, not include)
+
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_min_cut_fusion(self):
+        # Min-cut fuses the producer of a buffer that any DSL's kernel writes into the
+        # kernel's clone of it, and fuses nothing into the kernel's output, so it saves
+        # x rather than a, and the kernel's output rather than z.
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def joint(x, tangents):
+            a = x.cos()
+            out = scale_kernel_wrapper_functional(
+                scale=2, kwargs={"x": x, "out": a}, tensors_to_clone=["out"]
+            )["out"]
+            z = out.cos()
+            return z.sin(), tangents * a * z
+
+        gm = make_fx(joint, tracing_mode="fake")(torch.randn(16), torch.randn(16))
+        _, bw = min_cut_rematerialization_partition(gm, None, num_fwd_outputs=1)
+        bw_inputs = [n.name for n in bw.graph.find_nodes(op="placeholder")]
+        self.assertEqual(bw_inputs, ["x_1", "getitem", "tangents_1"])
 
     @requires_gpu
     @inductor_config.patch(force_disable_caches=True)
