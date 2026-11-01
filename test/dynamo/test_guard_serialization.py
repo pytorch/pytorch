@@ -2138,7 +2138,13 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
-                self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
+                loaded = load_guards_state(buf.getvalue())["o"]
+                if isinstance(obj, weakref.ref):
+                    # An unguarded weakref comes back dead, not as the sentinel.
+                    self.assertIs(type(loaded), weakref.ref)
+                    self.assertIsNone(loaded())
+                else:
+                    self.assertIsInstance(loaded, _Missing)
                 graph = types.SimpleNamespace(
                     guards=[],
                     local_scope={"o": obj},
