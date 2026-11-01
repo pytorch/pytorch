@@ -36,6 +36,7 @@ from ..bytecode_transformation import (
 from ..exc import (
     handle_observed_exception,
     ObservedException,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -2614,6 +2615,67 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(result)
 
+    def bytearray_join(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_join: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        from .builder import SourcelessBuilder
+
+        iterable = args[0].realize()
+        sep = self.data
+        if istype(iterable, (ListVariable, TupleVariable)):
+            items = iterable.items
+        else:
+            # CPython exports the separator's buffer for the whole call, so
+            # resizing it raises BufferError. Every mutator swaps in a new
+            # buffer, so a changed self.data means the separator was mutated:
+            # leave that to eager, also when iteration raised.
+            try:
+                # PySequence_Fast: GetIter, then list(iterator), which calls
+                # iter() again, asks the first iterator for a length hint
+                # (default 8) and reads the items from the second.
+                try:
+                    iterator = generic_getiter(tx, iterable)
+                except ObservedTypeError:
+                    # ObservedTypeError is only produced for TypeError itself, not
+                    # for subclasses, which CPython would also rewrite here; same
+                    # gap as call_length_hint.
+                    handle_observed_exception(tx)
+                    raise_type_error(tx, "can only join an iterable")
+                inner = generic_getiter(tx, iterator)
+                hint = SourcelessBuilder.create_internal_builtin(operator.length_hint)
+                hint.call_function(tx, [iterator, ConstantVariable.create(8)], {})
+                items = []
+                while True:
+                    try:
+                        items.append(pyiter_next(tx, inner))
+                    except ObservedUserStopIteration:
+                        handle_observed_exception(tx)
+                        break
+            except ObservedException:
+                if self.data is not sep:
+                    handle_observed_exception(tx)
+                    return None
+                raise
+            if self.data is not sep:
+                return None
+        parts = []
+        for item in items:
+            item = item.realize()
+            if isinstance(item, ByteArrayVariable):
+                parts.append(item.data)
+            elif item.is_python_constant():
+                parts.append(item.as_python_constant())
+            else:
+                return None
+        try:
+            return VariableTracker.build(tx, self.data.join(parts))
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
     def _bytearray_case_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2663,6 +2725,7 @@ class ByteArrayVariable(VariableTracker):
         "extend": Method(bytearray_extend),
         "insert": Method(bytearray_insert),
         "pop": Method(bytearray_pop),
+        "join": Method(bytearray_join),
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),

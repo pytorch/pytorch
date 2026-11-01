@@ -441,6 +441,249 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 self.assertIs(type(part), bytearray)
 
     @make_dynamo_test
+    def test_join(self):
+        self.assertEqual(self.type2test(b"").join([]), b"")
+        self.assertEqual(self.type2test(b"").join([b""]), b"")
+        for lst in [[b"abc"], [b"a", b"bc"], [b"ab", b"c"], [b"a", b"b", b"c"]]:
+            lst = list(map(self.type2test, lst))
+            self.assertEqual(self.type2test(b"").join(lst), b"abc")
+            self.assertEqual(self.type2test(b"").join(tuple(lst)), b"abc")
+            self.assertEqual(self.type2test(b"").join(iter(lst)), b"abc")
+
+        dot_join = self.type2test(b".:").join
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([bytearray(b"ab"), b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([b"ab", bytearray(b"cd")]), b"ab.:cd")
+        self.assertEqual(dot_join(x for x in (b"a", b"b")), b"a.:b")
+
+        # The result is a new bytearray, not the separator.
+        out = dot_join([b"ab", b"cd"])
+        self.assertIsInstance(out, self.type2test)
+        out += b"ef"
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            self.type2test(b" ").join(None)
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            self.type2test(b" ").join(0)
+        dot_join = self.type2test(b".:").join
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            dot_join([bytearray(b"ab"), "cd", b"ef"])
+
+    def test_join_iterator_errors(self):
+        class Items:
+            def __init__(self, iter_error=None, next_error=None):
+                self.iter_error = iter_error
+                self.next_error = next_error
+
+            def __iter__(self):
+                if self.iter_error is not None:
+                    raise self.iter_error
+                return self
+
+            def __next__(self):
+                raise self.next_error
+
+        class Outer:
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __iter__(self):
+                return self.inner
+
+        def f(make_items, x):
+            try:
+                bytearray(b",").join(make_items())
+            except Exception as e:
+                return type(e), str(e), x + 1
+            return None, None, x + 1
+
+        x = torch.ones(1)
+        cases = [
+            # A TypeError from the first iter() becomes join's own error.
+            lambda: Items(iter_error=TypeError("first iter")),
+            # Errors from the second iter() and from iteration propagate as is.
+            lambda: Outer(Items(iter_error=TypeError("second iter"))),
+            lambda: Items(next_error=TypeError("next")),
+            lambda: Items(next_error=ValueError("next")),
+        ]
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        for make_items in cases:
+            self.assertEqual(compiled(make_items, x), f(make_items, x))
+
+    def test_join_length_hint_first_iterator(self):
+        seen = []
+
+        class Second:
+            def __init__(self):
+                self.done = False
+
+            def __iter__(self):
+                return self
+
+            def __length_hint__(self):
+                seen.append("second hint")
+                return 1
+
+            def __next__(self):
+                if self.done:
+                    raise StopIteration
+                self.done = True
+                return b"A"
+
+        class First:
+            def __init__(self):
+                self.second = Second()
+
+            def __iter__(self):
+                return self.second
+
+            def __length_hint__(self):
+                seen.append("first hint")
+                return 1
+
+            def __next__(self):
+                raise StopIteration
+
+        class Iterable:
+            def __init__(self):
+                self.first = First()
+
+            def __iter__(self):
+                return self.first
+
+        def f(iterable, x):
+            seen.clear()
+            return bytearray(b",").join(iterable), list(seen), x + 1
+
+        x = torch.ones(1)
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(Iterable(), x), f(Iterable(), x))
+
+    def test_join_length_hint(self):
+        class Iterator:
+            def __init__(self):
+                self.seen = []
+                self.done = False
+
+            def __iter__(self):
+                self.seen.append("iter")
+                return self
+
+            def __length_hint__(self):
+                self.seen.append("hint")
+                return 1
+
+            def __next__(self):
+                self.seen.append("next")
+                if self.done:
+                    raise StopIteration
+                self.done = True
+                return b"A"
+
+        def f(x):
+            it = Iterator()
+            return bytearray(b",").join(it), it.seen, x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    def test_join_separator_mutation_graph_break(self):
+        class Items:
+            def __init__(self, sep):
+                self.sep = sep
+                self.items = [b"A", b"B"]
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.sep.extend(b"")
+                if not self.items:
+                    raise StopIteration
+                return self.items.pop(0)
+
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, x):
+            x = x + 1
+            return sep.join(Items(sep)), x * 2
+
+        self.assertEqual(
+            f(bytearray(b","), torch.ones(1)), (b"A,B", torch.full((1,), 4.0))
+        )
+        # Mutating the separator during join is left to eager.
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_join_nonconstant_item_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, item, x):
+            x = x + 1
+            return sep.join([item, b"c"]), x * 2
+
+        result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
+        self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_join_separator_mutation_then_raise(self):
+        class NextRaises:
+            def __init__(self, sep):
+                self.sep = sep
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.sep.extend(b"x")
+                raise ValueError("next")
+
+        class IterRaises:
+            def __init__(self, sep):
+                self.sep = sep
+
+            def __iter__(self):
+                self.sep.extend(b"x")
+                raise TypeError("iter")
+
+        def f(sep, items, x):
+            try:
+                sep.join(items)
+            except (TypeError, ValueError) as e:
+                return type(e), x + 1
+            return None, x + 1
+
+        def run(fn, cls):
+            sep = bytearray(b",")
+            try:
+                result = fn(sep, cls(sep), torch.ones(1))[0]
+            except BufferError:
+                result = BufferError
+            return result, sep
+
+        for cls in (NextRaises, IterRaises):
+            with self.subTest(cls=cls.__name__):
+                torch._dynamo.reset()
+                compiled = torch.compile(f, backend="eager")
+                self.assertEqual(run(compiled, cls), run(f, cls))
+
+    def test_input_bytearray_join(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(sep, ba, items):
+            return sep.join([ba, b"x"]), sep.join(items)
+
+        self.assertEqual(
+            fn(bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")]),
+            (bytearray(b"ab-x"), bytearray(b"ab-cd")),
+        )
+
+    @make_dynamo_test
     def test_hex(self):
         b = self.type2test(b"\x01\x02\xff")
         self.assertEqual(b.hex(), "0102ff")
