@@ -108,6 +108,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    check_setattr_args,
     GetSet,
     maybe_get_python_type,
     Member,
@@ -3203,7 +3204,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return ConstantVariable.create(None)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
-                return self.method_setattr_standard(tx, *args, **kwargs)
+                check_setattr_args(tx, args, kwargs)
+                return self.method_setattr_standard(tx, *args)
 
             if is_standard_delattr(method):
                 return self.method_setattr_standard(
@@ -4071,19 +4073,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
-            if (
-                isinstance(type_attr, types.MethodDescriptorType)
-                and self.lookup_method_descriptor(type_attr) is not None
-            ):
+            if isinstance(type_attr, types.MethodDescriptorType):
                 if self.cls_source:
                     install_guard(
                         self.get_source_by_walking_mro(tx, name).make_guard(
                             GuardBuilder.FUNCTION_MATCH
                         )
                     )
-                return variables.BoundBuiltinMethodVariable(
-                    type_attr, self, source=source
-                )
+                if self.lookup_method_descriptor(type_attr) is not None:
+                    return variables.BoundBuiltinMethodVariable(
+                        type_attr, self, source=source
+                    )
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):
@@ -5176,7 +5176,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            ConstDictVariable.tp_methods["update"](self, tx, "update", args, kwargs)
+            ConstDictVariable.dict_update(self, tx, args, kwargs)
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
@@ -5558,6 +5558,8 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
             if init_args:
                 arg = init_args[0]
                 if isinstance(arg, (SetVariable, ConstDictVariable)):
+                    if isinstance(arg, variables.NNModuleHooksDictVariable):
+                        arg.install_key_escape_guard()
                     items = list(arg.items.keys())
                 else:
                     items = unpack_iterable(tx, arg)
