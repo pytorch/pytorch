@@ -3,8 +3,10 @@
 import collections
 import contextlib
 import dis
+import enum
 import functools
 import inspect
+import sys
 import types
 import unittest
 from unittest import mock
@@ -82,6 +84,37 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
+
+    @parametrize("graph_break", [False, True])
+    def test_dynamic_slice_reconstruct(self, graph_break):
+        def fn(x):
+            result = x + 1
+            value = slice(0, x.shape[0] - 1)
+            if graph_break:
+                torch._dynamo.graph_break()
+            return result, value
+
+        compiled = torch.compile(
+            fn, backend="eager", dynamic=True, fullgraph=not graph_break
+        )
+        for size in (4, 6):
+            x = torch.randn(size)
+            self.assertEqual(compiled(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Enum value containment added in 3.12")
+    def test_enum_membership_creates_combined_flag(self):
+        class Flags(enum.Flag):
+            A = 1
+            B = 2
+            C = 4
+
+        def fn(x):
+            return x + int(7 in Flags)
+
+        x = torch.ones(1)
+        # Compile before eager membership populates the enum's member cache.
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
 
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""

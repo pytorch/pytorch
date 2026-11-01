@@ -2799,6 +2799,83 @@ class RelationalGuard : public LeafGuard {
   virtual void reset_state() = 0;
 };
 
+struct NNModuleHookMembership {
+  PyObject* hooks = nullptr;
+  PyObject* flags = nullptr;
+  std::vector<bool> expected;
+
+  bool check() const {
+    if (PyDict_GET_SIZE(hooks) != static_cast<Py_ssize_t>(expected.size())) {
+      return false;
+    }
+    PyObject *key = nullptr, *value = nullptr;
+    Py_ssize_t pos = 0;
+    // Restrict both sides to integer hook IDs, so lookup cannot run callbacks.
+    while (PyDict_Next(flags, &pos, &key, &value)) {
+      if (!PyLong_CheckExact(key)) {
+        return false;
+      }
+    }
+    pos = 0;
+    size_t index = 0;
+    while (PyDict_Next(hooks, &pos, &key, &value)) {
+      if (!PyLong_CheckExact(key)) {
+        return false;
+      }
+      const int contains = PyDict_Contains(flags, key);
+      if (contains < 0) {
+        PyErr_Clear();
+        return false;
+      }
+      if (static_cast<bool>(contains) != expected[index++]) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+// Compare membership by hook storage position without specializing module IDs.
+// Two role-tagged leaves permit either guard manager to run first.
+class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
+ public:
+  NN_MODULE_HOOK_MEMBERSHIP(
+      RootGuardManager* root,
+      std::shared_ptr<NNModuleHookMembership> state,
+      bool is_hooks,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _state(std::move(state)),
+        _is_hooks(is_hooks) {}
+
+  bool check_nopybind(PyObject* value) override {
+    if (!PyDict_Check(value)) {
+      return false;
+    }
+    (_is_hooks ? _state->hooks : _state->flags) = value;
+    if (_state->hooks == nullptr || _state->flags == nullptr) {
+      return true;
+    }
+    bool result;
+    Py_BEGIN_CRITICAL_SECTION2(_state->hooks, _state->flags);
+    result = _state->check();
+    Py_END_CRITICAL_SECTION2();
+    return result;
+  }
+
+  void reset_state() final {
+    (_is_hooks ? _state->hooks : _state->flags) = nullptr;
+  }
+
+ private:
+  std::shared_ptr<NNModuleHookMembership> _state;
+  bool _is_hooks;
+};
+
 /**
  * Checks that object x is object y.
  */
@@ -7505,6 +7582,24 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+void install_nn_module_hook_membership_guard(
+    GuardManager* hooks,
+    GuardManager* flags,
+    std::vector<bool> expected,
+    py::object verbose_code_parts,
+    py::object user_stack) {
+  TORCH_CHECK(hooks->get_root() == flags->get_root());
+  auto state = std::make_shared<NNModuleHookMembership>();
+  state->expected = std::move(expected);
+  for (bool is_hooks : {true, false}) {
+    auto* manager = is_hooks ? hooks : flags;
+    auto guard = std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
+        manager->get_root(), state, is_hooks, verbose_code_parts, user_stack);
+    manager->get_root()->add_relational_guard_resetter(guard);
+    manager->add_permitted_leaf_guard(std::move(guard));
+  }
+}
+
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -8085,6 +8180,12 @@ PyObject* torch_c_dynamo_guards_init() {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
       py_m, "RelationalGuard");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      NN_MODULE_HOOK_MEMBERSHIP,
+      RelationalGuard,
+      std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP>>(
+      py_m, "NN_MODULE_HOOK_MEMBERSHIP");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       OBJECT_ALIASING,
@@ -9191,6 +9292,9 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
+  py_m.def(
+      "install_nn_module_hook_membership_guard",
+      install_nn_module_hook_membership_guard);
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);

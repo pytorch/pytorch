@@ -47,6 +47,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstDictKeySource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
@@ -786,6 +787,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # NB - Guard on all the keys of the other dict to ensure
                 # correctness.
                 other.install_dict_keys_match_guard()
+                if isinstance(other, NNModuleHooksDictVariable):
+                    other.install_key_escape_guard()
                 self.items.update(other.items)
             elif (
                 isinstance(
@@ -1309,19 +1312,99 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
-    # Special class to avoid adding any guards on the nn module hook ids.
+    # Defer hook-ID guards so equivalent modules can reuse normal hook dispatch.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
-    def install_dict_keys_match_guard(self) -> None:
-        pass
+    global_flags_name: str | None = None
 
-    def install_dict_contains_guard(
+    def is_python_constant(self) -> bool:
+        # Inspecting nonempty keys here would realize and specialize lazy IDs.
+        return not self.items
+
+    def install_dict_keys_match_guard(self) -> None:
+        # Truth and view length need a guard without specializing hook IDs.
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+
+    def install_key_escape_guard(self) -> None:
+        # Detached containers reuse stored hashes, so failed lookups may never
+        # compare or realize their keys.
+        for key in self.items:
+            key.vt.realize()
+
+    def clone(self, **kwargs: Any) -> VariableTracker:
+        if self.source is not None and kwargs.get("source", self.source) is None:
+            self.install_key_escape_guard()
+        return super().clone(**kwargs)
+
+    def _new_dict(
+        self, items: dict[HashableTracker, VariableTracker]
+    ) -> "OrderedDictVariable":
+        # A detached copy uses stored hashes for lookups, so its keys must be guarded.
+        for key in items:
+            key.vt.realize()
+        return OrderedDictVariable(items, mutation_type=ValueMutationNew())
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        if not self.items and isinstance(item, variables.LazyConstantVariable):
+            item.python_type()
+            self.install_dict_keys_match_guard()
+            return ConstantVariable.create(False)
+        source = item.source
+        if (
+            isinstance(source, ConstDictKeySource)
+            and isinstance(source.base, AttrSource)
+            and source.base.member in ("_forward_hooks", "_forward_pre_hooks")
+            and self.source is not None
+            and (
+                self.global_flags_name is not None
+                or isinstance(self.source, AttrSource)
+                and source.base.base == self.source.base
+            )
+            and not tx.output.side_effects.is_modified(self)
+        ):
+            key = _get_literal_key(item)
+            keys = [_get_literal_key(k.vt) for k in self.items]
+            if type(key) is int and all(type(k) is int for k in keys):
+                item.python_type()
+                for stored_key in self.items:
+                    stored_key.vt.python_type()
+                if self.global_flags_name is not None:
+                    self.install_dict_keys_match_guard()
+                # Normal hook dispatch tests an ID against the same module's
+                # kwargs/always-call flags. Guard that relationship, not the ID.
+                install_guard(
+                    source.base.base.make_guard(
+                        functools.partial(
+                            GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                            hooks_name=source.base.member,
+                            flags_name=self.global_flags_name
+                            or cast(AttrSource, self.source).member,
+                            flags_source=self.source,
+                        )
+                    )
+                )
+                return ConstantVariable.create(key in keys)
+        return super().sq_contains_impl(tx, item)
+
+
+class NNModuleGlobalHookFlagsDictVariable(NNModuleHooksDictVariable):
+    def __init__(
         self,
-        tx: "InstructionTranslatorBase",
-        key: HashableTracker,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker],
         *,
-        key_present: bool | None = None,
+        global_flags_name: str,
+        **kwargs: Any,
     ) -> None:
-        pass
+        self.global_flags_name = global_flags_name
+        super().__init__(items, **kwargs)
+
+    def install_dict_keys_match_guard(self) -> None:
+        # Global IDs are shared across modules; only their relationship with
+        # the current module's local IDs needs the membership guard.
+        ConstDictVariable.install_dict_keys_match_guard(self)
 
 
 class DictViewVariable(VariableTracker):

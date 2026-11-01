@@ -250,6 +250,7 @@ from .dicts import (
     ConstDictVariable,
     DictKeysVariable,
     MappingProxyVariable,
+    NNModuleGlobalHookFlagsDictVariable,
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -1515,7 +1516,26 @@ class VariableBuilder:
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            if istype(value, collections.defaultdict):
+            global_flags_name = None
+            if istype(value, collections.OrderedDict):
+                global_flags_name = next(
+                    (
+                        name
+                        for name in (
+                            "_global_forward_hooks_with_kwargs",
+                            "_global_forward_hooks_always_called",
+                        )
+                        if value is getattr(torch.nn.modules.module, name)
+                    ),
+                    None,
+                )
+            if global_flags_name is not None:
+                result = NNModuleGlobalHookFlagsDictVariable(
+                    result,
+                    global_flags_name=global_flags_name,
+                    source=self.source,
+                )
+            elif istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
                     result,  # type: ignore[arg-type]

@@ -3,6 +3,8 @@
 import contextlib
 import functools
 import unittest
+from collections import defaultdict, OrderedDict
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -15,7 +17,12 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.utils import _pytree
 from torch.utils.hooks import RemovableHandle
 
 
@@ -36,11 +43,148 @@ def global_hook_2(grad):
 
 
 h0 = None
+_global_hook_flags_alias = None
 
 
 class ClassWithVal:
     def __init__(self, val):
         self.val = val
+
+
+@instantiate_parametrized_tests
+class HookDictionaryTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("flags_name", ["with_kwargs", "always_called"])
+    @parametrize("populated", [False, True])
+    def test_global_flags_preserve_mapping_type(
+        self, mapping_type, flags_name, populated
+    ):
+        def fn(x, flags):
+            return (
+                x + 1,
+                flags.copy(),
+                _pytree.tree_map(lambda value: not value, flags),
+                repr(flags),
+            )
+
+        flags = mapping_type()
+        if populated:
+            flags[1] = True
+        with patch.object(
+            torch.nn.modules.module, f"_global_forward_hooks_{flags_name}", flags
+        ):
+            x = torch.ones(1)
+            expected = fn(x, flags)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x, flags)
+            self.assertEqual(actual, expected)
+            for result in actual[1:3]:
+                self.assertIs(type(result), mapping_type)
+
+    @parametrize("flags_name", ["with_kwargs", "always_called"])
+    def test_defaultdict_global_flags_preserve_factory(self, flags_name):
+        def fn(x, flags):
+            copied = flags.copy()
+            return x + 1, copied.default_factory is int, repr(flags)
+
+        flags = defaultdict(int, {1: True})
+        with patch.object(
+            torch.nn.modules.module, f"_global_forward_hooks_{flags_name}", flags
+        ):
+            x = torch.ones(1)
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, flags),
+                fn(x, flags),
+            )
+
+    @parametrize(
+        "operation",
+        [
+            "set",
+            "set_unpack",
+            "frozenset",
+            "fromkeys",
+            "union",
+            "intersection",
+            "difference",
+            "isdisjoint",
+            "view_union",
+            "view_intersection",
+            "reverse_view_union",
+            "tree_map",
+            "tree_map_with_path",
+        ],
+    )
+    def test_materialized_hook_keys(self, operation):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, module):
+            hooks = module._forward_hooks
+            if operation == "set":
+                result = set(hooks)
+            elif operation == "set_unpack":
+                result = {*hooks}
+            elif operation == "frozenset":
+                result = frozenset(hooks)
+            elif operation == "fromkeys":
+                result = dict.fromkeys(set(hooks))
+            elif operation == "union":
+                result = {0}.union(hooks)
+            elif operation == "intersection":
+                result = {1}.intersection(hooks)
+            elif operation == "difference":
+                result = {1}.difference(hooks)
+            elif operation == "isdisjoint":
+                return x + {1}.isdisjoint(hooks)
+            elif operation == "view_union":
+                result = {0: True}.keys() | hooks
+            elif operation == "view_intersection":
+                result = {1: True}.keys() & hooks
+            elif operation == "reverse_view_union":
+                result = hooks | {0: True}.keys()
+            elif operation == "tree_map":
+                result = _pytree.tree_map(lambda value: True, hooks)
+            else:
+                result = _pytree.tree_map_with_path(lambda path, value: True, hooks)
+            return x + (1 in result)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for keys in ((2, 3), (1, 3)):
+            module = torch.nn.Identity()
+            for key in keys:
+                module._forward_hooks[key] = hook
+            self.assertEqual(compiled(x, module), fn(x, module))
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("flags_name", ["with_kwargs", "always_called"])
+    def test_global_flags_alias_survives_registry_replacement(
+        self, mapping_type, flags_name
+    ):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, module):
+            return x + sum(
+                key in _global_hook_flags_alias for key in module._forward_hooks
+            )
+
+        flags = mapping_type({1: True})
+        registry_name = f"_global_forward_hooks_{flags_name}"
+        with (
+            patch.object(torch.nn.modules.module, registry_name, flags),
+            patch(f"{__name__}._global_hook_flags_alias", flags),
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            x = torch.ones(1)
+            for key in (2, 1):
+                module = torch.nn.Identity()
+                module._forward_hooks[key] = hook
+                if key == 1:
+                    setattr(torch.nn.modules.module, registry_name, mapping_type())
+                self.assertEqual(compiled(x, module), fn(x, module))
 
 
 class HooksTests(torch._dynamo.test_case.TestCase):
