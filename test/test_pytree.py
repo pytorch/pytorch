@@ -1190,6 +1190,34 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         ):
             python_pytree.treespec_dumps(spec)
 
+    def test_pytree_deserialize_names_dumps_never_writes(self):
+        # A namedtuple node must name a namedtuple class, and no node may use the
+        # name that stands for every type without a serialized name.
+        import json
+
+        Point = namedtuple("Point", ["x", "y"])
+        python_pytree._register_namedtuple(
+            Point,
+            serialized_type_name="test_pytree.test_pytree_deserialize_names.Point",
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, Point)
+        serialized = python_pytree.treespec_dumps(
+            python_pytree.tree_structure(Point(1, 2))
+        )
+        python_pytree.treespec_loads(serialized)
+        no_name = python_pytree.NO_SERIALIZED_TYPE_NAME_FOUND
+        protocol, root = json.loads(serialized)
+        for name, node in [
+            ("not a namedtuple", {**root, "context": "collections.defaultdict"}),
+            ("namedtuple without a name", {**root, "context": no_name}),
+            ("type without a name", {**root, "type": no_name, "context": "null"}),
+        ]:
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(NotImplementedError, "(?i)deserializ"),
+            ):
+                python_pytree.treespec_loads(json.dumps([protocol, node]))
+
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):

@@ -897,13 +897,21 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
 
 
 def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+    if (
+        dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE
+        or dumpable_context == NO_SERIALIZED_TYPE_NAME_FOUND
+    ):
         raise NotImplementedError(
             f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
             "because we couldn't find a serialized name."
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+    if not is_namedtuple_class(typ):
+        raise NotImplementedError(
+            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
+            f"because it names {typ}, which is not a namedtuple class."
+        )
     return typ
 
 
@@ -2054,6 +2062,14 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         and len(json_schema["children_spec"]) == 0
     ):
         return _LEAF_SPEC
+
+    # treespec_dumps never writes the name that stands for every type registered
+    # without a serialized_type_name.
+    if json_schema["type"] == NO_SERIALIZED_TYPE_NAME_FOUND:
+        raise NotImplementedError(
+            f"Deserializing {NO_SERIALIZED_TYPE_NAME_FOUND} in pytree failed because "
+            "it does not name one type."
+        )
 
     if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         serialized_type_name = json_schema["type"]
