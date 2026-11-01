@@ -2790,14 +2790,10 @@ class TestPredispatchSerialization(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
     def test_predispatch_flat_apply_load_in_new_process(self):
-        # Load imports the modules in its table, such as the one of ModIndex,
-        # which indexing inside vmap uses, but not the module that defines
-        # TwoTensor, so the new process imports that one first.
-        from torch._dynamo._trace_wrapped_higher_order_op import (
-            ModIndex,
-            TransformGetItemToIndex,
-        )
-        from torch._export.serde.serialize import _FLAT_APPLY_MODULES
+        # ModIndex, which indexing inside vmap uses, comes from torch's own
+        # modules. The module that defines TwoTensor has to be imported before
+        # loading, so the new process imports it.
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from torch.testing._internal.two_tensor import TwoTensor
 
         class M(torch.nn.Module):
@@ -2807,7 +2803,6 @@ class TestPredispatchSerialization(TestCase):
                     mask = torch.vmap(lambda i: types[0, i])(q)
                 return mask, TwoTensor(x, x * 2).b
 
-        self.assertIn(ModIndex.__module__, _FLAT_APPLY_MODULES)
         inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
         expected = M()(*inp)
         with TemporaryFileName(suffix=".pt2") as path:
@@ -2881,9 +2876,10 @@ class TestPredispatchSerialization(TestCase):
                 return (x + LocalTwoTensor(x, x) + self.buffer).a
 
         with self.subTest("class defined inside a function"):
+            # Even in an imported module, it cannot be found by name.
+            LocalTwoTensor.__module__ = TwoTensor.__module__
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-            reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
-            with self.assertRaisesRegex(SerializeError, reason):
+            with self.assertRaisesRegex(SerializeError, "not a top-level"):
                 torch.export.save(ep, io.BytesIO())
 
         with self.subTest("name that finds a different class"):
@@ -3038,6 +3034,12 @@ class TestPredispatchSerialization(TestCase):
         ]
         return node
 
+    def _load_changed(self, artifact, change):
+        # Each case edits its own copy of the serialized flat_apply node.
+        program = json.loads(artifact.exported_program)
+        change(self._flat_apply_node(program))
+        return self._load_exported_program(artifact, json.dumps(program).encode())
+
     def test_predispatch_flat_apply_load_rejects_other_functions(self):
         _, artifact = self._index_in_vmap_artifact()
         func_name = (
@@ -3134,115 +3136,124 @@ class TestPredispatchSerialization(TestCase):
     def test_predispatch_flat_apply_load_rejects_bad_specs(self):
         _, artifact = self._index_in_vmap_artifact()
 
-        def load(payload):
-            return self._load_exported_program(artifact, payload)
+        def spec_of(args_and_kwargs):
+            return pytree.treespec_dumps(pytree.tree_flatten(args_and_kwargs)[1])
 
-        # The input spec decides which input the helper gets as the class name.
-        program = json.loads(artifact.exported_program)
-        node = self._flat_apply_node(program)
-        for args_and_kwargs in [
-            ((0, 0), {"function_cls_name": 0}),
-            # For a dict, *args would pass its keys, not args[0].
-            ({0: 0, 1: 0, 2: [0]}, {}),
-        ]:
-            spec = pytree.tree_flatten(args_and_kwargs)[1]
-            node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
-            with (
-                self.subTest(args_and_kwargs=args_and_kwargs),
-                self.assertRaisesRegex(SerializeError, "name as the first input"),
-            ):
-                load(json.dumps(program).encode())
+        def set_spec(in_spec):
+            def change(node):
+                node["inputs"][1]["arg"]["as_string"] = in_spec
 
-        # Loading an enum or a defaultdict factory would import its module.
+            return change
+
         class Color(enum.Enum):
             RED = 0
 
-        enum_spec = pytree.treespec_dumps(
-            pytree.tree_flatten((("name", {Color.RED: 0}), {}))[1]
-        )
+        enum_spec = spec_of((("name", {Color.RED: 0}), {}))
         # JSON allows other spellings of the key, which load decodes too.
         escaped_enum_spec = enum_spec.replace("__enum__", "\\\\u005f_enum__")
         self.assertNotIn("__enum__", escaped_enum_spec)
-        for in_spec in [
-            enum_spec,
-            escaped_enum_spec,
-            pytree.treespec_dumps(
-                pytree.tree_flatten((("name", defaultdict(int, a=0)), {}))[1]
+        for name, change, reason in [
+            # The input spec decides which input the helper gets as the class
+            # name. For a dict, *args would pass its keys, not args[0].
+            (
+                "class name as a keyword",
+                set_spec(spec_of(((0, 0), {"function_cls_name": 0}))),
+                "name as the first input",
+            ),
+            (
+                "arguments as a dict",
+                set_spec(spec_of(({0: 0, 1: 0, 2: [0]}, {}))),
+                "name as the first input",
+            ),
+            # Loading an enum or a defaultdict factory would import its module.
+            ("enum", set_spec(enum_spec), "enums or defaultdicts"),
+            ("escaped enum", set_spec(escaped_enum_spec), "enums or defaultdicts"),
+            (
+                "defaultdict",
+                set_spec(spec_of((("name", defaultdict(int, a=0)), {}))),
+                "enums or defaultdicts",
+            ),
+            (
+                "not a treespec",
+                set_spec("not a treespec"),
+                "Cannot load the input spec",
+            ),
+            (
+                "no function",
+                lambda node: node["inputs"].pop(0),
+                "does not start with its function",
             ),
         ]:
-            node["inputs"][1]["arg"]["as_string"] = in_spec
-            with (
-                self.subTest(in_spec=in_spec),
-                self.assertRaisesRegex(SerializeError, "enums or defaultdicts"),
-            ):
-                load(json.dumps(program).encode())
-        node["inputs"][1]["arg"]["as_string"] = "not a treespec"
-        with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
-            load(json.dumps(program).encode())
-        del node["inputs"][0]
-        with self.assertRaisesRegex(SerializeError, "does not start with its function"):
-            load(json.dumps(program).encode())
+            with self.subTest(name), self.assertRaisesRegex(SerializeError, reason):
+                self._load_changed(artifact, change)
 
     def test_predispatch_flat_apply_load_rejects_other_inputs(self):
         ep, artifact = self._index_in_vmap_artifact()
-        func_name = (
-            b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
+        helper = (
+            "torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"
         )
 
-        def load(payload):
-            return self._load_exported_program(artifact, payload)
+        def set_last(**fields):
+            def change(node):
+                node["inputs"][-1].update(fields)
 
-        # An input that names an operator would reach the function as a callable.
-        program = json.loads(artifact.exported_program)
-        node = self._flat_apply_node(program)
-        last = node["inputs"][-1]
-        last["arg"] = {"as_operator": "torch.os.system"}
-        with self.assertRaisesRegex(SerializeError, "does not name an operator"):
-            load(json.dumps(program).encode())
-        # A dict of arguments could hold one too, and export passes neither
-        # dicts nor keyword arguments through flat_apply.
-        last["arg"] = {
-            "as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}
-        }
-        with self.assertRaisesRegex(SerializeError, "as_string_to_argument"):
-            load(json.dumps(program).encode())
-        last["arg"], last["kind"] = {"as_int": 0}, 2
-        with self.assertRaisesRegex(SerializeError, "cannot be saved or loaded"):
-            load(json.dumps(program).encode())
-        last["kind"], last["name"] = 1, "checked_output"
-        with self.assertRaisesRegex(SerializeError, "cannot be saved or loaded"):
-            load(json.dumps(program).encode())
-        last["name"] = ""
-        for target, reason in [
-            ("torch.os", "does not name an operator"),
-            (json.loads(func_name), "only be called through flat_apply"),
+            return change
+
+        def call_helper_directly(node):
+            node["target"] = helper
+            node["inputs"] = node["inputs"][2:]
+
+        for name, change, reason in [
+            # An input that names an operator would reach the function as a
+            # callable.
+            (
+                "torch.os.system",
+                set_last(arg={"as_operator": "torch.os.system"}),
+                "does not name an operator",
+            ),
+            (
+                "module",
+                set_last(arg={"as_operator": "torch.os"}),
+                "does not name an operator",
+            ),
+            (
+                "helper",
+                set_last(arg={"as_operator": helper}),
+                "only be called through flat_apply",
+            ),
+            # A dict of arguments could hold one too, and export passes neither
+            # dicts nor keyword arguments through flat_apply.
+            (
+                "dict",
+                set_last(
+                    arg={
+                        "as_string_to_argument": {
+                            "f": {"as_operator": "torch.os.system"}
+                        }
+                    }
+                ),
+                "of kind as_string_to_argument",
+            ),
+            ("keyword", set_last(arg={"as_int": 0}, kind=2), "keyword input"),
+            ("named", set_last(name="checked_output"), "keyword input"),
+            # Export calls the helper only through flat_apply. Called directly,
+            # it would import the module that the file names when it runs.
+            (
+                "helper called directly",
+                call_helper_directly,
+                "only be called through flat_apply",
+            ),
         ]:
-            last["arg"] = {"as_operator": target}
-            with (
-                self.subTest(target=target),
-                self.assertRaisesRegex(SerializeError, reason),
-            ):
-                load(json.dumps(program).encode())
+            with self.subTest(name), self.assertRaisesRegex(SerializeError, reason):
+                self._load_changed(artifact, change)
 
         # Save refuses the same inputs, so it never writes what load refuses.
         (flat_apply_node,) = ep.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.flat_apply
         )
         flat_apply_node.kwargs = {"checked_output": False}
-        with self.assertRaisesRegex(SerializeError, "cannot be saved or loaded"):
+        with self.assertRaisesRegex(SerializeError, "keyword input"):
             serialize(ep)
-        flat_apply_node.kwargs = {}
-
-        # Export calls the helper only through flat_apply. Called directly, it
-        # would import the module that the file names when the program runs.
-        program = json.loads(artifact.exported_program)
-        node = self._flat_apply_node(program)
-        node["target"] = json.loads(func_name)
-        node["inputs"] = node["inputs"][2:]
-        with self.assertRaisesRegex(
-            SerializeError, "only be called through flat_apply"
-        ):
-            load(json.dumps(program).encode())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
