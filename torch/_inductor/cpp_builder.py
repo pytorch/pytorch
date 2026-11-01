@@ -1062,6 +1062,17 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     return cflags, ldflags
 
 
+# torch.cpu.get_capabilities() names mapped to GCC -march extension names, used
+# when the arch has to be spelled out instead of using -march=native.
+_AARCH64_GCC_EXTENSIONS = {
+    "dot": "dotprod",
+    "fp16_arith": "fp16",
+    "fhm": "fp16fml",
+    "bf16": "bf16",
+    "i8mm": "i8mm",
+}
+
+
 @functools.cache
 def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
     flags: OrderedSet[str] = OrderedSet()
@@ -1075,7 +1086,7 @@ def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
     capabilities = torch.cpu.get_capabilities()
     flags.update(
         capability
-        for capability in ("bf16", "sve", "sve2")
+        for capability in ("sve", "sve2", "sme", *_AARCH64_GCC_EXTENSIONS)
         if capabilities.get(capability, False)
     )
 
@@ -1083,17 +1094,37 @@ def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
 
 
 @functools.cache
-def _get_linux_aarch64_arch_flag(cpp_compiler: str) -> str:
+def _get_linux_aarch64_arch_cflags(cpp_compiler: str) -> list[str]:
     flags = _get_linux_aarch64_cpu_flags()
 
     if _is_gcc(cpp_compiler) and _is_gcc_version_less_than(cpp_compiler, 13):
         if OrderedSet(["bf16", "sve", "sve2"]).issubset(flags):
-            return "march=armv8.6-a+sve+sve2+bf16"
+            return ["march=armv8.6-a+sve+sve2+bf16"]
 
         if OrderedSet(["bf16", "sve"]).issubset(flags):
-            return "march=armv8.6-a+sve+bf16"
+            return ["march=armv8.6-a+sve+bf16"]
 
-    return "march=native"
+    # GCC 15 enables SME under -march=native but does not support SME without
+    # SVE2, so CPUs with SME but no SVE2 (e.g. Apple M4 in a Linux VM) fail every
+    # compile with "no support for 'sme' without 'sve2'". GCC 16 supports this
+    # combination. GCC also rejects -march=native+nosme, so spell out the detected
+    # extensions instead, keeping -mtune=native. Any SME CPU implements Armv9.2,
+    # so the armv8.2-a base is always available.
+    if (
+        _is_gcc(cpp_compiler)
+        and not _is_gcc_version_less_than(cpp_compiler, 15)
+        and _is_gcc_version_less_than(cpp_compiler, 16)
+        and "sme" in flags
+        and "sve2" not in flags
+    ):
+        extensions = [
+            gcc_name
+            for capability, gcc_name in _AARCH64_GCC_EXTENSIONS.items()
+            if capability in flags
+        ]
+        return ["march=" + "+".join(["armv8.2-a", *extensions]), "mtune=native"]
+
+    return ["march=native"]
 
 
 def _get_cpu_arch_cflags(cpp_compiler: str) -> list[str]:
@@ -1118,7 +1149,7 @@ def _get_cpu_arch_cflags(cpp_compiler: str) -> list[str]:
         if machine == "riscv32":
             return ["march=rv32gc"]
         if machine in ("aarch64", "arm64"):
-            return [_get_linux_aarch64_arch_flag(cpp_compiler)]
+            return list(_get_linux_aarch64_arch_cflags(cpp_compiler))
         return ["march=native"]
 
     if machine == "ppc64le":
@@ -1756,7 +1787,10 @@ def _get_cpp_stdlib_args(
             " -Wl,--exclude-libs,ALL",
         ]
     elif config.is_fbcode():
-        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        # Without an explicit libgcc_lib, clang falls back to the host's system
+        # GCC install for -lstdc++, which can be newer than the platform runtime
+        # and yield a .so that fails to load (e.g. GLIBCXX_3.4.30 not found).
+        lib_dir_paths = [build_paths.libgcc_lib, sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
     return lib_dir_paths, libs, passthrough_args
@@ -2601,11 +2635,14 @@ class CppBuilder:
                 )
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
-            if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
-                # Store PCH paths relative to -isysroot so the .pch can
-                # be used from a different build directory.  The matching
-                # -isysroot is injected by build_fbcode_re().
-                self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
+            if _is_clang(BuildOption.get_compiler()):
+                # -c: needed by clang 20+ when a config file adds linker flags (e.g. conda-forge).
+                self._cflags_args += " --compile "
+                if self._use_relative_path:
+                    # Store PCH paths relative to -isysroot so the .pch can
+                    # be used from a different build directory.  The matching
+                    # -isysroot is injected by build_fbcode_re().
+                    self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
         else:
             self._sources_args = " ".join(sources)
 

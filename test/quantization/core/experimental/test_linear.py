@@ -1,11 +1,16 @@
 # Owner(s): ["oncall: quantization"]
 
+import unittest
+
 import torch
 from torch.ao.quantization.experimental.linear import LinearAPoT
 from torch.nn.modules.linear import Linear
-import unittest
+from torch.testing._internal.common_utils import HardwareClassification
+
 
 class TestNonUniformObserver(unittest.TestCase):
+    hw_classification = HardwareClassification.CPU
+
     """
         Test linear_APoT_fn by comparing to uniform linear
         for 2d tensors with size (4,4) and k=1

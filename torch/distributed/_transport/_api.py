@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, cast, Literal, Protocol, runtime_checkable
+from functools import partial
+from typing import Any, cast, Literal, Protocol, runtime_checkable, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -11,11 +12,35 @@ from torch.distributed import Work
 from ._work import _validate_timeout, wait_all
 
 
+if TYPE_CHECKING:
+    import builtins
+
+    from ._cuda_stream import _CudaStreamOrdering
+
+
 @runtime_checkable
 class MemoryView(Protocol):
     """A read-only view of registered memory."""
 
     def size(self) -> int: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a view of a byte range of this one.
+
+        ``offset`` is relative to this view and defaults to 0; ``length``
+        defaults to the rest. Raises ``ValueError`` unless the range lies within
+        this view.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``view[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end and out-of-range bounds are clamped.
+        Raises ``TypeError`` for a non-slice key and ``ValueError`` for a step
+        other than 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -40,6 +65,25 @@ class RemoteBuffer(Protocol):
 
     @classmethod
     def deserialize(cls, data: bytes) -> Self: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a descriptor for a byte range of this one.
+
+        ``offset`` is relative to this descriptor and defaults to 0; ``length``
+        defaults to the rest. Raises ``ValueError`` unless the range lies within
+        this descriptor. The result shares this descriptor's registration and
+        lifetime, and does not restrict access to the rest of the registration.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``buffer[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end and out-of-range bounds are clamped.
+        Raises ``TypeError`` for a non-slice key and ``ValueError`` for a step
+        other than 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -70,8 +114,9 @@ class Transport(ABC):
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
 
-    Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
-    one outgoing peer; no process group, ranks, or matching receives are needed.
+    Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
+    connect to multiple peers, and remote descriptors identify their peer. No
+    process group, ranks, or matching receives are needed.
     Exchange connection bytes and remote descriptors through a trusted control
     plane. Registration is valid until unregistration or close, including after bind/connect.
 
@@ -88,12 +133,19 @@ class Transport(ABC):
     a peer. The application must coordinate remote access and notify peers before
     unregistering memory or closing; local completion does not establish that a peer has stopped accessing
     this endpoint. Descriptors are invalid after unregistration or their owner closes.
-    CUDA stream, graph capture, and tracing semantics are not part of this API.
+
+    ``read_stream`` and ``write_stream`` order transfers on the current CUDA
+    stream: the transfer starts after prior work on the stream, and later work
+    waits for it to complete. They return after enqueueing, without holding SMs
+    while the transfer is in flight, and can be captured in CUDA graphs.
+    Transfer failures terminate the process, since consumers may already be
+    enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
         self.device = torch.device(device) if device is not None else None
         self._default_timeout: float | None = None
+        self._cuda_streams: dict[tuple[int, int], _CudaStreamOrdering] = {}
 
     def _check_device(self, device: torch.device) -> None:
         if self.device is not None and (
@@ -115,13 +167,18 @@ class Transport(ABC):
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
         """Connect to a bound peer and return zero on success.
 
+        Connecting to additional peers keeps existing connections; reconnecting
+        with the same connection bytes is a no-op. There is no per-peer
+        disconnect; ``close`` releases all peers. Transfers to descriptors naming
+        an unconnected peer raise ``ValueError``.
+
         Rank-to-endpoint lookup belongs in a separate application control-plane
         adapter; this interface addresses peers using opaque connection bytes.
         """
 
     @abstractmethod
     def connected(self) -> bool:
-        """Return whether the endpoint is connected to its peer."""
+        """Return whether the endpoint is connected to any peer."""
 
     @abstractmethod
     def register_memory(
@@ -129,7 +186,7 @@ class Transport(ABC):
     ) -> Memory:
         """Register a contiguous tensor, including after bind/connect or transfers.
 
-        Exchange its remote-buffer descriptor with the peer before remote access.
+        Exchange its remote-buffer descriptor with peers before remote access.
         """
 
     def unregister_memory(
@@ -167,6 +224,71 @@ class Transport(ABC):
         timeout: float | None = None,
     ) -> int | Work:
         """Read into a local view; return Work for async_op=True, otherwise zero."""
+
+    def write_stream(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        stream: torch.cuda.Stream | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Write a local view in order on ``stream`` (default: current).
+
+        Returns once enqueued. Backends with native stream support may override this.
+        """
+        _validate_timeout(timeout)
+        if timeout == 0:
+            raise ValueError("stream transfers require a positive timeout")
+        self._check_transfer(local_buffer, remote_buffer, mutable=False)
+        submit = partial(self.write_async, local_buffer, remote_buffer, timeout=timeout)
+        self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
+            submit, local_buffer
+        )
+
+    def read_stream(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        stream: torch.cuda.Stream | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Read into a local view in order on ``stream`` (default: current)."""
+        _validate_timeout(timeout)
+        if timeout == 0:
+            raise ValueError("stream transfers require a positive timeout")
+        self._check_transfer(local_buffer, remote_buffer, mutable=True)
+        submit = partial(self.read_async, local_buffer, remote_buffer, timeout=timeout)
+        self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
+            submit, local_buffer
+        )
+
+    def _check_transfer(  # noqa: B027
+        self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
+    ) -> None:
+        """Validate a transfer before it is enqueued on a CUDA stream."""
+
+    def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
+        from ._cuda_stream import _CudaStreamOrdering
+
+        key = (stream.device.index, stream.cuda_stream)
+        if key not in self._cuda_streams:
+            self._cuda_streams[key] = _CudaStreamOrdering(stream)
+        return self._cuda_streams[key]
+
+    def _cuda_stream_views(self) -> list[MemoryView]:
+        """Return views retained by enqueued or captured stream transfers."""
+        return [
+            view
+            for ordering in self._cuda_streams.values()
+            for view in ordering.retained_views()
+        ]
+
+    def _close_cuda_streams(self) -> None:
+        for ordering in self._cuda_streams.values():
+            ordering.close()
+        self._cuda_streams.clear()
 
     async def write_async(
         self,

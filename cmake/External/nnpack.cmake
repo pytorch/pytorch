@@ -46,6 +46,9 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
 
   # Directories for NNPACK dependencies submoduled in Caffe2
   set(PYTHON_PEACHPY_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-peachpy" CACHE STRING "PeachPy (Python package) source directory")
+  if(NOT DEFINED PYTHON_SIX_SOURCE_DIR AND DEFINED ENV{PYTHON_SIX_SOURCE_DIR})
+    set(PYTHON_SIX_SOURCE_DIR "$ENV{PYTHON_SIX_SOURCE_DIR}" CACHE STRING "six (Python package) source directory")
+  endif()
   if(NOT DEFINED CPUINFO_SOURCE_DIR)
     set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
