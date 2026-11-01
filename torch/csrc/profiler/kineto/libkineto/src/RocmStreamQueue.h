@@ -18,6 +18,7 @@
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/hip/runtime_api_id.h>
 
+#include "ActivityType.h"
 #include "RocLogger.h"
 
 namespace KINETO_NAMESPACE {
@@ -35,6 +36,10 @@ inline uint64_t runtimeStreamId(const rocprofBase* item) {
   if (item->type == ROCTRACER_ACTIVITY_COPY) {
     return streamIdFromHipStream(
         reinterpret_cast<const rocprofCopyRow*>(item)->stream);
+  }
+  if (item->type == ROCTRACER_ACTIVITY_MEMSET) {
+    return streamIdFromHipStream(
+        reinterpret_cast<const rocprofMemsetRow*>(item)->stream);
   }
   return 0;
 }
@@ -138,6 +143,41 @@ void backfillAsyncStreams(
   }
 }
 
+// Size arguments of a HIP memset API call.
+struct MemsetArgs {
+  size_t sizeBytes{0};
+  size_t width{0};
+  size_t height{0};
+  size_t depth{1};
+  size_t count{0};
+  hipStream_t stream{nullptr};
+};
+
+// Total bytes filled by a HIP memset API call, or 0 if unknown.
+inline size_t memsetTotalBytes(uint32_t apiId, const MemsetArgs& args) {
+  if (args.sizeBytes > 0)
+    return args.sizeBytes;
+  // 2D and 3D fills.  clr fills width * height bytes for hipMemsetD2D16/32
+  // too (ihipMemset3D does not scale width by the element size).
+  if (args.width > 0 && args.height > 0)
+    return args.width * args.height * args.depth;
+  // hipMemsetD8/D16/D32 fill 'count' elements of known width.
+  switch (apiId) {
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8Async:
+      return args.count;
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16Async:
+      return args.count * 2;
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32Async:
+      return args.count * 4;
+    default:
+      break;
+  }
+  return 0;
+}
+
 // Map a HIP memcpy kind to the rocprofiler copy operation used to render
 // copy direction strings.  Copies issued through APIs that take no kind
 // argument (hipMemcpyPeerAsync, hipMemcpyDtoD*, ...) always report
@@ -190,17 +230,19 @@ inline uint32_t copyOperationFromApi(hipMemcpyKind kind, uint32_t apiId) {
 // is no double counting when it is reported as the memset/memcpy the user
 // asked for (CUPTI parity) rather than as a user kernel.  The dispatch
 // shares the correlation id of the runtime API record.
-inline void classifyRuntimeInternalDispatches(
-    std::vector<rocprofBase*>& rows,
-    const std::unordered_map<uint64_t, size_t>& memsetOps) {
+inline void classifyRuntimeInternalDispatches(std::vector<rocprofBase*>& rows) {
   std::unordered_map<uint64_t, const rocprofCopyRow*> copyByCorrelation;
+  std::unordered_map<uint64_t, size_t> memsetByCorrelation;
   for (const auto* item : rows) {
     if (item->type == ROCTRACER_ACTIVITY_COPY) {
       const auto* copy = reinterpret_cast<const rocprofCopyRow*>(item);
       copyByCorrelation.emplace(copy->id, copy);
+    } else if (item->type == ROCTRACER_ACTIVITY_MEMSET) {
+      const auto* fill = reinterpret_cast<const rocprofMemsetRow*>(item);
+      memsetByCorrelation.emplace(fill->id, fill->size);
     }
   }
-  if (memsetOps.empty() && copyByCorrelation.empty()) {
+  if (memsetByCorrelation.empty() && copyByCorrelation.empty()) {
     return;
   }
   // The runtime can split one fill or copy into several dispatches (unaligned
@@ -225,13 +267,29 @@ inline void classifyRuntimeInternalDispatches(
           copyOperationFromApi(copyIt->second->kind, copyIt->second->cid);
       continue;
     }
-    const auto memsetIt = memsetOps.find(async->id);
-    if (memsetIt != memsetOps.end()) {
+    const auto memsetIt = memsetByCorrelation.find(async->id);
+    if (memsetIt != memsetByCorrelation.end()) {
       async->internalApi = RocLogger::RuntimeInternalMemset;
       if (sized.insert(async->id).second) {
         async->internalBytes = memsetIt->second;
       }
     }
+  }
+}
+
+// The activity type a GPU row is reported as, which decides whether it is
+// kept and whether its stream is backfilled.
+inline ActivityType asyncActivityType(const rocprofAsyncRow& async) {
+  if (async.domain == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) {
+    return ActivityType::GPU_MEMCPY;
+  }
+  switch (async.internalApi) {
+    case RocLogger::RuntimeInternalMemset:
+      return ActivityType::GPU_MEMSET;
+    case RocLogger::RuntimeInternalMemcpy:
+      return ActivityType::GPU_MEMCPY;
+    default:
+      return ActivityType::CONCURRENT_KERNEL;
   }
 }
 

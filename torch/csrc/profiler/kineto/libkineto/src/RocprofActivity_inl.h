@@ -247,15 +247,11 @@ inline void RuntimeActivity<rocprofKernelRow>::visitTypedMetadata(
         demangle(hipKernelNameRef(raw().function)));
   }
 
-  // cache grid and block so we can pass it into async activity (GPU track)
-  auto grid = rocprofKernelGrid(raw());
-  auto block = rocprofKernelBlock(raw());
-
   visitor.visit(RocmMetadataFields::kCid, static_cast<uint64_t>(raw().cid));
   visitor.visit(
       RocmMetadataFields::kCorrelation, static_cast<uint64_t>(raw().id));
-  visitor.visit(RocmMetadataFields::kGrid, grid);
-  visitor.visit(RocmMetadataFields::kBlock, block);
+  visitor.visit(RocmMetadataFields::kGrid, rocprofKernelGrid(raw()));
+  visitor.visit(RocmMetadataFields::kBlock, rocprofKernelBlock(raw()));
   visitor.visit(
       RocmMetadataFields::kSharedMemory,
       static_cast<uint64_t>(raw().groupSegmentSize));

@@ -1023,3 +1023,173 @@ TEST_F(RocmActivityProfilerTest, JsonGPUIDSortTest) {
   }
 #endif
 }
+
+namespace {
+constexpr uint32_t kDispatch = ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH;
+
+std::unique_ptr<rocprofAsyncRow> makeDispatch(uint64_t correlation) {
+  return std::make_unique<rocprofAsyncRow>(
+      correlation, kDispatch, 0, 0, 0, 1, 10, 20, std::string());
+}
+} // namespace
+
+TEST(RocmRuntimeInternalDispatchTest, CopyOperationFromApi) {
+  using detail::copyOperationFromApi;
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyHostToDevice, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy),
+      ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE);
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyDeviceToHost, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy),
+      ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST);
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyDeviceToDeviceNoCU,
+          ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync),
+      ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE);
+  // An explicit kind wins over the API id.
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyHostToHost, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoD),
+      ROCPROFILER_MEMORY_COPY_HOST_TO_HOST);
+  // APIs without a kind argument report hipMemcpyDefault.
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyDefault, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyPeerAsync),
+      ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE);
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyDefault, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyHtoDAsync),
+      ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE);
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyDefault, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoH),
+      ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST);
+  EXPECT_EQ(
+      copyOperationFromApi(
+          hipMemcpyDefault, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync),
+      ROCPROFILER_MEMORY_COPY_NONE);
+}
+
+TEST(RocmRuntimeInternalDispatchTest, MemsetTotalBytes) {
+  using detail::MemsetArgs;
+  using detail::memsetTotalBytes;
+  MemsetArgs bytes;
+  bytes.sizeBytes = 20;
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync, bytes),
+      20u);
+  MemsetArgs plane;
+  plane.width = 100;
+  plane.height = 6;
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset2D, plane),
+      600u);
+  MemsetArgs volume = plane;
+  volume.depth = 4;
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3D, volume),
+      2400u);
+  MemsetArgs count;
+  count.count = 10;
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8, count), 10u);
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16Async, count),
+      20u);
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32, count),
+      40u);
+  EXPECT_EQ(
+      memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset, MemsetArgs{}),
+      0u);
+}
+
+TEST(RocmRuntimeInternalDispatchTest, ClassifiesFillAndCopyDispatches) {
+  const auto stream = reinterpret_cast<hipStream_t>(0x1000);
+  rocprofCopyRow copy(
+      1,
+      RUNTIME_DOMAIN,
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoDAsync,
+      0,
+      0,
+      1,
+      2,
+      nullptr,
+      nullptr,
+      4096,
+      hipMemcpyDefault,
+      stream);
+  rocprofMemsetRow fill(
+      2,
+      RUNTIME_DOMAIN,
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync,
+      0,
+      0,
+      1,
+      2,
+      20,
+      stream);
+  // The runtime splits each call into two dispatches; correlation 3 is a
+  // user kernel.
+  auto copyHead = makeDispatch(1);
+  auto copyTail = makeDispatch(1);
+  auto fillHead = makeDispatch(2);
+  auto fillTail = makeDispatch(2);
+  auto kernel = makeDispatch(3);
+  const auto userOp = kernel->op;
+  std::vector<rocprofBase*> rows{
+      &copy,
+      &fill,
+      copyHead.get(),
+      copyTail.get(),
+      fillHead.get(),
+      fillTail.get(),
+      kernel.get()};
+
+  detail::classifyRuntimeInternalDispatches(rows);
+
+  for (const auto* row : {copyHead.get(), copyTail.get()}) {
+    EXPECT_EQ(row->internalApi, RocLogger::RuntimeInternalMemcpy);
+    EXPECT_EQ(
+        row->op,
+        static_cast<uint32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE));
+    EXPECT_EQ(detail::asyncActivityType(*row), ActivityType::GPU_MEMCPY);
+  }
+  for (const auto* row : {fillHead.get(), fillTail.get()}) {
+    EXPECT_EQ(row->internalApi, RocLogger::RuntimeInternalMemset);
+    EXPECT_EQ(detail::asyncActivityType(*row), ActivityType::GPU_MEMSET);
+  }
+  // Only the first dispatch of a call carries its bytes.
+  EXPECT_EQ(copyHead->internalBytes, 4096u);
+  EXPECT_EQ(copyTail->internalBytes, 0u);
+  EXPECT_EQ(fillHead->internalBytes, 20u);
+  EXPECT_EQ(fillTail->internalBytes, 0u);
+  EXPECT_EQ(kernel->internalApi, RocLogger::RuntimeInternalNone);
+  EXPECT_EQ(kernel->op, userOp);
+  EXPECT_EQ(
+      detail::asyncActivityType(*kernel), ActivityType::CONCURRENT_KERNEL);
+
+  // The fill dispatches take the memset call's stream.
+  detail::backfillAsyncStreams(rows, [](const rocprofAsyncRow& async) {
+    return detail::asyncActivityType(async) == ActivityType::GPU_MEMSET;
+  });
+  EXPECT_NE(fillHead->stream, 0u);
+  EXPECT_EQ(fillHead->stream, fillTail->stream);
+  EXPECT_EQ(kernel->stream, 0u);
+}
+
+TEST(RocmRuntimeInternalDispatchTest, AsyncCopyRecordIsMemcpy) {
+  rocprofAsyncRow copy(
+      1,
+      ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+      0,
+      ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE,
+      0,
+      1,
+      10,
+      20,
+      std::string());
+  EXPECT_EQ(detail::asyncActivityType(copy), ActivityType::GPU_MEMCPY);
+}

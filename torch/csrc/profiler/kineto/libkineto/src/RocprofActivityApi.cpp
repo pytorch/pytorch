@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include <mutex>
 #include <unordered_map>
 #include <vector>
 #include "ApproximateClock.h"
@@ -145,14 +144,7 @@ int RocprofActivityApi::processActivities(
   // hipMemset/hipMemcpy calls) as GPU memsets/memcpies.  Done here, after
   // the per-thread buffers are merged, so that every memset/memcpy runtime
   // row is visible to the correlation lookup.
-  {
-    std::unordered_map<uint64_t, size_t> memsetOps;
-    {
-      std::lock_guard<std::mutex> lock(d->memsetMutex_);
-      memsetOps = d->memsetOps_;
-    }
-    detail::classifyRuntimeInternalDispatches(d->rows_, memsetOps);
-  }
+  detail::classifyRuntimeInternalDispatches(d->rows_);
 
   // Async ops are in CLOCK_MONOTONIC rather than junk clock.
   // Convert these timestamps, poorly.
@@ -161,13 +153,13 @@ int RocprofActivityApi::processActivities(
   // much better job.
   auto toffset = getTimeOffset();
 
-  const bool logCopies = isLogged(ActivityType::GPU_MEMCPY);
-  const bool logKernels = isLogged(ActivityType::CONCURRENT_KERNEL);
-  if (logCopies || logKernels) {
+  if (isLogged(ActivityType::GPU_MEMCPY) ||
+      isLogged(ActivityType::GPU_MEMSET) ||
+      isLogged(ActivityType::CONCURRENT_KERNEL)) {
     detail::backfillAsyncStreams(
-        d->rows_, [logCopies, logKernels](const rocprofAsyncRow& async) {
-          return (logCopies && isAsyncCopy(async)) ||
-              (logKernels && isAsyncKernel(async));
+        d->rows_, [this](const rocprofAsyncRow& async) {
+          return (isAsyncCopy(async) || isAsyncKernel(async)) &&
+              isLogged(detail::asyncActivityType(async));
         });
   }
 
@@ -186,16 +178,8 @@ int RocprofActivityApi::processActivities(
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         default:
           if (item->type == ROCTRACER_ACTIVITY_ASYNC) {
-            const auto* async = reinterpret_cast<rocprofAsyncRow*>(item);
-            if (async->internalApi == RocLogger::RuntimeInternalMemset) {
-              if (!isLogged(ActivityType::GPU_MEMSET))
-                filtered = true;
-            } else if (async->internalApi == RocLogger::RuntimeInternalMemcpy) {
-              if (!isLogged(ActivityType::GPU_MEMCPY))
-                filtered = true;
-            } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
-              filtered = true;
-            }
+            filtered = !isLogged(detail::asyncActivityType(
+                *reinterpret_cast<rocprofAsyncRow*>(item)));
           } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
             filtered = true;
           }

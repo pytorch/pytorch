@@ -5545,58 +5545,47 @@ class TestMetadataJsonFormatCUDA(TestCase):
             self.assertIsInstance(parsed[key], list)
             self.assertEqual(len(parsed[key]), 3)
 
-    def _profile_kernels(self, fn):
-        kernels = []
-        for _ in range(3):
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
-            ) as prof:
-                fn()
-                torch.cuda.synchronize()
-            kernels = [
-                act
-                for act in prof.profiler.kineto_results.trace_activities()
-                if act.type() == "kernel"
-            ]
-            if kernels:
-                break
-        return kernels
+    def _profile_gpu_activities(self, fn, types):
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            fn()
+            torch.cuda.synchronize()
+        return [
+            act
+            for act in prof.profiler.kineto_results.trace_activities()
+            if act.type() in types
+        ]
+
+    def _assert_kernel_dims(self, kernels):
+        self.assertTrue(kernels, "expected at least one kernel event")
+        for act in kernels:
+            parsed = json.loads("{" + act.metadata_json() + "}")
+            for key in ["grid", "block"]:
+                self.assertIn(key, parsed, f"missing '{key}' for kernel '{act.name()}'")
+                self.assertEqual(len(parsed[key]), 3)
+                self.assertTrue(
+                    all(d > 0 for d in parsed[key]),
+                    f"non-positive {key} {parsed[key]} for kernel '{act.name()}'",
+                )
 
     def test_all_kernel_events_have_dims(self):
         # Every kernel-typed event must carry launch dimensions, including
         # dispatches the runtime issued on a user's behalf.  (Events for
         # runtime memsets must not be kernel-typed at all.)
         x = torch.randn(64, 64, device="cuda")
-        kernels = self._profile_kernels(lambda: torch.mm(x, x))
-        self.assertTrue(kernels, "expected at least one kernel event")
-        for act in kernels:
-            parsed = json.loads("{" + act.metadata_json() + "}")
-            for key in ["grid", "block"]:
-                self.assertIn(
-                    key,
-                    parsed,
-                    lambda msg, n=act.name(): (
-                        f"{msg}\nMissing field '{key}' for kernel '{n}'"
-                    ),
-                )
+        self._assert_kernel_dims(
+            self._profile_gpu_activities(lambda: torch.mm(x, x), ("kernel",))
+        )
 
     def test_graph_kernel_events_have_dims(self):
         # Graph replays issue no per-kernel launch API records; dims must
         # still be reported for the kernels they dispatch.
         x = torch.randn(64, 64, device="cuda")
         graph = torch.cuda.CUDAGraph()
-        try:
-            with torch.cuda.graph(graph):
-                _ = torch.mm(x, x)
-        except RuntimeError as e:
-            self.skipTest(f"CUDA graph capture unavailable: {e}")
-        kernels = self._profile_kernels(graph.replay)
-        self.assertTrue(kernels, "expected at least one kernel event")
-        for act in kernels:
-            parsed = json.loads("{" + act.metadata_json() + "}")
-            self.assertIn("grid", parsed)
-            self.assertIsInstance(parsed["grid"], list)
-            self.assertEqual(len(parsed["grid"]), 3)
+        with torch.cuda.graph(graph):
+            _ = torch.mm(x, x)
+        self._assert_kernel_dims(
+            self._profile_gpu_activities(graph.replay, ("kernel",))
+        )
 
     def test_runtime_internal_dispatches_are_not_kernels(self):
         # Same-device clone() goes through cudaMemcpyAsync, which the runtime
@@ -5605,22 +5594,9 @@ class TestMetadataJsonFormatCUDA(TestCase):
         # its size, and must not surface as a kernel.
         x = torch.randn(64, 64, device="cuda")
         nbytes = x.nbytes
-        gpu_acts = []
-        for _ in range(3):
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
-            ) as prof:
-                y = x.clone()
-                torch.cuda.synchronize()
-                del y
-            gpu_acts = [
-                act
-                for act in prof.profiler.kineto_results.trace_activities()
-                if act.type() in ("kernel", "gpu_memcpy", "gpu_memset")
-            ]
-            if any(act.type() == "gpu_memcpy" for act in gpu_acts):
-                break
-
+        gpu_acts = self._profile_gpu_activities(
+            x.clone, ("kernel", "gpu_memcpy", "gpu_memset")
+        )
         memcpys = [act for act in gpu_acts if act.type() == "gpu_memcpy"]
         self.assertTrue(memcpys, "expected a gpu_memcpy event for clone()")
         self.assertIn(
@@ -5645,21 +5621,7 @@ class TestMetadataJsonFormatCUDA(TestCase):
         # add up to the requested size, never as kernels.  20 bytes is not a
         # multiple of 16, which some runtimes split into two dispatches.
         x = torch.empty(numel, device="cuda")
-        gpu_acts = []
-        for _ in range(3):
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
-            ) as prof:
-                x.zero_()
-                torch.cuda.synchronize()
-            gpu_acts = [
-                act
-                for act in prof.profiler.kineto_results.trace_activities()
-                if act.type() in ("kernel", "gpu_memset")
-            ]
-            if any(act.type() == "gpu_memset" for act in gpu_acts):
-                break
-
+        gpu_acts = self._profile_gpu_activities(x.zero_, ("kernel", "gpu_memset"))
         memsets = [act for act in gpu_acts if act.type() == "gpu_memset"]
         self.assertTrue(memsets, f"expected a gpu_memset event, got {gpu_acts}")
         metadata = [json.loads("{" + act.metadata_json() + "}") for act in memsets]

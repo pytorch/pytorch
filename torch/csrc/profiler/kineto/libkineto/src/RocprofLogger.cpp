@@ -36,6 +36,7 @@
 #include "Demangle.h"
 #include "DeviceUtil.h"
 #include "Logger.h"
+#include "RocmStreamQueue.h"
 #include "ThreadUtil.h"
 #include "ThrowUtil.h"
 
@@ -181,13 +182,6 @@ auto extract_malloc_args =
 };
 
 // memset args
-struct memset_args {
-  size_t sizeBytes{0};
-  size_t width{0};
-  size_t height{0};
-  size_t depth{1};
-  size_t count{0};
-};
 auto extract_memset_args =
     []([[maybe_unused]] rocprofiler_callback_tracing_kind_t kind,
        [[maybe_unused]] rocprofiler_tracing_operation_t operation,
@@ -199,7 +193,7 @@ auto extract_memset_args =
        [[maybe_unused]] const char* arg_value_str,
        [[maybe_unused]] int32_t dereference_count,
        void* cb_data) -> int {
-  auto& args = *(static_cast<memset_args*>(cb_data));
+  auto& args = *(static_cast<detail::MemsetArgs*>(cb_data));
   if (strcmp("sizeBytes", arg_name) == 0)
     args.sizeBytes = *(reinterpret_cast<const size_t*>(arg_value_addr));
   else if (strcmp("width", arg_name) == 0)
@@ -213,34 +207,10 @@ auto extract_memset_args =
     args.width = extent.width;
     args.height = extent.height;
     args.depth = extent.depth;
-  }
+  } else if (strcmp("stream", arg_name) == 0)
+    args.stream = *(reinterpret_cast<const hipStream_t*>(arg_value_addr));
   return 0;
 };
-
-// Total bytes filled by a HIP memset API call, or 0 if unknown.
-size_t memsetTotalBytes(uint32_t operation, const memset_args& args) {
-  if (args.sizeBytes > 0)
-    return args.sizeBytes;
-  // 2D and 3D fills.  clr fills width * height bytes for hipMemsetD2D16/32
-  // too (ihipMemset3D does not scale width by the element size).
-  if (args.width > 0 && args.height > 0)
-    return args.width * args.height * args.depth;
-  // hipMemsetD8/D16/D32 fill 'count' elements of known width.
-  switch (operation) {
-    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8:
-    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8Async:
-      return args.count;
-    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16:
-    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16Async:
-      return args.count * 2;
-    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32:
-    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32Async:
-      return args.count * 4;
-    default:
-      break;
-  }
-  return 0;
-}
 
 // memset api calls
 bool isMemsetApi(uint32_t id) {
@@ -693,10 +663,6 @@ void RocprofLogger::clearLogs() {
     rows_.clear();
   }
   {
-    std::lock_guard<std::mutex> lock(memsetMutex_);
-    memsetOps_.clear();
-  }
-  {
     std::lock_guard<std::mutex> lock(externalCorrelationsMutex_);
     for (auto& correlations : externalCorrelations_) {
       correlations.clear();
@@ -915,32 +881,26 @@ void RocprofLogger::api_callback(
         insert_row_to_buffer(row);
       }
       // Memset Records
-      // Recorded as plain runtime rows (like other unhandled APIs), but the
-      // correlation id and size are kept to classify the fill kernels that
-      // the runtime dispatches to implement the memset.
+      // The size and stream classify the fill kernels that the runtime
+      // dispatches to implement the memset.
       else if (isMemsetApi(record.operation)) {
-        memset_args args;
+        detail::MemsetArgs args;
         rocprofiler_iterate_callback_tracing_kind_operation_args(
             record,
             extract_memset_args,
             1 /*max_deref*/
             ,
             &args);
-        RocprofLogger& dis = singleton();
-        {
-          std::lock_guard<std::mutex> lock(dis.memsetMutex_);
-          dis.memsetOps_.emplace(
-              record.correlation_id.internal,
-              memsetTotalBytes(record.operation, args));
-        }
-        rocprofRow* row = new rocprofRow(
+        rocprofMemsetRow* row = new rocprofMemsetRow(
             record.correlation_id.internal,
             record.kind,
             record.operation,
             processId(),
             systemThreadId(),
             startTime,
-            endTime);
+            endTime,
+            detail::memsetTotalBytes(record.operation, args),
+            args.stream);
         insert_row_to_buffer(row);
       }
       // Default Records

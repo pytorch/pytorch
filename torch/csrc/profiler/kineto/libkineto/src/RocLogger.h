@@ -84,6 +84,7 @@ typedef enum {
   ROCTRACER_ACTIVITY_COPY,
   ROCTRACER_ACTIVITY_MALLOC,
   ROCTRACER_ACTIVITY_ASYNC,
+  ROCTRACER_ACTIVITY_MEMSET,
   ROCTRACER_ACTIVITY_NONE
 } rocprof_activity_types;
 
@@ -216,6 +217,27 @@ struct rocprofMallocRow : public rocprofRow {
   size_t size;
 };
 
+// A HIP memset API call.  The size classifies the fill kernels the runtime
+// dispatches to implement it.
+struct rocprofMemsetRow : public rocprofRow {
+  rocprofMemsetRow(
+      uint64_t id,
+      uint32_t domain,
+      uint32_t cid,
+      uint32_t pid,
+      uint32_t tid,
+      uint64_t begin,
+      uint64_t end,
+      size_t size,
+      hipStream_t stream,
+      rocprof_activity_types type = ROCTRACER_ACTIVITY_MEMSET)
+      : rocprofRow(id, domain, cid, pid, tid, begin, end, type),
+        size(size),
+        stream(stream) {}
+  size_t size;
+  hipStream_t stream;
+};
+
 struct rocprofAsyncRow : public rocprofBase {
   rocprofAsyncRow(
       uint64_t id,
@@ -251,7 +273,9 @@ struct rocprofAsyncRow : public rocprofBase {
   // Set when this dispatch was issued by the runtime to implement a HIP
   // memset or memcpy API call.  The dispatch record is the GPU-side
   // artifact for kernel-implemented fills/copies; report it under the API
-  // the user called (CUPTI parity) instead of as a user kernel.
-  uint32_t internalApi{0}; // 0=none, 1=memset, 2=memcpy
+  // the user called (CUPTI parity) instead of as a user kernel.  For a
+  // memcpy, op then holds a ROCPROFILER_MEMORY_COPY_* direction instead of a
+  // kernel dispatch operation.
+  RocLogger::RuntimeInternalApi internalApi{RocLogger::RuntimeInternalNone};
   size_t internalBytes{0};
 };
