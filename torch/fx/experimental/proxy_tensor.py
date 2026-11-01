@@ -710,25 +710,25 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     inner = val
     while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(inner):
         inner = functorch.get_unwrapped(inner)
-    fake_mode = maybe_get_fake_mode(inner) if is_fake_tensor(inner) else None
+    fake = cast(FakeTensor, inner) if is_fake_tensor(inner) else None
     # A value whose real tensor is kept, such as a placeholder of a cond branch
     # inside vmap under real tensor propagation, keeps its wrapper as before,
     # which carries the real tensor. Its real view would need the real layout
     # at each functorch level, while the view below uses the fake one.
-    if fake_mode is not None and not (include_real and inner.real_tensor is not None):
+    if fake is not None and not (include_real and fake.real_tensor is not None):
         # The view is made on the meta tensor inside the fake tensor, as
         # fast_detach does, so real tensor propagation does not also run it on
         # the real tensor, which has no storage for it when the batch is empty.
         with torch._C._DisableFuncTorch():
-            with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+            with no_python_dispatcher(), in_kernel_invocation_manager(fake.fake_mode):
                 view = torch.ops.aten.as_strided.default(
-                    torch.ops.aten.detach.default(inner),
+                    torch.ops.aten.detach.default(fake),
                     val.shape,
                     val.stride(),
                     val.storage_offset(),
                 )
             return FakeTensor(
-                fake_mode, view, inner.device, dispatch_keys=inner.dispatch_keys
+                fake.fake_mode, view, fake.device, dispatch_keys=fake.dispatch_keys
             )
     return val.detach()
 
