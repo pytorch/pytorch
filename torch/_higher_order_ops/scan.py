@@ -24,6 +24,7 @@ from torch._higher_order_ops.partitioner import (
 from torch._higher_order_ops.utils import (
     _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
+    _maybe_run_with_interpreter,
     _move_batch_dims_to_last_for_scan,
     _VmapCombineFnWrapper,
     check_meta_consistency,
@@ -496,6 +497,19 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
     return scans
 
 
+def _scan_output_value(node: Any, value: Any) -> Any:
+    # Inside vmap or jvp, meta["val"] holds a plain fake tensor, while the output
+    # of scan must keep the functorch wrapper that the combine function returned.
+    # Otherwise meta["val"] is the value to use: unlike the returned value, it
+    # holds no constant or real tensor from the one step that tracing ran.
+    functorch = torch._C._functorch
+    if isinstance(value, torch.Tensor) and (
+        functorch.is_batchedtensor(value) or functorch.is_gradtrackingtensor(value)
+    ):
+        return value.detach()
+    return node.meta["val"] if node is not None else None
+
+
 def trace_scan(
     proxy_mode,
     func_overload,
@@ -514,7 +528,14 @@ def trace_scan(
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
-        combine_graph = reenter_make_fx(combine_fn)(
+        combine_outs: list[Any] = []
+        run_combine = _maybe_run_with_interpreter(combine_fn)
+
+        def combine_and_keep_outs(*args):
+            combine_outs.append(run_combine(*args))
+            return combine_outs[-1]
+
+        combine_graph = reenter_make_fx(combine_and_keep_outs)(
             *sample_inits, *sample_inputs, *sample_additional_inputs
         )
 
@@ -559,8 +580,10 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
+        (combine_out,) = combine_outs
         fake_carry, fake_outputs = _extract_carry_and_out(
-            [o.meta["val"] if o is not None else None for o in outputs], len(init)
+            [_scan_output_value(o, v) for o, v in zip(outputs, combine_out)],
+            len(init),
         )
         for t in fake_outputs:
             if not isinstance(t, torch.Tensor) and t is not None:

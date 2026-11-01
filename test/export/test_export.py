@@ -1028,6 +1028,51 @@ class TestExport(TestCase):
         gm.recompile()
         self.assertEqual(gm(x), M()(x))
 
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_scan_in_vmap_strict_export(self) -> None:
+        # Strict export traces scan inside vmap with batched operands. The
+        # outputs of scan stay batched, so leaving vmap does not broadcast them
+        # along the batch dim.
+        from torch._higher_order_ops.scan import scan
+
+        def combine(carry, x):
+            carry = carry + x
+            return carry, carry * 2
+
+        def scan_rows(x):
+            return scan(combine, torch.zeros_like(x[0]), x)
+
+        class ScanInVmap(torch.nn.Module):
+            def forward(self, xs):
+                return torch.vmap(scan_rows)(xs)
+
+        xs = torch.randn(3, 5, 4)
+        ep = torch.export.export(ScanInVmap(), (xs,), strict=True)
+        for node in ep.graph.output_node().args[0]:
+            self.assertNotIn(0, node.meta["val"].stride(), node.name)
+        self.assertEqual(ep.module()(xs), ScanInVmap()(xs))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_scan_output_keeps_no_constant(self) -> None:
+        # Tracing runs the combine function for one step, and the outputs of
+        # scan must not keep the constant values of that step.
+        from torch._higher_order_ops.scan import scan
+
+        def combine(carry, x):
+            step, acc = carry
+            return (step + 1, acc + x), acc * 2
+
+        class StepCounter(torch.nn.Module):
+            def forward(self, xs):
+                (step, _), _ = scan(combine, (torch.tensor(0), torch.zeros(4)), xs)
+                return torch.zeros(step.item())
+
+        xs = torch.randn(5, 4)
+        ep = torch.export.export(StepCounter(), (xs,), strict=False)
+        self.assertEqual(ep.module()(xs).shape, (5,))
+
     # run_decompositions fails on a TwoTensor input, with or without vmap.
     @testing.expectedFailureTrainingIRToRunDecomp
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
