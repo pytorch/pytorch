@@ -989,9 +989,9 @@ INSTANTIATE_CONV1D_MPP_ALL(bfloat)
 // thread does R consecutive ow outputs. I is int when all numels fit in int32.
 template <typename T, typename I, int R>
 kernel void conv2d(
-    constant T* input [[buffer(0)]],
-    constant T* weight [[buffer(1)]],
-    constant T* bias [[buffer(2)]],
+    device const T* input [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device const T* bias [[buffer(2)]],
     device T* output [[buffer(3)]],
     constant Conv2DParams& p [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
@@ -1059,11 +1059,11 @@ kernel void conv2d(
 #define REGISTER_CONV2D_OP(DTYPE, ITYPE, INAME, R)                       \
   template [[host_name("conv2d_r" #R "_" INAME "_" #DTYPE)]] kernel void \
   conv2d<DTYPE, ITYPE, R>(                                               \
-      constant DTYPE * input [[buffer(0)]],                              \
-      constant DTYPE * weight [[buffer(1)]],                             \
-      constant DTYPE * bias [[buffer(2)]],                               \
-      device DTYPE * output [[buffer(3)]],                               \
-      constant Conv2DParams & p [[buffer(4)]],                           \
+      device const DTYPE* input [[buffer(0)]],                           \
+      device const DTYPE* weight [[buffer(1)]],                          \
+      device const DTYPE* bias [[buffer(2)]],                            \
+      device DTYPE* output [[buffer(3)]],                                \
+      constant Conv2DParams& p [[buffer(4)]],                            \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_CONV2D_DTYPE(DTYPE)         \

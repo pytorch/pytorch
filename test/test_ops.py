@@ -3,6 +3,7 @@ import contextlib
 import copy
 import inspect
 import itertools
+import math
 import os
 import re
 import unittest
@@ -478,8 +479,8 @@ class TestCommon(TestCase):
     @dtypes(torch.float32)
     @parametrize("sign", [-1, 1])
     def test_expm1_small(self, device, dtype, sign):
-        x = torch.logspace(-8, -1, 100, dtype=dtype)
-        cutoffs = torch.tensor([1e-5, 0.1], dtype=dtype)
+        x = torch.logspace(-8, 1.9, 1000, dtype=dtype)
+        cutoffs = torch.tensor([1e-5, 0.1, math.log(2) / 2], dtype=dtype)
         values = (
             x,
             torch.tensor([0.0, 0.0074433], dtype=dtype),
@@ -490,7 +491,16 @@ class TestCommon(TestCase):
         x = torch.cat(values) * sign
         expected = torch.expm1(x.double())
         actual = torch.expm1(x.to(device)).cpu().double()
-        self.assertEqual(actual, expected, atol=0, rtol=1e-6)
+        self.assertEqual(actual, expected, atol=0, rtol=3e-7)
+
+    @dtypes(torch.float32)
+    @parametrize("op", ["elu", "celu", "selu"])
+    def test_elu_small(self, device, dtype, op):
+        fn = getattr(torch.nn.functional, op)
+        x = -torch.logspace(-8, 1.3, 500, dtype=dtype)
+        expected = fn(x.double())
+        actual = fn(x.to(device)).cpu().double()
+        self.assertEqual(actual, expected, atol=0, rtol=3e-7)
 
     # Tests that the cpu and gpu results are consistent
     @onlyAccelerator
@@ -2038,6 +2048,8 @@ class TestCompositeCompliance(TestCase):
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
+        if not torch._C._is_cow_tensor(torch.empty(1, device=device)._lazy_clone()):
+            self.skipTest("allocator does not support COW sharing")
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
 
         def is_strided_tensor(arg):
@@ -2061,7 +2073,7 @@ class TestCompositeCompliance(TestCase):
                 else f"Keyword argument '{idx_or_kw}'"
             ) + f" during {backward_or_forward} call"
 
-            if is_strided_tensor(arg):
+            if is_strided_tensor(arg) and arg.untyped_storage().nbytes():
                 self.assertTrue(
                     torch._C._is_cow_tensor(arg_raw),
                     msg=(
@@ -2117,6 +2129,8 @@ class TestCompositeCompliance(TestCase):
             # all inputs
             for arg in args_raw:
                 if is_strided_tensor(arg):
+                    if not torch._C._is_cow_tensor(arg):
+                        torch._C._cow_record_done(arg)
                     args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
                 else:
@@ -2128,6 +2142,8 @@ class TestCompositeCompliance(TestCase):
 
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
+                    if not torch._C._is_cow_tensor(arg):
+                        torch._C._cow_record_done(arg)
                     kwargs_copy[kw] = arg.detach().clone()
                     kwargs[kw] = torch._lazy_clone(arg)
                 else:
@@ -2907,7 +2923,7 @@ fake_autocast_backward_xfails = {
 
 # TODO: triage. Most of these ops are either not implemented on MPS or need float64;
 # the rest are real meta vs. MPS mismatches (batch_norm, embedding_bag, linear,
-# logsigmoid, max_unpool2d).
+# max_unpool2d).
 fake_backward_mps_xfails = {
     xfail(name, variant, device_type="mps")
     for name, variant in (
@@ -2917,33 +2933,24 @@ fake_backward_mps_xfails = {
         ("cdouble", ""),
         ("double", ""),
         ("float_power", ""),
-        ("linalg.eig", ""),
-        ("linalg.eigvals", ""),
         ("linalg.matrix_sqrth", ""),
         ("mode", ""),
         ("native_batch_norm", ""),
-        ("nn.functional.adaptive_avg_pool1d", ""),
-        ("nn.functional.adaptive_avg_pool2d", ""),
-        ("nn.functional.adaptive_avg_pool3d", ""),
         ("nn.functional.adaptive_max_pool3d", ""),
         ("nn.functional.batch_norm", ""),
-        ("nn.functional.binary_cross_entropy_with_logits", ""),
         ("nn.functional.channel_shuffle", ""),
         ("nn.functional.embedding_bag", ""),
         ("nn.functional.fractional_max_pool2d", ""),
         ("nn.functional.fractional_max_pool3d", ""),
         ("nn.functional.grid_sample", ""),
-        ("nn.functional.interpolate", "area"),
         ("nn.functional.linear", ""),
         ("nn.functional.linear_cross_entropy", ""),
         ("nn.functional.linear_cross_entropy", "chunked"),
         ("nn.functional.linear_cross_entropy", "chunked_none"),
-        ("nn.functional.logsigmoid", ""),
         ("nn.functional.max_unpool2d", ""),
         ("nn.functional.max_unpool2d", "grad"),
         ("nn.functional.multi_margin_loss", ""),
         ("nn.functional.multilabel_margin_loss", ""),
-        ("nn.functional.multilabel_soft_margin_loss", ""),
         ("nn.functional.pdist", ""),
         ("nn.functional.rrelu", ""),
         ("normal", "number_mean"),
@@ -3171,9 +3178,6 @@ class TestFakeTensor(TestCase):
         self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
-        if "xpu" in device and ("fft" in op.name):
-            self.skipTest("Skip on XPU for torch-xpu-ops/issues/3599")
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
