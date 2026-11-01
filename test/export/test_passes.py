@@ -21,6 +21,7 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
+    replace_set_grad_with_hop_pass,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     get_view_copy_of_view_op,
@@ -43,6 +44,7 @@ from torch.export._remove_auto_functionalized_pass import (
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
@@ -1045,25 +1047,36 @@ def forward(self, sin, cos):
                     torch.autograd.grad(expected.sum(), x),
                 )
 
-    def test_sequential_split_region_reads_nested_spec(self):
-        # split_module reads a pytree spec that lives on a submodule with a
-        # dotted get_attr at the start of the region.
+    def test_set_grad_pass_reads_nested_spec(self):
+        # A pytree spec that lives on a submodule is read with a dotted
+        # get_attr, before, inside and after the region.
         root = torch.nn.Module()
         root.sub = torch.nn.Module()
         root.sub.spec = pytree.tree_flatten((0, 0))[1]
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
+        before = graph.call_function(
+            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
+        )
         graph.call_function(torch._C._set_grad_enabled, (False,))
-        spec = graph.get_attr("sub.spec")
-        out = graph.call_function(pytree.tree_unflatten, ([x, x], spec))
+        inside = graph.call_function(
+            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
+        )
+        y = graph.call_function(torch.ops.aten.mul.Tensor, (x, 2))
         graph.call_function(torch._C._set_grad_enabled, (True,))
-        graph.output(out)
-        new_gm = sequential_split(
-            torch.fx.GraphModule(root, graph), _is_set_grad_enabled_node
+        after = graph.call_function(
+            pytree.tree_unflatten, ([y, y], graph.get_attr("sub.spec"))
         )
+        graph.output((before, inside, after))
+        gm = torch.fx.GraphModule(root, graph)
+        with FakeTensorMode() as mode:
+            FakeTensorProp(gm, mode).propagate(mode.from_tensor(torch.ones(2)))
+        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
+        region = torch.ops.higher_order.wrap_with_set_grad_enabled
         self.assertEqual(
-            nodes_count(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod), 2
+            nodes_count(new_gm.graph.nodes, lambda n: n.target is region), 1
         )
+        self.assertEqual(new_gm(torch.ones(2)), gm(torch.ones(2)))
 
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
