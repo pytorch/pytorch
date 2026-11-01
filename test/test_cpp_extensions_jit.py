@@ -95,6 +95,16 @@ with tempfile.TemporaryDirectory() as tmpdir:
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipIf(IS_WINDOWS, "ROCM_HOME=/usr is a Linux distro layout")
+    def test_hip_include_paths_skip_usr_include(self):
+        # An explicit -isystem /usr/include breaks libstdc++'s #include_next (#202007).
+        with (
+            mock.patch("torch.utils.cpp_extension.IS_HIP_EXTENSION", True),
+            mock.patch("torch.utils.cpp_extension.ROCM_HOME", "/usr"),
+        ):
+            paths = torch.utils.cpp_extension.include_paths("cuda")
+        self.assertNotIn("/usr/include", paths)
+
 
 class _TestCppExtensionJITBase(common.TestCase):
     """Shared set up and tear down functions for device-specific test classes
