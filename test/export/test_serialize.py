@@ -2787,17 +2787,21 @@ class TestPredispatchSerialization(TestCase):
             if not IS_FBCODE:
                 script = (
                     "import torch, torch.testing._internal.two_tensor;"
-                    f"ep = torch.export.load(r'{path}');"
+                    f"ep = torch.export.load({path!r});"
                     "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
                     "print([t.tolist() for t in out])"
                 )
-                out = subprocess.check_output(
+                p = subprocess.run(
                     [sys.executable, "-c", script],
                     cwd=os.path.dirname(path),
+                    capture_output=True,
                     text=True,
+                    timeout=600,
                 )
+                self.assertEqual(p.returncode, 0, p.stderr)
                 self.assertEqual(
-                    out.strip().splitlines()[-1], str([t.tolist() for t in expected])
+                    p.stdout.strip().splitlines()[-1],
+                    str([t.tolist() for t in expected]),
                 )
 
         # A spec that lives on a submodule, as in a hand-built graph, is read
@@ -2943,7 +2947,7 @@ class TestPredispatchSerialization(TestCase):
 
         # Without its module imported, load refuses the name and says why.
         buffer.seek(0)
-        with self.assertRaises(RuntimeError) as cm:
+        with self.assertRaisesRegex(RuntimeError, "error when deserializing") as cm:
             torch.export.load(buffer)
         self.assertIsInstance(cm.exception.__cause__, SerializeError)
         self.assertIn("import it first", str(cm.exception.__cause__))
