@@ -48,19 +48,21 @@ def _is_exit_autocast_node(node: torch.fx.Node) -> torch.fx.Node | bool:
 
 def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
     """
-    Check if the first non-placeholder node is `torch.amp.autocast_mode._enter_autocast`.
+    Check if the first call of the submodule is `torch.amp.autocast_mode._enter_autocast`.
     """
     if node.op == "call_module":
         if not isinstance(node.target, str):
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
-        first_non_ph = nodes_first(
-            subgm.graph.nodes, lambda node: node.op != "placeholder"
+        # split_module reads submodules and pytree specs, such as the branches
+        # of a cond, with get_attr nodes before the first call of a region.
+        first_call = nodes_first(
+            subgm.graph.nodes, lambda node: node.op not in ("placeholder", "get_attr")
         )
         if (
-            first_non_ph
-            and first_non_ph.op == "call_function"
-            and first_non_ph.target is torch.amp.autocast_mode._enter_autocast
+            first_call
+            and first_call.op == "call_function"
+            and first_call.target is torch.amp.autocast_mode._enter_autocast
         ):
             # TODO: check if current auto-cast type is the same as the args of
             # _enter_autocast. If so, return False, i.e. do not create a submodule.

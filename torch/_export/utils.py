@@ -19,6 +19,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_te
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
+from torch.fx.graph_module import _assign_attr, _get_attr, _has_attr
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -877,16 +878,23 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     raise AssertionError(
                         f"Expected str target for get_attr, got {type(node.target)}"
                     )
+                attr = _get_attr(sub_gm, node.target)
                 new_target_name = new_node.target
-                if hasattr(gm, new_target_name):
+                # Several get_attr nodes can read one attribute, such as a pytree
+                # spec, so reuse it and rename only when the name holds another object.
+                if (
+                    _has_attr(gm, new_target_name)
+                    and _get_attr(gm, new_target_name) is not attr
+                ):
                     # Loop through and find the "submod_{i}" that have no name collision
                     i = 1
                     new_target_name = f"submod_{i}"
                     while hasattr(gm, new_target_name):
                         i += 1
                         new_target_name = f"submod_{i}"
+                if not _has_attr(gm, new_target_name):
+                    _assign_attr(attr, gm, new_target_name)
                 new_node.target = new_target_name
-                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
