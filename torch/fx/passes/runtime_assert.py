@@ -630,7 +630,7 @@ def insert_deferred_runtime_asserts(
                 # refinement.  This is important, because if we are going
                 # to retrace the graph (and we typically are if we send
                 # the graph to AOTAutograd), we need to make sure we apply
-                # range refinement first, BEFORE we
+                # range refinement (ala _check_is_size) first, BEFORE we
                 # run any of the asserts.  Otherwise, we may decide to
                 # perform substitutions based on the asserts which we then
                 # can't back out, because value ranges can only be applied
