@@ -128,6 +128,11 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 try:
+    import tabulate as _tabulate
+except ImportError:
+    _tabulate = None  # type: ignore[assignment]
+
+try:
     import torch._logging
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
@@ -241,14 +246,11 @@ def tabulate(
     rows: list[tuple[str, Any]] | list[list[Any]],
     headers: tuple[str, ...] | list[str],
 ) -> str:
-    try:
-        import tabulate
-
-        return tabulate.tabulate(rows, headers=headers)
-    except ImportError:
-        return "\n".join(
-            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
-        )
+    if _tabulate is not None:
+        return _tabulate.tabulate(rows, headers=headers)
+    return "\n".join(
+        ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+    )
 
 
 curr_frame = 0
@@ -4847,9 +4849,7 @@ def tensor_always_has_static_shape(
 
 def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
-        try:
-            from tabulate import tabulate  # TODO: Check that this is installed
-        except ImportError:
+        if _tabulate is None:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
                 + str(lazy_format_graph_code(fn_name, gm))
@@ -4858,7 +4858,7 @@ def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
         node_specs = [
             [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
         ]
-        graph_str = tabulate(
+        graph_str = _tabulate.tabulate(
             node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
         )
         return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
