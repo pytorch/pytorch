@@ -4825,26 +4825,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.reset()
                 self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
-    def test_stale_base_at_entry_not_aliased(self):
+    def test_stale_base_at_entry_not_merged(self):
         # The input is already stale when the compiled function is called:
-        # dest.set_(src) runs before compile, so dest._base still points at the
-        # old storage while dest now owns src's. describe_tensor and
-        # _view_base_sharing_storage must see dest as standalone, not alias storage.
+        # dest.set_(src) runs before compile, so dest._base still points at
+        # `storage` while dest now owns src's storage. Fakification must
+        # describe dest as standalone, otherwise it is merged with `storage`
+        # and the write through dest leaks into it.
         def fn(dest, storage):
             dest[0] = 10.0
             return storage[0].clone()
 
-        storage = torch.arange(5, dtype=torch.float32)
-        dest = storage[:3]
-        dest.set_(torch.full((3,), 7.0))  # rebase: dest._base is now stale
-
-        expected_storage = storage.clone()
         for backend in ["eager", "aot_eager", "inductor"]:
             with self.subTest(backend=backend):
                 torch._dynamo.reset()
-                s = expected_storage.clone()
-                torch.compile(fn, backend=backend)(dest, s)
-                self.assertEqual(s, expected_storage)
+                storage = torch.arange(5, dtype=torch.float32)
+                dest = storage[:3]
+                dest.set_(torch.full((3,), 7.0))  # rebase: dest._base is stale
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(dest, storage),
+                    torch.tensor(0.0),
+                )
+                self.assertEqual(storage, torch.arange(5, dtype=torch.float32))
+
+    def test_stale_base_at_entry_runtime_base_fallback(self):
+        # dest.set_(src) before compile makes dest share src's storage while
+        # dest._base still points at an unrelated tensor. The synthetic-base
+        # wrapper must not adopt that stale base, or the mutation is applied to
+        # the wrong storage and never reaches src.
+        def fn(dest, src):
+            src[0] = 10.0
+            return dest[0].clone()
+
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                stale_base = torch.arange(5, dtype=torch.float32)
+                src = torch.full((3,), 7.0)
+                dest = stale_base[:3]
+                dest.set_(src)  # dest aliases src; dest._base is stale
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(dest, src),
+                    torch.tensor(10.0),
+                )
+                self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
+                self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
 
     def test_set_new_base_stays_aliased(self):
         # After dest.set_(src), dest must alias src, not its old base.

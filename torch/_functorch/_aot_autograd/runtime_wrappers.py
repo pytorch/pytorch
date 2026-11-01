@@ -50,6 +50,7 @@ from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.meta_utils import _live_view_base
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType
@@ -1849,34 +1850,6 @@ class AOTDedupeWrapper(CompilerWrapper):
         return debugged_compiled_fn
 
 
-def _view_base_sharing_storage(arg: torch.Tensor) -> torch.Tensor | None:
-    # set_() can rebind a tensor's storage without clearing the stale _base
-    # link, so only trust _base when it still shares storage with the tensor.
-    # The storage test is only meaningful for plain dense tensors: a nested
-    # tensor repacks values/offsets, so a genuine NT view need not share its
-    # base's storage; keep trusting _base there.
-    base = arg._base
-    if base is None:
-        return None
-    if arg.is_nested or base.is_nested:
-        return base
-    # A traceable wrapper subclass (e.g. AsyncCollectiveTensor) can rewrap a
-    # view output, giving the wrapper a fresh outer storage even though it is a
-    # real view, so the storage test below would wrongly report it stale. Keep
-    # trusting _base when either side is such a wrapper, mirroring meta_utils.py.
-    if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(base):
-        return base
-    # Sparse layouts throw on untyped_storage(), so only run the storage
-    # identity test on strided pairs and trust _base elsewhere. This mirrors
-    # the alias test in torch/_subclasses/meta_utils.py so the two copies of
-    # "is _base still a real alias?" agree.
-    if arg.layout != torch.strided or base.layout != torch.strided:
-        return base
-    if base.untyped_storage()._cdata == arg.untyped_storage()._cdata:
-        return base
-    return None
-
-
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
 # We need to take special care to ensure that the mutation is applied to the other aliases in the graph.
@@ -2089,7 +2062,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         buf.bind(
             torch=torch,
             _compiled_fn_=compiled_fn,
-            _view_base_sharing_storage=_view_base_sharing_storage,
+            _live_view_base=_live_view_base,
         )
 
         with buf.indent():
@@ -2101,7 +2074,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 buf.writeline("_b = None")
                 buf.writeline(f"for _i in [{indices_str}]:")
                 with buf.indent():
-                    buf.writeline("_b = _view_base_sharing_storage(args[_i])")
+                    buf.writeline("_b = _live_view_base(args[_i])")
                     buf.writeline("if _b is not None:")
                     with buf.indent():
                         buf.writeline("break")

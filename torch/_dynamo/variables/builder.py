@@ -79,7 +79,7 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_mode,
 )
-from torch._subclasses.meta_utils import is_sparse_any, safe_grad
+from torch._subclasses.meta_utils import _live_view_base, is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
@@ -3205,12 +3205,14 @@ class VariableBuilder:
         # without graph breaking.
         self.tx.output.side_effects.track_object_existing(value, tensor_variable)
 
-        if value._is_view():
-            # If value is a view, add its base tensor to the tracked fakes list.
-            # This is so we are able to access the correct source for its symbolic
-            # shape values, in case we need them.
+        # If value is a view, add its base tensor to the tracked fakes list.
+        # This is so we are able to access the correct source for its symbolic
+        # shape values, in case we need them. A base left behind by set_() is
+        # stale and no longer aliases value, so it is not a view base and must
+        # not be faked or guarded as one.
+        if (live_base := _live_view_base(value)) is not None:
             wrap_to_fake_tensor_and_record(
-                value._base,
+                live_base,
                 tx=self.tx,
                 source=AttrSource(source, "_base"),
                 is_tensor=True,
@@ -4771,11 +4773,12 @@ def _automatic_dynamic(
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else {}
     )
 
-    # Get base context if the tensor is a view
+    # Get base context if the tensor is a view. A base left behind by set_() is
+    # stale and no longer aliases e, so it must not drive e's symbolic context.
     view_base_context: SymbolicContext | None = None
-    if e._is_view():
+    if (live_base := _live_view_base(e)) is not None:
         base_source = AttrSource(source, "_base")
-        view_base_context = _automatic_dynamic(e._base, tx, base_source, static_shapes)
+        view_base_context = _automatic_dynamic(live_base, tx, base_source, static_shapes)
 
     if is_traceable_wrapper_subclass(e) and not outer_only:
         # Get symbolic context for outer tensor

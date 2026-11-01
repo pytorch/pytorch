@@ -234,6 +234,61 @@ def _set_real_storage(
     base.real_storage = real_storage  # type: ignore[attr-defined]
 
 
+def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
+    """Return ``t._base`` only when it is still a real alias of ``t``.
+
+    ``Tensor.set_()`` rebinds a tensor to a new storage without clearing the
+    autograd ``_base`` link, so ``_base`` alone does not prove that ``t`` is
+    still a view of it. A real view shares its base's storage; a rebound tensor
+    does not, and must be described as standalone rather than merged with a base
+    it no longer aliases.
+
+    This is the single answer to "is ``_base`` still a live view base?". Callers
+    in fakification, in the AOTAutograd synthetic-base wrapper and in dynamo all
+    route through here so the compile-time alias choice cannot drift from the
+    runtime one. Storage identity uses ``StorageWeakRef``, the same identity the
+    synthetic-base grouping uses to decide which inputs share a base.
+
+    The storage test only has meaning for plain strided tensors, so ``_base`` is
+    kept for everything else:
+
+    * a nested tensor repacks values/offsets, so a real nested view need not
+      share its base's storage;
+    * a traceable wrapper subclass (e.g. ``AsyncCollectiveTensor``) can rewrap a
+      view output, giving the wrapper a fresh outer storage even though it is a
+      real view;
+    * sparse, mkldnn, functorch-wrapped and legacy batched tensors either throw
+      on ``untyped_storage()`` or do not expose a storage that identifies the
+      tensor's aliasing.
+    """
+    from torch.multiprocessing.reductions import StorageWeakRef
+
+    base = t._base
+    if base is None:
+        return None
+    if (
+        t.is_nested
+        or base.is_nested
+        or is_traceable_wrapper_subclass(t)
+        or is_traceable_wrapper_subclass(base)
+    ):
+        return base
+    if (
+        t.layout != torch.strided
+        or base.layout != torch.strided
+        or is_functorch_wrapped_tensor(t)
+        or is_functorch_wrapped_tensor(base)
+        or is_legacy_batchedtensor(t)
+        or is_legacy_batchedtensor(base)
+        or t.is_mkldnn
+        or base.is_mkldnn
+    ):
+        return base
+    if StorageWeakRef(t.untyped_storage()) == StorageWeakRef(base.untyped_storage()):
+        return base
+    return None
+
+
 # Don't use id() directly, because those can get reallocated over time.
 MetaStorageId = NewType("MetaStorageId", int)
 MetaTensorId = NewType("MetaTensorId", int)
@@ -338,29 +393,11 @@ class MetaTensorDescriber:
             # put it in for accuracy
             storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
-            if is_view and (base := t._base) is not None:
-                # set_() can rebind a tensor's storage without clearing the
-                # stale _base link; a genuine view still shares its base's
-                # storage, so a mismatch means the view metadata is stale and
-                # the tensor must be built standalone from its own storage.
-                # Only meaningful for plain dense tensors: a nested tensor
-                # repacks values/offsets, so a genuine NT view need not share
-                # its base's storage. Sparse layouts throw on untyped_storage()
-                # (values() of a sparse tensor reports the sparse parent as
-                # _base), so the alias test only runs on strided pairs.
-                if (
-                    not is_nested
-                    and not base.is_nested
-                    and t.layout == torch.strided
-                    and base.layout == torch.strided
-                    # A traceable wrapper subclass (e.g. AsyncCollectiveTensor) can
-                    # rewrap a view output, giving the wrapper a fresh outer storage
-                    # even though it is a real view, so the storage test would wrongly
-                    # mark it stale. Skip it when either side is such a wrapper.
-                    and not (is_traceable_wrapper_subclass_v or is_traceable_wrapper_subclass(base))
-                    and base.untyped_storage()._cdata != t.untyped_storage()._cdata
-                ):
-                    is_view = False
+            if is_view and _live_view_base(t) is None:
+                # set_() can leave _base pointing at a tensor this one no longer
+                # aliases, so it is stale and the tensor must be built standalone
+                # from its own storage instead of being merged with that base.
+                is_view = False
 
         stride = None
         if not (
