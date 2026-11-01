@@ -108,7 +108,7 @@ jobs:
         with:
           model: ${{ inputs.model }}
           thinking: ${{ inputs.thinking }}
-          tools: read,grep,find,ls,get_issue,get_issue_comments,find_duplicate_issues
+          tools: read,grep,find,ls,get_issue,get_issue_comments,search_issues
           extensions: ${{ github.workspace }}/.github/pi/extensions/github-issue-tools.ts
           skills: ${{ github.workspace }}/.agents/skills/${{ inputs.skill }}
           prompt: ${{ format(inputs.prompt, matrix.issue) }}

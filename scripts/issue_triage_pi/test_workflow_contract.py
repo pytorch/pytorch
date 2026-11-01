@@ -33,7 +33,7 @@ READ_ONLY_TOOLS = {
     "ls",
     "get_issue",
     "get_issue_comments",
-    "find_duplicate_issues",
+    "search_issues",
 }
 PLAN_PERMISSIONS = {"contents": "read", "issues": "read", "id-token": "write"}
 
@@ -137,10 +137,9 @@ class TriageWorkflowContract(unittest.TestCase):
         agent = step(PLAN, lambda s: s.get("uses") == "./.github/actions/pi-agent")
         tools = set(agent["with"]["tools"].split(","))
         self.assertLessEqual(tools, READ_ONLY_TOOLS)
-        self.assertIn("find_duplicate_issues", tools)
-        self.assertNotIn("search_issues", tools)
+        self.assertIn("search_issues", tools)
 
-    def test_duplicate_discovery_source_is_bound_for_live_and_replay_runs(self):
+    def test_search_source_is_bound_for_live_and_replay_runs(self):
         self.assertEqual(PLAN["env"]["TRIAGE_SOURCE_ISSUE"], "${{ matrix.issue }}")
         self.assertEqual(PLAN["env"]["TRIAGE_REPO"], "${{ inputs.repo }}")
 
