@@ -704,6 +704,11 @@ class DebugFormatter:
     def output_code(self, filename: str, extension: str = "py") -> None:
         shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
+    def helion_code(self, source: str) -> None:
+        with self.fopen("helion_code.py", "a") as fd:
+            fd.write(source)
+            fd.write("\n")
+
     def log_autotuning_results(
         self,
         name: str,

@@ -27,6 +27,7 @@ from torch._inductor.codegen.triton import (
     get_triton_reduction_function,
     IndexingOptions,
     TMACompatibilityChecker,
+    triton_reshape,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
@@ -39,17 +40,20 @@ from torch._inductor.codegen.wrapper import (
     user_defined_triton_kernel_transitive_closure,
     user_defined_triton_kernel_transitive_closure_source_code,
 )
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
-from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties, ReductionHint
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
+    run_and_get_triton_code,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -251,6 +255,85 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(can_use(shape=(size,), storage=size))
         self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
         self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
+
+    @parametrize(
+        "old_shape,new_shape,expected",
+        [
+            ([2, 4], [2, 4], "value"),
+            ([2, 4], [2, 1, 4], "value[:, None, :]"),
+            ([2, 1, 4], [2, 4], "tl.squeeze(value, 1)"),
+            ([1, 2, 4], [2, 4], "tl.squeeze(value, 0)"),
+            ([1, 2, 1, 4], [2, 4], "tl.squeeze(tl.squeeze(value, 2), 0)"),
+            ([2, 1, 4], [2, 4, 1], "tl.squeeze(value, 1)[:, :, None]"),
+            ([1, 2, 1], [2, 1], "tl.squeeze(value, 0)"),
+            ([2, 1], [2, 1, 1], "value[:, :, None]"),
+            ([], [1, 1], "value[None, None]"),
+            ([1, 1], [], "tl.squeeze(tl.squeeze(value, 1), 0)"),
+            ([2, 4], [8], "tl.reshape(value, [8])"),
+        ],
+    )
+    def test_triton_reshape_singletons(self, old_shape, new_shape, expected):
+        with V.set_kernel_handler(SimpleNamespace(index_to_str=str)):
+            self.assertEqual(triton_reshape("value", old_shape, new_shape), expected)
+
+    @inductor_config.patch({"triton.native_matmul": True})
+    @parametrize(
+        "shape,a_strides,b_strides,expected",
+        [
+            ((1024, 1024, 4096), None, None, torch.int32),
+            ((50000, 1, 50000), None, None, torch.int64),
+            ((1, 50000, 50000), None, None, torch.int64),
+            ((50000, 50000, 1), None, None, torch.int64),
+            ((2, 16, 16), (2**31, 1), None, torch.int64),
+            ((1, 1, 2**31), (0, 0), (0, 0), torch.int64),
+        ],
+    )
+    def test_native_matmul_index_dtype(self, shape, a_strides, b_strides, expected):
+        m, n, k = map(sympy.Integer, shape)
+        device = torch.device("cpu")
+        dtype = torch.bfloat16
+        a = ir.Buffer(
+            name="a", layout=ir.FixedLayout(device, dtype, [m, k], a_strides or [k, 1])
+        )
+        b = ir.Buffer(
+            name="b", layout=ir.FixedLayout(device, dtype, [k, n], b_strides or [n, 1])
+        )
+        out = ir.ComputedBuffer(
+            name="out",
+            layout=ir.FixedLayout(device, dtype, [m, n], [n, 1]),
+            data=ir.Reduction(
+                device=device,
+                dtype=dtype,
+                inner_fn=lambda index, reduction_index: 0,
+                ranges=[m, n],
+                reduction_ranges=[k],
+                reduction_type="dot",
+                src_dtype=dtype,
+                reduction_hint=ReductionHint.DEFAULT,
+            ),
+        )
+        self._graph.graph_inputs.update(a=a, b=b)
+        self._graph.name_to_buffer["out"] = out
+        y, x, r = sympy.symbols("y x r", integer=True, nonnegative=True)
+        a_stride, b_stride = a.get_stride(), b.get_stride()
+        node = SimpleNamespace(
+            node=out,
+            get_buffer_names=lambda: ["out"],
+            used_buffer_names=lambda: ["a", "b"],
+            read_writes=SimpleNamespace(
+                reads=[
+                    MemoryDep("a", y * a_stride[0] + r * a_stride[1], (y, r), (m, k)),
+                    MemoryDep("b", r * b_stride[0] + x * b_stride[1], (r, x), (k, n)),
+                ],
+                writes=[MemoryDep("out", y * n + x, (y, x), (m, n))],
+            ),
+        )
+        features = SIMDKernelFeatures([node], m * n, k)
+        self.assertEqual(features.select_index_dtype(), expected)
+        if expected == torch.int32:
+            with inductor_config.patch({"triton.native_matmul": False}):
+                features = SIMDKernelFeatures([node], m * n, k)
+                self.assertEqual(features.select_index_dtype(), torch.int64)
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):
@@ -2210,6 +2293,32 @@ def helper(x):
             repr(hints),
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
+
+
+@unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+class TestCodegenTritonDevice(InductorTestCase):
+    @inductor_config.patch(
+        {
+            "triton.native_matmul": False,
+            "triton.use_tensor_descriptor": False,
+            "triton.persistent_reductions": False,
+        }
+    )
+    @parametrize("batch_shape", [(), (3,)])
+    def test_pointer_load_singletons(self, device, batch_shape):
+        def f(a, b):
+            return (a[..., None] + b).sum(-1)
+
+        a = torch.randn((*batch_shape, 65), device=device)
+        b = torch.randn((*batch_shape, 65, 65), device=device)
+        compiled = torch.compile(f, fullgraph=True)
+        code = run_and_get_triton_code(compiled, a, b)
+        self.assertEqual(compiled(a, b), f(a, b), atol=1e-4, rtol=1e-4)
+        self.assertIn("tl.load(in_ptr0 + (tl.squeeze(", code)
+        self.assertNotIn("tl.load(in_ptr1 + (tl.squeeze(", code)
+
+
+instantiate_device_type_tests(TestCodegenTritonDevice, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":

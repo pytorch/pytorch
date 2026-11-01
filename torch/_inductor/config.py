@@ -3215,6 +3215,9 @@ class trace:
     # Copy generated code to trace dir
     output_code = True
 
+    # Generate Helion source previews for native matmul kernels.
+    helion_code = False
+
     # Diagram showing post-fusion graph. INDUCTOR_POST_FUSION_SVG is the
     # legacy spelling for SVG output; INDUCTOR_POST_FUSION_GRAPH enables the
     # same dump for any graph_diagram_format.
