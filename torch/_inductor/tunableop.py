@@ -752,7 +752,12 @@ def _is_densely_packed(node: Any) -> bool:
     real_sizes = [int(x) for x in sizevars.optimization_hints(n.get_size())]
     order = ir.get_stride_order(real_strides)
     dense = [int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)]
-    return real_strides == dense
+    # A size-1 dim's stride is arbitrary: [1, 1] and [N, 1] describe the same
+    # layout for [1, N]. Comparing those positions rejects valid operands --
+    # notably rowwise _scaled_mm scales, where scale_b is w_scale.t().
+    return all(
+        rs == ds for rs, ds, sz in zip(real_strides, dense, real_sizes) if sz != 1
+    )
 
 
 def _meta_at(node: Any, sym_val: int, s: sympy.Symbol) -> TensorMeta:
@@ -1106,3 +1111,28 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
                 i + 1,
                 len(bmreqs),
             )
+
+
+# Extern winners waiting for the ladder. The select_algorithm hooks fire while
+# lowering, before finalize() decides layouts, so reading operand strides there
+# records placeholders; graph.py drains this once the layouts are decided.
+_pending_ladder: list[Any] = []
+
+
+def queue_range_pretune(winner: ExternKernelCaller) -> None:
+    _pending_ladder.append(winner)
+
+
+def run_queued_pretunes() -> None:
+    """Ladder every queued winner, now that layouts are final."""
+    pending, _pending_ladder[:] = list(_pending_ladder), []
+    for winner in pending:
+        try:
+            layouts = [_as_buffer(n).get_layout() for n in winner.input_nodes]
+        except (AttributeError, TypeError):
+            continue
+        # Still flexible means finalize() has not decided this one; tune
+        # nothing rather than guess at its strides.
+        if any(isinstance(lay, ir.FlexibleLayout) for lay in layouts):
+            continue
+        maybe_range_pretune(winner)

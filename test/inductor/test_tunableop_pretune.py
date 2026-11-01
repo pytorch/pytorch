@@ -176,9 +176,11 @@ class TestTunableOpPretune(TestCase):
         # traced shapes (most build _mm_winner("mm", s) at hint 512) pollute
         # each other depending on run order.
         tunableop._pretuned_gemms.cache_clear()
+        tunableop._pending_ladder.clear()
 
     def tearDown(self):
         tunableop._pretuned_gemms.cache_clear()
+        tunableop._pending_ladder.clear()
         super().tearDown()
 
     def _mm_winner(self, name, s):
@@ -197,7 +199,8 @@ class TestTunableOpPretune(TestCase):
             return _FakeWinner(name, [bias, mat1, mat2], [m, n])
         if name.startswith("_scaled_mm"):
             scale_a = _buffer("scale_a", [m, 1], [1, 1])
-            scale_b = _buffer("scale_b", [1, n], [n, 1])
+            # Rowwise scale_b is w_scale.t(): [1, N] strided [1, 1].
+            scale_b = _buffer("scale_b", [1, n], [1, 1])
             return _FakeWinner(name, [mat1, mat2, scale_a, scale_b], [m, n])
         return _FakeWinner(name, [mat1, mat2], [m, n])
 
@@ -692,19 +695,30 @@ class TestTunableOpPretune(TestCase):
         batches = {b.input_tensor_meta[0].sizes[0] for b in submitted}
         self.assertNotIn(16384, batches, "the oversize rung must be absent")
 
-    def test_select_algorithm_hook_fires_on_extern(self):
-        # The select_algorithm hook covers concrete extern winners; triton
-        # winners are ignored by the isinstance gate.
+    def test_select_algorithm_hook_queues_until_layouts_are_final(self):
+        # The hook fires while lowering, before finalize() decides layouts, so
+        # it queues; graph.py drains once they are decided. Triton winners are
+        # ignored by the isinstance gate.
         from torch._inductor import select_algorithm as _sa
 
         s = sympy.Symbol("s_hook", positive=True, integer=True)
-        winner = self._mm_winner("mm", s)
-        with mock.patch("torch._inductor.tunableop.maybe_range_pretune") as pretune:
-            _sa._maybe_pretune_tunableop(winner)
-            pretune.assert_called_once_with(winner)
-            pretune.reset_mock()
+        with _ladder(s) as submitted:
+            _sa._maybe_pretune_tunableop(self._mm_winner("mm", s))
             _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
-            pretune.assert_not_called()
+            self.assertEqual(submitted, [], "the hook must not ladder in place")
+            tunableop.run_queued_pretunes()
+            self.assertTrue(submitted, "the drain must ladder the extern winner")
+
+    def test_a_still_flexible_operand_is_not_tuned(self):
+        # finalize() should have decided every layout by drain time; one that
+        # is still flexible means it has not, so guess nothing.
+        s = sympy.Symbol("s_flex", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.input_nodes[0].layout = ir.FlexibleLayout(DEVICE, DTYPE, [s, 256])
+        with _ladder(s) as submitted:
+            tunableop.queue_range_pretune(winner)
+            tunableop.run_queued_pretunes()
+        self.assertEqual(submitted, [], "a flexible operand must not be tuned")
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
