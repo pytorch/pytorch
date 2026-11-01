@@ -421,7 +421,7 @@ class TestRefs(TestCase):
             x.to(device="meta")
 
     # From https://github.com/pytorch/pytorch/issues/195705
-    @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64)
+    @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_alpha_dropout_dtype(self, device, dtype):
         # python_ref_db skips the ref-vs-eager comparisons for dropout because
         # the mask is redrawn per call, and test_python_ref_meta compares the
@@ -433,7 +433,7 @@ class TestRefs(TestCase):
         actual = refs.nn.functional.alpha_dropout(a, p=0.5, training=False)
         self.assertEqual(actual.dtype, dtype)
 
-    @dtypes(torch.float64)
+    @dtypes(torch.float64, torch.complex128)
     def test_alpha_dropout_values(self, device, dtype):
         # p in {0, 1} and training=False hit early returns, and the dtype check
         # above does not catch the float64 coefficients being built in a lower
