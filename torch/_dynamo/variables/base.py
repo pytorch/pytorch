@@ -20,6 +20,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import sys
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
@@ -900,6 +901,19 @@ def _wrap_init(
     return func(self, tx, args, kwargs)
 
 
+def check_setattr_args(
+    tx: InstructionTranslatorBase,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> None:
+    if kwargs:
+        raise_type_error(tx, "wrapper __setattr__() takes no keyword arguments")
+    if len(args) != 2:
+        # CPython's wrap_setattr names the method starting in 3.14.
+        name = "__setattr__" if sys.version_info >= (3, 14) else ""
+        raise_type_error(tx, f"{name} expected 2 arguments, got {len(args)}")
+
+
 def _wrap_setattr(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -908,10 +922,7 @@ def _wrap_setattr(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_setattro via __setattr__: (name, value).
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_setattr_args(tx, args, kwargs)
     return func(self, tx, args[0], args[1])
 
 

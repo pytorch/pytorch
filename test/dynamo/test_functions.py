@@ -7358,13 +7358,239 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         for obj in (Mapping(a=1), Mapping(a=1)):
             self.assertEqual(compiled(x, obj, obj.get), fn(x, obj, obj.get))
+        self.assertEqual(counter.frame_count, 2 if prebound else 1)
+
+    @parametrize(
+        "container_type, method_name", [(dict, "get"), (list, "count"), (set, "add")]
+    )
+    @parametrize("tuple_depth", (0, 1, 2))
+    def test_bound_builtin_method_key_alias_guards(
+        self, container_type, method_name, tuple_depth
+    ):
+        def fn(x, left, right):
+            descriptor = container_type.__dict__[method_name]
+            left_key = descriptor.__get__(left, container_type)
+            right_key = descriptor.__get__(right, container_type)
+            for _ in range(tuple_depth):
+                left_key, right_key = (left_key,), (right_key,)
+            return x + len({left_key, right_key})
+
+        a, b, c, d = (container_type() for _ in range(4))
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for left, right in ((a, b), (a, a), (c, d), (c, c), (b, a)):
+            self.assertEqual(compiled(x, left, right), fn(x, left, right))
         self.assertEqual(counter.frame_count, 2)
 
-    def test_bound_builtin_method_hash_local_receiver(self):
+    @parametrize(
+        "container_type, names",
+        [
+            (dict, ("get", "keys")),
+            (list, ("count", "index")),
+            (set, ("add", "discard")),
+        ],
+    )
+    @parametrize("tuple_depth", (0, 1, 2))
+    def test_bound_builtin_method_local_keys(self, container_type, names, tuple_depth):
+        def fn(x):
+            receiver = container_type()
+            left, right = (
+                container_type.__dict__[name].__get__(receiver, container_type)
+                for name in names
+            )
+            alias = container_type.__dict__[names[0]].__get__(receiver, container_type)
+            for _ in range(tuple_depth):
+                left, right, alias = (left,), (right,), (alias,)
+            return (
+                x + len({left, right, alias}),
+                {left: 7}.get(alias),
+                {left: 7}.get(right, 0),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("reverse", [False, True])
+    @parametrize("local", [False, True])
+    @parametrize("tuple_depth", (0, 1, 2))
+    def test_bound_builtin_method_keys_custom_collisions(
+        self, reverse, local, tuple_depth
+    ):
+        class Key:
+            def __init__(self, hash_value):
+                self.hash_value = hash_value
+
+            def __hash__(self):
+                return self.hash_value
+
+            def __eq__(self, other):
+                return True
+
+        def fn(x, obj, key):
+            receiver = {} if local else obj
+            method = dict.get.__get__(receiver, dict)
+            for _ in range(tuple_depth):
+                method, key = (method,), (key,)
+            items = {key: 1, method: 2} if reverse else {method: 2, key: 1}
+            return x + len(items)
+
+        a, b = {}, {}
+        self.assertNotEqual(hash(a.get), hash(b.get))
+        key = Key(hash(a.get))
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        if local:
+            with self.assertRaisesRegex(
+                Unsupported, "Builtin method keys with custom equality"
+            ):
+                compiled(x, a, key)
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(fn, backend="eager")(x, a, key), fn(x, a, key)
+            )
+        else:
+            for obj in (a, b):
+                self.assertEqual(compiled(x, obj, key), fn(x, obj, key))
+            self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("operation", ["get", "contains", "set"])
+    @parametrize("tuple_depth", (0, 1, 2))
+    def test_bound_builtin_method_input_keys(self, operation, tuple_depth):
+        def fn(x, obj, mapping):
+            method = list.index.__get__(obj, list)
+            for _ in range(tuple_depth):
+                method = (method,)
+            if operation == "get":
+                return x + mapping.get(method, -1)
+            if operation == "contains":
+                return x + (method in mapping)
+            return x + len({method, *mapping})
+
+        a, b = [], []
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for key in ("key", a.count, a.index, b.index):
+            for _ in range(tuple_depth):
+                key = (key,)
+            mapping = {key: 3}
+            for obj in (b, a, b):
+                self.assertEqual(compiled(x, obj, mapping), fn(x, obj, mapping))
+
+    @parametrize("tuple_depth", (0, 1, 2))
+    @parametrize("key_kind", ("metaclass", "plain_metaclass", "spoofed_method"))
+    def test_bound_builtin_method_input_key_custom_equality(
+        self, tuple_depth, key_kind
+    ):
+        class BaseMeta(type):
+            def __hash__(cls):
+                return cls.hash_value
+
+        class Meta(BaseMeta):
+            __hash__ = BaseMeta.__hash__
+
+            def __eq__(cls, other):
+                return hash(other) == cls.hash_value
+
+        class ClassKey(metaclass=BaseMeta if key_kind == "plain_metaclass" else Meta):
+            hash_value = 0
+
+        class Key:
+            def __init__(self, method):
+                self.method = method
+                self.hash_value = hash(method)
+
+            @property
+            def __class__(self):
+                return types.BuiltinMethodType
+
+            def __hash__(self):
+                return self.hash_value
+
+            def __eq__(self, other):
+                return self.method == other
+
+        def fn(x, obj, mapping):
+            method = list.count.__get__(obj, list)
+            for _ in range(tuple_depth):
+                method = (method,)
+            return x + mapping.get(method, -1)
+
+        a, b = [], []
+        self.assertNotEqual(hash(a.count), hash(b.count))
+        ClassKey.hash_value = hash(a.count)
+        key = Key(a.count) if key_kind == "spoofed_method" else ClassKey
+        for _ in range(tuple_depth):
+            key = (key,)
+        mapping = {key: 3}
+        x = torch.ones(1)
+        if key_kind == "metaclass":
+            with self.assertRaisesRegex(
+                Unsupported, "Builtin method keys with custom metaclass"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x, b, mapping)
+            torch._dynamo.reset()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=key_kind != "metaclass")
+        for obj in (b, a, b):
+            self.assertEqual(compiled(x, obj, mapping), fn(x, obj, mapping))
+        if key_kind != "metaclass":
+            self.assertEqual(
+                counter.frame_count, 1 if key_kind == "plain_metaclass" else 2
+            )
+
+    @parametrize("tuple_depth", (1, 2))
+    def test_bound_builtin_method_tuple_input_alias(self, tuple_depth):
+        def fn(x, first, second):
+            return x + len({first: 1, second: 2})
+
+        left, right = [], []
+        first, other = left.count, right.count
+        for _ in range(tuple_depth):
+            first, other = (first,), (other,)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for second in (other, first, other):
+            self.assertEqual(compiled(x, first, second), fn(x, first, second))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_nested_region_builtin_method_keys(self):
+        class Holder:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+        @torch.compiler.nested_compile_region
+        def region(x, holder):
+            return x + len(
+                {
+                    dict.get.__get__(holder.left, dict),
+                    dict.get.__get__(holder.right, dict),
+                }
+            )
+
+        def fn(x, first, second):
+            return region(x, first), region(x, second)
+
+        a, b, c, d = {}, {}, {}, {}
+        first, second = Holder(a, b), Holder(c, c)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for right in (c, d, c):
+            second.right = right
+            self.assertEqual(compiled(x, first, second), fn(x, first, second))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("tuple_depth", (0, 1, 2))
+    def test_bound_builtin_method_hash_local_receiver(self, tuple_depth):
         def fn(x):
             receiver = [1]
             left = list.count.__get__(receiver, list)
             right = list.index.__get__(receiver, list)
+            for _ in range(tuple_depth):
+                left, right = (left,), (right,)
             return (
                 x + 1,
                 hash(left) == hash(right),
@@ -7604,26 +7830,52 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("base", [dict, list])
+    @parametrize("base", [dict, list, object])
+    @parametrize("form", ["raw", "bound", "alias"])
     @parametrize("case", ["missing", "extra", "keywords", "missing_and_keywords"])
-    def test_inherited_setattr_descriptor_arity(self, base, case):
+    def test_inherited_setattr_descriptor_arity(self, base, form, case):
+        class Container(base):
+            assign = object.__setattr__
+
         def fn(x):
-            obj = base()
+            obj = Container()
+            method = (
+                base.__setattr__
+                if form == "raw"
+                else getattr(obj, "assign" if form == "alias" else "__setattr__")
+            )
+            args = (obj, "value") if form == "raw" else ("value",)
             try:
                 if case == "missing":
-                    base.__setattr__(obj, "value")
+                    method(*args)
                 elif case == "extra":
-                    base.__setattr__(obj, "value", 1, 2)
+                    method(*args, 1, 2)
                 elif case == "keywords":
-                    base.__setattr__(obj, "value", 1, extra=2)
+                    method(*args, 1, extra=2)
                 else:
-                    base.__setattr__(obj, "value", value=1)
+                    method(*args, value=1)
             except TypeError as exc:
                 return x + 1, str(exc)
             return x - 1, "no error"
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_method_descriptor_fallback_class_mutation(self):
+        class Mapping(collections.OrderedDict):
+            pass
+
+        def fn(x, obj):
+            return x + len(list(obj.keys()))
+
+        obj = Mapping(a=1, b=2)
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        Mapping.keys = lambda self: ["a", "b", "c"]
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
 
     def test_wrapper_descriptor_missing_receiver_tp_name(self):
         def fn(x):
