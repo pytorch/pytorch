@@ -7242,8 +7242,7 @@ class Scheduler:
                 multi_node = node.node
                 # The conflict check freezes flexible input layouts, so keep
                 # the original short-circuit past it under the force-extern
-                # flag. Unevaluated there, which the ladder reads as no
-                # conflict: forcing the extern path does not change the metas.
+                # flag. Unevaluated there reads as no conflict.
                 force_extern = config.test_configs.force_extern_kernel_in_multi_template
                 if not force_extern and not self._has_layout_conflict_for_template(
                     multi_node
@@ -7294,10 +7293,9 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
-                # aten won, so widen its recorded coverage across the dynamic
-                # dim, after output_node() as the select_algorithm sites do.
-                # Not on the layout-conflict fallback: the meta rebuild reads
-                # the constraint, not the frozen layout the kernel receives.
+                # aten won, so widen its coverage across the dynamic dim,
+                # after output_node() as the select_algorithm sites do. Not on
+                # the conflict fallback: the rebuild reads the constraint.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
                 if not has_layout_conflict:

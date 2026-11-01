@@ -875,10 +875,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         if _has(sz, s):
             dims.add("B")
             dyn_expr = sz
-    # Exactly one axis. The ceiling is computed from dyn_expr alone, so a
-    # symbol spanning two axes caps one and lets the other run away (M=1000*s
-    # with N=s reaches M=16,384,000). Those buckets also differ in two dims,
-    # which the nearest matcher will not borrow across anyway.
+    # Exactly one axis: the ceiling comes from dyn_expr alone, so a symbol
+    # spanning two caps one and lets the other run away (M=1000*s with N=s
+    # reaches 16,384,000), and two differing dims never borrow anyway.
     if "K" in dims or len(dims) != 1 or dyn_expr is None:
         return
 
@@ -909,10 +908,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         OrderedSet([sym_start, sym_hint, sym_hi])
         | OrderedSet([1 << k for k in range(1, 64) if sym_start < (1 << k) < sym_hi])
     )
-    # Ceiling applies in DIM space, not symbol space: the symbol cap cannot see
-    # a multiplier, so an expression like 96*s clears it by two orders of
-    # magnitude. Floored at the served dim, so the ceiling can never truncate
-    # below the size the model actually runs.
+    # Ceiling in DIM space: the symbol cap cannot see a multiplier, so 96*s
+    # clears it by two orders of magnitude. Floored at the served dim so it
+    # can never truncate below the size the model runs.
     try:
         served_dim = _eval_at(dyn_expr, sym_hint, s)
     except (AttributeError, TypeError, ValueError):  # unevaluatable at the hint
@@ -936,10 +934,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             continue
         buckets.append(sym_val)
         dim_vals.append(dim_val)
-    # The traced hint first, then largest first. The budget below is shared and
-    # spent in this order, so whatever sorts last is what gets dropped: the hint
-    # leads because it is the one size runtime is known to ask for, and the rest
-    # descend so the largest -- the likeliest to fault -- cannot starve it.
+    # Hint first, then largest first. The shared budget is spent in this
+    # order, so whatever sorts last is dropped: the hint leads as the one size
+    # runtime asks for, and the largest cannot starve it.
     order = sorted(
         range(len(buckets)), key=lambda i: (buckets[i] != sym_hint, -dim_vals[i])
     )
