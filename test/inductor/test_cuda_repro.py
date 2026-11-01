@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     TEST_MULTIGPU,
     tf32_on_and_off,
+    with_tf32_off,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -2185,6 +2186,10 @@ class CudaReproTests(TestCase):
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
     )
+    # With TF32 convs, the compiled and eager input grads differ by ~1e-3 on
+    # some GPUs (an A100 MIG slice), far outside the 1e-5 tolerance this fp32
+    # numerics check needs.
+    @with_tf32_off
     def test_conv_bias_no_extra_cast_for_fp32(self):
         # fp32 conv output is not low precision: no cast, unchanged numerics.
         conv, x = _make_conv()
