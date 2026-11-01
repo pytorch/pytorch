@@ -589,9 +589,12 @@ def gen_c_shim(
         func,
         backend_index,
     )
-    # Without a backend kernel, backend_call is at::{op}, which goes through the
-    # dispatcher and so already handles conj/neg.
-    resolve_dispatch_flags = backend_index is not None
+    # at::{op} goes through the dispatcher, and CompositeImplicitAutograd kernels
+    # decompose into at:: calls, so both already handle conj/neg.
+    resolve_dispatch_flags = (
+        backend_index is not None
+        and backend_index.dispatch_key != DispatchKey.CompositeImplicitAutograd
+    )
 
     try:
         if header:
