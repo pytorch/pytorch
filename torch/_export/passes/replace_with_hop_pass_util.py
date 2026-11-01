@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 
-def _first_call_node(sub_gm: torch.fx.GraphModule) -> torch.fx.Node | None:
+def _first_node_after_inputs(sub_gm: torch.fx.GraphModule) -> torch.fx.Node | None:
     """
     Returns the first node of a region submodule after its inputs. split_module
     reads pytree specs, such as the ones flat_apply takes, with get_attr nodes

@@ -8,7 +8,7 @@ from torch._higher_order_ops.wrap import wrap_with_autocast
 
 from ..utils import node_inline_, nodes_filter, sequential_split
 from .replace_with_hop_pass_util import (
-    _first_call_node,
+    _first_node_after_inputs,
     _replace_with_hop_helper,
     _replace_with_hop_pass_helper,
     _sequential_split_and_maybe_inline_subgraphs_helper,
@@ -55,7 +55,7 @@ def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
         if not isinstance(node.target, str):
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
-        first_non_ph = _first_call_node(subgm)
+        first_non_ph = _first_node_after_inputs(subgm)
         if (
             first_non_ph
             and first_non_ph.op == "call_function"
