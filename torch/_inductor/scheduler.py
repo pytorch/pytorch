@@ -7240,18 +7240,19 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                # Hoisted out of the condition below, which short-circuited
-                # past it under the force-extern test flag: the ladder needs a
-                # real answer, and the freeze it performs is what the ordinary
-                # path does anyway.
-                has_layout_conflict = self._has_layout_conflict_for_template(multi_node)
-                if not (
-                    config.test_configs.force_extern_kernel_in_multi_template
-                    or has_layout_conflict
+                # The conflict check freezes flexible input layouts, so keep
+                # the original short-circuit past it under the force-extern
+                # flag. Unevaluated there, which the ladder reads as no
+                # conflict: forcing the extern path does not change the metas.
+                force_extern = config.test_configs.force_extern_kernel_in_multi_template
+                if not force_extern and not self._has_layout_conflict_for_template(
+                    multi_node
                 ):
+                    has_layout_conflict = False
                     # TODO (PaulZhang12): Potentially support recompilation/benchmark for new strides
                     min_node_unfused, _ = multi_node.get_min_choice()
                 else:
+                    has_layout_conflict = not force_extern
                     extern_choices = [
                         c
                         for c in multi_node.choices
