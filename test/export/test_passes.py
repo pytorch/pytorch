@@ -1034,18 +1034,19 @@ def forward(self, sin, cos):
             ),
             (Autocast(), "wrap_with_autocast", torch.randn(4, 4)),
         ):
-            ep = export(m, (x,))
-            target = getattr(torch.ops.higher_order, region)
-            self.assertEqual(
-                nodes_count(ep.graph.nodes, lambda n: n.target is target), 1
-            )
-            out, expected = ep.module()(x), m(x)
-            self.assertEqual(out, expected)
-            if x.requires_grad:
+            with self.subTest(region=region):
+                ep = export(m, (x,))
+                target = getattr(torch.ops.higher_order, region)
                 self.assertEqual(
-                    torch.autograd.grad(out.sum(), x),
-                    torch.autograd.grad(expected.sum(), x),
+                    nodes_count(ep.graph.nodes, lambda n: n.target is target), 1
                 )
+                out, expected = ep.module()(x), m(x)
+                self.assertEqual(out, expected)
+                if x.requires_grad:
+                    self.assertEqual(
+                        torch.autograd.grad(out.sum(), x),
+                        torch.autograd.grad(expected.sum(), x),
+                    )
 
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted

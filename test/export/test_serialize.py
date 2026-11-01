@@ -2793,7 +2793,7 @@ class TestPredispatchSerialization(TestCase):
                 )
                 p = subprocess.run(
                     [sys.executable, "-c", script],
-                    cwd=os.path.dirname(path),
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
                     capture_output=True,
                     text=True,
                     timeout=600,
@@ -2934,21 +2934,28 @@ class TestPredispatchSerialization(TestCase):
 
         Other.__module__, Other.__qualname__ = module.__name__, "Sub"
         module.Scale, module.AddPair, module.Sub = Scale, AddPair, Other
-        with patch.dict(sys.modules, {module.__name__: module}):
+        # Unlike patch.dict, this removes only this module afterwards, not the
+        # torch modules that export imports the first time it runs.
+        sys.modules[module.__name__] = module
+        saved = {}
+        try:
             x = torch.randn(4)
             for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4)):
-                buffer = io.BytesIO()
-                torch.export.save(export(m, (x,), strict=False), buffer)
-                buffer.seek(0)
-                self.assertEqual(torch.export.load(buffer).module()(x), expected)
+                with self.subTest(module=type(m).__name__):
+                    buffer = io.BytesIO()
+                    torch.export.save(export(m, (x,), strict=False), buffer)
+                    saved[type(m).__name__] = buffer.getvalue()
+                    buffer.seek(0)
+                    self.assertEqual(torch.export.load(buffer).module()(x), expected)
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
             with self.assertRaisesRegex(SerializeError, "names a different object"):
                 torch.export.save(ep, io.BytesIO())
+        finally:
+            del sys.modules[module.__name__]
 
         # Without its module imported, load refuses the name and says why.
-        buffer.seek(0)
         with self.assertRaisesRegex(RuntimeError, "error when deserializing") as cm:
-            torch.export.load(buffer)
+            torch.export.load(io.BytesIO(saved["Bar"]))
         self.assertIsInstance(cm.exception.__cause__, SerializeError)
         self.assertIn("import it first", str(cm.exception.__cause__))
 
@@ -2999,7 +3006,7 @@ class TestPredispatchSerialization(TestCase):
             (cls_name, b'"torch.autograd.Function"', "not a class or function defined"),
             (cls_name, b'"torch.os.system"', "not a top-level"),
         ]:
-            with self.assertRaisesRegex(SerializeError, reason, msg=new):
+            with self.subTest(name=new), self.assertRaisesRegex(SerializeError, reason):
                 load(artifact.exported_program.replace(old, new))
 
         # Finding a flat_apply name never runs the code of a module outside
@@ -3023,34 +3030,43 @@ class TestPredispatchSerialization(TestCase):
                 raise AttributeError(attr)
 
             holder.__getattr__ = module_getattr
-            with (
-                patch.object(sys, "path", [tmp, *sys.path]),
-                patch.dict(sys.modules, {holder.__name__: holder}),
-            ):
-                for new, reason in [
-                    (b'"flat_apply_side_effect.F"', "not a top-level"),
-                    (b'"flat_apply_holder.lazy"', "not a class or function"),
-                    (b'"flat_apply_holder.F"', "not a class or function"),
-                ]:
-                    for old in (func_name, cls_name):
-                        with self.assertRaisesRegex(SerializeError, reason):
-                            load(artifact.exported_program.replace(old, new))
-                        self.assertFalse(os.path.exists(ran))
+            # Unlike patch.dict, this removes only these modules afterwards, not
+            # the torch modules that loading imports the first time it runs.
+            sys.modules[holder.__name__] = holder
+            try:
+                with patch.object(sys, "path", [tmp, *sys.path]):
+                    for new, reason in [
+                        (b'"flat_apply_side_effect.F"', "not a top-level"),
+                        (b'"flat_apply_holder.lazy"', "not a class or function"),
+                        (b'"flat_apply_holder.F"', "not a class or function"),
+                    ]:
+                        for old in (func_name, cls_name):
+                            with (
+                                self.subTest(name=new, replaces=old),
+                                self.assertRaisesRegex(SerializeError, reason),
+                            ):
+                                load(artifact.exported_program.replace(old, new))
+                            self.assertFalse(os.path.exists(ran))
 
-                # Only a module that _FLAT_APPLY_MODULES lists gets imported.
-                with (
-                    patch(
-                        "torch._export.serde.serialize._FLAT_APPLY_MODULES",
-                        {"flat_apply_side_effect"},
-                    ),
-                    self.assertRaisesRegex(SerializeError, "not a class or function"),
-                ):
-                    load(
-                        artifact.exported_program.replace(
-                            func_name, b'"flat_apply_side_effect.F"'
+                    # Only a module that _FLAT_APPLY_MODULES lists gets imported.
+                    with (
+                        patch(
+                            "torch._export.serde.serialize._FLAT_APPLY_MODULES",
+                            {"flat_apply_side_effect"},
+                        ),
+                        self.assertRaisesRegex(
+                            SerializeError, "not a class or function"
+                        ),
+                    ):
+                        load(
+                            artifact.exported_program.replace(
+                                func_name, b'"flat_apply_side_effect.F"'
+                            )
                         )
-                    )
-                self.assertTrue(os.path.exists(ran))
+                    self.assertTrue(os.path.exists(ran))
+            finally:
+                del sys.modules[holder.__name__]
+                sys.modules.pop("flat_apply_side_effect", None)
 
         # The input spec decides which input the helper gets as the class name.
         program = json.loads(artifact.exported_program)
@@ -3066,7 +3082,10 @@ class TestPredispatchSerialization(TestCase):
         ]:
             spec = pytree.tree_flatten(args_and_kwargs)[1]
             node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
-            with self.assertRaisesRegex(SerializeError, "name as the first input"):
+            with (
+                self.subTest(args_and_kwargs=args_and_kwargs),
+                self.assertRaisesRegex(SerializeError, "name as the first input"),
+            ):
                 load(json.dumps(program).encode())
         node["inputs"][1]["arg"]["as_string"] = "not a treespec"
         with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
