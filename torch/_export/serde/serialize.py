@@ -826,47 +826,6 @@ def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
     )
 
 
-def _check_flat_apply_in_spec(in_spec_str: str) -> None:
-    """
-    Refuse the parts of a flat_apply input spec that make ``treespec_loads``
-    import a module that the file names: enum classes, and defaultdict
-    factories, which would also reach the function as callables that the file
-    chooses. Also refuse the name that pytree gives every type registered
-    without a serialized type name, which save never writes. A pytree type
-    registered with its own context decoder decodes its context with the code
-    that registered it.
-    """
-    message = "a flat_apply input spec cannot contain enums or defaultdicts"
-
-    def refuse_enum(obj: dict[str, Any]) -> dict[str, Any]:
-        if "__enum__" in obj:
-            raise SerializeError(message)
-        return obj
-
-    _, root = json.loads(in_spec_str)
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node["type"] == "collections.defaultdict":
-            raise SerializeError(message)
-        # A namedtuple node names its type in its context.
-        if pytree.NO_SERIALIZED_TYPE_NAME_FOUND in (node["type"], node["context"]):
-            raise SerializeError(
-                "a flat_apply input spec cannot name a pytree type that has no "
-                "serialized type name"
-            )
-        # Decode the context as treespec_loads does, so that no spelling of the
-        # enum key gets past this check. It decodes JSON, with the hook that
-        # imports enum modules, only for types without their own decoder.
-        typ = pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE.get(node["type"])
-        if (
-            typ is not None
-            and pytree.SUPPORTED_SERIALIZED_TYPES[typ].from_dumpable_context is None
-        ):
-            json.loads(node["context"], object_hook=refuse_enum)
-        stack.extend(node["children_spec"])
-
-
 def _find_flat_apply_func(
     name: str, in_spec: pytree.TreeSpec, flat_args: Sequence[Any]
 ) -> Any:
@@ -1516,7 +1475,8 @@ class GraphModuleSerializer(metaclass=Final):
             )
         try:
             in_spec_str = self.serialize_treespec(in_spec_value)
-            _check_flat_apply_in_spec(in_spec_str)
+            # Load refuses specs that would import a module, see below.
+            pytree._treespec_loads_without_imports(in_spec_str)
         except Exception as e:
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
@@ -3444,8 +3404,11 @@ class GraphModuleDeserializer(metaclass=Final):
         func_input, in_spec_input, *flat_inputs = inputs
         func_name = func_input.arg.as_operator
         try:
-            _check_flat_apply_in_spec(in_spec_input.arg.as_string)
-            in_spec = treespec_loads(in_spec_input.arg.as_string)
+            # Loading an enum or a defaultdict factory would import a module
+            # that the file names.
+            in_spec = pytree._treespec_loads_without_imports(
+                in_spec_input.arg.as_string
+            )
         except Exception as e:
             raise SerializeError(
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"

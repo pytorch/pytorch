@@ -2940,6 +2940,30 @@ class TestPredispatchSerialization(TestCase):
             with self.assertRaisesRegex(SerializeError, "input is a pytree constant"):
                 torch.export.save(ep, io.BytesIO())
 
+        with self.subTest("enum in an input"):
+            # Load would import the module of the enum, so save refuses it.
+            class Key(enum.Enum):
+                A = 0
+
+            Scale = self._scale_function()
+
+            class ByKey(Scale):
+                @staticmethod
+                def forward(d):
+                    return d[Key.A] * 2
+
+                @staticmethod
+                def backward(ctx, grad):
+                    return None
+
+            class UsesEnum(torch.nn.Module):
+                def forward(self, x):
+                    return ByKey.apply({Key.A: x})
+
+            ep = export(UsesEnum(), (torch.randn(4),), strict=False)
+            with self.assertRaisesRegex(SerializeError, "module of an enum"):
+                torch.export.save(ep, io.BytesIO())
+
     def test_predispatch_flat_apply_save_load_by_name(self):
         Scale = self._scale_function()
 
@@ -3174,18 +3198,18 @@ class TestPredispatchSerialization(TestCase):
                 "name as the first input",
             ),
             # Loading an enum or a defaultdict factory would import its module.
-            ("enum", set_spec(enum_spec), "enums or defaultdicts"),
-            ("escaped enum", set_spec(escaped_enum_spec), "enums or defaultdicts"),
+            ("enum", set_spec(enum_spec), "module of an enum"),
+            ("escaped enum", set_spec(escaped_enum_spec), "module of an enum"),
             (
                 "defaultdict",
                 set_spec(spec_of((("name", defaultdict(int, a=0)), {}))),
-                "enums or defaultdicts",
+                "module of a defaultdict factory",
             ),
             # Save never writes the name of a type without a serialized name.
             (
                 "type without a name",
                 set_spec(with_node({**leaf, "type": no_name, "context": "{}"})),
-                "no serialized type name",
+                no_name,
             ),
             (
                 "namedtuple without a name",
@@ -3198,7 +3222,7 @@ class TestPredispatchSerialization(TestCase):
                         }
                     )
                 ),
-                "no serialized type name",
+                no_name,
             ),
             (
                 "not a treespec",
