@@ -2957,10 +2957,10 @@ class TestPredispatchSerialization(TestCase):
         try:
             x = torch.randn(4)
             for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4)):
+                buffer = io.BytesIO()
+                torch.export.save(export(m, (x,), strict=False), buffer)
+                saved[type(m).__name__] = buffer.getvalue()
                 with self.subTest(module=type(m).__name__):
-                    buffer = io.BytesIO()
-                    torch.export.save(export(m, (x,), strict=False), buffer)
-                    saved[type(m).__name__] = buffer.getvalue()
                     buffer.seek(0)
                     self.assertEqual(torch.export.load(buffer).module()(x), expected)
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
@@ -3109,14 +3109,24 @@ class TestPredispatchSerialization(TestCase):
         class Color(enum.Enum):
             RED = 0
 
-        for args_and_kwargs in [
-            (("name", {Color.RED: 0}), {}),
-            (("name", collections.defaultdict(int, a=0)), {}),
+        enum_spec = pytree.treespec_dumps(
+            pytree.tree_flatten((("name", {Color.RED: 0}), {}))[1]
+        )
+        # JSON allows other spellings of the key, which load decodes too.
+        escaped_enum_spec = enum_spec.replace("__enum__", "\\\\u005f_enum__")
+        self.assertNotIn("__enum__", escaped_enum_spec)
+        for in_spec in [
+            enum_spec,
+            escaped_enum_spec,
+            pytree.treespec_dumps(
+                pytree.tree_flatten((("name", collections.defaultdict(int, a=0)), {}))[
+                    1
+                ]
+            ),
         ]:
-            spec = pytree.tree_flatten(args_and_kwargs)[1]
-            node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
+            node["inputs"][1]["arg"]["as_string"] = in_spec
             with (
-                self.subTest(args_and_kwargs=args_and_kwargs),
+                self.subTest(in_spec=in_spec),
                 self.assertRaisesRegex(SerializeError, "enums or defaultdicts"),
             ):
                 load(json.dumps(program).encode())
@@ -3136,7 +3146,7 @@ class TestPredispatchSerialization(TestCase):
         ]
         last = node["inputs"][-1]
         last["arg"] = {"as_operator": "torch.os.system"}
-        with self.assertRaisesRegex(SerializeError, "values, not functions"):
+        with self.assertRaisesRegex(SerializeError, "does not name an operator"):
             load(json.dumps(program).encode())
         # A dict of arguments could hold one too, and export passes neither
         # dicts nor keyword arguments through flat_apply.
@@ -3148,6 +3158,29 @@ class TestPredispatchSerialization(TestCase):
         last["arg"], last["kind"] = {"as_int": 0}, 2
         with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
             load(json.dumps(program).encode())
+        last["kind"], last["name"] = 1, "checked_output"
+        with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
+            load(json.dumps(program).encode())
+        last["name"] = ""
+        for target, reason in [
+            ("torch.os", "does not name an operator"),
+            (json.loads(func_name), "only be called through flat_apply"),
+        ]:
+            last["arg"] = {"as_operator": target}
+            with (
+                self.subTest(target=target),
+                self.assertRaisesRegex(SerializeError, reason),
+            ):
+                load(json.dumps(program).encode())
+
+        # Save refuses the same inputs, so it never writes what load refuses.
+        (flat_apply_node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        flat_apply_node.kwargs = {"checked_output": False}
+        with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
+            serialize(ep)
+        flat_apply_node.kwargs = {}
 
         # Export calls the helper only through flat_apply. Called directly, it
         # would import the module that the file names when the program runs.

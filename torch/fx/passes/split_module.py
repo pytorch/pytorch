@@ -45,7 +45,9 @@ def _get_attr_in_partition(attr: Any) -> bool:
     # Submodules and pytree specs (such as the flat_apply specs export emits) are
     # read with get_attr inside the partition. They are not values, so they
     # cannot be passed to it as inputs.
-    return isinstance(attr, (torch.nn.Module, torch.utils._pytree.TreeSpec))
+    return isinstance(
+        attr, torch.nn.Module
+    ) or torch.utils._pytree._is_pytreespec_instance(attr)
 
 
 def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:

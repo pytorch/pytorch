@@ -788,6 +788,22 @@ _FLAT_APPLY_INPUT_KINDS = frozenset(
 )
 
 
+def _check_flat_apply_inputs(
+    node_name: str | None, inputs: Sequence[NamedArgument]
+) -> None:
+    """Save and load both refuse the inputs that export does not pass."""
+    for inp in inputs:
+        if (
+            inp.kind != ArgumentKind.POSITIONAL
+            or inp.name
+            or inp.arg.type not in _FLAT_APPLY_INPUT_KINDS
+        ):
+            raise SerializeError(
+                f"flat_apply node {node_name} has an input that export does not "
+                f"pass to its function: {inp.arg.type}"
+            )
+
+
 def _check_flat_apply_in_spec(in_spec_str: str) -> None:
     """
     Refuse the parts of a flat_apply input spec that make ``treespec_loads``
@@ -795,17 +811,23 @@ def _check_flat_apply_in_spec(in_spec_str: str) -> None:
     runs no code from a module that the file names. A defaultdict factory would
     also reach the function as a callable.
     """
+    message = "a flat_apply input spec cannot contain enums or defaultdicts"
+
+    def refuse_enum(obj: dict[str, Any]) -> dict[str, Any]:
+        if "__enum__" in obj:
+            raise SerializeError(message)
+        return obj
+
     _, root = json.loads(in_spec_str)
     stack = [root]
     while stack:
         node = stack.pop()
-        context = node["context"]
-        if node["type"] == "collections.defaultdict" or (
-            isinstance(context, str) and "__enum__" in context
-        ):
-            raise SerializeError(
-                "a flat_apply input spec cannot contain enums or defaultdicts"
-            )
+        if node["type"] == "collections.defaultdict":
+            raise SerializeError(message)
+        # Decode the context as treespec_loads does, so that no spelling of the
+        # enum key gets past this check.
+        if isinstance(node["context"], str):
+            json.loads(node["context"], object_hook=refuse_enum)
         stack.extend(node["children_spec"])
 
 
@@ -820,13 +842,8 @@ def _find_flat_apply_func(
     argument, so that name must find a torch.autograd.Function. Both names
     are found with ``_find_imported``.
     """
-    # Export passes these functions values and operators. Another function
-    # among the inputs could make an accepted class run it.
-    if any(
-        callable(arg) and not isinstance(arg, torch._ops.OpOverload)
-        for arg in flat_args
-    ):
-        raise SerializeError("flat_apply inputs must be values, not functions")
+    if in_spec.num_leaves != len(flat_args):
+        raise SerializeError("flat_apply inputs do not match its input spec")
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
         return func
@@ -839,8 +856,6 @@ def _find_flat_apply_func(
             "wrapper tensor subclasses and custom autograd functions can be saved "
             "and loaded"
         )
-    if in_spec.num_leaves != len(flat_args):
-        raise SerializeError("flat_apply inputs do not match its input spec")
     # flat_apply rebuilds (args, kwargs) from the input spec and calls the helper
     # with *args and **kwargs, so args[0] is the name it gets only when the spec
     # is a (tuple, dict) pair, as export saves it. Only the spec is read, because
@@ -1473,6 +1488,8 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: {func_name} names "
                 "a different object, so it could not be loaded back"
             )
+        flat_inputs = self.serialize_hoo_inputs(flat_args, node.kwargs)
+        _check_flat_apply_inputs(node.name, flat_inputs)
         return [
             NamedArgument(
                 name="",
@@ -1484,7 +1501,7 @@ class GraphModuleSerializer(metaclass=Final):
                 arg=Argument.create(as_string=in_spec_str),
                 kind=ArgumentKind.POSITIONAL,
             ),
-            *self.serialize_hoo_inputs(flat_args, node.kwargs),
+            *flat_inputs,
         ]
 
     def is_inductor_sym_int_arg(self, arg) -> bool:
@@ -2614,6 +2631,17 @@ class GraphModuleDeserializer(metaclass=Final):
                 return serialized_target
             else:
                 target = getattr(target, name)
+        if (
+            target
+            is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        ):
+            # The verifier allows this helper, but export calls it only through
+            # flat_apply, whose function load finds separately and checks with
+            # the class name it gets. As a node target or an argument, it would
+            # import a module that the file names when the program runs.
+            raise SerializeError(
+                f"{serialized_target} can only be called through flat_apply"
+            )
         return target
 
     def _parse_sym_expr(
@@ -2990,17 +3018,6 @@ class GraphModuleDeserializer(metaclass=Final):
             )
             self.deserialize_outputs(serialized_node, fx_node)
         elif callable(target):
-            if (
-                target
-                is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-            ):
-                # The verifier allows this helper, but export calls it only
-                # through flat_apply, where load checks the class name it gets.
-                # Called directly, it would import a module that the file names
-                # when the program runs.
-                raise SerializeError(
-                    f"{serialized_node.target} can only be called through flat_apply"
-                )
             # Handle predispatch wrapper functions (vmap, JVP, etc.)
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             name = serialized_node.name if serialized_node.name else None
@@ -3382,16 +3399,16 @@ class GraphModuleDeserializer(metaclass=Final):
             raise SerializeError(
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
             ) from e
-        for inp in flat_inputs:
-            if (
-                inp.kind == ArgumentKind.KEYWORD
-                or inp.arg.type not in _FLAT_APPLY_INPUT_KINDS
+        _check_flat_apply_inputs(serialized_node.name, flat_inputs)
+        args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
+        for inp, arg in zip(flat_inputs, args):
+            if inp.arg.type == "as_operator" and not isinstance(
+                arg, torch._ops.OpOverload
             ):
                 raise SerializeError(
                     f"flat_apply node {serialized_node.name} has an input that "
-                    f"export does not pass to its function: {inp.arg.type}"
+                    f"does not name an operator: {inp.arg.as_operator}"
                 )
-        args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
         func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []
