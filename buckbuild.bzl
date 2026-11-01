@@ -965,6 +965,7 @@ def define_buck_targets(
             ("aten/src", "ATen/mkl/*.h"),
             ("aten/src", "ATen/native/mkl/*.h"),
             ("aten/src", "ATen/native/mkldnn/*.h"),
+            ("aten/src", "ATen/native/mkldnn/detail/*.h"),
         ]),
         # ATen/core/enum_tag.h is a forwarding header that includes from
         # torch/headeronly, so we need to export that dependency.
