@@ -384,6 +384,11 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
     group = _read_json(path, path.read_bytes())
     children = group.get("child_paths") if isinstance(group, dict) else None
     expected = {name: root / record["key"] / name for name in record["members"]}
+    if isinstance(children, list) and all(isinstance(child, str) for child in children):
+        # Triton >= triton-lang/triton#12001 stores just the member names,
+        # relative to this group's directory, instead of each member's full
+        # original path, so there is nothing to compare there.
+        return set(children) == expected.keys()
     # Triton records paths under knobs.cache.dir, which may spell the same
     # directory differently.
     return (
