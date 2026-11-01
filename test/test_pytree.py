@@ -1218,6 +1218,29 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             ):
                 python_pytree.treespec_loads(json.dumps([protocol, node]))
 
+    def test_pytree_loads_without_imports(self):
+        # Loading an enum or a defaultdict factory imports its module.
+        spec = python_pytree.tree_structure(
+            ({TestEnum.A: 0}, defaultdict(list, a=[0]), (1, 2))
+        )
+        serialized = python_pytree.treespec_dumps(spec)
+        self.assertEqual(python_pytree.treespec_loads(serialized), spec)
+        for value, reason in [
+            ((0, {TestEnum.A: 0}), "module of an enum"),
+            ((0, defaultdict(list, a=[0])), "module of a defaultdict factory"),
+        ]:
+            with self.subTest(reason), self.assertRaisesRegex(ValueError, reason):
+                python_pytree._treespec_loads_without_imports(
+                    python_pytree.treespec_dumps(python_pytree.tree_structure(value))
+                )
+        plain = python_pytree.tree_structure(({"a": 0}, [1, (2,)]))
+        self.assertEqual(
+            python_pytree._treespec_loads_without_imports(
+                python_pytree.treespec_dumps(plain)
+            ),
+            plain,
+        )
+
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):
