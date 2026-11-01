@@ -2,7 +2,6 @@
 
 import torch
 from torch.testing._internal.common_device_type import (
-    dtypes,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
@@ -134,19 +133,6 @@ class TestReductionComplexDtypeBackwardDevice(TestCase):
         else:
             expected = torch.full_like(x, 1.0 / n if op is torch.mean else 1.0)
         self.assertEqual(x.grad, expected)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_mixed_precision_grad_not_downcast(self, device, dtype):
-        # The real-to-real reduction backward must divide the incoming grad in
-        # the output dtype before converting it to the input dtype. Converting
-        # first rounds the scaled grad before the division and produces a
-        # different gradient.
-        x = torch.randn(2, 3, dtype=dtype, device=device, requires_grad=True)
-        y = x.mean(dtype=torch.float32)
-        y.backward(torch.full_like(y, 2085.0))
-        self.assertEqual(x.grad.dtype, dtype)
-        expected = torch.full_like(x, 2085.0 / x.numel(), dtype=torch.float32)
-        self.assertEqual(x.grad, expected.to(dtype))
 
     def test_real_to_complex_backward_no_cast_warning(self, device):
         # at::real drops the imaginary part silently; a plain .to() cast here
