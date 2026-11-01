@@ -108,6 +108,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    check_setattr_args,
     GetSet,
     Member,
     Method,
@@ -3201,7 +3202,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return ConstantVariable.create(None)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
-                return self.method_setattr_standard(tx, *args, **kwargs)
+                check_setattr_args(tx, args, kwargs)
+                return self.method_setattr_standard(tx, *args)
 
             if is_standard_delattr(method):
                 return self.method_setattr_standard(
@@ -4069,19 +4071,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
-            if (
-                isinstance(type_attr, types.MethodDescriptorType)
-                and self.lookup_method_descriptor(type_attr) is not None
-            ):
+            if isinstance(type_attr, types.MethodDescriptorType):
                 if self.cls_source:
                     install_guard(
                         self.get_source_by_walking_mro(tx, name).make_guard(
                             GuardBuilder.FUNCTION_MATCH
                         )
                     )
-                return variables.BoundBuiltinMethodVariable(
-                    type_attr, self, source=source
-                )
+                if self.lookup_method_descriptor(type_attr) is not None:
+                    return variables.BoundBuiltinMethodVariable(
+                        type_attr, self, source=source
+                    )
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):

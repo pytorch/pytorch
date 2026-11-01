@@ -3666,6 +3666,24 @@ class GuardBuilder(GuardBuilderBase):
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @skip_guard_check_spec
+    def BUILTIN_METHOD_RECEIVER_ALIAS(
+        self, guard: Guard, source_b: Source, expected_alias: bool
+    ) -> None:
+        if self.save_guards:
+            if name := get_local_source_name(source_b):
+                self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(source_b):
+                self.check_fn_manager.additional_used_global_vars.add(name)
+        code = [
+            f"{self.arg_ref(guard)} is{'' if expected_alias else ' not'} "
+            f"{self.arg_ref(source_b.name)}"
+        ]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code, get_verbose_code_parts(code, guard)
+        )
+
+    @skip_guard_check_spec
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
@@ -5655,6 +5673,17 @@ def _resolves_by_reference(value: object) -> bool:
             _resolves_by_reference(owner)
             and isinstance(value.name, str)
             and getattr(owner, value.name, None) is value
+        )
+    if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        owner = value.__objclass__
+        # Match GuardsStatePickler's immutable-owner descriptor reducer.
+        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+        return (
+            bool(flags & (1 << 8))
+            and _resolves_by_reference(owner)
+            and any(
+                item is value for item in get_type_dict_no_user_code(owner).values()
+            )
         )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.

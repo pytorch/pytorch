@@ -90,6 +90,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    check_setattr_args,
     GetSet,
     Member,
     Method,
@@ -1959,12 +1960,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
-            if kwargs:
-                raise_type_error(tx, "wrapper __setattr__() takes no keyword arguments")
-            if len(args) != 3:
+            if not args:
                 raise_type_error(
-                    tx, f"__setattr__ expected 2 arguments, got {len(args) - 1}"
+                    tx, "descriptor '__setattr__' of 'object' object needs an argument"
                 )
+            check_setattr_args(tx, args[1:], kwargs)
             obj, name_var, val = args
             obj = obj.realize()
             if (
@@ -2632,6 +2632,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_keys_match_guard()
+            if args[0].source:
+                tx.output.guard_on_key_order.add(args[0].source)
         if isinstance(
             args[0],
             (

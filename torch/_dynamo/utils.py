@@ -1510,14 +1510,15 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
-        (
+    # These types cannot be subclassed. Identity avoids spoofed __class__ and metaclass equality.
+    return any(
+        type(value) is function_type
+        for function_type in (
             types.FunctionType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-        ),
+        )
     )
 
 
@@ -3286,8 +3287,7 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     items = get_items_from_dict(obj)
-    dict_type: type[dict[K, V]] = type(obj)
-    if issubclass(dict_type, OrderedDict):
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
         key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
         return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
