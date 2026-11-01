@@ -1006,6 +1006,67 @@ kernel void avg_pool(
   }
 }
 
+// avg_pool for 2 pooling dims of tensors that are dense in NCHW or NHWC
+// (channels_last) layout, with the grid of pool2d_coords over tiles of
+// avg_pool2d_tile_rows output rows. Knowing the W stride at compile time is
+// what makes its loads fast.
+template <typename T, bool channels_last>
+kernel void avg_pool2d_dense(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant AvgPoolingParams<5>& params [[buffer(2)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr auto tile_rows = avg_pool2d_tile_rows;
+  auto dims = params.dims;
+  const auto C = params.input_sizes[dims - 3];
+  const auto IH = params.input_sizes[dims - 2],
+             IW = params.input_sizes[dims - 1];
+  const auto OH = params.output_sizes[dims - 2],
+             OW = params.output_sizes[dims - 1];
+  const int32_t stride_w = channels_last ? C : 1;
+  auto xy = pool2d_coords(pos, C, ceil_div(OH, tile_rows), channels_last);
+  auto oh0 = xy.h * tile_rows;
+  auto w = avg_pool_window(
+      xy.w,
+      IW,
+      params.kernel_size[1],
+      params.stride[1],
+      params.padding[1],
+      params.count_include_pad);
+  AvgPoolIterBounds<int32_t> h[tile_rows];
+  for (int32_t u = 0; u < tile_rows; u++) {
+    h[u] = avg_pool_window(
+        min(oh0 + u, OH - 1),
+        IH,
+        params.kernel_size[0],
+        params.stride[0],
+        params.padding[0],
+        params.count_include_pad);
+  }
+  input +=
+      channels_last ? xy.n * (IH * IW * C) + xy.c : int32_t(pos.z) * (IH * IW);
+
+  opmath_t<T> value_sum[tile_rows] = {};
+  for (auto ih = h[0].start; ih < h[tile_rows - 1].end; ih++) {
+    auto row = input + ih * (IW * stride_w);
+    opmath_t<T> row_sum = 0;
+    for (auto iw = w.start; iw < w.end; iw++) {
+      row_sum += static_cast<opmath_t<T>>(row[iw * stride_w]);
+    }
+    for (int32_t u = 0; u < tile_rows; u++) {
+      value_sum[u] += h[u].start <= ih && ih < h[u].end ? row_sum : 0;
+    }
+  }
+  output +=
+      channels_last ? xy.n * (OH * OW * C) + xy.c : int32_t(pos.z) * (OH * OW);
+  output += (oh0 * OW + xy.w) * stride_w;
+  for (int32_t u = 0; u < tile_rows && oh0 + u < OH; u++) {
+    opmath_t<T> divisor = params.has_divisor_override ? params.divisor_override
+                                                      : h[u].count * w.count;
+    output[u * (OW * stride_w)] = static_cast<T>(value_sum[u] / divisor);
+  }
+}
+
 // One simdgroup per output element, with lanes splitting the innermost window
 // dim. For large adaptive windows, where one thread per output leaves the GPU
 // mostly idle while each thread sums a whole window serially.
@@ -1355,10 +1416,17 @@ kernel void avg_pool2d_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],      \
       uint tid [[thread_position_in_grid]]);
 
+#define REGISTER_AVG_POOL2D_DENSE(DTYPE, CL, SUFFIX)            \
+  template [[host_name("avg_pool2d_dense_" SUFFIX "_" #DTYPE)]] \
+  kernel void avg_pool2d_dense<DTYPE, CL>(                      \
+      device const DTYPE* input [[buffer(0)]],                  \
+      device DTYPE* output [[buffer(1)]],                       \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],       \
+      uint3 pos [[thread_position_in_grid]]);
+
 #define REGISTER_POOL_OP(DTYPE)                                               \
   REGISTER_MAX_POOL(DTYPE, int32_t, "")                                       \
   REGISTER_MAX_POOL(DTYPE, int64_t, "_i64")                                   \
-  REGISTER_AVG_POOL(DTYPE, int32_t, "_i32")                                   \
                                                                               \
   template [[host_name("max_unpool_" #DTYPE)]] kernel void max_unpool<DTYPE>( \
       device DTYPE * output [[buffer(0)]],                                    \
@@ -1388,23 +1456,25 @@ kernel void avg_pool2d_backward(
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_ADAPTIVE_AVG_POOL(DTYPE, IDX_T, SUFFIX)                     \
-  template [[host_name("adaptive_avg_pool_simd_" #DTYPE #SUFFIX)]]           \
-  kernel void adaptive_avg_pool_simd<DTYPE, IDX_T>(                          \
+  template[[host_name("adaptive_avg_pool_simd_" #DTYPE SUFFIX)]] kernel void \
+  adaptive_avg_pool_simd<DTYPE, IDX_T>(                                      \
       device const DTYPE* input [[buffer(0)]],                               \
       device DTYPE* output [[buffer(1)]],                                    \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
       uint tid [[thread_position_in_grid]],                                  \
       uint lane [[thread_index_in_simdgroup]],                               \
       uint simd_width [[threads_per_simdgroup]]);                            \
-  template [[host_name("adaptive_avg_pool_backward_scale_" #DTYPE #SUFFIX)]] \
-  kernel void adaptive_avg_pool_backward_scale<DTYPE, IDX_T>(                \
+  template[[host_name(                                                       \
+      "adaptive_avg_pool_backward_scale_" #DTYPE SUFFIX)]] kernel void       \
+  adaptive_avg_pool_backward_scale<DTYPE, IDX_T>(                            \
       device const DTYPE* grad_output [[buffer(0)]],                         \
       device opmath_t<DTYPE>* scaled_grad [[buffer(1)]],                     \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
       device int2* out_ranges [[buffer(3)]],                                 \
       uint tid [[thread_position_in_grid]]);                                 \
-  template [[host_name("adaptive_avg_pool_backward_" #DTYPE #SUFFIX)]]       \
-  kernel void adaptive_avg_pool_backward<DTYPE, IDX_T>(                      \
+  template[                                                                  \
+      [host_name("adaptive_avg_pool_backward_" #DTYPE SUFFIX)]] kernel void  \
+  adaptive_avg_pool_backward<DTYPE, IDX_T>(                                  \
       device DTYPE * grad_input [[buffer(0)]],                               \
       device const opmath_t<DTYPE>* scaled_grad [[buffer(1)]],               \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
@@ -1427,8 +1497,8 @@ kernel void avg_pool2d_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],           \
       uint3 pos [[thread_position_in_grid]]);                       \
   REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")                         \
-  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, _i32);                 \
-  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int64_t, _i64)
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, "");                   \
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int64_t, "_i64")
 
 REGISTER_POOL_OP(float);
 REGISTER_POOL_OP(half);
@@ -1439,6 +1509,17 @@ REGISTER_POOL_OP(short);
 REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
+
+// Avg pooling supports the dtypes of the CPU kernels: floating types and long
+#define REGISTER_AVG_POOL_OP(DTYPE)               \
+  REGISTER_AVG_POOL(DTYPE, int32_t, "")           \
+  REGISTER_AVG_POOL2D_DENSE(DTYPE, false, "nchw") \
+  REGISTER_AVG_POOL2D_DENSE(DTYPE, true, "nhwc")
+
+REGISTER_AVG_POOL_OP(float);
+REGISTER_AVG_POOL_OP(half);
+REGISTER_AVG_POOL_OP(bfloat);
+REGISTER_AVG_POOL_OP(long);
 
 REGISTER_POOL_BACKWARD_OP_SERIAL(float, false);
 REGISTER_POOL_BACKWARD_OP_SERIAL(half, false);

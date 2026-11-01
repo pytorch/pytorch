@@ -4,6 +4,9 @@
 // Tile of outputs computed by each thread of max_pool2d_s1_nchw
 C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_cols = 8;
 C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_rows = 2;
+// Output rows computed by each thread of avg_pool2d, which share the input rows
+// their windows overlap on
+C10_METAL_CONSTEXPR int32_t avg_pool2d_tile_rows = 2;
 // grad_input columns computed by each thread of the 2D pooling backward
 // kernels, which share the gradients and divisors of their covering outputs
 C10_METAL_CONSTEXPR int32_t pool2d_backward_tile_cols = 4;

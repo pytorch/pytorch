@@ -90,6 +90,7 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
                 torch.uint8,
+                torch.bool,
                 torch.int8,
             ],
             "nn.functional.batch_norm": [
