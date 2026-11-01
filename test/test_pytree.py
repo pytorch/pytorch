@@ -15,6 +15,7 @@ from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -1190,7 +1191,16 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         ):
             python_pytree.treespec_dumps(spec)
 
-    def test_pytree_deserialize_names_dumps_never_writes(self):
+    @parametrize(
+        "case,reason",
+        [
+            ("not_a_namedtuple", "which is not a namedtuple class"),
+            ("namedtuple_without_a_name", "couldn't find a serialized name"),
+            ("type_without_a_name", "does not name one type"),
+        ],
+        name_fn=lambda case, reason: case,
+    )
+    def test_pytree_deserialize_names_dumps_never_writes(self, case, reason):
         # A namedtuple node must name a namedtuple class, and no node may use the
         # name that stands for every type without a serialized name.
         import json
@@ -1207,32 +1217,40 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         python_pytree.treespec_loads(serialized)
         no_name = python_pytree.NO_SERIALIZED_TYPE_NAME_FOUND
         protocol, root = json.loads(serialized)
-        for name, node in [
-            ("not a namedtuple", {**root, "context": "collections.defaultdict"}),
-            ("namedtuple without a name", {**root, "context": no_name}),
-            ("type without a name", {**root, "type": no_name, "context": "null"}),
-        ]:
-            with (
-                self.subTest(name),
-                self.assertRaisesRegex(NotImplementedError, "(?i)deserializ"),
-            ):
-                python_pytree.treespec_loads(json.dumps([protocol, node]))
+        node = {
+            "not_a_namedtuple": {**root, "context": "collections.defaultdict"},
+            "namedtuple_without_a_name": {**root, "context": no_name},
+            "type_without_a_name": {**root, "type": no_name, "context": "null"},
+        }[case]
+        # Some type is always registered under the placeholder name, so the
+        # case does not depend on which tests registered or removed one before.
+        with (
+            patch.dict(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE, {no_name: tuple}),
+            self.assertRaisesRegex(NotImplementedError, reason),
+        ):
+            python_pytree.treespec_loads(json.dumps([protocol, node]))
 
-    def test_pytree_loads_without_imports(self):
+    @parametrize(
+        "value,reason",
+        [
+            subtest(((0, {TestEnum.A: 0}), "module of an enum"), name="enum"),
+            subtest(
+                ((0, defaultdict(list, a=[0])), "module of a defaultdict factory"),
+                name="defaultdict",
+            ),
+        ],
+    )
+    def test_pytree_loads_without_imports(self, value, reason):
         # Loading an enum or a defaultdict factory imports its module.
-        spec = python_pytree.tree_structure(
-            ({TestEnum.A: 0}, defaultdict(list, a=[0]), (1, 2))
+        serialized = python_pytree.treespec_dumps(python_pytree.tree_structure(value))
+        self.assertEqual(
+            python_pytree.treespec_loads(serialized),
+            python_pytree.tree_structure(value),
         )
-        serialized = python_pytree.treespec_dumps(spec)
-        self.assertEqual(python_pytree.treespec_loads(serialized), spec)
-        for value, reason in [
-            ((0, {TestEnum.A: 0}), "module of an enum"),
-            ((0, defaultdict(list, a=[0])), "module of a defaultdict factory"),
-        ]:
-            with self.subTest(reason), self.assertRaisesRegex(ValueError, reason):
-                python_pytree._treespec_loads_without_imports(
-                    python_pytree.treespec_dumps(python_pytree.tree_structure(value))
-                )
+        with self.assertRaisesRegex(ValueError, reason):
+            python_pytree._treespec_loads_without_imports(serialized)
+
+    def test_pytree_loads_without_imports_plain(self):
         plain = python_pytree.tree_structure(({"a": 0}, [1, (2,)]))
         self.assertEqual(
             python_pytree._treespec_loads_without_imports(

@@ -11,6 +11,7 @@ import io
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    subtest,
     TemporaryFileName,
     TestCase,
 )
@@ -2632,6 +2634,12 @@ def forward(self, x):
         self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
 
 
+_FLAT_APPLY_HELPER = (
+    "torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"
+)
+_MOD_INDEX = "torch._dynamo._trace_wrapped_higher_order_op.ModIndex"
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestPredispatchSerialization(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -3064,102 +3072,130 @@ class TestPredispatchSerialization(TestCase):
         change(self._flat_apply_node(program))
         return self._load_exported_program(artifact, json.dumps(program).encode())
 
-    def test_predispatch_flat_apply_load_rejects_other_functions(self):
-        _, artifact = self._index_in_vmap_artifact()
-        func_name = (
-            b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
-        )
-        cls_name = b'"torch._dynamo._trace_wrapped_higher_order_op.ModIndex"'
-        # The cases below replace these strings, so each must appear once.
-        self.assertEqual(artifact.exported_program.count(func_name), 1)
-        self.assertEqual(artifact.exported_program.count(cls_name), 1)
-        deserialize(artifact)
+    def _load_with_name(self, artifact, replaced, name):
+        # Loads the artifact with the function name, or the autograd class name
+        # that the helper gets, replaced by another name.
+        old = json.dumps(
+            {"function": _FLAT_APPLY_HELPER, "class": _MOD_INDEX}[replaced]
+        ).encode()
+        self.assertEqual(artifact.exported_program.count(old), 1)
+        payload = artifact.exported_program.replace(old, json.dumps(name).encode())
+        return self._load_exported_program(artifact, payload)
 
-        def load(payload):
-            return self._load_exported_program(artifact, payload)
-
-        for old, new, reason in [
-            (func_name, b'"builtins.exec"', "cannot be used as a flat_apply function"),
-            (
-                func_name,
-                b'"torch.nn.parameter.Parameter"',
-                "cannot be used as a flat_apply function",
+    @parametrize(
+        "replaced,name,reason",
+        [
+            subtest(("function", "builtins.exec", "cannot be used"), name="exec"),
+            subtest(
+                ("function", "torch.nn.parameter.Parameter", "cannot be used"),
+                name="parameter",
             ),
-            (func_name, b'"os.system"', "not a class or function defined"),
-            (func_name, b'"torch.os.system"', "not a top-level"),
-            (func_name, b'"torch.builtins.exec"', "not a top-level"),
-            (func_name, b'"torch.does_not_exist.f"', "not a top-level"),
-            (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
-            (func_name, b'"__mp_main__.f"', "__main__ module"),
-            (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
-            (cls_name, b'"torch.autograd.Function"', "not a class or function defined"),
-            (cls_name, b'"torch.os.system"', "not a top-level"),
-        ]:
-            with self.subTest(name=new), self.assertRaisesRegex(SerializeError, reason):
-                load(artifact.exported_program.replace(old, new))
-
-        # Finding a flat_apply name never runs the code of a module outside
-        # _FLAT_APPLY_MODULES: not for a module that is not imported yet, not
-        # for a lazily loaded one, which runs on its first attribute read, and
-        # not for a module __getattr__.
-        with tempfile.TemporaryDirectory() as tmp:
-            ran = os.path.join(tmp, "ran")
-            path = os.path.join(tmp, "flat_apply_side_effect.py")
-            with open(path, "w") as f:
-                f.write(f"open({ran!r}, 'w').close()\n")
-            spec = importlib.util.spec_from_file_location("flat_apply_lazy", path)
-            spec.loader = importlib.util.LazyLoader(spec.loader)
-            holder = types.ModuleType("flat_apply_holder")
-            holder.lazy = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(holder.lazy)
-
-            def module_getattr(attr):
-                if attr == "F":
-                    open(ran, "w").close()
-                raise AttributeError(attr)
-
-            holder.__getattr__ = module_getattr
-            # Unlike patch.dict, this removes only these modules afterwards, not
-            # the torch modules that loading imports the first time it runs.
-            sys.modules[holder.__name__] = holder
-            try:
-                with patch.object(sys, "path", [tmp, *sys.path]):
-                    for new, reason in [
-                        (b'"flat_apply_side_effect.F"', "not a top-level"),
-                        (b'"flat_apply_holder.lazy"', "not a class or function"),
-                        (b'"flat_apply_holder.F"', "not a class or function"),
-                    ]:
-                        for old in (func_name, cls_name):
-                            with (
-                                self.subTest(name=new, replaces=old),
-                                self.assertRaisesRegex(SerializeError, reason),
-                            ):
-                                load(artifact.exported_program.replace(old, new))
-                            self.assertFalse(os.path.exists(ran))
-
-                    # Only a module that _FLAT_APPLY_MODULES lists gets imported.
-                    with (
-                        patch(
-                            "torch._export.serde.serialize._FLAT_APPLY_MODULES",
-                            {"flat_apply_side_effect"},
-                        ),
-                        self.assertRaisesRegex(
-                            SerializeError, "not a class or function"
-                        ),
-                    ):
-                        load(
-                            artifact.exported_program.replace(
-                                func_name, b'"flat_apply_side_effect.F"'
-                            )
-                        )
-                    self.assertTrue(os.path.exists(ran))
-            finally:
-                del sys.modules[holder.__name__]
-                sys.modules.pop("flat_apply_side_effect", None)
-
-    def test_predispatch_flat_apply_load_rejects_bad_specs(self):
+            subtest(
+                ("function", "os.system", "not a class or function defined"),
+                name="os_system",
+            ),
+            subtest(
+                ("function", "torch.os.system", "not a top-level"),
+                name="torch_os_system",
+            ),
+            subtest(
+                ("function", "torch.builtins.exec", "not a top-level"),
+                name="torch_builtins_exec",
+            ),
+            subtest(
+                ("function", "torch.does_not_exist.f", "not a top-level"),
+                name="missing",
+            ),
+            subtest(
+                ("function", "torch.utils.model_dump.__main__.main", "__main__ module"),
+                name="main",
+            ),
+            subtest(("function", "__mp_main__.f", "__main__ module"), name="mp_main"),
+            subtest(
+                ("class", "builtins.exec", "is not a torch.autograd.Function"),
+                name="class_exec",
+            ),
+            subtest(
+                ("class", "torch.autograd.Function", "not a class or function defined"),
+                name="class_alias",
+            ),
+            subtest(
+                ("class", "torch.os.system", "not a top-level"),
+                name="class_torch_os_system",
+            ),
+        ],
+    )
+    def test_predispatch_flat_apply_load_rejects_other_functions(
+        self, replaced, name, reason
+    ):
         _, artifact = self._index_in_vmap_artifact()
+        with self.assertRaisesRegex(SerializeError, reason):
+            self._load_with_name(artifact, replaced, name)
 
+    def _side_effect_modules(self):
+        # Modules whose code creates a marker file when it runs: one not imported
+        # yet, a lazily loaded one, which runs on its first attribute read, and
+        # one with a module __getattr__. Returns the marker path.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        ran = os.path.join(tmp, "ran")
+        path = os.path.join(tmp, "flat_apply_side_effect.py")
+        with open(path, "w") as f:
+            f.write(f"open({ran!r}, 'w').close()\n")
+        spec = importlib.util.spec_from_file_location("flat_apply_lazy", path)
+        spec.loader = importlib.util.LazyLoader(spec.loader)
+        holder = types.ModuleType("flat_apply_holder")
+        holder.lazy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(holder.lazy)
+
+        def module_getattr(attr):
+            if attr == "F":
+                open(ran, "w").close()
+            raise AttributeError(attr)
+
+        holder.__getattr__ = module_getattr
+        # Unlike patch.dict, this removes only these modules afterwards, not the
+        # torch modules that loading imports the first time it runs.
+        sys.modules[holder.__name__] = holder
+        self.addCleanup(sys.modules.pop, holder.__name__, None)
+        self.addCleanup(sys.modules.pop, "flat_apply_side_effect", None)
+        sys_path = patch.object(sys, "path", [tmp, *sys.path])
+        sys_path.start()
+        self.addCleanup(sys_path.stop)
+        return ran
+
+    @parametrize("replaced", ["function", "class"])
+    @parametrize(
+        "name,reason",
+        [
+            subtest(("flat_apply_side_effect.F", "not a top-level"), name="new"),
+            subtest(("flat_apply_holder.lazy", "not a class or function"), name="lazy"),
+            subtest(("flat_apply_holder.F", "not a class or function"), name="getattr"),
+        ],
+    )
+    def test_predispatch_flat_apply_load_runs_no_module_code(
+        self, replaced, name, reason
+    ):
+        _, artifact = self._index_in_vmap_artifact()
+        ran = self._side_effect_modules()
+        with self.assertRaisesRegex(SerializeError, reason):
+            self._load_with_name(artifact, replaced, name)
+        self.assertFalse(os.path.exists(ran))
+
+    def test_predispatch_flat_apply_load_imports_only_table_modules(self):
+        _, artifact = self._index_in_vmap_artifact()
+        ran = self._side_effect_modules()
+        with (
+            patch(
+                "torch._export.serde.serialize._FLAT_APPLY_MODULES",
+                {"flat_apply_side_effect"},
+            ),
+            self.assertRaisesRegex(SerializeError, "not a class or function"),
+        ):
+            self._load_with_name(artifact, "function", "flat_apply_side_effect.F")
+        self.assertTrue(os.path.exists(ran))
+
+    def _bad_spec_changes(self):
         def spec_of(args_and_kwargs):
             return pytree.treespec_dumps(pytree.tree_flatten(args_and_kwargs)[1])
 
@@ -3168,9 +3204,6 @@ class TestPredispatchSerialization(TestCase):
                 node["inputs"][1]["arg"]["as_string"] = in_spec
 
             return change
-
-        class Color(enum.Enum):
-            RED = 0
 
         def with_node(node):
             # The spec of (("name", node), {}), as save writes it.
@@ -3184,82 +3217,75 @@ class TestPredispatchSerialization(TestCase):
             root["children_spec"][1]["context"] = context
             return json.dumps([protocol, root])
 
+        class Color(enum.Enum):
+            RED = 0
+
         leaf = {"type": None, "context": None, "children_spec": []}
         no_name = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
         enum_spec = spec_of((("name", {Color.RED: 0}), {}))
         # JSON allows other spellings of the key, which load decodes too.
         escaped_enum_spec = enum_spec.replace("__enum__", "\\\\u005f_enum__")
         self.assertNotIn("__enum__", escaped_enum_spec)
-        for name, change, reason in [
+        return {
             # The input spec decides which input the helper gets as the class
             # name. For a dict, *args would pass its keys, not args[0].
-            (
-                "class name as a keyword",
-                set_spec(spec_of(((0, 0), {"function_cls_name": 0}))),
-                "name as the first input",
-            ),
-            (
-                "arguments as a dict",
-                set_spec(spec_of(({0: 0, 1: 0, 2: [0]}, {}))),
-                "name as the first input",
-            ),
+            "keyword": set_spec(spec_of(((0, 0), {"function_cls_name": 0}))),
+            "dict_args": set_spec(spec_of(({0: 0, 1: 0, 2: [0]}, {}))),
+            "kwargs_context": set_spec(dict_context("5")),
             # Loading an enum or a defaultdict factory would import its module.
-            ("enum", set_spec(enum_spec), "module of an enum"),
-            ("escaped enum", set_spec(escaped_enum_spec), "module of an enum"),
-            (
-                "defaultdict",
-                set_spec(spec_of((("name", defaultdict(int, a=0)), {}))),
-                "module of a defaultdict factory",
-            ),
+            "enum": set_spec(enum_spec),
+            "escaped_enum": set_spec(escaped_enum_spec),
+            "defaultdict": set_spec(spec_of((("name", defaultdict(int, a=0)), {}))),
             # Save never writes the name of a type without a serialized name.
-            (
-                "type without a name",
-                set_spec(with_node({**leaf, "type": no_name, "context": "{}"})),
-                no_name,
+            "no_name_type": set_spec(
+                with_node({**leaf, "type": no_name, "context": "{}"})
             ),
-            (
-                "namedtuple without a name",
-                set_spec(
-                    with_node(
-                        {
-                            "type": "collections.namedtuple",
-                            "context": no_name,
-                            "children_spec": [leaf],
-                        }
-                    )
-                ),
-                no_name,
+            "no_name_namedtuple": set_spec(
+                with_node(
+                    {
+                        "type": "collections.namedtuple",
+                        "context": no_name,
+                        "children_spec": [leaf],
+                    }
+                )
             ),
-            (
-                "not a treespec",
-                set_spec("not a treespec"),
-                "Cannot load the input spec",
+            "not_a_treespec": set_spec("not a treespec"),
+            "no_function": lambda node: node["inputs"].pop(0),
+            "function_not_a_string": lambda node: node["inputs"][0]["arg"].update(
+                as_operator=5
             ),
-            (
-                "kwargs context that is not a list of keys",
-                set_spec(dict_context("5")),
-                "name as the first input",
-            ),
-            (
-                "no function",
-                lambda node: node["inputs"].pop(0),
-                "does not start with its function",
-            ),
-            (
-                "function name that is not a string",
-                lambda node: node["inputs"][0]["arg"].update(as_operator=5),
-                "does not start with its function",
-            ),
-        ]:
-            with self.subTest(name), self.assertRaisesRegex(SerializeError, reason):
-                self._load_changed(artifact, change)
+        }
 
-    def test_predispatch_flat_apply_load_rejects_other_inputs(self):
+    @parametrize(
+        "case,reason",
+        [
+            ("keyword", "name as the first input"),
+            ("dict_args", "name as the first input"),
+            ("kwargs_context", "name as the first input"),
+            ("enum", "module of an enum"),
+            ("escaped_enum", "module of an enum"),
+            ("defaultdict", "module of a defaultdict factory"),
+            ("no_name_type", "does not name one type"),
+            ("no_name_namedtuple", "couldn't find a serialized name"),
+            ("not_a_treespec", "Cannot load the input spec"),
+            ("no_function", "does not start with its function"),
+            ("function_not_a_string", "does not start with its function"),
+        ],
+        name_fn=lambda case, reason: case,
+    )
+    def test_predispatch_flat_apply_load_rejects_bad_specs(self, case, reason):
         _, artifact = self._index_in_vmap_artifact()
-        helper = (
-            "torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"
-        )
+        # Some type is always registered under the placeholder name, so these
+        # cases do not depend on which tests registered or removed one before.
+        no_name = {pytree.NO_SERIALIZED_TYPE_NAME_FOUND: tuple}
+        with (
+            patch.dict(pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE, no_name),
+            self.assertRaisesRegex(SerializeError, reason),
+        ):
+            self._load_changed(artifact, self._bad_spec_changes()[case])
 
+    @staticmethod
+    def _other_input_changes():
         def set_last(**fields):
             def change(node):
                 node["inputs"][-1].update(fields)
@@ -3268,92 +3294,88 @@ class TestPredispatchSerialization(TestCase):
 
         def call_helper_directly(node):
             # The helper gets the name of the class to call as its first input.
-            node["target"] = helper
+            node["target"] = _FLAT_APPLY_HELPER
             node["inputs"] = node["inputs"][2:]
             node["inputs"][0]["arg"] = {"as_string": "os.system"}
 
-        # Looking up a name outside torch.ops reads attributes of torch, which
-        # can import a torch module, so load refuses the name first.
-        onnx_imported = "torch.onnx" in sys.modules
-        with self.assertRaisesRegex(SerializeError, "not an operator overload"):
-            self._load_changed(
-                artifact, set_last(arg={"as_operator": "torch.onnx.export"})
-            )
-        self.assertEqual("torch.onnx" in sys.modules, onnx_imported)
-
-        for name, change, reason in [
+        return {
             # An input that names an operator would reach the function as a
             # callable.
-            (
-                "torch.os.system",
-                set_last(arg={"as_operator": "torch.os.system"}),
-                "not an operator overload",
-            ),
-            (
-                "module",
-                set_last(arg={"as_operator": "torch.os"}),
-                "not an operator overload",
-            ),
-            (
-                "helper",
-                set_last(arg={"as_operator": helper}),
-                "not an operator overload",
-            ),
+            "torch_os_system": set_last(arg={"as_operator": "torch.os.system"}),
+            "module": set_last(arg={"as_operator": "torch.os"}),
+            "helper": set_last(arg={"as_operator": _FLAT_APPLY_HELPER}),
             # A dict of arguments could hold one too, and export passes neither
             # dicts nor keyword arguments through flat_apply.
-            (
-                "dict",
-                set_last(
-                    arg={
-                        "as_string_to_argument": {
-                            "f": {"as_operator": "torch.os.system"}
-                        }
-                    }
-                ),
-                "of kind as_string_to_argument",
+            "dict": set_last(
+                arg={"as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}}
             ),
-            ("keyword", set_last(arg={"as_int": 0}, kind=2), "keyword input"),
-            ("named", set_last(name="checked_output"), "keyword input"),
+            "keyword": set_last(arg={"as_int": 0}, kind=2),
+            "named": set_last(name="checked_output"),
             # Called directly, the helper would import the module of the class
             # name it gets when the program runs.
-            (
-                "helper called directly with another name",
-                call_helper_directly,
-                "not a class or function defined",
-            ),
-        ]:
-            with self.subTest(name), self.assertRaisesRegex(SerializeError, reason):
-                self._load_changed(artifact, change)
+            "direct_helper_call": call_helper_directly,
+        }
 
+    @parametrize(
+        "case,reason",
+        [
+            ("torch_os_system", "not an operator overload"),
+            ("module", "not an operator overload"),
+            ("helper", "not an operator overload"),
+            ("dict", "of kind as_string_to_argument"),
+            ("keyword", "keyword input"),
+            ("named", "keyword input"),
+            ("direct_helper_call", "not a class or function defined"),
+        ],
+        name_fn=lambda case, reason: case,
+    )
+    def test_predispatch_flat_apply_load_rejects_other_inputs(self, case, reason):
+        _, artifact = self._index_in_vmap_artifact()
+        with self.assertRaisesRegex(SerializeError, reason):
+            self._load_changed(artifact, self._other_input_changes()[case])
+
+    def test_predispatch_flat_apply_load_refuses_operator_names_outside_torch_ops(
+        self,
+    ):
+        # Looking up such a name reads attributes of torch, which can import a
+        # torch module, so load refuses the name first.
+        _, artifact = self._index_in_vmap_artifact()
+        onnx_imported = "torch.onnx" in sys.modules
+
+        def change(node):
+            node["inputs"][-1]["arg"] = {"as_operator": "torch.onnx.export"}
+
+        with self.assertRaisesRegex(SerializeError, "not an operator overload"):
+            self._load_changed(artifact, change)
+        self.assertEqual("torch.onnx" in sys.modules, onnx_imported)
+
+    @parametrize(
+        "case,reason",
+        [
+            ("keyword", "keyword input"),
+            ("higher_order_op", "not an operator overload"),
+            ("direct_helper_call", "not a class or function defined"),
+        ],
+        name_fn=lambda case, reason: case,
+    )
+    def test_predispatch_flat_apply_save_rejects_other_inputs(self, case, reason):
         # Save refuses the same inputs and calls, so it never writes what load
         # refuses.
-        def keyword_input(node):
+        ep, _ = self._index_in_vmap_artifact()
+        (node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        if case == "keyword":
             node.kwargs = {"checked_output": False}
-
-        def higher_order_op_input(node):
+        elif case == "higher_order_op":
             node.args = (*node.args[:-1], torch.ops.higher_order.cond)
-
-        def direct_helper_call(node):
+        else:
             node.target = (
                 torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             )
             node.args = ("os.system", *node.args[3:])
-
-        for change, reason in [
-            (keyword_input, "keyword input"),
-            (higher_order_op_input, "not an operator overload"),
-            (direct_helper_call, "not a class or function defined"),
-        ]:
-            ep, _ = self._index_in_vmap_artifact()
-            (node,) = ep.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.flat_apply
-            )
-            change(node)
-            with (
-                self.subTest(change.__name__),
-                self.assertRaisesRegex(SerializeError, reason),
-            ):
-                serialize(ep)
+        with self.assertRaisesRegex(SerializeError, reason):
+            serialize(ep)
 
     def test_predispatch_custom_autograd_helper_called_directly(self):
         # A pass may call the helper directly instead of through flat_apply.
@@ -3688,6 +3710,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestSaveLoadAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
 )
+instantiate_parametrized_tests(TestPredispatchSerialization)
 
 
 if __name__ == "__main__":
