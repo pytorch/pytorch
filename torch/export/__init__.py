@@ -363,8 +363,8 @@ def load(
         ep = torch.export.load("exported_program.pt2")
 
     This is not a safety guarantee: as the warning above says, load unpickles
-    data, which can import modules, and so can the specs of the program's
-    inputs and outputs.
+    data, and other parts of the file, such as the specs of the program's
+    inputs and outputs, can import modules too.
 
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
