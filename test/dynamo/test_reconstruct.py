@@ -83,6 +83,57 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    @parametrize("container_type", [None, list, dict, set])
+    @parametrize("nested", [False, True])
+    def test_sourced_constant_in_aggregates(self, container_type, nested):
+        def fn(x, key):
+            contents = key
+            if container_type is not None:
+                contents = (
+                    {key: None} if container_type is dict else container_type((key,))
+                )
+            value = slice(contents, None)
+            if nested:
+                value = ((slice(value, None),),)
+            return x + 1, ((key,),), frozenset((key,)), value
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        keys = [b"layer0weight".decode() for _ in range(2)]
+        self.assertIsNot(keys[0], keys[1])
+        x = torch.ones(1)
+        previous = None
+        for key in keys:
+            result = compiled(x, key)
+            self.assertEqual(result, fn(x, key))
+            self.assertIs(result[1][0][0], key)
+            self.assertIs(next(iter(result[2])), key)
+            contents = result[3][0][0].start.start if nested else result[3].start
+            if container_type is None:
+                self.assertIs(contents, key)
+            else:
+                self.assertIs(next(iter(contents)), key)
+                self.assertIsNot(contents, previous)
+                previous = contents
+        if container_type is None:
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("graph_break", [False, True])
+    def test_dynamic_slice_reconstruct(self, graph_break):
+        def fn(x):
+            result = x + 1
+            value = slice(0, x.shape[0] - 1)
+            if graph_break:
+                torch._dynamo.graph_break()
+            return result, value
+
+        compiled = torch.compile(
+            fn, backend="eager", dynamic=True, fullgraph=not graph_break
+        )
+        for size in (4, 6):
+            x = torch.randn(size)
+            self.assertEqual(compiled(x), fn(x))
+
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""
         captured = {}
