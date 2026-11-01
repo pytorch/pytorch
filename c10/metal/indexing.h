@@ -93,7 +93,6 @@ inline array<int, sizeof...(S)> offsets_from_thread_index(
   for (uint dim = 0; dim < ndim; ++dim) {
     uint pos = idx;
     if (dim + 1 < ndim) {
-      // Copy the aligned box out of constant memory: one 16-byte load, and
       // Metal cannot call member functions on constant-address-space objects.
       const auto d = sizes[dim];
       const auto qr = d.d.divmod(pos);

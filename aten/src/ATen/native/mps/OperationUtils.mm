@@ -2,7 +2,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
-#include <c10/util/IntegerDivider.h>
 #include <functional>
 #include <mutex>
 #include <stdexcept>

@@ -101,7 +101,7 @@ struct IntDivider<unsigned int> {
 
   IntDivider() = default;
 
-#if !defined(__METAL__) // host-only: needs assert and 64-bit arithmetic
+#if !defined(__METAL__) // host-only: kernels never build dividers
   IntDivider(unsigned int d) : divisor(d) {
     assert(divisor >= 1 && divisor <= INT32_MAX);
 
