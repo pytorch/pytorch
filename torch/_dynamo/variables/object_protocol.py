@@ -24,6 +24,7 @@ from torch._C._dynamo import (
     get_type_slots,
     get_type_tp_name,
     has_slot,
+    is_generic_getattr,
     PyMappingSlots,
     PyNumberSlots,
     PySequenceSlots,
@@ -2442,7 +2443,8 @@ def object_generic_getattr(
       4. Non-data descriptor -> invoke tp_descr_get
       5. Plain class variable -> wrap in VT
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
-      7. AttributeError
+      7. AttributeError for a known runtime type with generic attribute lookup;
+         otherwise defer to the tracker's fallback.
     """
     from .user_defined import is_data_descriptor
 
@@ -2500,12 +2502,19 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # The MRO and instance lookup above found no attribute. Builtin iterable
-    # trackers with no instance storage cannot acquire one dynamically.
+    # A tracker can model a different type, e.g. odict_values as ListVariable.
+    # Only generic lookup on the actual runtime type proves the attribute absent.
+    modeled_type = obj._cpython_type
+    modeled_types = modeled_type if isinstance(modeled_type, tuple) else (modeled_type,)
     if (
-        (obj.tp_iter is not None or obj.tp_as_sequence.sq_item is not None)
-        and not py_type.__dictoffset__
+        not py_type.__dictoffset__
+        and is_generic_getattr(py_type)
         and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+        and (
+            type(tx.output.resolve_source_value(obj.source)) is py_type
+            if obj.source
+            else any(py_type is candidate for candidate in modeled_types)
+        )
     ):
         raise_observed_exception(
             AttributeError,
@@ -2517,26 +2526,6 @@ def object_generic_getattr(
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
-
-
-def generic_getmethod(
-    tx: "InstructionTranslatorBase", obj: VariableTracker, name: str
-) -> VariableTracker:
-    result = generic_getattr(tx, obj, name)
-    if (
-        isinstance(obj, variables.UserDefinedObjectVariable)
-        and isinstance(result, variables.BoundBuiltinMethodVariable)
-        and result.obj is obj
-    ):
-        # Argument evaluation can shadow the method after LOAD_METHOD chose its owner.
-        qualname = obj.method_load_qualname(tx, name, result.descriptor)
-        return result.clone(
-            is_method_load=True,
-            method_load_qualname=qualname,
-            # getattr's source reconstructs a bound method, not descriptor + self.
-            source=None if qualname is not None else result.source,
-        )
-    return result
 
 
 def generic_getattr(

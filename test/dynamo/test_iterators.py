@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
+import itertools
 import sys
 import types
 import unittest
+from collections import deque
 
 import torch
 import torch._dynamo.test_case
@@ -137,6 +139,70 @@ class TestIterators(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    @parametrize("name", ["__name__", "__qualname__", "__mro__", "mro", "missing"])
+    def test_iterator_missing_instance_attribute(self, name):
+        def fn(x):
+            iterator = zip([1], [2])
+            return x + 1, hasattr(iterator, name)
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), (x + 1, False))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("method", ["__getattr__", "__getattribute__"])
+    def test_slotted_iterable_custom_attribute(self, method):
+        class Iterable:
+            __slots__ = ()
+
+            def __iter__(self):
+                return iter((1,))
+
+            def get_attribute(self, name):
+                if name == "missing":
+                    return 7
+                return object.__getattribute__(self, name)
+
+            if method == "__getattr__":
+                __getattr__ = get_attribute
+            else:
+                __getattribute__ = get_attribute
+
+        def fn(x, obj):
+            return x + obj.missing, hasattr(obj, "missing")
+
+        x, obj = torch.ones(1), Iterable()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
+        )
+
+    @parametrize(
+        "factory, args",
+        [
+            (bytearray, ()),
+            (itertools.chain, ()),
+            (itertools.count, ()),
+            (itertools.repeat, (1,)),
+            (deque, ()),
+            (torch.Size, ([],)),
+        ],
+    )
+    @parametrize("call_method", [False, True])
+    def test_builtin_iterable_missing_attribute_message(
+        self, factory, args, call_method
+    ):
+        def fn(x):
+            obj = factory(*args)
+            try:
+                if call_method:
+                    obj.sort()
+                else:
+                    obj.missing
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @make_dynamo_test
     def test_list_iteration(self):
