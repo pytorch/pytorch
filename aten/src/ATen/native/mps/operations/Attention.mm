@@ -16,7 +16,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty.h>
 #endif
@@ -414,6 +413,39 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   return {out.view_symint(out_shape), at::empty({0}, q_.options())};
 }
 
-REGISTER_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+// The Metal kernels above are exposed as the flash attention backend; anything
+// they can not handle (dropout, backward) goes to the math backend.
+static int64_t _fused_sdp_choice_mps(const Tensor& query,
+                                     const Tensor& key,
+                                     const Tensor& value,
+                                     const std::optional<Tensor>& attn_mask,
+                                     double dropout_p,
+                                     bool /*is_causal*/,
+                                     std::optional<double> /*scale*/,
+                                     bool /*enable_gqa*/) {
+  auto& ctx = at::globalContext();
+  const bool requires_grad = GradMode::is_enabled() &&
+      (query.requires_grad() || key.requires_grad() || value.requires_grad() ||
+       (attn_mask && attn_mask->requires_grad()));
+  std::string_view reason;
+  if (!ctx.userEnabledFlashSDP()) {
+    reason = "it is disabled";
+  } else if (dropout_p > 0.0) {
+    reason = "it does not support dropout";
+  } else if (requires_grad) {
+    reason = "it does not support backward";
+  } else if (!c10::isFloatingType(query.scalar_type())) {
+    reason = "it only supports floating point inputs";
+  } else {
+    return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
+  }
+  TORCH_CHECK(ctx.userEnabledMathSDP(),
+              "No available kernel for scaled_dot_product_attention on MPS: flash attention was not used because ",
+              reason,
+              " and the math backend is disabled.");
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
+REGISTER_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps)
 } // namespace native
 } // namespace at
