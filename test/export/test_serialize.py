@@ -2935,9 +2935,12 @@ class TestPredispatchSerialization(TestCase):
 
             # Removing a type without a serialized name also removes the
             # placeholder entry that other such types share, so restore it.
-            serialized_types = patch.dict(pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE)
-            serialized_types.start()
-            self.addCleanup(serialized_types.stop)
+            placeholder = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
+            self.addCleanup(
+                pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE.__setitem__,
+                placeholder,
+                pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[placeholder],
+            )
             pytree.register_constant(Config)
             self.addCleanup(pytree._deregister_pytree_node, Config)
 
@@ -3328,8 +3331,9 @@ class TestPredispatchSerialization(TestCase):
             # callable.
             "torch_os_system": set_last(arg={"as_operator": "torch.os.system"}),
             "module": set_last(arg={"as_operator": "torch.os"}),
-            # Looking up such a name reads attributes of torch, which can import
-            # a torch module such as torch.onnx, so load refuses it first.
+            # Load refuses such a name by its text, because looking it up reads
+            # attributes of torch, which can import a torch module such as
+            # torch.onnx.
             "torch_onnx_export": set_last(arg={"as_operator": "torch.onnx.export"}),
             "unregistered_op": set_last(
                 arg={"as_operator": "torch.ops.flat_apply_test_ns.op.default"}

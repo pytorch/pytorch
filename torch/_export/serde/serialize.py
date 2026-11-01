@@ -714,10 +714,11 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-# The torch modules that define the flat_apply functions export produces, such
-# as ModIndex, which indexing inside vmap uses. Load finds functions only in
-# imported modules, and this module imports these, so programs that use them
-# load after a plain ``import torch``.
+# The torch modules that define names that export writes into flat_apply
+# nodes: the helper for custom autograd functions, and ModIndex, the autograd
+# function that indexing inside vmap passes to it. Load finds names only in
+# imported modules, so this module imports these. The tuple exists only to
+# keep those imports, so programs that use them load after ``import torch``.
 _TORCH_FLAT_APPLY_MODULES = (
     torch._dynamo._trace_wrapped_higher_order_op,
     torch.export.custom_ops,
@@ -931,7 +932,7 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
     Find the custom autograd function that the helper for custom autograd
     functions calls by name, with ``_find_imported``. The helper imports that
     name's module when the program runs, so save and load check the name
-    first, whether the helper is called through flat_apply or directly.
+    first in a flat_apply call of the helper and in a direct call.
     """
     function_cls = _find_imported(name) if isinstance(name, str) else None
     if not (
