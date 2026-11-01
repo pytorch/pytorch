@@ -8,6 +8,9 @@ import multiprocessing
 import os
 import operator
 import random
+import subprocess
+import sys
+import textwrap
 import traceback
 import unittest
 from typing import NamedTuple, TYPE_CHECKING
@@ -30,6 +33,8 @@ hu.assert_deadline_disabled()
 
 
 import torch.backends.xnnpack
+from torch._subclasses import CrossRefFakeMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.ao.quantization import PerChannelMinMaxObserver
 from torch.testing._internal.common_cuda import (
     SM80OrLater,
@@ -60,11 +65,13 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_PPC,
     IS_SANDCASTLE,
+    parametrize,
     raise_on_run_directly,
     TestCase,
 )
 from torch.testing._internal.optests import opcheck
 
+from torch.utils import _pytree as pytree
 from torch.utils.cpp_extension import ROCM_HOME
 
 np_dtype = {torch.quint8: np.uint8, torch.qint8: np.int8, torch.qint32: np.int32}
@@ -9087,6 +9094,252 @@ class TestQuantizedConv(TestCase):
 
 
 
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not available")
+class TestQConvPointwisePrepack(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def setUp(self):
+        super().setUp()
+        if not torch._C._dispatch_has_kernel_for_dispatch_key(
+            "onednn::qconv_pointwise_prepack", "MkldnnCPU"
+        ):
+            self.skipTest("qconv pointwise prepack requires oneDNN 3.1 or later")
+
+    def _inputs(
+        self,
+        device,
+        *,
+        output_dtype=torch.float32,
+        kernel=1,
+        with_bias=True,
+        per_channel=True,
+        attr="none",
+        scalars=(),
+        algorithm="",
+    ):
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        w = torch.randint(
+            -8, 8, (32, 16, kernel, kernel), dtype=torch.int8, device=device
+        )
+        scales = torch.full((32 if per_channel else 1,), 0.125, device=device)
+        zeros = torch.zeros_like(scales, dtype=torch.int64)
+        bias = torch.randn(32, device=device) if with_bias else None
+        geometry = ([1, 1], [kernel // 2] * 2, [1, 1], 1)
+        packed = torch.ops.onednn.qconv_prepack(
+            w, scales, 0.25, 3, *geometry, list(x.shape)
+        )
+        floating_output = output_dtype in (torch.float32, torch.bfloat16)
+        output_scale = 1.0 if floating_output else 0.5
+        output_zp = 3 if output_dtype in (None, torch.uint8) else 0
+        post_ops = (
+            output_scale,
+            output_zp,
+            output_dtype,
+            attr,
+            list(scalars),
+            algorithm,
+        )
+        conv_args = (x, 0.25, 3, packed, scales, zeros, bias, *geometry, *post_ops)
+        pack_args = (packed, scales, bias, 0.25, 3, list(x.shape), *geometry, *post_ops)
+        return conv_args, pack_args
+
+    @parametrize(
+        "output_dtype", [None, torch.uint8, torch.int8, torch.float32, torch.bfloat16]
+    )
+    @parametrize("kernel", [1, 3])
+    @parametrize("with_bias", [False, True])
+    @parametrize("per_channel", [False, True])
+    def test_prepack(self, device, output_dtype, kernel, with_bias, per_channel):
+        conv_args, pack_args = self._inputs(
+            device,
+            output_dtype=output_dtype,
+            kernel=kernel,
+            with_bias=with_bias,
+            per_channel=per_channel,
+        )
+        expected = torch.ops.onednn.qconv_pointwise(*conv_args)
+        packed = torch.ops.onednn.qconv_pointwise_prepack(*pack_args)
+        actual = torch.ops.onednn.qconv_pointwise(
+            *conv_args[:3], packed, *conv_args[4:]
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize(
+        "attr,scalars,algorithm",
+        [
+            ("relu", [], ""),
+            ("hardtanh", [-0.5, 4.0], ""),
+            ("hardswish", [], ""),
+            ("swish", [], ""),
+        ],
+    )
+    def test_post_ops(self, device, attr, scalars, algorithm):
+        conv_args, pack_args = self._inputs(
+            device, attr=attr, scalars=scalars, algorithm=algorithm
+        )
+        expected = torch.ops.onednn.qconv_pointwise(*conv_args)
+        packed = torch.ops.onednn.qconv_pointwise_prepack(*pack_args)
+        self.assertEqual(
+            torch.ops.onednn.qconv_pointwise(*conv_args[:3], packed, *conv_args[4:]),
+            expected,
+            atol=0,
+            rtol=0,
+        )
+
+    def test_independent_storage(self, device):
+        conv_args, pack_args = self._inputs(device)
+        expected = torch.ops.onednn.qconv_pointwise(*conv_args)
+        packed = torch.ops.onednn.qconv_pointwise_prepack(*pack_args)
+        again = torch.ops.onednn.qconv_pointwise_prepack(packed, *pack_args[1:])
+        zeros = torch.zeros(pack_args[0].shape, dtype=torch.int8, device=device)
+        zero_packed = torch.ops.onednn.qconv_pointwise_prepack(
+            zeros.to_mkldnn(), *pack_args[1:]
+        )
+        packed.copy_(zero_packed)
+        self.assertEqual(
+            torch.ops.onednn.qconv_pointwise(*conv_args[:3], again, *conv_args[4:]),
+            expected,
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(
+            torch.ops.onednn.qconv_pointwise(*conv_args), expected, atol=0, rtol=0
+        )
+
+    @parametrize(
+        "argument,value,message",
+        [
+            ("w_scale", 0, "one value per output channel"),
+            ("w_scale", 2, "one value per output channel"),
+            ("x_shape", [1, 15, 8, 8], "input channels must match"),
+            ("x_shape", [1, 16, 8], "supports Conv2d"),
+            ("stride", [0, 1], "stride must be positive"),
+            ("stride", [1, -1], "stride must be positive"),
+            ("stride", [1], "expects 2D parameters"),
+            ("groups", 2, "supports groups=1"),
+            ("output_dtype", torch.float64, "unsupported qconv pointwise output dtype"),
+            (
+                "output_scale",
+                0.5,
+                "floating-point qconv output requires default output qparams",
+            ),
+            ("attr", "invalid", "unsupported unary post op"),
+        ],
+    )
+    def test_invalid_inputs(self, device, argument, value, message):
+        _, pack_args = self._inputs(device)
+        op = torch.ops.onednn.qconv_pointwise_prepack.default
+        kwargs = dict(zip((arg.name for arg in op._schema.arguments), pack_args))
+        if argument == "w_scale":
+            value = torch.ones(value, device=device)
+        kwargs[argument] = value
+        with self.assertRaisesRegex(RuntimeError, message):
+            op(**kwargs)
+
+    @parametrize("use_kwargs", [False, True])
+    def test_fake(self, device, use_kwargs):
+        _, pack_args = self._inputs(device)
+        op = torch.ops.onednn.qconv_pointwise_prepack.default
+        # opcheck's input cloning cannot access MKLDNN storage. Run its fake
+        # metadata comparison directly, without the input-cloning wrapper.
+        with CrossRefFakeMode(ignore_op_fn=lambda func: func.namespace == "aten"):
+            expected = op(*pack_args)
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
+            fake_args = pytree.tree_map_only(torch.Tensor, mode.from_tensor, pack_args)
+            if use_kwargs:
+                kwargs = dict(
+                    zip((arg.name for arg in op._schema.arguments), fake_args)
+                )
+                actual = op(**kwargs)
+            else:
+                actual = op(*fake_args)
+        self.assertIs(actual.fake_mode, mode)
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual.device, expected.device)
+        self.assertEqual(actual.layout, expected.layout)
+        self.assertFalse(torch._C._is_alias_of(actual, fake_args[0]))
+
+    def test_export(self, device):
+        class M(torch.nn.Module):
+            def forward(self, weight, scales):
+                return torch.ops.onednn.qconv_pointwise_prepack(
+                    weight.to_mkldnn(),
+                    scales,
+                    None,
+                    0.25,
+                    3,
+                    [1, 16, 8, 8],
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    1,
+                    1.0,
+                    0,
+                    torch.float32,
+                    "none",
+                    [],
+                    "",
+                ).to_dense()
+
+        weight = torch.randint(-8, 8, (32, 16, 1, 1), dtype=torch.int8, device=device)
+        scales = torch.full((32,), 0.125, device=device)
+        exported = torch.export.export(M(), (weight, scales), strict=True)
+        self.assertTrue(
+            any(
+                node.target is torch.ops.onednn.qconv_pointwise_prepack.default
+                for node in exported.graph.nodes
+            )
+        )
+        self.assertEqual(exported.module()(weight, scales), weight)
+
+    @parametrize("attr", ["none", "relu"])
+    def test_no_runtime_weight_reorder(self, device, attr):
+        # A subprocess captures oneDNN's native stdout and isolates verbose state.
+        code = textwrap.dedent(f"""
+            import torch
+            torch.set_num_threads(1)
+            device = {device!r}
+            x = torch.ones((1, 16, 8, 8), dtype=torch.uint8, device=device)
+            w = torch.ones((32, 16, 1, 1), dtype=torch.int8, device=device)
+            scales = torch.full((32,), 0.125, device=device)
+            zeros = torch.zeros(32, dtype=torch.int64, device=device)
+            geometry = ([1, 1], [0, 0], [1, 1], 1)
+            post_ops = (1.0, 0, torch.float32, {attr!r}, [], "")
+            initial = torch.ops.onednn.qconv_prepack(
+                w, scales, 0.25, 3, *geometry, list(x.shape))
+            with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
+                packed = torch.ops.onednn.qconv_pointwise_prepack(
+                    initial, scales, None, 0.25, 3, list(x.shape), *geometry, *post_ops)
+                print("RUNTIME", flush=True)
+                for _ in range(2):
+                    torch.ops.onednn.qconv_pointwise(
+                        x, 0.25, 3, packed, scales, zeros, None, *geometry, *post_ops)
+        """)
+        result = subprocess.run(
+            [sys.executable, "-u", "-c", code],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "ONEDNN_VERBOSE": "0", "DNNL_VERBOSE": "0"},
+        )
+        if "Failed to set MKLDNN into verbose mode" in result.stderr:
+            self.skipTest("oneDNN verbose support is unavailable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        packing, runtime = result.stdout.split("RUNTIME\n", 1)
+        self.assertIn(",reorder,", packing)
+        executions = [line for line in runtime.splitlines() if ",exec," in line]
+        self.assertEqual(sum(",convolution," in line for line in executions), 2)
+        self.assertFalse(
+            any(
+                ",reorder," in line and "src_s8" in line and "dst_s8" in line
+                for line in executions
+            ),
+            runtime,
+        )
+
+
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
@@ -9801,6 +10054,7 @@ class TestQuantizedWithMinMax(TestCase):
 
 
 instantiate_device_type_tests(TestQuantizedMaxPool2dPT2EDevice, globals(), only_for=("cpu", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestQConvPointwisePrepack, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")

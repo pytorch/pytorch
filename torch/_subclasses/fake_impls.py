@@ -1991,6 +1991,23 @@ def to_mkldnn(
     return FakeTensor(fake_mode, out, fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS)
 
 
+if torch._C._has_mkldnn:
+
+    @register_op_impl(torch.ops.onednn.qconv_pointwise_prepack.default)
+    def qconv_pointwise_prepack(
+        fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        _, normalized = _normalize_function_or_error(
+            func, args, kwargs, normalize_to_only_use_kwargs=True
+        )
+        weight = normalized["qw"]
+        # Repacking preserves logical metadata and creates independent storage.
+        with fake_mode:
+            return torch.empty(
+                weight.shape, dtype=weight.dtype, device=weight.device
+            ).to_mkldnn()
+
+
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
     lambda func: is_builtin(func)
