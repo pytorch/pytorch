@@ -402,7 +402,8 @@ class Vectorized<float> {
     // the result rounds once and does not overflow.
     auto vec_n = _mm256_cvtps_epi32(vec_fx);
     auto vec_scaled = _mm256_castsi256_ps(_mm256_add_epi32(
-        _mm256_castps_si256(vec_res), _mm256_slli_epi32(vec_n, n_mantissa_bits)));
+        _mm256_castps_si256(vec_res),
+        _mm256_slli_epi32(vec_n, n_mantissa_bits)));
     const auto rare = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
         _mm256_add_epi32(vec_n, _mm256_set1_epi32(INT32_MIN + 125)),
         _mm256_set1_epi32(INT32_MIN + 252)));
@@ -413,8 +414,8 @@ class Vectorized<float> {
           _mm256_add_epi32(vec_n1, vec_127), n_mantissa_bits));
       auto vec_two_pow_n2 = _mm256_castsi256_ps(_mm256_slli_epi32(
           _mm256_add_epi32(vec_n2, vec_127), n_mantissa_bits));
-      auto vec_two_factor = _mm256_mul_ps(
-          _mm256_mul_ps(vec_res, vec_two_pow_n1), vec_two_pow_n2);
+      auto vec_two_factor =
+          _mm256_mul_ps(_mm256_mul_ps(vec_res, vec_two_pow_n1), vec_two_pow_n2);
       vec_scaled = _mm256_blendv_ps(vec_scaled, vec_two_factor, rare);
     }
     return _mm256_andnot_ps(zero_mask, vec_scaled);
