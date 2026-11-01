@@ -5,6 +5,7 @@ import gc
 import inspect
 import os
 import sys
+import sysconfig
 import unittest
 import weakref
 from collections import OrderedDict
@@ -86,6 +87,68 @@ def less_match_verbose_code_parts(expected):
 class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_hook_membership_guard_retains_temporary_dictionary(self):
+        references = []
+
+        class Registries:
+            @property
+            def hooks(self):
+                hooks = OrderedDict({1: None})
+                references.append(weakref.ref(hooks))
+                return hooks
+
+            @property
+            def flags(self):
+                if references[-1]() is None:
+                    raise RuntimeError("hook dictionary was freed before comparison")
+                return {1: True}
+
+        root = RootGuardManager()
+        managers = [
+            root.getattr_manager(name, name, {1: None}, default_mgr_enum)
+            for name in ("hooks", "flags")
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
+        self.assertTrue(root.check(Registries()))
+        self.assertIsNone(references[-1]())
+
+    @parametrize("verbose", [False, True])
+    def test_hook_membership_guard_resets_after_exception(self, verbose):
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        hooks, flags = OrderedDict({1: None}), {1: True}
+        inputs = {"hooks": hooks, "tensor": nested, "flags": flags}
+        root = RootGuardManager()
+        managers = {
+            name: root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in inputs.items()
+        }
+        managers["tensor"].add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "tensor",
+            [],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        guards.install_nn_module_hook_membership_guard(
+            managers["hooks"], managers["flags"], (True,), [], None
+        )
+        check = root.check_verbose if verbose else root.check
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            check(inputs)
+        # A partial clone must not combine its flags with the previous traversal.
+        clone = root.clone_manager(
+            lambda manager: manager.get_source() not in ("hooks", "tensor")
+        )
+        self.assertTrue(clone.check({"flags": {2: True}}))
+        reference = weakref.ref(hooks)
+        del hooks, inputs
+        self.assertIsNone(reference())
+
     @parametrize("reverse", [False, True])
     def test_hook_membership_guard(self, reverse):
         hooks = OrderedDict.fromkeys((1, 2))
@@ -124,6 +187,75 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
             flags.clear()
             flags[2] = True
             self.assertTrue(manager.check(inputs))
+
+    @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
+    @parametrize("reverse", [False, True])
+    @parametrize("clone", [False, True])
+    @parametrize("same_root", [False, True])
+    def test_hook_membership_guard_recursive_tags(self, reverse, clone, same_root):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        modules = [torch.nn.Module(), torch.nn.Module()]
+        for key, module in enumerate(modules):
+            module.hooks = OrderedDict({key: None})
+            module.flags = OrderedDict({key: True})
+        root = RootGuardManager()
+        managers = {}
+        module_managers = []
+        for name in ("module",) if same_root else ("hooks", "flags"):
+            module_mgr = root.dict_getitem_manager(
+                name, name, modules[0], default_mgr_enum
+            )
+            module_managers.append(module_mgr)
+            dict_mgr = module_mgr.get_generic_dict_manager(
+                f"{name}.__dict__", vars(modules[0]), default_mgr_enum
+            )
+            for member in ("hooks", "flags") if same_root else (name,):
+                managers[member] = dict_mgr.dict_getitem_manager(
+                    member,
+                    f"{name}.{member}",
+                    getattr(modules[0], member),
+                    default_mgr_enum,
+                )
+        # Either role can be encountered first, independently of accessor order.
+        args = (
+            (managers["flags"], managers["hooks"])
+            if reverse
+            else (managers["hooks"], managers["flags"])
+        )
+        guards.install_nn_module_hook_membership_guard(*args, (True,), [], None)
+        GuardManagerWrapper(root).find_tag_safe_roots()
+        for manager in module_managers:
+            self.assertEqual(
+                manager.is_tag_safe_root(),
+                sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
+            )
+        if clone:
+            root = root.clone_manager(lambda manager: True)
+
+        for module in modules:
+            inputs = (
+                {"module": module} if same_root else {"hooks": module, "flags": module}
+            )
+            self.assertTrue(root.check(inputs))
+            self.assertTrue(root.check(inputs))  # warm each root's pointer cache
+        if not same_root:
+            mixed = {"hooks": modules[0], "flags": modules[1]}
+            self.assertFalse(
+                root.check(mixed)
+            )  # both cached sides must still participate
+        modules[1].flags.clear()
+        modules[1].flags[10] = True
+        self.assertFalse(root.check(inputs))
+        self.assertFalse(root.check_verbose(inputs).result)
+        modules[1].flags = OrderedDict({1: True})
+        self.assertTrue(root.check(inputs))
+        references = [weakref.ref(module.hooks) for module in modules]
+        del module, inputs, modules
+        if not same_root:
+            del mixed
+        gc.collect()
+        self.assertTrue(all(reference() is None for reference in references))
 
     def test_hook_membership_guard_same_manager(self):
         mapping = {1: True, 2: True}

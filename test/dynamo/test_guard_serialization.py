@@ -4933,6 +4933,83 @@ class TestGuardSerialization(TestGuardSerializationBase):
             guard_type == "NN_MODULE_HOOKS_DICT_CONTAINS",
         )
 
+    def test_nested_region_hook_secondary_source(self):
+        @torch.compiler.nested_compile_region
+        def region(x, module, box):
+            return x + sum(key in box.flags for key in module._forward_hooks)
+
+        def fn(x, module, first, second):
+            return region(x, module, first), region(x, module, second)
+
+        module = torch.nn.Identity()
+        module._forward_hooks.update({1: None, 2: None})
+        first = types.SimpleNamespace(flags=collections.OrderedDict({1: True}))
+        second = types.SimpleNamespace(flags=collections.OrderedDict({1: True}))
+        x = torch.ones(2)
+        with mock.patch.object(
+            torch.nn.modules.module, "_global_forward_hooks_with_kwargs", first.flags
+        ):
+            ref, loaded = self._test_serialization(
+                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module, first, second
+            )
+            inputs = {
+                "x": x,
+                "module": module,
+                "first": first,
+                "second": second,
+                "region": region,
+            }
+            self._test_check_fn(ref, loaded, inputs, True)
+            second.flags.clear()
+            self._test_check_fn(ref, loaded, inputs, False)
+
+    @parametrize("global_flags", [False, True])
+    @parametrize("populated", [False, True])
+    def test_nested_region_hook_membership(self, global_flags, populated):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest)
+
+        first, second = torch.nn.Identity(), torch.nn.Identity()
+        for module in (first, second):
+            module._forward_hooks.update({1: hook, 2: hook})
+            if populated:
+                module._forward_hooks_with_kwargs[1] = True
+        flags = (
+            collections.OrderedDict({7: True})
+            if populated
+            else collections.OrderedDict()
+        )
+        if global_flags:
+            second._forward_hooks = collections.OrderedDict({3: hook, 4: hook})
+
+        @torch.compiler.nested_compile_region
+        def region(x, module, flags):
+            if global_flags:
+                return x + sum(key in flags for key in module._forward_hooks)
+            return module(x)
+
+        def fn(x, first, second):
+            return region(x, first, flags), region(x, second, flags)
+
+        x = torch.ones(2)
+        registry_name = "_global_forward_hooks_with_kwargs"
+        with mock.patch.object(torch.nn.modules.module, registry_name, flags):
+            ref, loaded = self._test_serialization(
+                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, first, second
+            )
+            inputs = {"x": x, "first": first, "second": second, "flags": flags}
+            self._test_check_fn(ref, loaded, inputs, True)
+            if global_flags:
+                with mock.patch.object(
+                    torch.nn.modules.module, registry_name, collections.OrderedDict()
+                ):
+                    flags[3] = True
+                    self._test_check_fn(ref, loaded, inputs, False)
+            else:
+                second._forward_hooks_with_kwargs.clear()
+                second._forward_hooks_with_kwargs[2] = True
+                self._test_check_fn(ref, loaded, inputs, False)
+
     @parametrize("flag_name", ["with_kwargs", "always_call"])
     @parametrize("replace_registry", [False, True])
     def test_global_hook_membership(self, flag_name, replace_registry):
