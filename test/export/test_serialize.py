@@ -3368,7 +3368,7 @@ class TestPredispatchSerialization(TestCase):
             ("named", "keyword input"),
             ("direct_helper_call", "not a class or function defined"),
             ("direct_helper_call_operator", "outside torch.ops"),
-            ("direct_helper_call_dict", "of kind as_string_to_argument"),
+            ("direct_helper_call_dict", "operator in a dict input"),
             ("direct_helper_call_keyword", "not an operator overload"),
             ("direct_helper_call_after_keyword", "not an operator overload"),
         ],
@@ -3417,24 +3417,51 @@ class TestPredispatchSerialization(TestCase):
 
     def test_predispatch_custom_autograd_helper_called_directly(self):
         # A pass may call the helper directly instead of through flat_apply.
-        # Save and load then find its class name the same way.
-        ep, _ = self._index_in_vmap_artifact()
-        (node,) = ep.graph.find_nodes(
-            op="call_function", target=torch.ops.higher_order.flat_apply
-        )
-        spec = torch.fx.graph_module._get_attr(ep.graph_module, node.args[1].target)
-        node.args, node.kwargs = pytree.tree_unflatten(node.args[2:], spec)
-        node.target = (
-            torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-        )
-        for unused in [n for n in ep.graph.nodes if n.op == "get_attr" and not n.users]:
-            ep.graph.erase_node(unused)
-        ep.graph_module.recompile()
-        inp = (torch.arange(4), torch.tensor([3, 1]))
-        buffer = io.BytesIO()
-        torch.export.save(ep, buffer)
-        buffer.seek(0)
-        self.assertEqual(torch.export.load(buffer).module()(*inp), ep.module()(*inp))
+        # Save and load then find its class name the same way, and its inputs
+        # are not flattened, so a dict input stays a dict.
+        Scale = self._scale_function()
+
+        class ByKey(Scale):
+            @staticmethod
+            def forward(d):
+                return d["k"] * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        class UsesKey(torch.nn.Module):
+            def forward(self, x):
+                return ByKey.apply({"k": x})
+
+        module = self._import_test_module(ByKey=ByKey)
+        ByKey.__module__, ByKey.__qualname__ = module.__name__, "ByKey"
+        x = torch.randn(4)
+        cases = {
+            "index_in_vmap": (
+                self._index_in_vmap_artifact()[0],
+                (torch.arange(4), torch.tensor([3, 1])),
+            ),
+            "dict_input": (export(UsesKey(), (x,), strict=False), (x,)),
+        }
+        for case, (ep, inp) in cases.items():
+            with self.subTest(case):
+                (node,) = ep.graph.find_nodes(
+                    op="call_function", target=torch.ops.higher_order.flat_apply
+                )
+                spec_name = node.args[1].target
+                spec = torch.fx.graph_module._get_attr(ep.graph_module, spec_name)
+                node.args, node.kwargs = pytree.tree_unflatten(node.args[2:], spec)
+                node.target = torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+                for n in ep.graph.find_nodes(op="get_attr"):
+                    if not n.users:
+                        ep.graph.erase_node(n)
+                ep.graph_module.recompile()
+                buffer = io.BytesIO()
+                torch.export.save(ep, buffer)
+                buffer.seek(0)
+                loaded = torch.export.load(buffer)
+                self.assertEqual(loaded.module()(*inp), ep.module()(*inp))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

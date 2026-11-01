@@ -809,26 +809,35 @@ def _check_flat_apply_inputs(where: str, inputs: Sequence[NamedArgument]) -> Non
         _check_operator_name(where, inp)
 
 
-# Kinds of saved inputs that load turns into objects the function could call,
-# or that could hold operators.
-_HELPER_CALL_REFUSED_KINDS = frozenset(
-    {"as_graph", "as_string_to_argument", "as_custom_obj"}
-)
+# Kinds of saved inputs that load turns into objects the function could call.
+_HELPER_CALL_REFUSED_KINDS = frozenset({"as_graph", "as_custom_obj"})
+
+
+def _check_helper_call_argument(where: str, arg: Argument) -> None:
+    if arg.type in _HELPER_CALL_REFUSED_KINDS:
+        raise SerializeError(
+            f"{where} has an input of kind {arg.type}, which cannot be saved or loaded"
+        )
+    if arg.type == "as_string_to_argument":
+        for value in arg.as_string_to_argument.values():
+            # The operator checks only see operators passed as inputs.
+            if value.type == "as_operator":
+                raise SerializeError(
+                    f"{where} has an operator in a dict input, which cannot be "
+                    "saved or loaded"
+                )
+            _check_helper_call_argument(where, value)
 
 
 def _check_helper_call_inputs(where: str, inputs: Sequence[NamedArgument]) -> None:
     """
     The inputs of a direct call of the helper for custom autograd functions
     reach the autograd function, as the inputs of a flat_apply call do. They
-    are not flattened, so lists of values are fine, but save and load refuse
-    the same callables.
+    are not flattened, so lists and dicts of values are fine, but save and load
+    refuse the same callables, and operators inside dicts.
     """
     for inp in inputs:
-        if inp.arg.type in _HELPER_CALL_REFUSED_KINDS:
-            raise SerializeError(
-                f"{where} has an input of kind {inp.arg.type}, which cannot be "
-                "saved or loaded"
-            )
+        _check_helper_call_argument(where, inp.arg)
         _check_operator_name(where, inp)
 
 
