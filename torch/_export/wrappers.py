@@ -396,4 +396,7 @@ def allow_in_pre_dispatch_graph(func: Callable[_P, _R]) -> Callable[_P, _R]:
         )
         return out
 
+    # torch.export.load calls an autograd function by name only if its apply
+    # has this mark, because export only calls such functions.
+    wrapper._allowed_in_pre_dispatch_graph = True  # type: ignore[attr-defined]
     return wrapper

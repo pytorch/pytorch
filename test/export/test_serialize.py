@@ -3144,6 +3144,15 @@ class TestPredispatchSerialization(TestCase):
                 ("class", "torch.os.system", "not a top-level"),
                 name="class_torch_os_system",
             ),
+            # Export only calls autograd functions whose apply allows it.
+            subtest(
+                (
+                    "class",
+                    "torch.utils.checkpoint.CheckpointFunction",
+                    "allow_in_pre_dispatch_graph",
+                ),
+                name="class_not_for_export",
+            ),
         ],
     )
     def test_predispatch_flat_apply_load_rejects_other_functions(

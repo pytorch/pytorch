@@ -928,7 +928,8 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
     Find the custom autograd function that the helper for custom autograd
     functions calls by name, with ``_find_imported``. The helper imports that
     name's module when the program runs, so save and load check the name
-    first in a flat_apply call of the helper and in a direct call.
+    first in a flat_apply call of the helper and in a direct call. They accept
+    only a function whose apply export calls.
     """
     function_cls = _find_imported(name) if isinstance(name, str) else None
     if not (
@@ -936,6 +937,13 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
         and issubclass(function_cls, torch.autograd.Function)
     ):
         raise SerializeError(f"{name} is not a torch.autograd.Function")
+    apply = getattr(inspect.getattr_static(function_cls, "apply"), "__func__", None)
+    if not inspect.getattr_static(apply, "_allowed_in_pre_dispatch_graph", False):
+        raise SerializeError(
+            f"{name} is not a torch.autograd.Function that export calls: its "
+            "apply is not decorated with "
+            "torch._export.wrappers.allow_in_pre_dispatch_graph"
+        )
     return function_cls
 
 
