@@ -2349,9 +2349,11 @@ def get_cpp_torch_device_options(
     # _get_openmp_args adds OpenMP to every Linux link too, and unless the
     # compiler asks the linker to link as needed, as Ubuntu's GCC does by
     # default, the linker records libgomp even when the model calls no OpenMP
-    # function. The artifact then fails to load without torch on a machine that
-    # has no libgomp. As above, dropping libraries nothing references cannot
-    # drop one the model uses, and links with libtorch are left alone.
+    # function. The shared library then fails to load without torch on a
+    # machine that has no libgomp. As above, dropping libraries nothing
+    # references cannot drop one the model uses, and links with libtorch are
+    # left alone. A static library is linked later by the program that uses
+    # it, so there the program's own link flags decide.
     if (
         _IS_LINUX
         and aot_mode

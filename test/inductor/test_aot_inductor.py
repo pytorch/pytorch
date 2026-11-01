@@ -10856,33 +10856,31 @@ class AOTInductorTestsTemplate:
     def test_libtorch_free_so_has_no_unused_openmp_dependency(self):
         # _get_openmp_args adds OpenMP to every Linux link. A model that calls no
         # OpenMP function must still not record libgomp, or the artifact fails to
-        # load on a machine without it. Reading the dynamic section rather than
-        # the link line is what makes this fail if the flag stops having the
-        # effect it is added for. A compiler that links as needed by default,
-        # such as Ubuntu's GCC, passes this either way.
+        # load on a machine without it. A compiler that links as needed by
+        # default, such as Ubuntu's GCC, passes this either way, so
+        # test_cpp_builder also checks the link command itself.
         class Model(torch.nn.Module):
             def forward(self, x):
                 return x + 1
 
-        example_inputs = (torch.randn(8, device=self.device),)
-        so_path = AOTIRunnerUtil.legacy_compile(
-            Model(), example_inputs, options={"aot_inductor.link_libtorch": False}
-        )
-        dynamic = subprocess.run(
-            ["readelf", "-d", so_path], check=True, capture_output=True, text=True
-        ).stdout
-        needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", dynamic)
-        if not needed:
-            raise AssertionError(f"readelf reported no dependencies for {so_path}")
+        def openmp_libraries(x, options):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                Model(), (x,), options={"aot_inductor.link_libtorch": False, **options}
+            )
+            dynamic = subprocess.run(
+                ["readelf", "-d", so_path], check=True, capture_output=True, text=True
+            ).stdout
+            needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", dynamic)
+            self.assertTrue(needed, f"readelf reported no dependencies for {so_path}")
+            return [lib for lib in needed if "omp" in lib.lower()]
 
-        # Named rather than counted, so a failure says which library came back.
-        openmp = [lib for lib in needed if "omp" in lib.lower()]
-        if openmp:
-            raise AssertionError(f"unused OpenMP dependency in {so_path}: {openmp}")
+        # assertFalse names the libraries that came back, assertEqual does not.
+        self.assertFalse(openmp_libraries(torch.randn(8, device=self.device), {}))
 
-        # A library the model does reach has to survive.
-        if not any(lib.startswith("libc.so") for lib in needed):
-            raise AssertionError(f"expected libc among {needed}")
+        if self.device == "cpu":
+            # Large enough for Inductor to parallelize the kernel with OpenMP on
+            # two threads, so the library is used and has to stay.
+            self.assertTrue(openmp_libraries(torch.randn(4096), {"cpp.threads": 2}))
 
     def test_unbounded_expr_substitutions(self):
         class Model(torch.nn.Module):
