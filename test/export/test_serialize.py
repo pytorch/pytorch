@@ -2813,21 +2813,25 @@ class TestPredispatchSerialization(TestCase):
 
         inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
         expected = M()(*inp)
-        with TemporaryFileName(suffix=".pt2") as path:
-            torch.export.save(export(M(), inp, strict=False), path)
-            script = (
-                "import torch, torch.testing._internal.two_tensor;"
-                f"ep = torch.export.load({path!r});"
-                "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
-                "print([t.tolist() for t in out])"
-            )
-            p = subprocess.run(
-                [sys.executable, "-c", script],
-                cwd=os.path.dirname(path),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+        # The child runs in a directory of its own, so neither the source tree
+        # nor files left in a shared temporary directory are on its import path.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        path = os.path.join(tmp, "m.pt2")
+        torch.export.save(export(M(), inp, strict=False), path)
+        script = (
+            "import torch, torch.testing._internal.two_tensor;"
+            f"ep = torch.export.load({path!r});"
+            "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
+            "print([t.tolist() for t in out])"
+        )
+        p = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=tmp,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(
             p.stdout.strip().splitlines()[-1], str([t.tolist() for t in expected])
