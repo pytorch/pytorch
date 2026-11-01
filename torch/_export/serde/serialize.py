@@ -717,9 +717,9 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 # programs whose users import nothing: the helper that calls custom autograd
 # functions, and ModIndex, the autograd function that TransformGetItemToIndex
 # uses. `import torch` does not import all of them, so load imports these
-# itself. Other modules, such as torch.distributed.tensor for DTensor, have to
-# be imported first, like any other. The module comes from this table, never
-# from the loaded file.
+# itself. Other modules, such as one that defines your own tensor subclass,
+# have to be imported first, like any other. The module comes from this table,
+# never from the loaded file.
 _FLAT_APPLY_MODULES = frozenset(
     {"torch.export.custom_ops", "torch._dynamo._trace_wrapped_higher_order_op"}
 )
