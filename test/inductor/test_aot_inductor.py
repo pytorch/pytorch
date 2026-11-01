@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import uuid
 import zipfile
@@ -1259,6 +1260,41 @@ class AOTInductorTestsTemplate:
         )
         compiled = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(compiled(*input1), model(*input1))
+
+    def test_run_on_thread_without_current_context(self):
+        # A serving thread whose first CUDA work is the model has no current
+        # context for the model's driver-API kernel launches.
+        if self.device != "cuda" or torch.version.hip is not None:
+            raise unittest.SkipTest("CUDA driver contexts only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(
+                    torch.nn.functional.layer_norm(x, (64,))
+                )
+
+        x = torch.randn(32, 64, device=self.device)
+        package_path = torch._inductor.aoti_compile_and_package(
+            torch.export.export(Model(), (x,))
+        )
+        compiled = torch._inductor.aoti_load_package(package_path)
+        # Loads and launches the kernels on this thread.
+        expected = compiled(x)
+
+        result = {}
+
+        def run():
+            try:
+                result["out"] = compiled(x)
+            except Exception as e:
+                result["error"] = e
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join()
+        if "error" in result:
+            raise result["error"]
+        self.assertEqual(result["out"], expected)
 
     @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])

@@ -400,6 +400,12 @@ class DeviceOpOverrides:
     def cpp_kernel_launch_supports_pdl(self) -> bool:
         return False
 
+    def cpp_ensure_current_context(self, device_idx: str) -> str:
+        """C++ statement that makes a context for device `device_idx` current on
+        the calling thread before the wrapper's driver-API calls, or "" if none
+        is needed."""
+        return ""
+
     def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
