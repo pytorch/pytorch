@@ -12892,6 +12892,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
         )
 
+    def test_small_int_atomic_add_fallback(self):
+        # https://github.com/pytorch/pytorch/issues/202878
+        # Triton atomic_add does not support 8/16-bit ints; these must fall back.
+        for dtype in (torch.uint8, torch.int8, torch.int16):
+            index = torch.tensor([0, 1, 0, 2, 1, 0])
+            src = torch.randint(0, 5, (6,), dtype=dtype)
+
+            def index_add_fn(x, index, src):
+                return x.index_add(0, index, src)
+
+            def scatter_add_fn(x, index, src):
+                return x.scatter_add(0, index, src)
+
+            def index_put_fn(x, index, src):
+                return x.index_put((index,), src, accumulate=True)
+
+            for fn in (index_add_fn, scatter_add_fn, index_put_fn):
+                self.common(
+                    fn,
+                    [torch.zeros(4, dtype=dtype), index, src],
+                    check_lowp=False,
+                )
+
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
