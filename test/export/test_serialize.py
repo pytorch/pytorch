@@ -2935,12 +2935,12 @@ class TestPredispatchSerialization(TestCase):
 
             # Removing a type without a serialized name also removes the
             # placeholder entry that other such types share, so restore it.
+            names = pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE
             placeholder = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
-            self.addCleanup(
-                pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE.__setitem__,
-                placeholder,
-                pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[placeholder],
-            )
+            if placeholder in names:
+                self.addCleanup(names.__setitem__, placeholder, names[placeholder])
+            else:
+                self.addCleanup(names.pop, placeholder, None)
             pytree.register_constant(Config)
             self.addCleanup(pytree._deregister_pytree_node, Config)
 
