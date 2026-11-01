@@ -222,6 +222,173 @@ instantiate_layer_norm(float);
 instantiate_layer_norm(half);
 instantiate_layer_norm(bfloat);
 
+template <typename T>
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
+kernel void layer_norm_backward_single_row(
+    device const T* dY [[buffer(0)]],
+    device const T* X [[buffer(1)]],
+    device const T* mean [[buffer(2)]],
+    device const T* rstd [[buffer(3)]],
+    device const T* gamma [[buffer(4)]],
+    device T* dX [[buffer(5)]],
+    constant uint& N [[buffer(6)]],
+    uint row [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  constexpr int N_READS = ILP_PER_THREAD;
+  const uint base = tid * N_READS;
+  const ulong row_offset = ulong(row) * N + base;
+  device const T* dy = dY + row_offset;
+  device const T* x = X + row_offset;
+  device T* dx = dX + row_offset;
+  const int count = min(N_READS, max(0, int(N) - int(base)));
+  const float mean_v = float(mean[row]), rstd_v = float(rstd[row]);
+  float dyg[N_READS], xhat[N_READS];
+  float sum_dyg = 0, sum_dyg_xhat = 0;
+#pragma unroll
+  for (int i = 0; i < N_READS; i++) {
+    if (i < count) {
+      const float g = gamma != nullptr ? float(gamma[base + i]) : 1.0f;
+      dyg[i] = float(dy[i]) * g;
+      xhat[i] = (float(x[i]) - mean_v) * rstd_v;
+      sum_dyg += dyg[i];
+      sum_dyg_xhat += dyg[i] * xhat[i];
+    }
+  }
+  threadgroup float local_a[simdgroup_size], local_b[simdgroup_size];
+  const auto sums =
+      threadgroup_sum2(local_a, local_b, sum_dyg, sum_dyg_xhat, tid, lsize);
+  const float mean_dyg = sums[0] / float(N), mean_dyg_xhat = sums[1] / float(N);
+#pragma unroll
+  for (int i = 0; i < N_READS; i++) {
+    if (i < count) {
+      dx[i] = static_cast<T>(
+          rstd_v * (dyg[i] - mean_dyg - xhat[i] * mean_dyg_xhat));
+    }
+  }
+}
+
+template <typename T>
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
+kernel void layer_norm_backward_looped(
+    device const T* dY [[buffer(0)]],
+    device const T* X [[buffer(1)]],
+    device const T* mean [[buffer(2)]],
+    device const T* rstd [[buffer(3)]],
+    device const T* gamma [[buffer(4)]],
+    device T* dX [[buffer(5)]],
+    constant uint& N [[buffer(6)]],
+    uint row [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  constexpr int N_READS = ILP_PER_THREAD;
+  const ulong row_offset = ulong(row) * N;
+  device const T* dy = dY + row_offset;
+  device const T* x = X + row_offset;
+  device T* dx = dX + row_offset;
+  const float mean_v = float(mean[row]), rstd_v = float(rstd[row]);
+  float sum_dyg = 0, sum_dyg_xhat = 0;
+  for (uint r = tid * N_READS; r < N; r += lsize * N_READS) {
+#pragma unroll
+    for (int i = 0; i < N_READS; i++) {
+      const uint j = r + i;
+      if (j < N) {
+        const float g = gamma != nullptr ? float(gamma[j]) : 1.0f;
+        const float dyg = float(dy[j]) * g;
+        sum_dyg += dyg;
+        sum_dyg_xhat += dyg * (float(x[j]) - mean_v) * rstd_v;
+      }
+    }
+  }
+  threadgroup float local_a[simdgroup_size], local_b[simdgroup_size];
+  const auto sums =
+      threadgroup_sum2(local_a, local_b, sum_dyg, sum_dyg_xhat, tid, lsize);
+  const float mean_dyg = sums[0] / float(N), mean_dyg_xhat = sums[1] / float(N);
+  for (uint r = tid * N_READS; r < N; r += lsize * N_READS) {
+#pragma unroll
+    for (int i = 0; i < N_READS; i++) {
+      const uint j = r + i;
+      if (j < N) {
+        const float g = gamma != nullptr ? float(gamma[j]) : 1.0f;
+        const float dyg = float(dy[j]) * g;
+        const float xhat = (float(x[j]) - mean_v) * rstd_v;
+        dx[j] =
+            static_cast<T>(rstd_v * (dyg - mean_dyg - xhat * mean_dyg_xhat));
+      }
+    }
+  }
+}
+
+template <typename T>
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
+kernel void layer_norm_backward_affine(
+    device const T* dY [[buffer(0)]],
+    device const T* X [[buffer(1)]],
+    device const T* mean [[buffer(2)]],
+    device const T* rstd [[buffer(3)]],
+    device float2* part [[buffer(4)]],
+    constant uint2& dims [[buffer(5)]],
+    uint2 tg [[threadgroup_position_in_grid]],
+    uint2 ntg [[threadgroups_per_grid]],
+    uint2 pos [[thread_position_in_threadgroup]]) {
+  const uint M = dims.x, N = dims.y;
+  const uint col = tg.x * simdgroup_size + pos.x;
+  const uint row0 = tg.y * simdgroup_size + pos.y;
+  const uint row_step = ntg.y * simdgroup_size;
+  float2 acc = 0;
+  if (col < N) {
+    ulong idx = ulong(row0) * N + col;
+    const ulong idx_step = ulong(row_step) * N;
+    for (uint i = row0; i < M; i += row_step, idx += idx_step) {
+      const float dy = float(dY[idx]);
+      acc += float2(dy * (float(X[idx]) - float(mean[i])) * float(rstd[i]), dy);
+    }
+  }
+  threadgroup float2 buf[simdgroup_size][simdgroup_size];
+  buf[pos.y][pos.x] = acc;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const float2 total = simd_sum(buf[pos.x][pos.y]);
+  const uint out_col = tg.x * simdgroup_size + pos.y;
+  if (pos.x == 0 && out_col < N) {
+    part[tg.y * N + out_col] = total;
+  }
+}
+
+template <typename T>
+kernel void layer_norm_backward_affine_combine(
+    device const float2* part [[buffer(0)]],
+    device T* dgamma [[buffer(1)]],
+    device T* dbeta [[buffer(2)]],
+    constant uint2& dims [[buffer(3)]],
+    uint col [[thread_position_in_grid]]) {
+  float2 acc = 0;
+  for (uint p = 0; p < dims.x; ++p) {
+    acc += part[p * dims.y + col];
+  }
+  if (dgamma != nullptr) {
+    dgamma[col] = static_cast<T>(acc.x);
+  }
+  if (dbeta != nullptr) {
+    dbeta[col] = static_cast<T>(acc.y);
+  }
+}
+
+#define REGISTER_LAYER_NORM_BACKWARD(T)                                       \
+  template [[host_name("layer_norm_backward_single_row_" #T)]] [[kernel]]     \
+  decltype(layer_norm_backward_single_row<T>)                                 \
+      layer_norm_backward_single_row<T>;                                      \
+  template [[host_name("layer_norm_backward_looped_" #T)]] [[kernel]]         \
+  decltype(layer_norm_backward_looped<T>) layer_norm_backward_looped<T>;      \
+  template [[host_name("layer_norm_backward_affine_" #T)]] [[kernel]]         \
+  decltype(layer_norm_backward_affine<T>) layer_norm_backward_affine<T>;      \
+  template [[host_name("layer_norm_backward_affine_combine_" #T)]] [[kernel]] \
+  decltype(layer_norm_backward_affine_combine<T>)                             \
+      layer_norm_backward_affine_combine<T>
+
+REGISTER_LAYER_NORM_BACKWARD(float);
+REGISTER_LAYER_NORM_BACKWARD(half);
+REGISTER_LAYER_NORM_BACKWARD(bfloat);
+
 template <typename I>
 inline vec<I, 2> batch_norm_offset(constant BatchNormLayout<>& layout, I o) {
   constant auto& dims = layout.outer_dims;
