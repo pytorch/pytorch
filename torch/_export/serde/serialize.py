@@ -2640,10 +2640,10 @@ class GraphModuleDeserializer(metaclass=Final):
             target
             is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
         ):
-            # The verifier allows this helper, but export calls it only through
-            # flat_apply, whose function load finds separately and checks with
-            # the class name it gets. As a node target or an argument, it would
-            # import a module that the file names when the program runs.
+            # The verifier allows this helper as a node target, but export calls
+            # it only through flat_apply, whose function load finds separately
+            # and checks with the class name it gets. A node that calls it
+            # directly would import a module that the file names when it runs.
             raise SerializeError(
                 f"{serialized_target} can only be called through flat_apply"
             )
