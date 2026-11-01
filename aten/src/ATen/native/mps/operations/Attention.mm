@@ -16,6 +16,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty.h>
 #endif
@@ -410,9 +411,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   }
   // The attention weights are never materialized (nothing consumes them); an
   // empty tensor stands in, as the flash attention ops do for unrequested outputs.
-  // TODO: implement the flash, efficient and math attention ops for MPS properly
-  // instead of routing them all through this op.
   return {out.view_symint(out_shape), at::empty({0}, q_.options())};
 }
+
+REGISTER_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 } // namespace native
 } // namespace at

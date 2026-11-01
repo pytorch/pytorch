@@ -12041,7 +12041,7 @@ class TestSDPA(TestCaseMPS):
         requires_grad: bool = False
     ):
 
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION, torch.nn.attention.SDPBackend.MATH]):
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps", requires_grad=requires_grad)
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
             v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
@@ -12121,7 +12121,7 @@ class TestSDPA(TestCaseMPS):
 
     def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             i = 42 if S > 42 else S // 2
 
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
@@ -12277,7 +12277,7 @@ class TestSDPA(TestCaseMPS):
         v = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
         attention_mask = torch.ones(1, seq_len, seq_len, dtype=dtype)
 
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             y = F.scaled_dot_product_attention(
                 q.to("mps"),
                 k.to("mps"),
@@ -12311,7 +12311,7 @@ class TestSDPA(TestCaseMPS):
         k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
 
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
@@ -12336,7 +12336,7 @@ class TestSDPA(TestCaseMPS):
         v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         mask = torch.tril(torch.ones(L, L, dtype=torch.bool, device="mps")).unsqueeze(0).unsqueeze(0)
 
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
@@ -12362,7 +12362,7 @@ class TestSDPA(TestCaseMPS):
             q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
         )
 
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             y = F.scaled_dot_product_attention(
                 q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
             )
@@ -12439,7 +12439,7 @@ class TestSDPA(TestCaseMPS):
                                         dtype=torch.bool, device=q.device)
                 attn_mask[..., s_len // 2:] = True
 
-            with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
                 y = F.scaled_dot_product_attention(
                     q, k, v,
                     attn_mask=attn_mask,
@@ -12457,7 +12457,7 @@ class TestSDPA(TestCaseMPS):
                 enable_gqa=enable_gqa,
             )
         else:
-            with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
                 y = F.scaled_dot_product_attention(
                     q, k, v,
                     dropout_p=dropout_p,
@@ -12540,7 +12540,7 @@ class TestSDPA(TestCaseMPS):
         k = torch.randn(1, 2, 16, 64, device="mps")
         v = torch.randn(1, 2, 16, 64, device="mps")
         mask = torch.zeros(1, 2, 4, 16, dtype=torch.bool, device="mps")
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True",
@@ -12624,7 +12624,7 @@ class TestSDPA(TestCaseMPS):
             else:
                 tol = 0.05
         enable_gqa = q.shape[-3] != k.shape[-3]
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
             y = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask=attn_mask, dropout_p=0.0,
@@ -12739,16 +12739,18 @@ class TestSDPA(TestCaseMPS):
         tol = 0.02 if dtype == torch.float32 else 0.05
         self._run_prefill_test(q, k, v, is_causal=is_causal, tol=tol)
 
-    def test_dropout_raises_not_implemented(self):
-        q = torch.randn(1, 2, 4, 8, device="mps")
-        # shouldn't raise
-        y_no_drop = F.scaled_dot_product_attention(q, q, q, dropout_p=0.0)
-        y_no_drop = F.scaled_dot_product_attention(q, q, q)
-        # should raise
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"scaled_dot_product_attention for MPS does not support dropout."):
-            F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
+    def test_dropout_uses_math_backend(self):
+        q = torch.randn(1, 2, 4, 8, device="mps", requires_grad=True)
+        for grad_enabled in [True, False]:
+            with torch.set_grad_enabled(grad_enabled):
+                torch.manual_seed(0)
+                y = F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
+                torch.manual_seed(0)
+                y_ref, _ = torch.ops.aten._scaled_dot_product_attention_math(q, q, q, None, 0.2)
+                self.assertEqual(y, y_ref)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
 
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("head_dim", [64, 128])

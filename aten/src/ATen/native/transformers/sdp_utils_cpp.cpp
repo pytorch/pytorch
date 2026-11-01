@@ -58,6 +58,32 @@ bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
 
   return check_tensor_dtype(params, cpp_supported_flash_dtypes, debug);
 }
+
+// The MPS kernels take any layout, 5D inputs and a value head dim different
+// from the query one, but have no backward.
+bool check_requires_grad_mps(sdp_params const& params, bool debug) {
+  if (input_requires_grad(params) ||
+      (at::GradMode::is_enabled() && params.attn_mask.has_value() && params.attn_mask->requires_grad())) {
+    if (debug) {
+      TORCH_WARN("Flash attention on MPS does not support backward.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool use_flash_attention_mps(sdp_params const& params, bool debug) {
+  constexpr auto mps_supported_flash_dtypes =
+      std::to_array<at::ScalarType>({at::kFloat, at::kBFloat16, at::kHalf});
+  constexpr auto constraints = std::to_array<bool (*)(sdp_params const&, bool)>(
+      {check_runtime_disabled_flash, check_for_dropout, check_requires_grad_mps});
+  for (auto& constraint : constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+  return check_tensor_dtype(params, mps_supported_flash_dtypes, debug);
+}
 } // namespace
 
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
@@ -68,6 +94,7 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
     return SDPBackend::error;
   }
+  const auto use_flash_attention = kernel_params.query.is_mps() ? use_flash_attention_mps : use_flash_attention_cpp;
   // Get ideal kernel ordering
   const auto ordering = priority_order_cpp(kernel_params);
 
@@ -77,7 +104,7 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
   for (auto& backend : ordering) {
     switch (backend) {
       case SDPBackend::flash_attention:
-        if (use_flash_attention_cpp(kernel_params, print_debug)) {
+        if (use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;
         }
         break;
@@ -99,7 +126,7 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
 
   print_debug = true;
   TORCH_WARN("Flash attention kernel not used because:");
-  use_flash_attention_cpp(kernel_params, print_debug);
+  use_flash_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
   return SDPBackend::error;
 }
