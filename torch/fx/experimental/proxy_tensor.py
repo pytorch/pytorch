@@ -2188,39 +2188,15 @@ _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_m
 )
 
 
-# The jvp calls, whose results PreDispatchTorchFunctionMode tracks with
-# functorch disabled.
-_jvp_predispatch_functions = frozenset(
-    {
-        torch._functorch.predispatch._make_dual,
-        torch._functorch.predispatch._unpack_dual,
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._unwrap_for_grad,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
+from torch._functorch.predispatch import (
+    _functorch_predispatch_functions,
+    _jvp_predispatch_functions,
 )
-
-# The functorch wrappers that pre-dispatch tracing keeps in the graph. They
-# change global state (functorch levels, forward-mode AD levels, the registered
-# vmap decompositions), or take as an argument a level that an earlier call
-# entered. So they must stay where they are: dead code elimination must keep
-# them even with no users, and passes that check Node.is_impure() must not fold,
-# reorder or run one on its own.
-# Registered here rather than in predispatch.py to avoid circular imports
-# (predispatch.py loads before torch.fx during torch.autograd init).
-_functorch_predispatch_functions = _jvp_predispatch_functions | {
-    torch._functorch.predispatch.lazy_load_decompositions,
-    torch._functorch.predispatch._vmap_increment_nesting,
-    torch._functorch.predispatch._vmap_decrement_nesting,
-    torch._functorch.predispatch._add_batch_dim,
-    torch._functorch.predispatch._remove_batch_dim,
-}
-
 from torch.fx.node import _side_effectful_functions
 
 
+# predispatch.py says why these calls must stay where they are. They are
+# registered here because predispatch.py loads before torch.fx.
 _side_effectful_functions.update(_functorch_predispatch_functions)
 
 

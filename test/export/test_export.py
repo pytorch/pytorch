@@ -949,6 +949,40 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
         self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
 
+    def _check_functorch_fake_views(self, graph, num_batched):
+        # Values recorded inside vmap and jvp are fake views of the tensors the
+        # functorch wrappers wrap, as in eager. Saving and loading rebuild the
+        # values without aliasing, so callers pass the graph of a direct export.
+        for node in graph.nodes:
+            if isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+        self.assertEqual(len(batched), num_batched)
+        for node in batched:
+            val, wrapped, dim = node.meta["val"], node.args[0].meta["val"], node.args[1]
+            self.assertEqual(
+                StorageWeakRef(val.untyped_storage()),
+                StorageWeakRef(wrapped.untyped_storage()),
+            )
+            self.assertEqual(val.storage_offset(), wrapped.storage_offset())
+            self.assertEqual(
+                val.stride(), wrapped.stride()[:dim] + wrapped.stride()[dim + 1 :]
+            )
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_nested_vmap_export(self) -> None:
+        class NestedVmap(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(torch.vmap(lambda v: v * 2 + 1), in_dims=1)(x)
+
+        # x starts at a storage offset, and the outer vmap is over its second dim.
+        x = torch.randn(3, 4, 6)[:, :, 1:]
+        graph = torch.export.export(NestedVmap(), (x,)).graph
+        self._check_functorch_fake_views(graph, num_batched=2)
+        self.assertEqual(export(NestedVmap(), (x,)).module()(x), NestedVmap()(x))
+
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
     def test_jvp_in_vmap_export(self) -> None:
@@ -961,26 +995,8 @@ class TestExport(TestCase):
 
         # x starts at a storage offset, and t is batched along its second dim.
         inp = (torch.randn(3, 5)[:, 1:], torch.randn(4, 3))
-        # Values recorded inside vmap and jvp are fake views of the tensors the
-        # functorch wrappers wrap, as in eager. Saving and loading rebuild the
-        # values without aliasing, so these checks export directly.
         graph = torch.export.export(JvpInVmap(), inp).graph
-        for node in graph.nodes:
-            if isinstance(node.meta.get("val"), torch.Tensor):
-                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
-        add_batch_dim = torch._functorch.predispatch._add_batch_dim
-        batched = graph.find_nodes(op="call_function", target=add_batch_dim)
-        self.assertEqual(len(batched), 2)
-        for node in batched:
-            val, wrapped, dim = node.meta["val"], node.args[0].meta["val"], node.args[1]
-            self.assertEqual(
-                StorageWeakRef(val.untyped_storage()),
-                StorageWeakRef(wrapped.untyped_storage()),
-            )
-            self.assertEqual(val.storage_offset(), wrapped.storage_offset())
-            self.assertEqual(
-                val.stride(), wrapped.stride()[:dim] + wrapped.stride()[dim + 1 :]
-            )
+        self._check_functorch_fake_views(graph, num_batched=2)
         # Passes must not remove, fold or run the vmap and jvp calls on their
         # own, and some of them have no users.
         predispatch = torch._functorch.predispatch.__name__

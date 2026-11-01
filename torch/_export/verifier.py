@@ -241,7 +241,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
-                *torch.fx.experimental.proxy_tensor._functorch_predispatch_functions,
+                *torch._functorch.predispatch._functorch_predispatch_functions,
             )
 
             if not isinstance(op, _allowed_op_types()):
