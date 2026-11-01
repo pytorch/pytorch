@@ -2188,8 +2188,8 @@ _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_m
 )
 
 
-# JVP predispatch functions need special handling during tracing:
-# _DisableFuncTorch prevents grad tracking tensor corruption in snapshot_fake.
+# The jvp calls, whose results PreDispatchTorchFunctionMode tracks with
+# functorch disabled.
 _jvp_predispatch_functions = frozenset(
     {
         torch._functorch.predispatch._make_dual,
