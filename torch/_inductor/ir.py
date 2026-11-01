@@ -1914,7 +1914,7 @@ class Reduction(Loops):
             reduction_ranges = [sympy.Integer(strict_reduction_rblock)]
             reduction_numel = sympy.Integer(strict_reduction_rblock)
 
-        if reduction_numel == 1 and not strict_reduction:
+        if reduction_numel == 1 and reduction_type != "dot" and not strict_reduction:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 

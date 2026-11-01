@@ -309,7 +309,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_native_matmul(mat1, mat2):
         helion_inputs = None
-        if inductor_config.trace.helion_code:
+        if inductor_config.trace.helion_code or inductor_config.native_matmul_helion:
             # Like MM, pass the actual [batch, row, reduction] operand view.
             _, _, _, _, mat1, mat2 = mm_args(
                 mat1, mat2, layout=layout, out_dtype=out_dtype
@@ -336,7 +336,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             args = [make_pointwise(_to_dtype)(x) for x in args]
 
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 2)
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 2
+        )
 
         if helion_inputs is not None:
             dot_reduction.realize()

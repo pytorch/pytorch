@@ -5,6 +5,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import sympy
+
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
@@ -175,6 +177,48 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
+    r"""use_native_matmul(mat1, mat2) -> bool
+
+    Select native dot IR, rejecting unsupported CUDA matmuls in Helion mode.
+    """
+    device_type = mat1.get_device().type
+    if device_type == "cuda" and config.native_matmul_helion:
+        if not torch._dynamo.config.assume_static_by_default:
+            raise NotImplementedError(
+                "Helion native matmul does not support dynamic input settings; "
+                "use torch.compile(..., dynamic=False)"
+            )
+        if config.cuda_backend != "triton":
+            raise NotImplementedError(
+                "Helion native matmul requires the CUDA Triton backend"
+            )
+        if config.helion_backend not in ("triton", "cutedsl"):
+            raise NotImplementedError(
+                f"Unsupported Helion native matmul backend: {config.helion_backend}"
+            )
+        if config.helion_autotune_effort not in ("none", "quick", "full"):
+            raise NotImplementedError(
+                f"Unsupported Helion autotune effort: {config.helion_autotune_effort}"
+            )
+        supported = (torch.float16, torch.bfloat16, torch.float32)
+        if mat1.get_dtype() not in supported or mat2.get_dtype() not in supported:
+            raise NotImplementedError(
+                "Helion requires native matmul with FP16/BF16/FP32 operands"
+            )
+        if is_bf16x9_matmul(device_type, mat1.get_dtype()):
+            raise NotImplementedError("Helion native matmul does not support BF16x9")
+        if any(
+            not isinstance(size, (int, sympy.Integer))
+            for operand in (mat1, mat2)
+            for size in operand.get_size()
+        ):
+            raise NotImplementedError("Helion native matmul requires static shapes")
+        if any(size == 0 for operand in (mat1, mat2) for size in operand.get_size()):
+            raise NotImplementedError(
+                "Helion native matmul does not support empty dimensions"
+            )
+        return True
+
     if (
         is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
         or not config.triton.native_matmul
