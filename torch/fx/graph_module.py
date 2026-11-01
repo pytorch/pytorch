@@ -862,7 +862,9 @@ class {module_name}(torch.nn.Module):
         A Module is considered "used" if any one of the following is
         true:
         1. It has children that are used
-        2. Its forward is called directly via a ``call_module`` node
+        2. Its forward is called directly via a ``call_module`` node, or a
+        ``get_attr`` node reads it, as for the body of a higher order op.
+        All of its submodules are used too.
         3. It has a non-Module attribute that is used from a
         ``get_attr`` node
 
@@ -890,20 +892,19 @@ class {module_name}(torch.nn.Module):
                 # `foo.bar.baz` to the set.
                 used.update(itertools.accumulate(fullpath, join_fn))
 
-                # For a `call_module` node, also register all recursive submodules
-                # as used
-                if node.op == "call_module":
-                    try:
-                        str_target = cast(str, node.target)
-                        submod = self.get_submodule(str_target)
+                # A submodule that a node calls or reads keeps all of its own
+                # submodules, which run with it.
+                try:
+                    str_target = cast(str, node.target)
+                    submod = self.get_submodule(str_target)
 
-                        for submod_name, _ in submod.named_modules():
-                            if submod_name != "":
-                                used.add(".".join([str_target, submod_name]))
-                    except AttributeError:
-                        # Node referenced nonexistent submodule, don't need to
-                        # worry about GCing anything
-                        pass
+                    for submod_name, _ in submod.named_modules():
+                        if submod_name != "":
+                            used.add(".".join([str_target, submod_name]))
+                except AttributeError:
+                    # The target is not a submodule, or does not exist, so there
+                    # is nothing more to keep
+                    pass
 
         to_delete = [name for name, _ in self.named_modules() if name not in used]
 
