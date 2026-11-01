@@ -8793,6 +8793,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants[name] = line
         self._named_constant_defs.writeline(line)
 
+    @override
     def iteration_ranges_codegen_header(
         self,
         entry: IterationRangesRoot,
@@ -8835,9 +8836,44 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             block_size = (
                 f"{x.upper()}BLOCK" if not self.mix_order_reduction else "RSPLIT_SIZE"
             )
+            pid = self.iteration_ranges_get_pid(entry)
+            if self.is_native_matmul and x in ("y", "x"):
+                # Y is emitted before X; group eight Y tiles to reuse data in L2.
+                if x == "y":
+                    x_entry = next(t for t in self.range_trees if t.prefix == "x")
+                    y_pid = pid
+                    x_pid = self.iteration_ranges_get_pid(x_entry)
+                    y_tiles = "tl.cdiv(ynumel, YBLOCK)"
+                    if self.needs_yz_grid_overflow(entry):
+                        # Swizzle the full launch grid, including padded Y tiles.
+                        y_tiles = (
+                            f"tl.num_programs({entry.grid_dim}) * "
+                            f"tl.num_programs({entry.grid_dim + 1})"
+                        )
+                    if self.triton_tensor_ndim() == 4:
+                        # For each batch, Y advances before X in the launch grid.
+                        code.writeline(f"pid_mn = {x_pid} * {y_tiles} + {y_pid}")
+                        y_pid = "pid_mn // tl.cdiv(xnumel, XBLOCK)"
+                        x_pid = "pid_mn % tl.cdiv(xnumel, XBLOCK)"
+                    # TODO(nullplay): Tune GROUP_M; currently fixed at 8.
+                    swizzle = (
+                        f"pid_y, pid_x = tl.swizzle2d({y_pid}, {x_pid}, "
+                        f"{y_tiles}, tl.cdiv(xnumel, XBLOCK), 8)"
+                    )
+                    if self.is_combo_kernel and not self.per_subkernel_blocks:
+                        # Shared combo grids can include masked tiles outside this matmul.
+                        code.writeline(f"pid_y, pid_x = {y_pid}, {x_pid}")
+                        code.writeline(
+                            f"if pid_y < {y_tiles} and pid_x < tl.cdiv(xnumel, XBLOCK):"
+                        )
+                        with code.indent():
+                            code.writeline(swizzle)
+                    else:
+                        code.writeline(swizzle)
+                pid = f"pid_{x}"
             code.writelines(
                 [
-                    f"{x}offset = {self.iteration_ranges_get_pid(entry)} * {block_size}",
+                    f"{x}offset = {pid} * {block_size}",
                     f"{entry.name} = {line}",
                 ]
             )
