@@ -82,18 +82,17 @@ base_type_to_callsite_expr = {
 
 # convert args to C types, names in declarations, and expressions in function bodies
 #
-# resolve_dispatch_flags: whether to materialize conj/neg input tensors before the
-# call. Device-specific shims call kernels directly and need this. Device-generic
-# (aten) shims go through the dispatcher, which already handles these flags, and
-# must pass tensors through as-is so that view ops keep aliasing their inputs.
+# resolve_dispatch_flags: whether to manually materialize conj/neg input tensors
+# before the call. Device-specific shims call kernels directly and need this.
+# Device-generic (aten) shims go through the dispatcher, which already handles these
+# flags. Then, one must pass tensors through as-is so that view ops called on
+# complex Tensors keep aliasing their inputs instead of operating on a temporary copy.
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
     is_write: bool = False,
     resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
-    # Output tensors are never materialized: resolve_tensor_dispatch_flags returns
-    # an rvalue, which can't be passed to at::Tensor&.
     materialize = resolve_dispatch_flags and not is_write
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
