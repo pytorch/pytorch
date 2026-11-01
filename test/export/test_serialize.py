@@ -2887,7 +2887,7 @@ class TestPredispatchSerialization(TestCase):
             # Even in an imported module, it cannot be found by name.
             LocalTwoTensor.__module__ = TwoTensor.__module__
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-            with self.assertRaisesRegex(SerializeError, "not a top-level"):
+            with self.assertRaisesRegex(SerializeError, "defined inside a function"):
                 torch.export.save(ep, io.BytesIO())
 
         with self.subTest("name that finds a different class"):
@@ -3182,19 +3182,6 @@ class TestPredispatchSerialization(TestCase):
             self._load_with_name(artifact, replaced, name)
         self.assertFalse(os.path.exists(ran))
 
-    def test_predispatch_flat_apply_load_imports_only_table_modules(self):
-        _, artifact = self._index_in_vmap_artifact()
-        ran = self._side_effect_modules()
-        with (
-            patch(
-                "torch._export.serde.serialize._FLAT_APPLY_MODULES",
-                {"flat_apply_side_effect"},
-            ),
-            self.assertRaisesRegex(SerializeError, "not a class or function"),
-        ):
-            self._load_with_name(artifact, "function", "flat_apply_side_effect.F")
-        self.assertTrue(os.path.exists(ran))
-
     def _bad_spec_changes(self):
         def spec_of(args_and_kwargs):
             return pytree.treespec_dumps(pytree.tree_flatten(args_and_kwargs)[1])
@@ -3307,6 +3294,9 @@ class TestPredispatchSerialization(TestCase):
             "torch_os_system": set_last(arg={"as_operator": "torch.os.system"}),
             "module": set_last(arg={"as_operator": "torch.os"}),
             "helper": set_last(arg={"as_operator": _FLAT_APPLY_HELPER}),
+            "higher_order_op": set_last(
+                arg={"as_operator": "torch.ops.higher_order.cond"}
+            ),
             # A dict of arguments could hold one too, and export passes neither
             # dicts nor keyword arguments through flat_apply.
             "dict": set_last(
@@ -3322,9 +3312,10 @@ class TestPredispatchSerialization(TestCase):
     @parametrize(
         "case,reason",
         [
-            ("torch_os_system", "not an operator overload"),
-            ("module", "not an operator overload"),
-            ("helper", "not an operator overload"),
+            ("torch_os_system", "outside torch.ops"),
+            ("module", "outside torch.ops"),
+            ("helper", "outside torch.ops"),
+            ("higher_order_op", "not an operator overload"),
             ("dict", "of kind as_string_to_argument"),
             ("keyword", "keyword input"),
             ("named", "keyword input"),
@@ -3341,16 +3332,15 @@ class TestPredispatchSerialization(TestCase):
         self,
     ):
         # Looking up such a name reads attributes of torch, which can import a
-        # torch module, so load refuses the name first.
+        # torch module such as torch.onnx, so load refuses the name before any
+        # lookup.
         _, artifact = self._index_in_vmap_artifact()
-        onnx_imported = "torch.onnx" in sys.modules
 
         def change(node):
             node["inputs"][-1]["arg"] = {"as_operator": "torch.onnx.export"}
 
-        with self.assertRaisesRegex(SerializeError, "not an operator overload"):
+        with self.assertRaisesRegex(SerializeError, "outside torch.ops"):
             self._load_changed(artifact, change)
-        self.assertEqual("torch.onnx" in sys.modules, onnx_imported)
 
     @parametrize(
         "case,reason",

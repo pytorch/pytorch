@@ -4,7 +4,6 @@ import copy
 import copyreg
 import dataclasses
 import heapq
-import importlib
 import inspect
 import io
 import json
@@ -713,26 +712,14 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-# The torch modules that define what export puts into flat_apply calls for
-# programs whose users import nothing: the helper that calls custom autograd
-# functions, and ModIndex, the autograd function that TransformGetItemToIndex
-# uses. `import torch` does not import all of them, so load imports these
-# itself. Other modules, such as one that defines your own tensor subclass,
-# have to be imported first, like any other. The module comes from this table,
-# never from the loaded file.
-_FLAT_APPLY_MODULES = frozenset(
-    {"torch.export.custom_ops", "torch._dynamo._trace_wrapped_higher_order_op"}
-)
-
-
 def _find_imported(name: str) -> Any:
     """
     Find the class or function that a saved flat_apply node names, without
     running code from a module that the file chooses. Importing a module runs
-    its code, so apart from the torch modules in ``_FLAT_APPLY_MODULES``,
-    nothing is imported: the module that defines a name has to be imported
-    before loading. Only top-level classes and functions are found, and the
-    object must report the same qualified name, so aliases such as
+    its code, so nothing is imported: the module that defines a name has to be
+    imported before loading. The torch modules that export itself uses here
+    are imported by then. Only top-level classes and functions are found, and
+    the object must report the same qualified name, so aliases such as
     ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
     Names in ``__main__`` modules are refused too, because a script differs
     between processes. That includes ``__mp_main__``, the main script of a
@@ -741,8 +728,11 @@ def _find_imported(name: str) -> Any:
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
         raise SerializeError(f"{name} is in a __main__ module")
-    if module_name in _FLAT_APPLY_MODULES:
-        importlib.import_module(module_name)
+    if "<locals>" in module_name.split("."):
+        raise SerializeError(
+            f"{name} is defined inside a function. Define it at the top level "
+            "of a module."
+        )
     module = sys.modules.get(module_name)
     if module is None:
         raise SerializeError(
@@ -812,8 +802,8 @@ def _check_flat_apply_inputs(
             and inp.arg.as_operator.startswith("torch.ops.")
         ):
             raise SerializeError(
-                f"flat_apply node {node_name} has an operator input that is not "
-                f"an operator overload: {inp.arg.as_operator}"
+                f"flat_apply node {node_name} has an operator input outside "
+                f"torch.ops: {inp.arg.as_operator}"
             )
 
 
