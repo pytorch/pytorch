@@ -3577,7 +3577,7 @@ def uniform(
     # dtype, which is a constant.
     torch._check_not_implemented(
         x.dtype.is_floating_point or x.dtype.is_complex,
-        lambda: f"\"check_uniform_bounds\" not implemented for '{x.dtype}'",
+        lambda: f"uniform_ not implemented for '{x.dtype}'",
     )
     return prims._uniform_helper(
         x.shape,

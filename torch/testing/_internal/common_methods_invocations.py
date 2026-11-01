@@ -23460,8 +23460,6 @@ python_ref_db = [
         torch_opinfo_name="geometric",
         supports_out=True,
         decorators=(
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-
             # TODO: RuntimeError: no _refs support for torch.rand_like
             DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
                          'TestCommon',

@@ -197,6 +197,10 @@ def replace_random(
         return
     if pin_memory:
         return
+    if dtype is not None and not (dtype.is_floating_point or dtype.is_complex):
+        # leave integral/bool rand for the uniform decomposition to reject, so the
+        # compiled path raises like eager instead of silently sampling a constant
+        return
 
     def replacement(size):
         result = inductor_prims.random(
