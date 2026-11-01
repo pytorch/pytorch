@@ -779,45 +779,87 @@ _FLAT_APPLY_INPUT_KINDS = frozenset(
 )
 
 
-def _check_flat_apply_inputs(
-    node_name: str | None, inputs: Sequence[NamedArgument]
-) -> None:
+def _check_operator_name(where: str, inp: NamedArgument) -> None:
+    # Looking up a name outside torch.ops reads attributes of torch, which can
+    # import a torch module.
+    if inp.arg.type == "as_operator" and not (
+        isinstance(inp.arg.as_operator, str)
+        and inp.arg.as_operator.startswith("torch.ops.")
+    ):
+        raise SerializeError(
+            f"{where} has an operator input outside torch.ops: {inp.arg.as_operator}"
+        )
+
+
+def _check_flat_apply_inputs(where: str, inputs: Sequence[NamedArgument]) -> None:
     """
-    Save and load both refuse keyword inputs, inputs other than plain values
-    and operators, and operator names outside torch.ops: looking one up reads
-    attributes of torch, which can import a torch module.
+    Save and load both refuse keyword inputs of a flat_apply call, inputs other
+    than plain values and operators, and operator names outside torch.ops.
     """
     for inp in inputs:
         if inp.kind != ArgumentKind.POSITIONAL or inp.name:
             raise SerializeError(
-                f"flat_apply node {node_name} has a keyword input, which cannot "
-                "be saved or loaded"
+                f"{where} has a keyword input, which cannot be saved or loaded"
             )
         if inp.arg.type not in _FLAT_APPLY_INPUT_KINDS:
             raise SerializeError(
-                f"flat_apply node {node_name} has an input of kind {inp.arg.type}, "
-                "which cannot be saved or loaded"
+                f"{where} has an input of kind {inp.arg.type}, which cannot be "
+                "saved or loaded"
             )
-        if inp.arg.type == "as_operator" and not (
-            isinstance(inp.arg.as_operator, str)
-            and inp.arg.as_operator.startswith("torch.ops.")
-        ):
+        _check_operator_name(where, inp)
+
+
+# Kinds of saved inputs that load turns into objects the function could call,
+# or that could hold operators.
+_HELPER_CALL_REFUSED_KINDS = frozenset(
+    {"as_graph", "as_string_to_argument", "as_custom_obj"}
+)
+
+
+def _check_helper_call_inputs(where: str, inputs: Sequence[NamedArgument]) -> None:
+    """
+    The inputs of a direct call of the helper for custom autograd functions
+    reach the autograd function, as the inputs of a flat_apply call do. They
+    are not flattened, so lists of values are fine, but save and load refuse
+    the same callables.
+    """
+    for inp in inputs:
+        if inp.arg.type in _HELPER_CALL_REFUSED_KINDS:
             raise SerializeError(
-                f"flat_apply node {node_name} has an operator input outside "
-                f"torch.ops: {inp.arg.as_operator}"
+                f"{where} has an input of kind {inp.arg.type}, which cannot be "
+                "saved or loaded"
             )
+        _check_operator_name(where, inp)
 
 
 def _check_flat_apply_operators(
-    node_name: str | None, inputs: Sequence[NamedArgument], args: Sequence[Any]
+    where: str,
+    inputs: Sequence[NamedArgument],
+    args: Sequence[Any],
+    kwargs: dict[str, Any],
 ) -> None:
-    """Save and load both refuse operator inputs other than operator overloads."""
-    for inp, arg in zip(inputs, args):
-        if inp.arg.type == "as_operator" and not isinstance(arg, torch._ops.OpOverload):
+    """
+    Save and load both refuse operator inputs other than operator overloads.
+    Each input is matched with its value as ``deserialize_hoo_inputs`` splits
+    the inputs into args and kwargs.
+    """
+    positional = iter(args)
+    for inp in inputs:
+        if inp.kind == ArgumentKind.POSITIONAL or inp.name == "":
+            arg = next(positional)
+        else:
+            arg = kwargs[inp.name]
+        if inp.arg.type != "as_operator" or isinstance(arg, torch._ops.OpOverload):
+            continue
+        if isinstance(arg, str):
             raise SerializeError(
-                f"flat_apply node {node_name} has an operator input that is not "
-                f"an operator overload: {inp.arg.as_operator}"
+                f"{where} names an operator that is not registered: {arg}. "
+                "Import the library that defines it before loading."
             )
+        raise SerializeError(
+            f"{where} has an operator input that is not an operator overload: "
+            f"{inp.arg.as_operator}"
+        )
 
 
 def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
@@ -1234,21 +1276,24 @@ class GraphModuleSerializer(metaclass=Final):
         elif callable(node.target):
             # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
             # as plain Python function call_function nodes in pre_dispatch graphs.
+            inputs = self.serialize_hoo_inputs(node.args, node.kwargs)
             if (
                 node.target
                 is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             ):
-                # Load checks the class name, see deserialize_node.
+                # Load checks the call as it checks flat_apply, see
+                # deserialize_node.
+                where = f"node {node.name}"
+                _check_helper_call_inputs(where, inputs)
+                _check_flat_apply_operators(where, inputs, node.args, node.kwargs)
                 try:
                     _find_autograd_function(node.args[0] if node.args else None)
                 except SerializeError as e:
-                    raise SerializeError(
-                        f"Cannot serialize node {node.name}: {e}"
-                    ) from e
+                    raise SerializeError(f"Cannot serialize {where}: {e}") from e
             ex_node = Node(
                 name=node.name,
                 target=self.serialize_operator(node.target),
-                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                inputs=inputs,
                 outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
@@ -1513,8 +1558,10 @@ class GraphModuleSerializer(metaclass=Final):
                 "a different object, so it could not be loaded back"
             )
         flat_inputs = self.serialize_hoo_inputs(flat_args, node.kwargs)
-        _check_flat_apply_inputs(node.name, flat_inputs)
-        _check_flat_apply_operators(node.name, flat_inputs, flat_args)
+        _check_flat_apply_inputs(f"flat_apply node {node.name}", flat_inputs)
+        _check_flat_apply_operators(
+            f"flat_apply node {node.name}", flat_inputs, flat_args, node.kwargs
+        )
         return [
             NamedArgument(
                 name="",
@@ -3033,11 +3080,16 @@ class GraphModuleDeserializer(metaclass=Final):
             self.deserialize_outputs(serialized_node, fx_node)
         elif callable(target):
             # Handle predispatch wrapper functions (vmap, JVP, etc.)
-            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
-            if (
+            helper = (
                 target
                 is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-            ):
+            )
+            where = f"node {serialized_node.name}"
+            if helper:
+                _check_helper_call_inputs(where, serialized_node.inputs)
+            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            if helper:
+                _check_flat_apply_operators(where, serialized_node.inputs, args, kwargs)
                 # The helper would import the module of the class it gets by
                 # name when the program runs, so load finds the class first.
                 _find_autograd_function(args[0] if args else None)
@@ -3433,9 +3485,10 @@ class GraphModuleDeserializer(metaclass=Final):
             raise SerializeError(
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
             ) from e
-        _check_flat_apply_inputs(serialized_node.name, flat_inputs)
+        where = f"flat_apply node {serialized_node.name}"
+        _check_flat_apply_inputs(where, flat_inputs)
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
-        _check_flat_apply_operators(serialized_node.name, flat_inputs, args)
+        _check_flat_apply_operators(where, flat_inputs, args, kwargs)
         func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []

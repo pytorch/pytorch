@@ -2823,7 +2823,7 @@ class TestPredispatchSerialization(TestCase):
             )
             p = subprocess.run(
                 [sys.executable, "-c", script],
-                cwd=os.path.dirname(os.path.realpath(__file__)),
+                cwd=os.path.dirname(path),
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -3296,15 +3296,35 @@ class TestPredispatchSerialization(TestCase):
             node["inputs"] = node["inputs"][2:]
             node["inputs"][0]["arg"] = {"as_string": "os.system"}
 
+        def call_helper_directly_with(arg, **fields):
+            # Its other inputs reach the autograd function.
+            def change(node):
+                node["target"] = _FLAT_APPLY_HELPER
+                node["inputs"] = node["inputs"][2:]
+                node["inputs"][-1].update(arg=arg, **fields)
+
+            return change
+
+        cond = {"as_operator": "torch.ops.higher_order.cond"}
+
+        def call_helper_directly_after_keyword(node):
+            # Inputs after a keyword input are matched with their values too.
+            call_helper_directly_with(cond)(node)
+            node["inputs"].insert(-1, {"name": "k", "arg": {"as_int": 1}, "kind": 2})
+
         return {
             # An input that names an operator would reach the function as a
             # callable.
             "torch_os_system": set_last(arg={"as_operator": "torch.os.system"}),
             "module": set_last(arg={"as_operator": "torch.os"}),
-            "helper": set_last(arg={"as_operator": _FLAT_APPLY_HELPER}),
-            "higher_order_op": set_last(
-                arg={"as_operator": "torch.ops.higher_order.cond"}
+            # Looking up such a name reads attributes of torch, which can import
+            # a torch module such as torch.onnx, so load refuses it first.
+            "torch_onnx_export": set_last(arg={"as_operator": "torch.onnx.export"}),
+            "unregistered_op": set_last(
+                arg={"as_operator": "torch.ops.flat_apply_test_ns.op.default"}
             ),
+            "helper": set_last(arg={"as_operator": _FLAT_APPLY_HELPER}),
+            "higher_order_op": set_last(arg=cond),
             # A dict of arguments could hold one too, and export passes neither
             # dicts nor keyword arguments through flat_apply.
             "dict": set_last(
@@ -3318,6 +3338,16 @@ class TestPredispatchSerialization(TestCase):
             # Called directly, the helper would import the module of the class
             # name it gets when the program runs.
             "direct_helper_call": call_helper_directly,
+            "direct_helper_call_operator": call_helper_directly_with(
+                {"as_operator": "torch.os.system"}
+            ),
+            "direct_helper_call_dict": call_helper_directly_with(
+                {"as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}}
+            ),
+            "direct_helper_call_keyword": call_helper_directly_with(
+                cond, name="f", kind=2
+            ),
+            "direct_helper_call_after_keyword": call_helper_directly_after_keyword,
         }
 
     @parametrize(
@@ -3325,6 +3355,8 @@ class TestPredispatchSerialization(TestCase):
         [
             ("torch_os_system", "outside torch.ops"),
             ("module", "outside torch.ops"),
+            ("torch_onnx_export", "outside torch.ops"),
+            ("unregistered_op", "not registered"),
             ("helper", "outside torch.ops"),
             ("higher_order_op", "not an operator overload"),
             ("dict", "of kind as_string_to_argument"),
@@ -3332,6 +3364,10 @@ class TestPredispatchSerialization(TestCase):
             ("keyword", "keyword input"),
             ("named", "keyword input"),
             ("direct_helper_call", "not a class or function defined"),
+            ("direct_helper_call_operator", "outside torch.ops"),
+            ("direct_helper_call_dict", "of kind as_string_to_argument"),
+            ("direct_helper_call_keyword", "not an operator overload"),
+            ("direct_helper_call_after_keyword", "not an operator overload"),
         ],
         name_fn=lambda case, reason: case,
     )
@@ -3340,26 +3376,14 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(artifact, self._other_input_changes()[case])
 
-    def test_predispatch_flat_apply_load_refuses_operator_names_outside_torch_ops(
-        self,
-    ):
-        # Looking up such a name reads attributes of torch, which can import a
-        # torch module such as torch.onnx, so load refuses the name before any
-        # lookup.
-        _, artifact = self._index_in_vmap_artifact()
-
-        def change(node):
-            node["inputs"][-1]["arg"] = {"as_operator": "torch.onnx.export"}
-
-        with self.assertRaisesRegex(SerializeError, "outside torch.ops"):
-            self._load_changed(artifact, change)
-
     @parametrize(
         "case,reason",
         [
             ("keyword", "keyword input"),
             ("higher_order_op", "not an operator overload"),
             ("direct_helper_call", "not a class or function defined"),
+            ("direct_helper_call_operator", "not an operator overload"),
+            ("direct_helper_call_keyword", "not an operator overload"),
         ],
         name_fn=lambda case, reason: case,
     )
@@ -3378,7 +3402,13 @@ class TestPredispatchSerialization(TestCase):
             node.target = (
                 torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             )
-            node.args = ("os.system", *node.args[3:])
+            if case == "direct_helper_call":
+                node.args = ("os.system", *node.args[3:])
+            elif case == "direct_helper_call_operator":
+                node.args = (*node.args[2:-1], torch.ops.higher_order.cond)
+            else:
+                node.args = node.args[2:]
+                node.kwargs = {"f": torch.ops.higher_order.cond}
         with self.assertRaisesRegex(SerializeError, reason):
             serialize(ep)
 
