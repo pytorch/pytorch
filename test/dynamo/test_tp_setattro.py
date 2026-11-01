@@ -12,6 +12,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     xfailIf,
@@ -118,6 +119,8 @@ def _slot_target(a, b=1, *, c=2):
 
 
 class TpSetattroTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -530,7 +533,6 @@ class TpSetattroTests(TestCase):
         self.assertEqual(fn(torch.ones(3), p1), compiled(torch.ones(3), p2))
         self.assertEqual(p1.__dict__, p2.__dict__)
 
-    @unittest.expectedFailure
     def test_sourced_function_defaults_delete(self):
         # `del f.__defaults__` stores a DeletedVariable that is never replayed;
         # CPython sets the slot to None.
@@ -771,7 +773,6 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
-    @unittest.expectedFailure
     def test_function_name_delete(self):
         # _set_name only rejects non-None non-str; eager raises
         # "__name__ must be set to a string object".
