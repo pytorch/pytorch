@@ -3,6 +3,7 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 import math
+import sys
 import unittest
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -210,6 +211,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
 @instantiate_parametrized_tests
 class TestSetGuards(LoggingTestCase):
+    @parametrize("operation", ("set", "frozenset", "update", "union"))
+    def test_ordered_dict_collision_order(self, operation):
+        def fn(x, mapping):
+            if operation == "set":
+                result = set(mapping)
+            elif operation == "frozenset":
+                result = frozenset(mapping)
+            elif operation == "update":
+                result = set()
+                result.update(mapping)
+            else:
+                result = set().union(mapping)
+            return x + 1, list(result)
+
+        # OrderedDict takes CPython's iterable path, not its exact-dict fast path.
+        # With colliding hashes, insertion order affects the resulting set order.
+        mapping = OrderedDict.fromkeys((0, sys.hash_info.modulus))
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        mapping.move_to_end(0)
+        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("mapping_type", (dict, OrderedDict))
     @parametrize(
         "operation",

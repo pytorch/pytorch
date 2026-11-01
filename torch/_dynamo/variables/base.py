@@ -361,23 +361,19 @@ def _check_method_arity(
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
-    if (
-        (not kwargs or flags & MethodFlags.KEYWORDS)
-        and not (flags & MethodFlags.NOARGS and args)
-        and not (flags & MethodFlags.O and n != 1)
-    ):
+    if kwargs and not (flags & MethodFlags.KEYWORDS):
+        error = "takes no keyword arguments"
+    elif flags & MethodFlags.NOARGS and args:
+        error = f"takes no arguments ({n} given)"
+    elif flags & MethodFlags.O and n != 1:
+        error = f"takes exactly one argument ({n} given)"
+    else:
         return
     if callable(qualname):
         qualname = qualname()
     elif qualname is None:
         qualname = f"{vt.python_type_name()}.{name}"
-    if kwargs and not (flags & MethodFlags.KEYWORDS):
-        raise_type_error(tx, f"{qualname}() takes no keyword arguments")
-    if flags & (MethodFlags.NOARGS | MethodFlags.O):
-        if flags & MethodFlags.NOARGS and args:
-            raise_type_error(tx, f"{qualname}() takes no arguments ({n} given)")
-        if flags & MethodFlags.O and n != 1:
-            raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
+    raise_type_error(tx, f"{qualname}() {error}")
 
 
 # CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above

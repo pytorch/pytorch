@@ -86,6 +86,91 @@ def less_match_verbose_code_parts(expected):
 
 
 @instantiate_parametrized_tests
+class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("reverse", [False, True])
+    def test_hook_membership_guard(self, reverse):
+        hooks = OrderedDict.fromkeys((1, 2))
+        flags = {2: True}
+        inputs = {"hooks": hooks, "flags": flags}
+        root = RootGuardManager()
+        managers = {
+            name: root.dict_getitem_manager(
+                name,
+                name,
+                inputs[name],
+                torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+            )
+            for name in (reversed(inputs) if reverse else inputs)
+        }
+        guards.install_nn_module_hook_membership_guard(
+            managers["hooks"], managers["flags"], (False, True), ["hook flags"], None
+        )
+        clone = root.clone_manager(lambda manager: True)
+        for manager in (root, clone):
+            self.assertTrue(manager.check(inputs))
+            self.assertTrue(manager.check_verbose(inputs).result)
+            self.assertFalse(manager.check({"hooks": hooks}))
+            self.assertTrue(manager.check(inputs))  # reset after a partial traversal
+            changed = {"hooks": hooks, "flags": {1: True}}
+            self.assertFalse(manager.check(changed))
+            self.assertFalse(manager.check_verbose(changed).result)
+            equivalent = {
+                "hooks": OrderedDict.fromkeys((11, 12)),
+                "flags": {12: True},
+            }
+            self.assertTrue(manager.check(equivalent))
+            flags.clear()
+            flags[1] = True
+            self.assertFalse(manager.check(inputs))
+            flags.clear()
+            flags[2] = True
+            self.assertTrue(manager.check(inputs))
+
+    def test_hook_membership_guard_same_manager(self):
+        mapping = {1: True, 2: True}
+        root = RootGuardManager()
+        guards.install_nn_module_hook_membership_guard(
+            root, root, (True, True), [], None
+        )
+        self.assertTrue(root.check(mapping))
+        self.assertFalse(root.check({1: True}))
+        self.assertFalse(root.check(None))
+        self.assertTrue(root.check(mapping))
+
+    @parametrize("side", ["hooks", "flags"])
+    def test_hook_membership_guard_rejects_noninteger_keys(self, side):
+        class Key:
+            fail = False
+
+            def __hash__(self):
+                if self.fail:
+                    raise AssertionError("guard called __hash__")
+                return 1
+
+            def __eq__(self, other):
+                raise AssertionError("guard called __eq__")
+
+        key = Key()
+        inputs = {"hooks": {1: None}, "flags": {1: True}}
+        inputs[side] = {key: None}
+        key.fail = True
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(
+                name,
+                name,
+                inputs[name],
+                torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+            )
+            for name in ("hooks", "flags")
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
+        self.assertFalse(root.check(inputs))
+
+
+@instantiate_parametrized_tests
 class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -185,7 +270,7 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
     @parametrize(
         "mutation, linked_count",
         [(mode, count) for mode in ("before", "after") for count in (0, 1, 2)]
-        + [("delete", 1), ("replace", 1)],
+        + [("delete", 1), ("replace", 1), ("duplicate", 1)],
     )
     @parametrize("key_type", [str, int])
     @parametrize("copy", [False, True])
@@ -194,9 +279,11 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
         if mutation == "before":
             dict.__setitem__(mapping, key_type(0), 0)
         mapping.update((key_type(i), i) for i in range(1, linked_count + 1))
-        if mutation in ("delete", "replace"):
+        if mutation in ("delete", "replace", "duplicate"):
             dict.__delitem__(mapping, key_type(1))
-        if mutation in ("after", "replace"):
+        if mutation == "duplicate":
+            mapping[key_type(1)] = 1
+        if mutation in ("after", "replace", "duplicate"):
             dict.__setitem__(mapping, key_type(0), 0)
         valid = OrderedDict(dict.items(mapping))
         spec = GuardBuilder.ORDERED_DICT_ORDER_MATCH.guard_check_spec
