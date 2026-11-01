@@ -262,9 +262,6 @@ class BaseSetVariable(VariableTracker):
         # matching CPython's hash-at-insert behavior.
         from .dicts import ConstDictVariable
 
-        if isinstance(other, ConstDictVariable):
-            # Escaping keys can be reconstructed by position, even for sets.
-            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             yield from other.items.keys()
             return
@@ -279,8 +276,6 @@ class BaseSetVariable(VariableTracker):
         # protocol.
         from .dicts import ConstDictVariable
 
-        if isinstance(other, ConstDictVariable):
-            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]

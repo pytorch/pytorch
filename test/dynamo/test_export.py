@@ -146,15 +146,6 @@ def forward(self, x, y):
         result = out_graph(torch.randn(5))
         self.assertEqual(result, 5)
 
-    @common_utils.parametrize("value", [2, 2.5, "mode", True, None])
-    def test_sourced_constant_outputs(self, value):
-        def fn(x, value):
-            return x + 1, value, ((value,),)
-
-        x = torch.ones(1)
-        graph, _ = torch._dynamo.export(fn)(x, value)
-        self.assertEqual(graph(x, value), fn(x, value))
-
     def test_no_tensor_computation_2(self):
         inp = torch.randn(3)
         inp2 = 2

@@ -959,14 +959,10 @@ class DictViewIterator(IteratorVariable):
     def __init__(
         self,
         items: dict[HashableTracker, VariableTracker],
-        *,
-        use_dict_storage: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if use_dict_storage and isinstance(items, dict):
-            self._iter = iter(getattr(dict, self.view_type)(items))
-        elif self.view_type == "keys":
+        if self.view_type == "keys":
             self._iter = iter(items)
         elif self.view_type == "values":
             self._iter = iter(items.values())  # type: ignore[bad-assignment]
@@ -979,12 +975,9 @@ class DictViewIterator(IteratorVariable):
 
     @classmethod
     def create(
-        cls,
-        items: dict[HashableTracker, VariableTracker],
-        *,
-        use_dict_storage: bool = False,
+        cls, items: dict[HashableTracker, VariableTracker]
     ) -> "DictViewIterator":
-        return cls(items, use_dict_storage=use_dict_storage)
+        return cls(items)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # dictiter_iternextitem: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5538-L5578
