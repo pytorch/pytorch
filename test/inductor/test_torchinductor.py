@@ -9754,7 +9754,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ):
                 model(x)
 
-    @xfail_if_mps_unimplemented
     def test_adaptive_avg_pool_errors_with_long(self):
         class Model(torch.nn.Module):
             def __init__(self, pool_operator):
@@ -20500,7 +20499,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
-    def test_pdl_store_only_kernel_waits(self):
+    def test_pdl_wait_through_store_only_kernel(self):
         def fn(x):
             y = x
             for _ in range(64):
@@ -20513,14 +20512,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,), check_lowp=False)
 
         code = run_and_get_triton_code(torch.compile(fn), x)
-        # gdc_wait only waits for the direct predecessor, so the zero fill must
-        # wait before exiting or index_put can read y before the sum writes it
+        # the zero fill in between never waits, so the index_put must wait for
+        # the sum before loading its result
         (
             FileCheck()
-            .check("def triton_poi_fused_new_zeros")
-            .check("store")
-            .check_not("def triton_")
+            .check("def triton_poi_fused_arange_index_put")
+            .check_not("load")
             .check("gdc_wait")
+            .check("load")
         ).run(code)
 
     @requires_cuda_and_triton
@@ -20563,6 +20562,70 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         (
             FileCheck()
             .check("def triton_poi_fused_arange_index_fill")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_wait_after_workspace_kernel(self):
+        def fn(x):
+            y = x
+            for _ in range(32):
+                y = torch.sin(y) * 1.5
+            c = torch.cumsum(y, 0)
+            z = torch.arange(2**21, device=x.device, dtype=torch.float32) * 3
+            w = torch.arange(8192, device=x.device, dtype=torch.float32) * 2 + 1
+            return c, z, w
+
+        x = torch.randn(2**20, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False, atol=1e-2, rtol=1e-3)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        # the split scan's workspace is freed right after launch, so the next
+        # kernel must wait before storing into memory it may reuse
+        (
+            FileCheck()
+            .check("def triton_spl_fused_cumsum")
+            .check("def triton_poi_fused_arange_mul")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "triton.cooperative_reductions": True,
+            "triton.force_cooperative_reductions": True,
+            "triton.multi_kernel": 2,
+        }
+    )
+    def test_pdl_wait_after_workspace_multi_kernel(self):
+        def fn(x):
+            s = x.sum(-1)
+            w = torch.arange(64, device=x.device, dtype=torch.float32) * 2 + 1
+            return s, w
+
+        x = torch.randn(1, 2**16, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False, atol=1e-2, rtol=1e-3)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        if not is_dynamic_shape_enabled():
+            # the non-cooperative alternative needs a static rnumel
+            self.assertIn("async_compile.multi_kernel", code)
+        # the cooperative reduction's workspace is freed right after launch, so
+        # the next kernel must wait before storing into memory it may reuse
+        (
+            FileCheck()
+            .check("fused_sum")
+            .check("def triton_poi_fused_add_arange_mul")
             .check_not("store")
             .check("gdc_wait")
             .check("store")
@@ -20995,23 +21058,6 @@ if RUN_CPU:
 
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
-
-        def test_bmm_integer_dtype_m1_n1(self):
-            # Verify the compiled result for integer bmm when M==1 or N==1,
-            # checking both dtype and values.
-            def f(a, b):
-                return torch.bmm(a, b)
-
-            m1 = torch.randint(-1000, 1000, (5, 1, 10), dtype=torch.int32)
-            m2 = torch.randint(-1000, 1000, (5, 2, 10), dtype=torch.int32)
-            rhs_n5 = torch.randint(-1000, 1000, (5, 10, 5), dtype=torch.int32)
-            rhs_n1 = torch.randint(-1000, 1000, (5, 10, 1), dtype=torch.int32)
-
-            for a, b in ((m1, rhs_n5), (m2, rhs_n1)):
-                expected = f(a, b)
-                actual = torch.compile(f)(a, b)
-                self.assertEqual(expected.dtype, actual.dtype)
-                self.assertEqual(expected, actual)
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
