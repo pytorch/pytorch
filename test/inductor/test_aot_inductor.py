@@ -10875,11 +10875,18 @@ class AOTInductorTestsTemplate:
             return [lib for lib in needed if "omp" in lib.lower()]
 
         # assertFalse names the libraries that came back, assertEqual does not.
-        self.assertFalse(openmp_libraries(torch.randn(8, device=self.device), {}))
+        # dynamic_threads would put even this small kernel in a parallel region.
+        self.assertFalse(
+            openmp_libraries(
+                torch.randn(8, device=self.device), {"cpp.dynamic_threads": False}
+            )
+        )
 
-        if self.device == "cpu":
-            # Large enough for Inductor to parallelize the kernel with OpenMP on
-            # two threads, so the library is used and has to stay.
+        # Large enough for Inductor to parallelize the kernel with OpenMP on two
+        # threads, so the library is used and has to stay. With
+        # fallback_by_default (lite mode) the op goes to ATen and no kernel is
+        # generated.
+        if self.device == "cpu" and not config.fallback_by_default:
             self.assertTrue(openmp_libraries(torch.randn(4096), {"cpp.threads": 2}))
 
     def test_unbounded_expr_substitutions(self):
