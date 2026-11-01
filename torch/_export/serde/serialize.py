@@ -863,6 +863,7 @@ def _find_flat_apply_func(
         or pair[0].num_children == 0
         or not pair[0].child(0).is_leaf()
         or pair[1].type is not dict
+        or not isinstance(pair[1].context, list)
         or "function_cls_name" in pair[1].context
         or not isinstance(flat_args[0], str)
     ):
@@ -3395,6 +3396,7 @@ class GraphModuleDeserializer(metaclass=Final):
         if (
             len(inputs) < 2
             or inputs[0].arg.type != "as_operator"
+            or not isinstance(inputs[0].arg.as_operator, str)
             or inputs[1].arg.type != "as_string"
         ):
             raise SerializeError(

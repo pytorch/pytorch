@@ -3178,6 +3178,12 @@ class TestPredispatchSerialization(TestCase):
             root["children_spec"][0]["children_spec"][1] = node
             return json.dumps([protocol, root])
 
+        def dict_context(context):
+            # The spec of the saved inputs with another context for the dict.
+            protocol, root = json.loads(spec_of((("name", 0, 0), {})))
+            root["children_spec"][1]["context"] = context
+            return json.dumps([protocol, root])
+
         leaf = {"type": None, "context": None, "children_spec": []}
         no_name = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
         enum_spec = spec_of((("name", {Color.RED: 0}), {}))
@@ -3230,8 +3236,18 @@ class TestPredispatchSerialization(TestCase):
                 "Cannot load the input spec",
             ),
             (
+                "kwargs context that is not a list of keys",
+                set_spec(dict_context("5")),
+                "name as the first input",
+            ),
+            (
                 "no function",
                 lambda node: node["inputs"].pop(0),
+                "does not start with its function",
+            ),
+            (
+                "function name that is not a string",
+                lambda node: node["inputs"][0]["arg"].update(as_operator=5),
                 "does not start with its function",
             ),
         ]:
