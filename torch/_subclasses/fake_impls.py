@@ -1991,6 +1991,143 @@ def to_mkldnn(
     return FakeTensor(fake_mode, out, fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS)
 
 
+if torch._C._has_mkldnn:
+
+    @register_op_impl(torch.ops.onednn.qconv_pointwise_prepack.default)
+    def qconv_pointwise_prepack(
+        fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+        _, normalized = _normalize_function_or_error(
+            func, args, kwargs, normalize_to_only_use_kwargs=True
+        )
+        weight = normalized["qw"]
+        x_shape = normalized["x_shape"]
+        groups = normalized["groups"]
+        stride = normalized["stride"]
+        padding = normalized["padding"]
+        dilation = normalized["dilation"]
+        scale_count = normalized["weight_scale_count"]
+        output_dtype = normalized["output_dtype"] or torch.uint8
+        name = "onednn::qconv_pointwise_prepack"
+
+        # Keep metadata validation consistent with prepare_qconv_pointwise_prepack.
+        torch._check(
+            weight.device.type == "cpu" and weight.is_mkldnn,
+            lambda: (
+                f"{name} expects an MKLDNN weight on CPU, got "
+                f"{weight.device} with layout {weight.layout}"
+            ),
+        )
+        torch._check(
+            weight.dtype == torch.int8,
+            lambda: f"{name}: weight must be int8, got {weight.dtype}",
+        )
+        torch._check_not_implemented(
+            len(x_shape) == 4,
+            lambda: (
+                f"{name} supports Conv2d, got x_shape with {len(x_shape)} dimensions"
+            ),
+        )
+        torch._check(
+            weight.dim() == 4,
+            lambda: f"{name}: weight must be 4-dimensional, got {weight.dim()}",
+        )
+        torch._check_not_implemented(
+            groups == 1, lambda: f"{name} supports groups=1, got {groups}"
+        )
+        torch._check(
+            len(stride) == len(padding) == len(dilation) == 2,
+            lambda: (
+                f"{name} expects 2D parameters, got lengths "
+                f"{len(stride)}, {len(padding)}, {len(dilation)} "
+                "for stride, padding, dilation"
+            ),
+        )
+        torch._check(
+            sym_and(stride[0] > 0, stride[1] > 0),
+            lambda: f"{name}: stride must be positive, got {stride}",
+        )
+        torch._check(
+            sym_and(
+                scale_count > 0,
+                sym_or(scale_count == 1, scale_count == weight.shape[0]),
+            ),
+            lambda: (
+                f"{name}: weight_scale_count must be 1 or match "
+                f"output channels ({weight.shape[0]}), got {scale_count}"
+            ),
+        )
+        torch._check(
+            weight.shape[1] * groups == x_shape[1],
+            lambda: (
+                f"{name}: input channels must match weight input channels times "
+                f"groups, got {x_shape[1]} and {weight.shape[1] * groups}"
+            ),
+        )
+        torch._check(
+            output_dtype in (torch.uint8, torch.int8, torch.float32, torch.bfloat16),
+            lambda: f"{name}: unsupported output dtype: {output_dtype}",
+        )
+        if output_dtype in (torch.float32, torch.bfloat16):
+            torch._check(
+                normalized["output_scale"] == 1.0
+                and normalized["output_zero_point"] == 0,
+                lambda: (
+                    f"{name}: floating-point output requires default output qparams, "
+                    f"got scale={normalized['output_scale']} "
+                    f"and zero_point={normalized['output_zero_point']}"
+                ),
+            )
+
+        attr = normalized["attr"]
+        scalars = normalized["scalars"]
+        algorithm = normalized["algorithm"] or ""
+        # Match create_attr_by_post_op's unary validation.
+        torch._check(
+            attr
+            in (
+                "none",
+                "relu",
+                "leaky_relu",
+                "tanh",
+                "gelu",
+                "hardtanh",
+                "hardswish",
+                "swish",
+            ),
+            lambda: f"{name}: unsupported unary post op {attr}",
+        )
+        if attr == "leaky_relu":
+            torch._check(
+                len(scalars) == 1 and scalars[0] is not None,
+                lambda: f"{name}: expect one argument for post op leaky_relu",
+            )
+        elif attr == "hardtanh":
+            torch._check(
+                len(scalars) == 2 and all(value is not None for value in scalars),
+                lambda: (
+                    f"{name}: hardtanh is expected to have two scalar input: "
+                    "min_val and max_val"
+                ),
+            )
+        elif attr == "gelu":
+            torch._check(
+                algorithm in ("none", "tanh"),
+                lambda: (
+                    f"{name}: algorithm for post op gelu must be none or tanh "
+                    f"but got {algorithm}"
+                ),
+            )
+
+        # Repacking preserves logical metadata and creates independent storage.
+        with fake_mode:
+            return torch.empty(
+                weight.shape, dtype=weight.dtype, device=weight.device
+            ).to_mkldnn()
+
+
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
     lambda func: is_builtin(func)

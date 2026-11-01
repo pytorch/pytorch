@@ -1,15 +1,22 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 import operator
 from functools import reduce
 from typing import Any, TYPE_CHECKING
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, optimization_hint
+from torch.fx.experimental.symbolic_shapes import (
+    has_free_symbols,
+    optimization_hint,
+    statically_known_true,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .. import ir, mkldnn_ir
+from ..constant_folding import replace_node_with_constant
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -36,6 +43,9 @@ from .quantization import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+log = logging.getLogger(__name__)
 
 
 if torch._C._has_mkldnn:
@@ -1571,6 +1581,177 @@ if torch._C._has_mkldnn:
             counters["inductor"]["mkldnn_linear_weight_pack_matcher_nodes"] += len(
                 match.nodes
             )
+
+    def _qconv_pointwise_prepack(gm, prepack_args) -> torch.Tensor:
+        # Query and pack real frozen weights, outside FakeTensor mode.
+        with torch.utils._python_dispatch._disable_current_modes():
+            args = pytree.tree_map_only(
+                torch.fx.Node,
+                lambda arg: operator.attrgetter(str(arg.target))(gm),
+                prepack_args,
+            )
+            if not torch.ops.onednn._qconv_pointwise_prepack_needed.default(*args):
+                return args[0]
+            return torch.ops.onednn.qconv_pointwise_prepack.default(*args)
+
+    def _pack_frozen_qconv_weights(gm: torch.fx.GraphModule) -> None:
+        """Pack frozen weights for the final qconv configuration after constant folding.
+
+        Only scalar-qparam unary Conv2d with static CPU uint8 input, groups=1,
+        and constant packing arguments is eligible.
+        Weights whose layout already matches are reused without repacking.
+        Identical packing arguments share a packed weight. Different configurations
+        can create separate packed copies, and the original weight remains when
+        other consumers or the eager module still use it. Packing failures leave
+        the original convolution unchanged.
+        """
+        if not (
+            torch.backends.mkldnn.enabled
+            and torch._C._dispatch_has_kernel_for_dispatch_key(
+                "onednn::qconv_pointwise_prepack", "MkldnnCPU"
+            )
+        ):
+            return
+
+        packed_weights: dict[tuple[Any, ...], torch.fx.Node | None] = {}
+        replaced_weight_targets: OrderedSet[str] = OrderedSet()
+
+        for node in list(gm.graph.nodes):
+            if (
+                node.op != "call_function"
+                or node.target is not torch.ops.onednn.qconv_pointwise.default
+            ):
+                continue
+
+            normalized = node.normalized_arguments(
+                gm, normalize_to_only_use_kwargs=True
+            )
+            if normalized is None:
+                continue
+            kwargs = normalized.kwargs
+            x = kwargs["qx"].meta.get("val")
+
+            if (
+                x is None
+                or x.device.type != "cpu"
+                or x.dtype != torch.uint8
+                or x.dim() != 4
+                or has_free_symbols(x.shape)
+                or any(dim <= 0 for dim in x.shape)
+                or kwargs["groups"] != 1
+                or kwargs["output_dtype"]
+                not in (
+                    None,
+                    torch.uint8,
+                    torch.int8,
+                    torch.float32,
+                    torch.bfloat16,
+                )
+            ):
+                continue
+
+            output = node.meta.get("val")
+            if output is not None and statically_known_true(output.numel() == 0):
+                continue
+
+            weight_node = kwargs["qw"]
+            if (
+                not isinstance(weight_node, torch.fx.Node)
+                or weight_node.op != "get_attr"
+            ):
+                continue
+
+            weight = operator.attrgetter(str(weight_node.target))(gm)
+            if not (weight.is_mkldnn and weight.dtype == torch.int8):
+                continue
+
+            scale_node = kwargs["w_scale"]
+            if not isinstance(scale_node, torch.fx.Node):
+                continue
+
+            if scale_node.op == "get_attr":
+                weight_scales = operator.attrgetter(str(scale_node.target))(gm)
+            else:
+                weight_scales = scale_node.meta.get("val")
+
+            if not isinstance(weight_scales, torch.Tensor) or has_free_symbols(
+                weight_scales.shape
+            ):
+                continue
+
+            weight_scale_count = weight_scales.numel()
+            with_bias = kwargs["bias"] is not None
+
+            prepack_args = (
+                weight_node,
+                weight_scale_count,
+                with_bias,
+                kwargs["x_scale"],
+                kwargs["x_zero_point"],
+                tuple(x.shape),
+                kwargs["stride"],
+                kwargs["padding"],
+                kwargs["dilation"],
+                kwargs["groups"],
+                kwargs["output_scale"],
+                kwargs["output_zero_point"],
+                kwargs["output_dtype"],
+                kwargs["attr"],
+                kwargs["scalars"],
+                kwargs["algorithm"],
+            )
+
+            leaves, spec = pytree.tree_flatten(prepack_args)
+            if any(
+                isinstance(value, torch.fx.Node) and value.op != "get_attr"
+                for value in leaves
+            ):
+                continue
+
+            key = (tuple(leaves), spec)
+            if key not in packed_weights:
+                try:
+                    packed_weight = _qconv_pointwise_prepack(gm, prepack_args)
+                except torch.OutOfMemoryError:
+                    raise
+                except RuntimeError as exc:
+                    log.debug("Skipping qconv weight prepack: %s", exc)
+                    packed_weights[key] = None
+                    continue
+
+                packed = weight_node
+                if packed_weight is not weight:
+                    with gm.graph.inserting_before(node):
+                        packed = gm.graph.call_function(
+                            torch.ops.onednn.qconv_pointwise_prepack.default,
+                            args=prepack_args,
+                        )
+                    packed.meta.update(weight_node.meta)
+                    replace_node_with_constant(gm, packed, packed_weight)
+                    # The replacement constant is immediately before this conv.
+                    packed = node.prev
+                packed_weights[key] = packed
+
+            packed = packed_weights[key]
+            if packed is None:
+                continue
+            if packed is not weight_node:
+                kwargs["qw"] = packed
+                node.args = tuple(kwargs.values())
+                node.kwargs = {}
+                replaced_weight_targets.add(str(weight_node.target))
+            counters["inductor"]["qconv_pointwise_prepack_node_count"] += 1
+
+        if replaced_weight_targets:
+            gm.graph.eliminate_dead_code()
+            live_targets = OrderedSet(
+                node.target for node in gm.graph.nodes if node.op == "get_attr"
+            )
+            for target in replaced_weight_targets:
+                if target not in live_targets and hasattr(gm, target):
+                    delattr(gm, target)
+            gm.graph.lint()
+            gm.recompile()
 
     def _eliminate_duplicate_packed_nodes(gm):
         """

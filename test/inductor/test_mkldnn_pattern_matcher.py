@@ -3,11 +3,13 @@ import contextlib
 import copy
 import itertools
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.fx_passes import mkldnn_fusion
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     is_mkldnn_bf16_supported,
@@ -15,6 +17,7 @@ from torch._inductor.utils import (
     run_and_get_code,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -23,9 +26,11 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    parametrize,
     requires_mkl,
     skipIfXpu,
     TEST_ACL,
@@ -1925,6 +1930,537 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
 
+class TestQConvPointwisePrepack(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.CPU
+
+    def setUp(self):
+        if not torch._C._dispatch_has_kernel_for_dispatch_key(
+            "onednn::qconv_pointwise_prepack", "MkldnnCPU"
+        ):
+            self.skipTest("qconv pointwise prepack requires oneDNN 3.1 or later")
+        super().setUp()
+        counters["inductor"].clear()
+        self.pack_counts = []
+        self.repack_requests = []
+        prepack = mkldnn_fusion._qconv_pointwise_prepack
+
+        def record_packs(gm, args):
+            weight = gm
+            for name in str(args[0].target).split("."):
+                weight = getattr(weight, name)
+            packed = prepack(gm, args)
+            needed = packed is not weight
+            self.repack_requests.append(needed)
+            if needed:
+                self.pack_counts.append(1)
+            return packed
+
+        self.ctx_stack.enter_context(
+            patch.object(
+                mkldnn_fusion, "_qconv_pointwise_prepack", side_effect=record_packs
+            )
+        )
+
+    def test_unsupported_kernel_preserves_config(self, device):
+        case = type(self)(self._testMethodName)
+        with (
+            config.patch(freezing=False),
+            patch.object(
+                torch._C, "_dispatch_has_kernel_for_dispatch_key", return_value=False
+            ),
+        ):
+            with self.assertRaisesRegex(unittest.SkipTest, "requires oneDNN 3.1"):
+                case.setUp()
+            self.assertFalse(config.freezing)
+
+    def _model(
+        self,
+        device,
+        *,
+        spatial_dim=2,
+        kernel_size=1,
+        groups=1,
+        output_dtype=torch.float32,
+        with_bias=True,
+        tensor_qparams=False,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("scales", torch.full((16,), 0.125, device=device))
+                self.register_buffer(
+                    "zeros", torch.zeros(16, dtype=torch.int64, device=device)
+                )
+                self.register_buffer("sx", torch.tensor(0.25, device=device))
+                self.register_buffer(
+                    "zx", torch.tensor(3, dtype=torch.int64, device=device)
+                )
+                self.register_buffer(
+                    "bias", torch.randn(16, device=device) if with_bias else None
+                )
+                weight = torch.randint(
+                    -8,
+                    8,
+                    (16, 16 // groups, *([kernel_size] * spatial_dim)),
+                    dtype=torch.int8,
+                    device=device,
+                )
+                self.register_buffer(
+                    "weight",
+                    torch.ops.onednn.qconv_prepack(
+                        weight,
+                        self.scales,
+                        0.25,
+                        3,
+                        [1] * spatial_dim,
+                        [0] * spatial_dim,
+                        [1] * spatial_dim,
+                        groups,
+                        [1, 16, *([8] * spatial_dim)],
+                    ),
+                )
+
+            def forward(self, x, bias=None, attr="none", scales=None):
+                op = (
+                    torch.ops.onednn.qconv_pointwise.tensor
+                    if tensor_qparams
+                    else torch.ops.onednn.qconv_pointwise.default
+                )
+                return op(
+                    qx=x,
+                    x_scale=self.sx if tensor_qparams else 0.25,
+                    x_zero_point=self.zx if tensor_qparams else 3,
+                    qw=self.weight,
+                    w_scale=self.scales if scales is None else scales,
+                    w_zero_point=self.zeros,
+                    bias=self.bias if bias is None else bias,
+                    stride=[1] * spatial_dim,
+                    padding=[0] * spatial_dim,
+                    dilation=[1] * spatial_dim,
+                    groups=groups,
+                    output_scale=0.5 if output_dtype in (None, torch.uint8) else 1.0,
+                    output_zero_point=3 if output_dtype in (None, torch.uint8) else 0,
+                    output_dtype=output_dtype,
+                    attr=attr,
+                    scalars=[],
+                    algorithm="",
+                )
+
+        return M().eval()
+
+    @parametrize("output_dtype", [torch.uint8, torch.float32, torch.bfloat16])
+    @parametrize("with_bias", [False, True])
+    @torch.inference_mode()
+    def test_compile(self, device, output_dtype, with_bias):
+        model = self._model(device, output_dtype=output_dtype, with_bias=with_bias)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        expected = model(x)
+        compiled = torch.compile(model, fullgraph=True, dynamic=False)
+        actual, code = run_and_get_code(compiled, x)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(compiled(x), expected, atol=0, rtol=0)
+        self.assertEqual(counters["inductor"]["qconv_pointwise_prepack_node_count"], 1)
+        self.assertEqual(len(self.repack_requests), 1)
+        self.assertEqual(sum(self.pack_counts), sum(self.repack_requests))
+        self.assertNotIn("torch.ops.onednn.qconv_pointwise_prepack", "\n".join(code))
+
+    @parametrize("output_dtype", [torch.uint8, torch.float32, torch.bfloat16])
+    @parametrize("cpp_wrapper", [False, True])
+    @torch.inference_mode()
+    def test_reuse_matching_weight(self, device, output_dtype, cpp_wrapper):
+        model = self._model(device, output_dtype=output_dtype)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        model.weight = torch.ops.onednn.qconv_pointwise_prepack(
+            model.weight,
+            model.scales.numel(),
+            True,
+            0.25,
+            3,
+            list(x.shape),
+            [1, 1],
+            [0, 0],
+            [1, 1],
+            1,
+            0.5 if output_dtype == torch.uint8 else 1.0,
+            3 if output_dtype == torch.uint8 else 0,
+            output_dtype,
+            "none",
+            [],
+            "",
+        )
+
+        def shared(x, y):
+            return model(x), model(y)
+
+        y = x + 1
+        expected = shared(x, y)
+        with config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(shared, fullgraph=True, dynamic=False)
+            actual, code = run_and_get_code(compiled, x, y)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+            self.assertEqual(compiled(x, y), expected, atol=0, rtol=0)
+        self.assertEqual(self.repack_requests, [False])
+        self.assertEqual(self.pack_counts, [])
+        self.assertNotIn("qconv_pointwise_prepack", "\n".join(code))
+
+    @parametrize(
+        "sharing",
+        [
+            "same",
+            "shape",
+            "post_op",
+            "runtime_bias",
+            "constant_bias",
+            "runtime_scales",
+            "constant_scales",
+        ],
+    )
+    @torch.inference_mode()
+    def test_shared_weight(self, device, sharing):
+        conv = self._model(device)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv
+                self.register_buffer("other_bias", conv.bias + 1)
+                self.register_buffer("other_scales", conv.scales * 2)
+
+            def forward(self, x, y, bias, scales):
+                other_bias = (
+                    bias
+                    if sharing == "runtime_bias"
+                    else self.other_bias
+                    if sharing == "constant_bias"
+                    else None
+                )
+                other_scales = (
+                    scales
+                    if sharing == "runtime_scales"
+                    else self.other_scales
+                    if sharing == "constant_scales"
+                    else None
+                )
+                return self.conv(x), self.conv(
+                    y,
+                    bias=other_bias,
+                    attr="relu" if sharing == "post_op" else "none",
+                    scales=other_scales,
+                )
+
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        shape = (2, 16, 10, 10) if sharing == "shape" else x.shape
+        y = torch.randint(0, 32, shape, dtype=torch.uint8, device=device)
+        bias = torch.randn(16, device=device)
+        scales = conv.scales * 2
+        model = M().eval()
+        compiled = torch.compile(model, fullgraph=True, dynamic=False)
+        self.assertEqual(
+            compiled(x, y, bias, scales), model(x, y, bias, scales), atol=0, rtol=0
+        )
+        if sharing in ("runtime_bias", "runtime_scales"):
+            if sharing == "runtime_bias":
+                bias = bias + 1
+            else:
+                scales = scales * 2
+            self.assertEqual(
+                compiled(x, y, bias, scales), model(x, y, bias, scales), atol=0, rtol=0
+            )
+        self.assertEqual(
+            len(self.repack_requests), 2 if sharing in ("shape", "post_op") else 1
+        )
+        self.assertEqual(sum(self.pack_counts), sum(self.repack_requests))
+        self.assertEqual(
+            counters["inductor"]["qconv_pointwise_prepack_node_count"],
+            2,
+        )
+
+    def _trace_shared(self, fn, *inputs):
+        gm = make_fx(fn, tracing_mode="fake", _allow_non_fake_inputs=True)(*inputs)
+        # make_fx emits repeated get_attrs; represent one shared frozen constant.
+        constants = {}
+        for node in list(gm.graph.nodes):
+            if node.op == "get_attr":
+                if node.target in constants:
+                    node.replace_all_uses_with(constants[node.target])
+                    gm.graph.erase_node(node)
+                else:
+                    constants[node.target] = node
+        gm.recompile()
+        return gm
+
+    @contextlib.contextmanager
+    def _mock_prepack_ops(
+        self, failure_stage=None, error_type=RuntimeError, batch=None
+    ):
+        query = torch.ops.onednn._qconv_pointwise_prepack_needed.default
+        prepack = torch.ops.onednn.qconv_pointwise_prepack.default
+        original_call = torch._ops.OpOverload.__call__
+        calls = {"query": [], "pack": []}
+
+        def call(op, *args, **kwargs):
+            if op is query or op is prepack:
+                stage = "query" if op is query else "pack"
+                calls[stage].append(tuple(args[5]))
+                if stage == failure_stage and (batch is None or args[5][0] == batch):
+                    raise error_type("injected prepack failure")
+                if op is query:
+                    # Exercise packing even on hosts where the layout matches.
+                    return True
+            return original_call(op, *args, **kwargs)
+
+        with patch.object(torch._ops.OpOverload, "__call__", new=call):
+            yield calls
+
+    @parametrize("failure_stage", ["query", "pack"])
+    @parametrize("error_type", [RuntimeError, NotImplementedError])
+    @parametrize("partial", [False, True])
+    @torch.inference_mode()
+    def test_prepack_failure(self, device, failure_stage, error_type, partial):
+        model = self._model(device)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        y = torch.randint(0, 32, (2, 16, 8, 8), dtype=torch.uint8, device=device)
+
+        def shared(x, y):
+            return model(x), model(y), model(x + 1), model(y + 1)
+
+        expected = shared(x, y)
+        gm = self._trace_shared(shared, x, y)
+        convs = list(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.onednn.qconv_pointwise.default
+            )
+        )
+        weights = [node.args[3] for node in convs]
+        before = str(gm.graph)
+        buffers = {name: id(value) for name, value in gm.named_buffers()}
+        with (
+            self._mock_prepack_ops(
+                failure_stage, error_type, batch=1 if partial else None
+            ) as calls,
+            self.assertLogs(mkldnn_fusion.log, level="DEBUG") as logs,
+        ):
+            mkldnn_fusion._pack_frozen_qconv_weights(gm)
+        self.assertTrue(any("injected prepack failure" in msg for msg in logs.output))
+        # Repeated consumers of a failed configuration must not retry it.
+        self.assertEqual(calls["query"], [tuple(x.shape), tuple(y.shape)])
+        self.assertEqual(
+            len(calls["pack"]), 2 if failure_stage == "pack" else int(partial)
+        )
+        self.assertIs(convs[0].args[3], weights[0])
+        self.assertIs(convs[2].args[3], weights[2])
+        if partial:
+            self.assertIsNot(convs[1].args[3], weights[1])
+            self.assertIs(convs[1].args[3], convs[3].args[3])
+            self.assertEqual(convs[1].args[3].op, "get_attr")
+        else:
+            self.assertEqual(str(gm.graph), before)
+            self.assertEqual(
+                {name: id(value) for name, value in gm.named_buffers()}, buffers
+            )
+        self.assertFalse(
+            any(
+                node.target is torch.ops.onednn.qconv_pointwise_prepack.default
+                for node in gm.graph.nodes
+            )
+        )
+        self.assertEqual(sum(self.pack_counts), int(partial))
+        self.assertEqual(
+            counters["inductor"]["qconv_pointwise_prepack_node_count"],
+            2 if partial else 0,
+        )
+        self.assertEqual(gm(x, y), expected, atol=0, rtol=0)
+        self.assertEqual(shared(x, y), expected, atol=0, rtol=0)
+
+    @parametrize("error_type", [RuntimeError, NotImplementedError])
+    @torch.inference_mode()
+    def test_compile_prepack_failure(self, device, error_type):
+        model = self._model(device)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+
+        def shared(x):
+            return model(x), model(x + 1)
+
+        expected = shared(x)
+        with patch.object(
+            mkldnn_fusion,
+            "_qconv_pointwise_prepack",
+            side_effect=error_type("injected prepack failure"),
+        ) as prepack:
+            compiled = torch.compile(shared, fullgraph=True, dynamic=False)
+            actual, code = run_and_get_code(compiled, x)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+            self.assertEqual(compiled(x), expected, atol=0, rtol=0)
+        prepack.assert_called_once()
+        self.assertNotIn("qconv_pointwise_prepack", "\n".join(code))
+
+    @parametrize("failure_stage", ["query", "pack"])
+    @parametrize(
+        "error_type", [torch.OutOfMemoryError, MemoryError, AssertionError, TypeError]
+    )
+    @torch.inference_mode()
+    def test_prepack_unexpected_failure(self, device, failure_stage, error_type):
+        model = self._model(device)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        gm = make_fx(model, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        before = str(gm.graph)
+        with (
+            self._mock_prepack_ops(failure_stage, error_type),
+            self.assertRaisesRegex(error_type, "injected prepack failure"),
+        ):
+            mkldnn_fusion._pack_frozen_qconv_weights(gm)
+        self.assertEqual(str(gm.graph), before)
+
+    @parametrize("keep_original", [False, True])
+    @torch.inference_mode()
+    def test_prepack_constants(self, device, keep_original):
+        from torch._inductor.freezing_utils import enter_freezing, is_frozen_param
+
+        model = self._model(device)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+
+        def shared(x):
+            outputs = (model(x), model(x + 1))
+            return (*outputs, model.weight) if keep_original else outputs
+
+        gm = self._trace_shared(shared, x)
+        convs = list(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.onednn.qconv_pointwise.default
+            )
+        )
+        original = convs[0].args[3]
+        original_weight = gm.get_buffer(original.target)
+        if keep_original:
+            output = gm.graph.find_nodes(op="output")[0]
+            # Another get_attr of the same buffer must survive cleanup.
+            with gm.graph.inserting_before(output):
+                alias = gm.graph.get_attr(original.target)
+            output.args = ((*output.args[0][:2], alias),)
+            gm.recompile()
+        with self._mock_prepack_ops() as calls, enter_freezing():
+            mkldnn_fusion._pack_frozen_qconv_weights(gm)
+        packed = convs[0].args[3]
+        self.assertIs(packed, convs[1].args[3])
+        self.assertEqual(packed.op, "get_attr")
+        packed_weight = gm.get_buffer(packed.target)
+        self.assertIsNot(packed_weight, original_weight)
+        self.assertTrue(is_frozen_param(packed_weight))
+        self.assertEqual(hasattr(gm, original.target), keep_original)
+        self.assertEqual(len(calls["query"]), 1)
+        self.assertEqual(len(calls["pack"]), 1)
+        actual, expected = gm(x), shared(x)
+        self.assertEqual(actual[:2], expected[:2], atol=0, rtol=0)
+        if keep_original:
+            self.assertIs(actual[2], original_weight)
+
+    @torch.inference_mode()
+    def test_prepack_graph_failure(self, device):
+        model = self._model(device)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        gm = make_fx(model, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        with (
+            self._mock_prepack_ops(),
+            patch.object(
+                mkldnn_fusion,
+                "replace_node_with_constant",
+                side_effect=RuntimeError("graph insertion failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "graph insertion failed"),
+        ):
+            mkldnn_fusion._pack_frozen_qconv_weights(gm)
+
+    @parametrize(
+        "shape",
+        [(0, 16, 8, 8), (1, 16, 2, 8), (1, 16, 8, 2), (1, 16, 2, 2)],
+    )
+    @parametrize("output_dtype", [torch.uint8, torch.float32])
+    @torch.inference_mode()
+    def test_empty_output(self, device, shape, output_dtype):
+        model = self._model(device, kernel_size=3, output_dtype=output_dtype)
+        x = torch.ones(shape, dtype=torch.uint8, device=device)
+        expected = model(x)
+        self.assertEqual(expected.numel(), 0)
+        # Real tracing preserves the empty result accepted by the native op.
+        # Fake tracing rejects zero spatial outputs before freezing runs.
+        gm = make_fx(model, tracing_mode="real")(x)
+        before = str(gm.graph)
+        with patch.object(
+            mkldnn_fusion,
+            "_qconv_pointwise_prepack",
+            side_effect=AssertionError("empty outputs must not query a weight layout"),
+        ) as query:
+            mkldnn_fusion._pack_frozen_qconv_weights(gm)
+        query.assert_not_called()
+        self.assertEqual(str(gm.graph), before)
+        self.assertEqual(gm(x), expected)
+        self.assertEqual(self.pack_counts, [])
+        self.assertEqual(counters["inductor"]["qconv_pointwise_prepack_node_count"], 0)
+
+    @torch.inference_mode()
+    def test_dynamic_shape(self, device):
+        model = self._model(device)
+        x = torch.randint(0, 32, (2, 16, 8, 8), dtype=torch.uint8, device=device)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 2)
+        compiled = torch.compile(model, fullgraph=True, dynamic=True)
+        self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        y = torch.randint(0, 32, (3, 16, 10, 8), dtype=torch.uint8, device=device)
+        self.assertEqual(compiled(y), model(y), atol=0, rtol=0)
+        self.assertEqual(sum(self.pack_counts), 0)
+
+    @torch.inference_mode()
+    def test_default_output_dtype(self, device):
+        model = self._model(device, output_dtype=None)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        gm = make_fx(model, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        mkldnn_fusion._pack_frozen_qconv_weights(gm)
+        self.assertEqual(gm(x), model(x), atol=0, rtol=0)
+        self.assertEqual(len(self.repack_requests), 1)
+        self.assertEqual(sum(self.pack_counts), sum(self.repack_requests))
+
+    @torch.inference_mode()
+    def test_grouped(self, device):
+        model = self._model(device, groups=4)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        self.assertEqual(
+            torch.compile(model, fullgraph=True, dynamic=False)(x),
+            model(x),
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(sum(self.pack_counts), 0)
+
+    @parametrize("flag", ["cpp.weight_prepack", "layout_optimization"])
+    @torch.inference_mode()
+    def test_disabled(self, device, flag):
+        model = self._model(device)
+        x = torch.randint(0, 32, (1, 16, 8, 8), dtype=torch.uint8, device=device)
+        with config.patch(flag, False):
+            self.assertEqual(
+                torch.compile(model, fullgraph=True, dynamic=False)(x),
+                model(x),
+                atol=0,
+                rtol=0,
+            )
+        self.assertEqual(sum(self.pack_counts), 0)
+
+    @parametrize("spatial_dim,tensor_qparams", [(1, False), (3, False), (2, True)])
+    @torch.inference_mode()
+    def test_unsupported_variants(self, device, spatial_dim, tensor_qparams):
+        model = self._model(
+            device, spatial_dim=spatial_dim, tensor_qparams=tensor_qparams
+        )
+        x = torch.randint(
+            0, 32, (1, 16, *([8] * spatial_dim)), dtype=torch.uint8, device=device
+        )
+        gm = make_fx(model, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        before = str(gm.graph)
+        mkldnn_fusion._pack_frozen_qconv_weights(gm)
+        self.assertEqual(str(gm.graph), before)
+        self.assertEqual(sum(self.pack_counts), 0)
+
+
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
     test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
@@ -1955,6 +2491,7 @@ instantiate_device_type_tests(
     TestDynamicPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_parametrized_tests(TestPatternMatcher)
+instantiate_device_type_tests(TestQConvPointwisePrepack, globals(), only_for="cpu")
 if __name__ == "__main__":
     if IS_LINUX and (HAS_CPU) and torch.backends.mkldnn.is_available():
         run_tests()

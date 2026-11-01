@@ -328,7 +328,7 @@ inline ideep::attr_t create_attr_by_post_op(
     } else if (unary_post_op == "leaky_relu") {
       TORCH_CHECK(
           unary_post_op_args.size() == 1,
-          "onednn qlinear: expect one argument for post op leaky_relu but got ", unary_post_op_args.size(), " args");
+          "onednn: expect one argument for post op leaky_relu but got ", unary_post_op_args.size(), " args");
       auto alpha = unary_post_op_args[0].value().to<float>();
       return ideep::attr_t::fuse_relu_v2(alpha);
     } else if (unary_post_op == "tanh") {
@@ -336,7 +336,7 @@ inline ideep::attr_t create_attr_by_post_op(
     } else if (unary_post_op == "gelu") {
       TORCH_CHECK(
           unary_post_op_algorithm == "none" || unary_post_op_algorithm == "tanh",
-          "onednn qlinear: algorithm for post op gelu must be none or tanh but got ", unary_post_op_algorithm);
+          "onednn: algorithm for post op gelu must be none or tanh but got ", unary_post_op_algorithm);
       auto post_algorithm = unary_post_op_algorithm == "none" ?
         dnnl::algorithm::eltwise_gelu_erf :
         dnnl::algorithm::eltwise_gelu_tanh;
@@ -359,7 +359,7 @@ inline ideep::attr_t create_attr_by_post_op(
     } else {
       TORCH_CHECK(
           unary_post_op == "none",
-          "onednn qlinear: unsupported unary post op ", unary_post_op);
+          "onednn: unsupported unary post op ", unary_post_op);
     }
   } else if (binary_post_op == "sum") {
     if (unary_post_op == "none") {
@@ -369,7 +369,7 @@ inline ideep::attr_t create_attr_by_post_op(
     } else {
       TORCH_CHECK(
           false,
-          "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op sum");
+          "onednn: unsupported unary post op ", unary_post_op, " with binary post op sum");
     }
   } else if (binary_post_op == "add") {
     if (unary_post_op == "none") {
@@ -382,12 +382,12 @@ inline ideep::attr_t create_attr_by_post_op(
     } else {
       TORCH_CHECK(
           false,
-          "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op add");
+          "onednn: unsupported unary post op ", unary_post_op, " with binary post op add");
     }
   } else {
     TORCH_CHECK(
         false,
-        "onednn qlinear: unsupported binary post op ", binary_post_op);
+        "onednn: unsupported binary post op ", binary_post_op);
   }
   return ideep::attr_t();
 }

@@ -134,6 +134,17 @@ def _freeze(
     freezing_passes(aot_autograd_gm, aot_example_inputs)
 
     constant_fold(aot_autograd_gm)
+    # The final fold materializes the initial packed weights after the
+    # convolution's output dtype and post-ops have been selected.
+    if (
+        torch._C._has_mkldnn
+        and config.cpp.weight_prepack
+        and config.layout_optimization
+    ):
+        from .fx_passes.mkldnn_fusion import _pack_frozen_qconv_weights
+
+        _pack_frozen_qconv_weights(aot_autograd_gm)
+
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
