@@ -7064,11 +7064,21 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 group.write_text("[]")
                 error = "Incomplete Triton runtime-cache group"
             elif damage == "group_outside_entry":
-                children["kernel.cubin"] = str(pathlib.Path(tmp, "kernel.cubin"))
-                group.write_text(json.dumps({"child_paths": children}))
+                # Current Triton writes child_paths as a bare list of names;
+                # synthesize the legacy path-carrying dict so the path check
+                # still runs.
+                mapping = {name: str(entry / name) for name in children}
+                mapping["kernel.cubin"] = str(pathlib.Path(tmp, "kernel.cubin"))
+                group.write_text(json.dumps({"child_paths": mapping}))
                 error = "points outside its entry"
             elif damage == "group_without_binary":
-                del children["kernel.cubin"]
+                # child_paths is a bare list of names on current Triton, but
+                # a {name: path} dict on Triton < triton-lang/triton#12001
+                # (e.g. a backend pinned to an older fork).
+                if isinstance(children, dict):
+                    del children["kernel.cubin"]
+                else:
+                    children.remove("kernel.cubin")
                 group.write_text(json.dumps({"child_paths": children}))
                 error = "no compiled binary"
             elif damage == "unrecognized_file":
