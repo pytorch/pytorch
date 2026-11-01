@@ -3071,9 +3071,13 @@ class GraphLowering(torch.fx.Interpreter):
         fusion decisions).
         """
         from .scheduler import Scheduler
+        from .tunableop import run_queued_pretunes
 
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
+        # Past finalize() and past the scheduler's own extern winners, so every
+        # queued winner now reads decided layouts.
+        run_queued_pretunes()
 
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
