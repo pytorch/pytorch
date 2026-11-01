@@ -589,7 +589,11 @@ def gen_c_shim(
         func,
         backend_index,
     )
-    resolve_dispatch_flags = backend_index is not None
+    # CompositeImplicitAutograd kernels re-dispatch through at:: ops.
+    resolve_dispatch_flags = (
+        backend_index is not None
+        and backend_index.dispatch_key != DispatchKey.CompositeImplicitAutograd
+    )
 
     try:
         if header:
