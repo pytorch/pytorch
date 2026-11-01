@@ -666,7 +666,7 @@ def lookup_spec_from_dynamo_source(
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
-    if not isinstance(value, types.BuiltinMethodType):
+    if type(value) is not types.BuiltinMethodType:
         return None
 
     method_self = value.__self__
@@ -947,7 +947,10 @@ def _build_dict_items(
             gb_type="OrderedDict storage differs from linked keys",
             context="OrderedDict input snapshot",
             explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
-            hints=[],
+            hints=[
+                "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                *graph_break_hints.FUNDAMENTAL,
+            ],
             skip_frame=True,
             apply_to_code=False,
         )
@@ -1534,8 +1537,9 @@ class VariableBuilder:
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if use_const_keys:
-                    # Keep OrderedDict keys sourced for replay, but read values by
-                    # literal key so read-only access does not guard input order.
+                    # OrderedDict replay rebuilds linked order and must retain
+                    # the input key objects; plain dict replay can update in place.
+                    # Read values by literal key to avoid guarding input order.
                     key_source = (
                         ConstDictKeySource(base, i)
                         if istype(value, collections.OrderedDict)
@@ -1861,7 +1865,7 @@ class VariableBuilder:
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif (
-            isinstance(value, types.BuiltinMethodType)
+            type(value) is types.BuiltinMethodType
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
