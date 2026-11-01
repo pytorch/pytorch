@@ -44,7 +44,7 @@ class MyWork(dist._Work):
         self.future_.set_result(result)
         self.pg_ = weakref.ref(pg)
 
-    def wait(self, timeout):
+    def wait(self, timeout=timedelta(0)):
         self.pg_().wait_count += 1
         return True
 
@@ -264,6 +264,20 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
 
         self.assertEqual(pg.wait_count, 0)
         self.assertEqual(pg.get_future_count, 0)
+
+    def test_ddp_pickle_compatibility(self):
+        # Inherited from CommonDistributedDataParallelTest via
+        # _create_ddp_model(), which here constructs DDP with the custom,
+        # non-default process group returned by _get_process_group() (see
+        # above). DDP pickling is only supported with the default process
+        # group (DistributedDataParallel._check_default_group()), so this
+        # inherited test does not apply to these process-group-wrapping
+        # test classes.
+        self.skipTest(
+            "DDP is constructed with a non-default process group in "
+            "AbstractDDPSingleRank subclasses; pickling requires the "
+            "default process group"
+        )
 
 
 class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiThreadedTestCase):

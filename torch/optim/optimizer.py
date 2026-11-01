@@ -11,6 +11,7 @@ from typing_extensions import deprecated, ParamSpec, Self
 
 import torch
 import torch.utils.hooks as hooks
+from torch.optim._utils import _preserve_state_dtype_on_load
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -420,6 +421,14 @@ class Optimizer:
                 "params argument given to the optimizer should be "
                 "an iterable of Tensors or dicts, but got " + torch.typename(params)
             )
+        elif isinstance(params, set):
+            warnings.warn(
+                "optimizer parameters need to be organized in ordered collections, but "
+                "the ordering of tensors in sets will change between runs. Please use a "
+                "list instead. This will be an error in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
@@ -807,10 +816,8 @@ class Optimizer:
         param_groups: list[dict[str, Any]],
         key: str | None = None,
     ) -> torch.Tensor:
-        # Floating-point types are a bit special here. They are the only ones
-        # that are assumed to always match the type of params.
-        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-        # UNLESS fused or capturable, see note [special device hosting for step]
+        # Unfused, noncapturable optimizers retain CPU step tensors to avoid synchronization.
+        # See note [special device hosting for step].
         fused = False
         capturable = False
         if param_groups is None:
@@ -826,10 +833,9 @@ class Optimizer:
             else:
                 return value
         else:
-            if param.is_floating_point():
+            if param.is_floating_point() and not _preserve_state_dtype_on_load.get():
                 return value.to(dtype=param.dtype, device=param.device)
-            else:
-                return value.to(device=param.device)
+            return value.to(device=param.device)
 
     def register_load_state_dict_pre_hook(
         self,
@@ -915,8 +921,33 @@ class Optimizer:
                 from a call to :meth:`state_dict`.
 
         .. warning::
+            By default, state tensors other than ``step`` are currently cast to the
+            parameter dtype for floating-point parameters. In a future release,
+            the default will preserve their saved dtype in order to respect the
+            dtype in the checkpoint. However, this behavior will break use cases
+            that rely on the state being automatically cast to the parameter's
+            dtype, as many optimizer :meth:`step` implementations do not support
+            mixed precision. We emit a ``FutureWarning`` when loading the checkpoint
+            changes a state tensor's dtype. Use :func:`torch.optim.preserve_state_dtype_on_load`
+            to select the desired behavior explicitly. In either case, state tensors
+            are moved to the parameter's device.
+
+        .. note::
+            When preserving dtypes, state tensors must be compatible with the
+            selected optimizer implementation for :meth:`step`. Use
+            :func:`torch.optim.preserve_state_dtype_on_load` with ``False`` to
+            retain automatic casting, or explicitly convert state tensors before
+            stepping, for example with :meth:`register_load_state_dict_post_hook`.
+
+        .. warning::
             Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
             as calling it beforehand will overwrite the loaded learning rates.
+
+        .. note::
+            The ``step`` tensor keeps its saved dtype and device unless the parameter
+            group is fused or capturable, which moves it to the parameter's device as
+            ``torch.float32``. This behavior is independent of the dtype preservation
+            setting.
 
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group
@@ -990,6 +1021,8 @@ class Optimizer:
             )
         )
 
+        warn_about_dtype_cast = False
+
         def _cast(
             param: torch.Tensor,
             value: _T,
@@ -997,14 +1030,18 @@ class Optimizer:
             param_groups: list[dict[str, Any]],
             key: str | None = None,
         ) -> _T:
-            r"""Make a deep copy of value, casting all tensors to device of param."""
+            r"""Apply the current dtype, device, and step policies recursively."""
+            nonlocal warn_about_dtype_cast
             if isinstance(value, torch.Tensor):
-                return cast(
-                    _T,
-                    Optimizer._process_value_according_to_param_policy(
-                        param, value, param_id, param_groups, key
-                    ),
+                casted_tensor = Optimizer._process_value_according_to_param_policy(
+                    param, value, param_id, param_groups, key
                 )
+                warn_about_dtype_cast |= (
+                    _preserve_state_dtype_on_load.get() is None
+                    and key != "step"
+                    and casted_tensor.dtype != value.dtype
+                )
+                return cast(_T, casted_tensor)
             elif isinstance(value, dict):
                 casted = {
                     k: _cast(
@@ -1024,9 +1061,8 @@ class Optimizer:
             else:
                 return value
 
-        # Copy state assigned to params (and cast tensors to appropriate types).
-        # State that is not assigned to params is copied as is (needed for
-        # backward compatibility).
+        # Apply the current dtype policy and step handling to parameter state.
+        # Copy state not assigned to parameters as is for backward compatibility.
         state: defaultdict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict["state"].items():
             if k in id_map:
@@ -1036,6 +1072,21 @@ class Optimizer:
                 )
             else:
                 state[k] = v
+
+        if warn_about_dtype_cast:
+            warnings.warn(
+                "Optimizer.load_state_dict currently casts non-step state tensors to "
+                "the parameter dtype for floating-point parameters. In a future release, "
+                "the default will preserve their saved dtype. Use "
+                "torch.optim.preserve_state_dtype_on_load() to opt in if the saved "
+                "state dtypes are supported by your optimizer implementation, or "
+                "torch.optim.preserve_state_dtype_on_load(False) to keep "
+                "the current behavior and silence this warning. The step tensor "
+                "policy is unchanged.",
+                FutureWarning,
+                # Skip the Dynamo wrappers to point to the caller.
+                stacklevel=4,
+            )
 
         # Update parameter groups, setting their 'params' value
         def update_group(

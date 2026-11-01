@@ -16,25 +16,23 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     register_ddp_comm_hook,
 )
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
     sys.exit(0)
-
-
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
 
 
 class Task(nn.Module):
@@ -56,15 +54,16 @@ class TestDdpCommHook(nn.Module):
         return self.t0(x ** (1 + rank))
 
 
-class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
+class _DDPCommHookTestBase(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
     def backend_str(cls):
-        return dist.get_default_backend_for_device(device_type)
+        return dist.get_default_backend_for_device(cls.device_type)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
+        device_type = cls.device_type
         if device_type != "cpu" and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
         if cls.backend_str() in ("nccl", "xccl"):
@@ -72,6 +71,10 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
             torch.set_default_device(device)
             torch.accelerator.set_device_index(device)
         super()._init_pg(rank, world_size, rdvz_file)
+
+
+class DistributedDataParallelCommHookTest(_DDPCommHookTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _local_model(self):
         local_model = TestDdpCommHook().cpu()
@@ -109,7 +112,7 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_hook(self):
+    def test_ddp_comm_hook_allreduce_hook(self, device):
         """
         This unit test verifies the ``allreduce`` hook registered case gives same result
         with no hook registered case.
@@ -125,7 +128,7 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_fp16compress_hook(self):
+    def test_ddp_comm_hook_fp16compress_hook(self, device):
         """
         This unit test verifies the ``fp16 compress`` hook registered case
         gives close result with no hook registered case.
@@ -141,7 +144,7 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_quantize_per_tensor_hook(self):
+    def test_ddp_comm_hook_quantize_per_tensor_hook(self, device):
         """
         This unit test verifies the ``quantize per tensor`` hook registered case
         gives close result with no hook registered case.
@@ -157,7 +160,7 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_quantize_per_channel_hook(self):
+    def test_ddp_comm_hook_quantize_per_channel_hook(self, device):
         """
         This unit test verifies the ``quantize per channel`` hook registered case
         gives close result with no hook registered case.
@@ -175,7 +178,7 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_noop_hook(self):
+    def test_ddp_comm_hook_noop_hook(self, device):
         """
         This unit test verifies the ``noop`` hook registered case and a subsequent allreduce
         gives same result with no hook registered case.
@@ -194,7 +197,7 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
-    def test_is_last_hook(self):
+    def test_is_last_hook(self, device):
         process_group = self.pg
 
         def hook(flags, bucket):
@@ -221,10 +224,9 @@ class DistributedDataParallelCommHookTest(MultiProcContinuousTest):
         self.assertFalse(any(flags[:-1]))
 
 
-if __name__ == "__main__":
-    if torch.cuda._initialized:
-        raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
-        )
+instantiate_device_type_tests(
+    DistributedDataParallelCommHookTest, globals(), except_for="cpu", allow_xpu=True
+)
 
+if __name__ == "__main__":
     run_tests()

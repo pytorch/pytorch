@@ -5,6 +5,8 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
+    class Gather : public ::testing::Test {};
+    template <typename T>
     class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
@@ -92,6 +94,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
+    TYPED_TEST_SUITE(Gather, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
@@ -177,6 +180,38 @@ namespace {
             }
             // clear storage
             std::memset(storage, 0, sizeof storage);
+        }
+    }
+    TYPED_TEST(Gather, MaskGatherUsesSignBit) {
+        using vec = TypeParam;
+        using VT = ValueType<vec>;
+        using int_t = at::vec::int_same_size_t<VT>;
+        using ivec = at::vec::Vectorized<int_t>;
+        constexpr auto size = vec::size();
+        CACHE_ALIGN VT base[size];
+        CACHE_ALIGN VT actual[size];
+        CACHE_ALIGN int_t index[size];
+        CACHE_ALIGN int_t mask_bits[size];
+        constexpr int_t masks[] = {
+            0,
+            1,
+            std::numeric_limits<int_t>::min(),
+            -1,
+        };
+        for (const auto i : c10::irange(size)) {
+            base[i] = static_cast<VT>(i + 1);
+            index[i] = static_cast<int_t>(i);
+            mask_bits[i] = masks[i % std::size(masks)];
+        }
+        auto mask = at::vec::cast<VT>(ivec::loadu(mask_bits));
+        at::vec::mask_gather<sizeof(VT)>(
+            vec(-1), base, ivec::loadu(index), mask).store(actual);
+        CACHE_ALIGN VT mask_after[size];
+        mask.store(mask_after);
+        for (const auto i : c10::irange(size)) {
+            const VT expected = mask_bits[i] < 0 ? base[i] : VT(-1);
+            ASSERT_EQ(expected, actual[i]);
+            ASSERT_EQ(mask_bits[i], c10::bit_cast<int_t>(mask_after[i]));
         }
     }
     TYPED_TEST(SignManipulation, Absolute) {
@@ -610,6 +645,48 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)
+    TYPED_TEST(Nan, OrNanIf) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT select_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT actual_vals[vec::size()];
+        const VT specials[] = {
+            (VT)1.5,
+            -(VT)0.0,
+            std::numeric_limits<VT>::infinity(),
+            -std::numeric_limits<VT>::infinity(),
+            std::numeric_limits<VT>::quiet_NaN(),
+            std::numeric_limits<VT>::denorm_min(),
+            -std::numeric_limits<VT>::max(),
+        };
+        constexpr int num_specials = sizeof(specials) / sizeof(specials[0]);
+        // The mask comes from a comparison so that on SVE it is a predicate.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          for (int i = 0; i < vec::size(); ++i) {
+            test_vals[i] = specials[(i + val) % num_specials];
+            select_vals[i] = (val & (1 << i)) ? (VT)1 : (VT)0;
+          }
+          const auto mask = vec::loadu(select_vals) != vec((VT)0);
+          vec::loadu(test_vals).or_nan_if(mask).store(actual_vals);
+          for (int i = 0; i < vec::size(); ++i) {
+            CACHE_ALIGN VT expected_val = test_vals[i];
+            if (val & (1 << i)) {
+              std::memset(static_cast<void*>(&expected_val), 0xFF, sizeof(VT));
+            }
+            ASSERT_EQ(
+                0, std::memcmp(&expected_val, &actual_vals[i], sizeof(VT)))
+                << "or_nan_if, mask: " << val << ", lane: " << i
+                << ", input: " << test_vals[i] << ", got: " << actual_vals[i];
+          }
+        }
+    }
+#endif
 #if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
     !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
     TYPED_TEST(Nan, ReduceMax) {
@@ -662,7 +739,9 @@ namespace {
         c10::BFloat16 val(ii, c10::BFloat16::from_bits());
         bool expected = std::isnan(val);
         CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size()];
-        at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
+        at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(
+            at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>(val).isnan())
+            .store(actual_vals);
         for (int jj = 0; jj < at::vec::CPU_CAPABILITY::Vectorized<c10::BFloat16>::size(); ++jj) {
           EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "bf16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }
