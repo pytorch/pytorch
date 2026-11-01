@@ -162,7 +162,8 @@ std::string cuspyEncodePftrace(
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
     const PftraceGpuCounter& counters,
-    int compression_level) {
+    int compression_level,
+    const std::vector<std::pair<std::string, std::string>>& metadata) {
   protozero::HeapBuffered<pbz::Trace> trace;
 
   // Time base: the packet timestamps are absolute (base_ns + offset,
@@ -182,6 +183,17 @@ std::string cuspyEncodePftrace(
     auto* real = cs->add_clocks();
     real->set_clock_id(pbz::BUILTIN_CLOCK_REALTIME);
     real->set_timestamp(static_cast<uint64_t>(base_ns));
+  }
+
+  if (!metadata.empty()) {
+    auto* pkt = trace->add_packet();
+    pkt->set_trusted_packet_sequence_id(1);
+    auto* bundle = pkt->set_chrome_events();
+    for (const auto& [name, json] : metadata) {
+      auto* md = bundle->add_metadata();
+      md->set_name(name);
+      md->set_json_value(json);
+    }
   }
 
   // Per-gpu InternedGpuCounterDescriptor iid (its own interned-id space). The
@@ -498,7 +510,8 @@ std::string cuspyEncodePftrace(
     const std::vector<PftraceGfxContext>& /*gfx_contexts*/,
     const PftraceRenderStages& /*stages*/,
     const PftraceGpuCounter& /*counters*/,
-    int /*compression_level*/) {
+    int /*compression_level*/,
+    const std::vector<std::pair<std::string, std::string>>& /*metadata*/) {
   TORCH_CHECK(
       false,
       "PyTorch was built without native .pftrace support: the CUPTI stubs were "
