@@ -44,7 +44,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/pi-install"
           cp .github/actions/pi-agent/package{,-lock}.json "$RUNNER_TEMP/pi-install/"
           npm ci --prefix "$RUNNER_TEMP/pi-install" --ignore-scripts --no-fund --no-audit
-      - name: Test read-only duplicate discovery offline
+      - name: Test read-only issue tools offline
         run: |
           export PI_TEST_RUNTIME="$RUNNER_TEMP/pi-install/node_modules/@earendil-works/pi-coding-agent"
           node --test .github/pi/tests/github-issue-tools.mjs
