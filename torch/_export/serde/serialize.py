@@ -754,9 +754,10 @@ def _find_imported(name: str) -> Any:
     return obj
 
 
-# The kinds of saved inputs that export passes through flat_apply. Load turns
-# other kinds, such as graphs or dicts of arguments, into objects that the
-# function could call.
+# The kinds of saved inputs that a flat_apply call may have: plain values and
+# operators. Load turns some other kinds, such as graphs or dicts of arguments,
+# into objects that the function could call. Custom objects, which export can
+# also pass, are refused too for now.
 _FLAT_APPLY_INPUT_KINDS = frozenset(
     {
         "as_none",
