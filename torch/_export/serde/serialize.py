@@ -817,9 +817,10 @@ def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
 def _check_flat_apply_in_spec(in_spec_str: str) -> None:
     """
     Refuse the parts of a flat_apply input spec that make ``treespec_loads``
-    import a module, enums and defaultdict factories, so that loading the spec
-    runs no code from a module that the file names. A defaultdict factory would
-    also reach the function as a callable.
+    import a module that the file names: enum classes, and defaultdict
+    factories, which would also reach the function as callables that the file
+    chooses. A pytree type registered with its own context decoder decodes its
+    context with the code that registered it.
     """
     message = "a flat_apply input spec cannot contain enums or defaultdicts"
 
