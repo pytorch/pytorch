@@ -26,6 +26,10 @@ from typing import Annotated, Any, cast, final, Optional
 import sympy
 
 import torch
+
+# Load finds ModIndex, which export uses for indexing inside vmap, only if
+# its module is imported.
+import torch._dynamo._trace_wrapped_higher_order_op
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
