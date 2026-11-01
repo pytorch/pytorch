@@ -9324,6 +9324,17 @@ def native_multi_head_attention_fake(
     return (output, attn_weights)
 
 
+def _create_ternary_float_meta_func(func):
+    @register_meta(func)
+    @out_wrapper()
+    def _f(x, y, z):
+        return elementwise_meta(
+            x, y, z, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    return _f
+
+
 def _create_binary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
@@ -9358,6 +9369,18 @@ _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
 _create_binary_float_meta_func(aten.special_legendre_polynomial_p)
+_create_ternary_float_meta_func(aten.special_betainc)
+_create_ternary_float_meta_func(aten.special_betaincinv)
+_create_binary_float_meta_func(aten.special_betaln)
+
+
+@register_meta([aten._special_betainc_partials, aten._special_betaincinv_partials])
+def meta_special_beta_partials(a, b, x):
+    # One contiguous tensor per argument, in the result dtype, as the kernels return.
+    out = elementwise_meta(
+        a, b, x, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return tuple(out.new_empty(out.shape) for _ in range(3))
 
 
 def _register_inplace_meta(fn):

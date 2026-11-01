@@ -3924,9 +3924,15 @@ inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
   //
   //
 /* below codes are from 'third_party/eigen/unsupported/Eigen/src/SpecialFunctions/SpecialFunctionsImpl.h' */
-// hard coded from eigen/Eigen/src/Core/util/Macros.h
-#define EIGEN_STRONG_INLINE inline  // hard coded Macro
-#define EIGEN_DEVICE_FUNC C10_HOST_DEVICE // hard coded Macro
+// hard coded from eigen/Eigen/src/Core/util/Macros.h, undefined at the end of this file
+#ifndef EIGEN_STRONG_INLINE
+#define EIGEN_STRONG_INLINE inline
+#define TORCH_MATH_UNDEF_EIGEN_STRONG_INLINE
+#endif
+#ifndef EIGEN_DEVICE_FUNC
+#define EIGEN_DEVICE_FUNC C10_HOST_DEVICE
+#define TORCH_MATH_UNDEF_EIGEN_DEVICE_FUNC
+#endif
 
 template <typename Scalar>
 struct cephes_helper {
@@ -4427,4 +4433,13 @@ inline C10_HOST_DEVICE T calc_betainc(T a, T b, T x) {
         return static_cast<T>(betainc_impl<float>::run(_a,_b,_x));
     }
 }
+
+#ifdef TORCH_MATH_UNDEF_EIGEN_STRONG_INLINE
+#undef EIGEN_STRONG_INLINE
+#undef TORCH_MATH_UNDEF_EIGEN_STRONG_INLINE
+#endif
+#ifdef TORCH_MATH_UNDEF_EIGEN_DEVICE_FUNC
+#undef EIGEN_DEVICE_FUNC
+#undef TORCH_MATH_UNDEF_EIGEN_DEVICE_FUNC
+#endif
 C10_CLANG_DIAGNOSTIC_POP()

@@ -1461,7 +1461,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Cross.cpp",
     "aten/src/ATen/native/DilatedMaxPool2d.cpp",
     "aten/src/ATen/native/DilatedMaxPool3d.cpp",
-    "aten/src/Aten/native/BetaOps.cpp",
+    "aten/src/ATen/native/BetaOps.cpp",
     # Referenced by both native and ATen/Version.cpp. Does not reference to other native symbols
     # "aten/src/ATen/native/DispatchStub.cpp",
     # "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",

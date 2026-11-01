@@ -2,7 +2,9 @@
 #include <ATen/native/BetaOps.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
@@ -13,6 +15,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/tensor.h>
 #include <ATen/ops/special_betainc.h>
 #include <ATen/ops/special_betainc_native.h>
@@ -93,12 +96,34 @@ namespace at::meta {
     .enforce_safe_casting_to_output(true)       \
     .promote_integer_inputs_to_float(true)
 
+// A Python number arrives as a 0-dim CPU tensor. The binary CUDA kernels take
+// one such scalar, the ternary ones none, so it moves to the common device.
+static Device _common_device(at::TensorList tensors) {
+  for (const Tensor& t : tensors) {
+    if (!(t.dim() == 0 && t.is_cpu())) {
+      return t.device();
+    }
+  }
+  return tensors[0].device();
+}
+
+static Tensor _on_device(const Tensor& t, const Device& device) {
+  if (!(t.dim() == 0 && t.is_cpu() && t.device() != device)) {
+    return t;
+  }
+  Tensor moved = t.to(device);
+  // Keep a Python number a wrapped number, so it does not set the dtype.
+  moved.unsafeGetTensorImpl()->set_wrapped_number(t.unsafeGetTensorImpl()->is_wrapped_number());
+  return moved;
+}
+
 TORCH_META_FUNC(special_betainc) (const Tensor& a, const Tensor& b, const Tensor& x) {
+  const Device device = _common_device({a, b, x});
   build(FLOAT_OP_CONFIG()
       .add_output(maybe_get_output())
-      .add_const_input(a)
-      .add_const_input(b)
-      .add_const_input(x));
+      .add_owned_const_input(_on_device(a, device))
+      .add_owned_const_input(_on_device(b, device))
+      .add_owned_const_input(_on_device(x, device)));
 }
 
 TORCH_META_FUNC(special_betaln) (const Tensor& a, const Tensor& b) {
@@ -109,11 +134,12 @@ TORCH_META_FUNC(special_betaln) (const Tensor& a, const Tensor& b) {
 }
 
 TORCH_META_FUNC(special_betaincinv) (const Tensor& a, const Tensor& b, const Tensor& y) {
+  const Device device = _common_device({a, b, y});
   build(FLOAT_OP_CONFIG()
       .add_output(maybe_get_output())
-      .add_const_input(a)
-      .add_const_input(b)
-      .add_const_input(y));
+      .add_owned_const_input(_on_device(a, device))
+      .add_owned_const_input(_on_device(b, device))
+      .add_owned_const_input(_on_device(y, device)));
 }
 
 } // namespace at::meta
@@ -147,6 +173,15 @@ static Tensor _log_gamma_correction(const Tensor& x) {
   return accum * inverse_x;
 }
 
+// Result dtype of the beta family: the inputs' result type, with integers
+// promoted to the default float dtype as TensorIterator does.
+static at::ScalarType _beta_result_dtype(at::TensorList tensors) {
+  at::ScalarType dtype = at::native::result_type(tensors);
+  return isIntegralType(dtype, /*includeBool=*/true)
+      ? c10::typeMetaToScalarType(c10::get_default_dtype())
+      : dtype;
+}
+
 static Tensor _log_gamma_difference_big_y(const Tensor& x, const Tensor& y) {
   Tensor cancelled_stirling = (-1.0 * (x + y - 0.5) * at::log1p(x / y)
                                - x * at::log(y) + x);
@@ -154,9 +189,8 @@ static Tensor _log_gamma_difference_big_y(const Tensor& x, const Tensor& y) {
   return correction + cancelled_stirling;
 }
 
-static Tensor _special_betaln(const Tensor& x, const Tensor& y) {
-  at::ScalarType dtype_orig = at::promoteTypes(x.scalar_type(), y.scalar_type());
-  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) | (dtype_orig == at::ScalarType::Half)) ? true : false;
+static Tensor _special_betaln(const Tensor& x, const Tensor& y, at::ScalarType dtype_orig) {
+  bool should_promote_dtype = (dtype_orig == at::ScalarType::BFloat16) || (dtype_orig == at::ScalarType::Half);
   at::ScalarType dtype = should_promote_dtype ? at::ScalarType::Float : dtype_orig;
   Tensor __x = x.to(dtype);
   Tensor __y = y.to(dtype);
@@ -181,9 +215,11 @@ static Tensor _special_betaln(const Tensor& x, const Tensor& y) {
   // Small arguments case: _x <= _y < 8.
   Tensor log_beta_small = at::lgamma(_x) + at::lgamma(_y) - at::lgamma(_x + _y);
 
+  // The one-large arm is a Stirling difference, valid while _x + _y is large;
+  // otherwise the exact lgamma form gives log|B(a, b)| for any argument.
   Tensor result = at::where(_x >= 8.0,
                    log_beta_two_large,
-                   at::where(_y >= 8.0,
+                   at::where((_y >= 8.0) & (_x + _y >= 8.0),
                              log_beta_one_large,
                              log_beta_small));
   if (should_promote_dtype)
@@ -196,9 +232,7 @@ TORCH_IMPL_FUNC(special_betaln_out) (const Tensor& a, const Tensor& b, const Ten
   TORCH_CHECK(!a.is_complex() && !b.is_complex(),
               "special.betaln is not yet implemented for complex tensors.");
 
-  TORCH_CHECK(!isIntegralType(a.scalar_type(), true) || !isIntegralType(b.scalar_type(), true),
-              "special.betaln must have at least one floating parameter.");
-  const Tensor&& result_tmp = _special_betaln(a, b);
+  const Tensor&& result_tmp = _special_betaln(a, b, common_dtype());
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
 }
@@ -284,19 +318,12 @@ static Tensor _betaincinv_initial_approx(const Tensor& a, const Tensor& b, const
   return at::clamp(result, tiny, 1.0 - eps);
 }
 
-static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Tensor& y) {
-  at::ScalarType dtype_orig = at::promoteTypes(at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
-  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) | (dtype_orig == at::ScalarType::Half)) ? true : false;
+static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Tensor& y, at::ScalarType dtype_orig) {
+  bool should_promote_dtype = (dtype_orig == at::ScalarType::BFloat16) || (dtype_orig == at::ScalarType::Half);
   at::ScalarType dtype = should_promote_dtype ? at::ScalarType::Float : dtype_orig;
-  Tensor _y = y.to(dtype_orig);
-  Tensor _a = a.to(dtype_orig);
-  Tensor _b = b.to(dtype_orig);
-
-  if (should_promote_dtype) {
-    _y = _y.to(dtype);
-    _a = _a.to(dtype);
-    _b = _b.to(dtype);
-  }
+  Tensor _y = y.to(dtype);
+  Tensor _a = a.to(dtype);
+  Tensor _b = b.to(dtype);
 
   const auto&& [eps, tiny, nan] = AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -435,11 +462,10 @@ static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Te
 }
 
 TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& a, const Tensor& b, const Tensor& y, const Tensor& result) {
-  const Tensor&& result_tmp = _betaincinv_computation(a, b, y);
+  const Tensor&& result_tmp = _betaincinv_computation(a, b, y, common_dtype());
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
 }
-
 
 static inline std::tuple<Tensor, Tensor> _betainc_even_partial_numerator(
     const int32_t iteration,
@@ -859,14 +885,11 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
     const Tensor& x) {
   // Reference: https://github.com/tensorflow/probability/blob/
   // b14ae1d79de4a52d834a3ba2dc88f7e5d849e6c7/tensorflow_probability/python/math/special.py#L432-L491
-  at::ScalarType dtype_origin = at::promoteTypes(
-      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
+  at::ScalarType dtype_origin = _beta_result_dtype({a, b, x});
   /* We promote bfloat16 and float16 to float32 to make this function consistent
    * with betainc */
-  bool should_promote_dtype = ((dtype_origin == at::ScalarType::BFloat16) |
-                               (dtype_origin == at::ScalarType::Half))
-      ? true
-      : false;
+  bool should_promote_dtype = (dtype_origin == at::ScalarType::BFloat16) ||
+      (dtype_origin == at::ScalarType::Half);
   at::ScalarType dtype =
       should_promote_dtype ? at::ScalarType::Float : dtype_origin;
 
@@ -910,13 +933,13 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
   const Tensor nan = AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
-      x.scalar_type(),
+      dtype,
       "__betainc_partials_nan",
       [&]() -> Tensor {
         return at::scalar_tensor(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::quiet_NaN(),
-            x.options());
+            _x.options());
       });
 
   grad_a = at::where(result_is_nan, nan, grad_a);
@@ -938,30 +961,23 @@ TORCH_API std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& x) {
-  return _betainc_partials(a, b, x);
+  // Contiguous, as the Meta kernel below promises.
+  auto [g_a, g_b, g_x] = _betainc_partials(a, b, x);
+  return std::make_tuple(g_a.contiguous(), g_b.contiguous(), g_x.contiguous());
 }
 
 static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& y) {
-  at::ScalarType dtype_orig = at::promoteTypes(
-      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
-  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) |
-                               (dtype_orig == at::ScalarType::Half))
-      ? true
-      : false;
+  at::ScalarType dtype_orig = _beta_result_dtype({a, b, y});
+  bool should_promote_dtype = (dtype_orig == at::ScalarType::BFloat16) ||
+      (dtype_orig == at::ScalarType::Half);
   at::ScalarType dtype =
       should_promote_dtype ? at::ScalarType::Float : dtype_orig;
-  Tensor _y = y.to(dtype_orig);
-  Tensor _a = a.to(dtype_orig);
-  Tensor _b = b.to(dtype_orig);
-
-  if (should_promote_dtype) {
-    _y = _y.to(dtype);
-    _a = _a.to(dtype);
-    _b = _b.to(dtype);
-  }
+  Tensor _y = y.to(dtype);
+  Tensor _a = a.to(dtype);
+  Tensor _b = b.to(dtype);
 
   Tensor _x = at::special_betaincinv(_a, _b, _y);
   auto [g_a, g_b, g_x] = _betainc_partials(_a, _b, _x);
@@ -982,37 +998,34 @@ TORCH_API std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& y) {
-  return _betaincinv_partials(a, b, y);
+  auto [g_a, g_b, g_y] = _betaincinv_partials(a, b, y);
+  return std::make_tuple(g_a.contiguous(), g_b.contiguous(), g_y.contiguous());
 }
 
+// Shape and dtype of the three partials: the broadcast of the inputs, in the
+// result dtype, contiguous.
+static std::tuple<Tensor, Tensor, Tensor> _partials_meta(
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  auto options = a.options().dtype(_beta_result_dtype({a, b, x})).device(at::meta::_common_device({a, b, x}));
+  auto sizes = at::infer_size(at::infer_size(a.sizes(), b.sizes()), x.sizes());
+  return std::make_tuple(
+      at::empty(sizes, options), at::empty(sizes, options), at::empty(sizes, options));
+}
 
 std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials_meta(
     const Tensor& a,
     const Tensor& b,
     const Tensor& x) {
-  at::ScalarType dtype_orig = at::promoteTypes(
-      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
-  auto vec = at::broadcast_tensors({a, b, x});
-
-  return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
-      at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
-      at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
+  return _partials_meta(a, b, x);
 }
-
 
 std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials_meta(
     const Tensor& a,
     const Tensor& b,
     const Tensor& y) {
-  at::ScalarType dtype_orig = at::promoteTypes(
-      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
-
-  auto vec = at::broadcast_tensors({a, b, y});
-
-  return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
-      at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
-      at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
-
+  return _partials_meta(a, b, y);
 }
 
 
