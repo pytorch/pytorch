@@ -1331,6 +1331,27 @@ class TestAlphaFMA(TestCase):
         self.assertIn("'enable_fp_fusion': False", code)
         self.assertEqual(actual, fn(a, b, c), atol=0, rtol=0, exact_device=True)
 
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name in ("add", "sub")],
+        allowed_dtypes=[torch.float16, torch.bfloat16],
+    )
+    @config.patch(emulate_precision_casts=True)
+    @parametrize("other_is_tensor", [False, True])
+    def test_alpha_fma_scalar_precision(self, device, dtype, op, other_is_tensor):
+        a = torch.full([256], 2, device=device, dtype=dtype)
+        other = (-1 if op.name == "add" else 1) / 3
+        if other_is_tensor:
+            other = torch.full_like(a, other)
+
+        def fn(a, other):
+            return op(a, other, alpha=6)
+
+        actual, (code,) = run_and_get_code(torch.compile(fn), a, other)
+        self.assertIn("tl.fma", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+        self.assertEqual(actual, fn(a, other), atol=0, rtol=0, exact_device=True)
+
 
 instantiate_device_type_tests(
     TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True

@@ -681,6 +681,15 @@ def _add_with_alpha_fma(a, b, alpha):
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     )
 
+    # Preserve eager CUDA's opmath precision for promoted scalar operands.
+    inputs = []
+    for x in (a, b):
+        scalar = x.data if isinstance(x, ExpandView) else x
+        if isinstance(scalar, ir.BaseConstant):
+            scalar = dataclasses.replace(scalar, dtype=get_computation_dtype(dtype))
+            x = ExpandView.create(scalar, x.get_size())
+        inputs.append(x)
+
     def inner_fn(a_val, b_val):
         if isinstance(alpha, sympy.Basic):
             alpha_expr = ops.index_expr(alpha, dtype)
@@ -688,7 +697,7 @@ def _add_with_alpha_fma(a, b, alpha):
             alpha_expr = ops.constant(alpha, dtype)
         return ops.fma(b_val, alpha_expr, a_val)
 
-    return make_pointwise(inner_fn, override_return_dtype=dtype)(a, b)
+    return make_pointwise(inner_fn, override_return_dtype=dtype)(*inputs)
 
 
 def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
