@@ -24,6 +24,23 @@ class Indexable:
         return self.value
 
 
+class ClearOnIndex:
+    def __init__(self, b):
+        self.b = b
+
+    def __index__(self):
+        del self.b[:]
+        return 0
+
+
+def setitem(b, key, value):
+    b[key] = value
+
+
+def delitem(b, key):
+    del b[key]
+
+
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
 
@@ -782,6 +799,122 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, ord("c"))
         self.assertEqual(b, bytearray(b"ab"))
         self.assertEqual(out_y, torch.ones(1) + 1)
+
+    @make_dynamo_test
+    def test_setitem(self):
+        b = self.type2test(b"abc")
+        b[0] = ord("x")
+        b[-1] = Indexable(ord("z"))
+        b[Indexable(1)] = 0xFF
+        self.assertEqual(b, b"x\xffz")
+        self.assertRaises(IndexError, setitem, b, 3, 1)
+        self.assertRaises(IndexError, setitem, b, -4, 1)
+        self.assertRaises(IndexError, setitem, b, 2**64, 1)
+        # The value is checked before the index.
+        self.assertRaises(ValueError, setitem, b, 10, 256)
+        self.assertRaises(TypeError, setitem, b, 0, b"a")
+        self.assertRaises(TypeError, setitem, b, "0", 1)
+        self.assertEqual(b, b"x\xffz")
+
+    @make_dynamo_test
+    def test_setitem_value_index_mutates(self):
+        b = self.type2test(b"abc")
+        # The value is converted before the index is checked.
+        self.assertRaises(IndexError, setitem, b, 0, ClearOnIndex(b))
+        self.assertEqual(b, b"")
+
+    @make_dynamo_test
+    def test_delitem(self):
+        b = self.type2test(b"abcd")
+        del b[0]
+        del b[-1]
+        self.assertEqual(b, b"bc")
+        self.assertRaises(IndexError, delitem, b, 2)
+        self.assertRaises(IndexError, delitem, b, -3)
+        self.assertEqual(b, b"bc")
+
+    @make_dynamo_test
+    def test_setslice(self):
+        b = self.type2test(b"abcdef")
+        b[1:3] = b"XYZ"
+        self.assertEqual(b, b"aXYZdef")
+        b[:2] = [0x31, 0x32]
+        self.assertEqual(b, b"12YZdef")
+        b[::2] = (0x41, 0x42, 0x43, 0x44)
+        self.assertEqual(b, b"A2BZCeD")
+        b[5:] = self.type2test()
+        self.assertEqual(b, b"A2BZC")
+        b[1:] = b
+        self.assertEqual(b, b"AA2BZC")
+        self.assertRaises(ValueError, setitem, b, slice(None, None, 2), b"x")
+        self.assertRaises(ValueError, setitem, b, slice(None, None, 0), b"")
+        self.assertRaises(ValueError, setitem, b, slice(0, 1), [256])
+        self.assertRaises(TypeError, setitem, b, slice(0, 1), 1)
+        self.assertRaises(TypeError, setitem, b, slice(0, 1), "a")
+        self.assertEqual(b, b"AA2BZC")
+
+    @make_dynamo_test
+    def test_delslice(self):
+        b = self.type2test(b"abcdefg")
+        del b[1:3]
+        self.assertEqual(b, b"adefg")
+        del b[::2]
+        self.assertEqual(b, b"df")
+        del b[10:]
+        self.assertEqual(b, b"df")
+        self.assertRaises(ValueError, delitem, b, slice(None, None, 0))
+
+    def test_setitem_delitem_arg_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(ba, x):
+            ba[0] = ord("x")
+            ba[1:3] = b"YZW"
+            del ba[-1]
+            return x + 1
+
+        b = bytearray(b"abcd")
+        self.assertEqual(f(b, torch.ones(1)), torch.ones(1) + 1)
+        self.assertEqual(b, bytearray(b"xYZW"))
+
+    def test_setslice_input_values(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(ba, values, x):
+            ba[0:2] = values
+            return x + 1
+
+        for values in ([65, 66], (65, 66), b"AB", bytearray(b"AB")):
+            with self.subTest(values=values):
+                b = bytearray(b"xyz")
+                f(b, values, torch.ones(1))
+                self.assertEqual(b, bytearray(b"ABz"))
+
+    def test_setitem_setslice_nonconstant_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(ba, x):
+            x = x + 1
+            ba[0] = 0x7A
+            x = x * 2
+            ba[:1] = (i for i in range(2))
+            x = x - 1
+            ba[-1] = x[0].to(torch.int64)
+            return x * 3
+
+        b = bytearray(b"ab")
+        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 9.0))
+        self.assertEqual(b, bytearray(b"\x00\x01\x03"))
+        # The constant store is traced; the generator and tensor values each
+        # break the graph once.
+        self.assertEqual(cnt.frame_count, 3)
+
+        def g(ba, x):
+            ba[0] = x[0].to(torch.int64)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "bytearray store with an unsupported value"
+        ):
+            torch.compile(g, backend="eager", fullgraph=True)(b, torch.ones(1))
 
     def test_repr(self):
         @torch.compile(backend="eager")

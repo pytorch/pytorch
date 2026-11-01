@@ -1802,6 +1802,16 @@
       "Hints": []
     }
   ],
+  "GB6860": [
+    {
+      "Gb_type": "bytearray store with an unsupported value",
+      "Context": "value: {value}",
+      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is a constant, bytes-like, or a constant list or tuple, not {value.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0113": [
     {
       "Gb_type": "Unable to resolve super getattr",

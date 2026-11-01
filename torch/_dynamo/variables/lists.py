@@ -17,7 +17,7 @@ variable tracking system.
 import collections
 import operator
 import sys
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, NoReturn, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -2122,7 +2122,6 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
 
 class ByteArrayVariable(VariableTracker):
     # PyByteArray_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-    # Missing slots: tp_as_sequence.sq_ass_item, tp_as_mapping.mp_ass_subscript
     _cpython_type = bytearray
     _index_not_found_msg = (
         "bytearray.index(x): x not in bytearray"
@@ -2188,6 +2187,100 @@ class ByteArrayVariable(VariableTracker):
             return ConstantVariable.create(self.data[index])
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # bytearray_ass_subscript: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel).
+        if pyindex_check(maybe_get_python_type(key)):
+            index = pynumber_as_ssize_t(tx, key)
+            # Explicit unbound dispatch: the value is checked before the bounds.
+            return ByteArrayVariable.sq_ass_item_impl(self, tx, index, value)
+        elif pyslice_check(key):
+            index = key.as_index_slice(tx)
+            if value is not None:
+                value = value.realize()
+            if value is None:
+                src = None
+            elif isinstance(value, ByteArrayVariable):
+                src = value.data
+            elif (
+                isinstance(value, ConstantVariable)
+                or istype(value, (ListVariable, TupleVariable))
+            ) and value.is_python_constant():
+                src = value.as_python_constant()
+            else:
+                self._unsupported_store_value(value)
+            new_data = bytearray(self.data)
+            try:
+                if value is None:
+                    del new_data[index]
+                else:
+                    new_data[index] = src
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            tx.output.side_effects.mutation(self)
+            self.data = new_data
+            return ConstantVariable.create(None)
+        else:
+            raise_type_error(
+                tx,
+                f"bytearray indices must be integers or slices, "
+                f"not {key.python_type_name()}",
+            )
+
+    def sq_ass_item_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # bytearray_setitem: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return super().sq_ass_item_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel).
+        index = key.nb_index_impl(tx).as_python_constant()
+        if value is not None:
+            # The value is checked before the index (gh-91153).
+            value = pynumber_index(tx, value)
+            if not value.is_python_constant():
+                self._unsupported_store_value(value)
+            if not 0 <= value.as_python_constant() < 256:
+                raise_observed_exception(
+                    ValueError, tx, args=["byte must be in range(0, 256)"]
+                )
+        if index < 0:
+            index += len(self.data)
+        if not 0 <= index < len(self.data):
+            raise_observed_exception(
+                IndexError, tx, args=["bytearray index out of range"]
+            )
+        new_data = bytearray(self.data)
+        if value is None:
+            del new_data[index]
+        else:
+            new_data[index] = value.as_python_constant()
+        tx.output.side_effects.mutation(self)
+        # New buffer: do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    @staticmethod
+    def _unsupported_store_value(value: VariableTracker) -> NoReturn:
+        unimplemented(
+            gb_type="bytearray store with an unsupported value",
+            context=f"value: {value}",
+            explanation="Dynamo only traces bytearray item and slice stores whose "
+            "value is a constant, bytes-like, or a constant list or tuple, "
+            f"not {value.python_type_name()}.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.data))
