@@ -3683,14 +3683,6 @@
       ]
     }
   ],
-  "GB2214": [
-    {
-      "Gb_type": "Unsupported OrderedDict instance dictionary",
-      "Context": "OrderedDict.__dict__",
-      "Explanation": "A dictionary subclass used as instance state could also be a linked key, so Dynamo cannot inspect the order without invoking user hashes.",
-      "Hints": []
-    }
-  ],
   "GB8395": [
     {
       "Gb_type": "mapping proxy of class with pending attribute mutation",
@@ -4249,7 +4241,10 @@
       "Gb_type": "OrderedDict storage differs from linked keys",
       "Context": "OrderedDict input snapshot",
       "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
-      "Hints": []
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
     }
   ],
   "GB0238": [
@@ -4293,6 +4288,26 @@
         "* `torch.utils._pytree.register_dataclass`\n",
         "* `torch.utils._pytree.register_pytree_node`",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2418": [
+    {
+      "Gb_type": "Builtin method keys with custom equality and local receivers",
+      "Context": "builtin method key hashing",
+      "Explanation": "Custom key equality can observe runtime method hash collisions, but a locally created receiver has no guardable identity.",
+      "Hints": [
+        "Keep these dictionary or set operations outside the compiled region."
+      ]
+    }
+  ],
+  "GB9745": [
+    {
+      "Gb_type": "Unguardable builtin method key receiver",
+      "Context": "source.name",
+      "Explanation": "Builtin method keys require guards on receiver aliasing.",
+      "Hints": [
+        "Keep these dictionary or set operations outside the compiled region."
       ]
     }
   ],
@@ -5977,6 +5992,16 @@
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3320": [
+    {
+      "Gb_type": "Builtin method keys with custom metaclass equality",
+      "Context": "builtin method key hashing",
+      "Explanation": "Dynamo cannot trace custom metaclass equality against builtin method keys.",
+      "Hints": [
+        "Keep these dictionary or set operations outside the compiled region."
       ]
     }
   ],

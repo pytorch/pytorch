@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import enum
 import functools
 import unittest
 from collections import defaultdict, OrderedDict
@@ -12,6 +13,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
+from torch._dynamo.variables import higher_order_ops
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -54,6 +56,183 @@ class ClassWithVal:
 @instantiate_parametrized_tests
 class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("key_type", [str, bool, enum.IntEnum("HookKey", {"value": 1})])
+    def test_mixed_hook_key_types(self, key_type):
+        def hook(module, args, output):
+            return output + 1
+
+        def kwargs_hook(module, args, kwargs, output):
+            return output + 2
+
+        module = torch.nn.Identity()
+        module._forward_hooks[key_type(1)] = hook
+        module._forward_hooks[100] = kwargs_hook
+        module._forward_hooks_with_kwargs[100] = True
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(module, backend="eager", fullgraph=True)(x), x + 3
+        )
+
+    @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
+    def test_hook_flag_mutation_with_recursive_tags(self):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest)
+
+        def fn(x, module):
+            return module(x)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for first, second in ((1, 2), (3, 4)):
+            module = torch.nn.Identity()
+            module._forward_hooks.update({first: hook, second: hook})
+            module._forward_hooks_with_kwargs[first] = True
+            self.assertEqual(compiled(x, module), x * 121)
+        self.assertEqual(counter.frame_count, 1)
+        module._forward_hooks_with_kwargs.clear()
+        module._forward_hooks_with_kwargs[second] = True
+        self.assertEqual(compiled(x, module), x * 112)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("global_flags", [False, True])
+    @parametrize("flags_type", [dict, OrderedDict])
+    @parametrize("initial_flags", [(), (1,)])
+    @parametrize("recursive_tags", [False, True])
+    def test_nested_region_hook_membership(
+        self, global_flags, flags_type, initial_flags, recursive_tags
+    ):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest)
+
+        modules = [torch.nn.Identity(), torch.nn.Identity()]
+        for module, flagged in zip(modules, (1, 2)):
+            module._forward_hooks.update({1: hook, 2: hook})
+            module._forward_hooks_with_kwargs[flagged] = True
+        if global_flags:
+            modules[1]._forward_hooks = OrderedDict({3: hook, 4: hook})
+
+        @torch.compiler.nested_compile_region
+        def region(x, module):
+            if global_flags:
+                return x + sum(
+                    key in _global_hook_flags_alias for key in module._forward_hooks
+                )
+            return module(x)
+
+        def fn(x, first, second):
+            return region(x, first), region(x, second)
+
+        flags = flags_type.fromkeys(initial_flags if global_flags else (), True)
+        with (
+            torch._dynamo.config.patch(
+                use_recursive_dict_tags_for_guards=recursive_tags
+            ),
+            patch.object(
+                torch.nn.modules.module, "_global_forward_hooks_with_kwargs", flags
+            ),
+            patch(f"{__name__}._global_hook_flags_alias", flags),
+        ):
+            x = torch.ones(1)
+            expected = (
+                (x + len(initial_flags), x) if global_flags else (x * 121, x * 112)
+            )
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            self.assertEqual(fn(x, *modules), expected)
+            self.assertEqual(compiled(x, *modules), expected)
+            if global_flags:
+                flags.clear()
+                flags[3] = True
+                self.assertEqual(compiled(x, *modules), (x, x + 1))
+                self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("initial_flags", [(), (1,)])
+    @parametrize("recursive_tags", [False, True])
+    @parametrize("mutation", ["flags", "callback", "tensor_shape"])
+    def test_nested_region_hook_mutation(self, initial_flags, recursive_tags, mutation):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest) + module.probe.shape[0]
+
+        def replacement_hook(module, args, *rest):
+            return rest[-1] * 20 + len(rest)
+
+        modules = [torch.nn.Identity(), torch.nn.Identity()]
+        for module in modules:
+            module.probe = torch.ones(1)
+            module._forward_hooks.update({1: hook, 2: hook})
+            module._forward_hooks_with_kwargs.update(dict.fromkeys(initial_flags, True))
+
+        @torch.compiler.nested_compile_region
+        def region(x, module):
+            return module(x)
+
+        def fn(x, y, first, second):
+            return region(x, first), region(y, second)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x, y = torch.ones(1), torch.full((1,), 2.0)
+        with (
+            torch._dynamo.config.patch(
+                use_recursive_dict_tags_for_guards=recursive_tags
+            ),
+            patch.object(
+                higher_order_ops,
+                "speculate_subgraph_with_auto_output_flattening",
+                wraps=higher_order_ops.speculate_subgraph_with_auto_output_flattening,
+            ) as traces,
+        ):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            self.assertEqual(compiled(x, y, *modules), fn(x, y, *modules))
+            self.assertEqual(traces.call_count, 1)
+            if mutation == "flags":
+                modules[1]._forward_hooks_with_kwargs.clear()
+                modules[1]._forward_hooks_with_kwargs[2] = True
+            elif mutation == "callback":
+                modules[1]._forward_hooks[1] = replacement_hook
+            else:
+                modules[1].probe = torch.ones(2)
+            self.assertEqual(compiled(x, y, *modules), fn(x, y, *modules))
+        self.assertEqual(counter.frame_count, 2)
+        y = torch.ones(2)
+        self.assertEqual(compiled(x, y, *modules), fn(x, y, *modules))
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_nested_region_hook_reuse_propagates_guards(self):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest)
+
+        modules = [torch.nn.Identity() for _ in range(4)]
+        for module in modules:
+            module._forward_hooks.update({1: hook, 2: hook})
+            module._forward_hooks_with_kwargs[1] = True
+
+        @torch.compiler.nested_compile_region
+        def inner(x, module):
+            return module(x)
+
+        @torch.compiler.nested_compile_region
+        def outer(x, first, second):
+            return inner(x, first) + inner(x, second)
+
+        def fn(x, modules):
+            return outer(x, *modules[:2]), outer(x, *modules[2:])
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        with patch.object(
+            higher_order_ops,
+            "speculate_subgraph_with_auto_output_flattening",
+            wraps=higher_order_ops.speculate_subgraph_with_auto_output_flattening,
+        ) as traces:
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            self.assertEqual(compiled(x, modules), fn(x, modules))
+            self.assertEqual(traces.call_count, 2)
+            modules[-1]._forward_hooks_with_kwargs.clear()
+            modules[-1]._forward_hooks_with_kwargs[2] = True
+            self.assertEqual(compiled(x, modules), fn(x, modules))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("flags_name", ["with_kwargs", "always_called"])
@@ -104,6 +283,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             "set",
             "set_unpack",
             "frozenset",
+            "frozenset_subclass",
             "fromkeys",
             "union",
             "intersection",
@@ -117,6 +297,9 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         ],
     )
     def test_materialized_hook_keys(self, operation):
+        class FrozenSet(frozenset):
+            pass
+
         def hook(module, args, output):
             return output
 
@@ -128,6 +311,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 result = {*hooks}
             elif operation == "frozenset":
                 result = frozenset(hooks)
+            elif operation == "frozenset_subclass":
+                result = FrozenSet(hooks)
             elif operation == "fromkeys":
                 result = dict.fromkeys(set(hooks))
             elif operation == "union":
@@ -158,10 +343,11 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 module._forward_hooks[key] = hook
             self.assertEqual(compiled(x, module), fn(x, module))
 
+    @parametrize("recursive_tags", [False, True])
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("flags_name", ["with_kwargs", "always_called"])
     def test_global_flags_alias_survives_registry_replacement(
-        self, mapping_type, flags_name
+        self, mapping_type, flags_name, recursive_tags
     ):
         def hook(module, args, output):
             return output
@@ -174,6 +360,9 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         flags = mapping_type({1: True})
         registry_name = f"_global_forward_hooks_{flags_name}"
         with (
+            torch._dynamo.config.patch(
+                use_recursive_dict_tags_for_guards=recursive_tags
+            ),
             patch.object(torch.nn.modules.module, registry_name, flags),
             patch(f"{__name__}._global_hook_flags_alias", flags),
         ):
