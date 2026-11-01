@@ -23,6 +23,12 @@
 #include <ATen/ops/special_betaincinv_native.h>
 #include <ATen/ops/special_betaln.h>
 #include <ATen/ops/special_betaln_native.h>
+#include <ATen/ops/special_betaincc_native.h>
+#include <ATen/ops/special_betainccinv_native.h>
+#include <ATen/ops/special_beta_native.h>
+#include <ATen/ops/floor.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/remainder.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/minimum_native.h>
 #include <ATen/ops/maximum.h>
@@ -466,6 +472,51 @@ TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& a, const Tensor& b, const
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
 }
+
+// betaincc(a, b, x) = 1 - betainc(a, b, x) = betainc(b, a, 1 - x). The second
+// form keeps the precision of a small complement.
+Tensor special_betaincc(const Tensor& a, const Tensor& b, const Tensor& x) {
+  return at::special_betainc(b, a, 1 - x.to(_beta_result_dtype({a, b, x})));
+}
+
+Tensor& special_betaincc_out(const Tensor& a, const Tensor& b, const Tensor& x, Tensor& result) {
+  return at::special_betainc_out(result, b, a, 1 - x.to(_beta_result_dtype({a, b, x})));
+}
+
+// betainccinv(a, b, y) solves betaincc(a, b, x) = y: x = 1 - betaincinv(b, a, y).
+Tensor special_betainccinv(const Tensor& a, const Tensor& b, const Tensor& y) {
+  return 1 - at::special_betaincinv(b, a, y);
+}
+
+Tensor& special_betainccinv_out(const Tensor& a, const Tensor& b, const Tensor& y, Tensor& result) {
+  at::special_betaincinv_out(result, b, a, y);
+  return result.neg_().add_(1);
+}
+
+// Sign of gamma(z): positive for z > 0 and at the poles (as scipy), alternating
+// between the poles below zero.
+static Tensor _gamma_sign(const Tensor& z) {
+  const Tensor floor_z = at::floor(z);
+  return at::where((z > 0) | (z == floor_z), 1.0, 1.0 - 2.0 * at::remainder(floor_z, 2.0));
+}
+
+// beta(a, b) = gamma(a) gamma(b) / gamma(a + b); betaln is the log of its
+// absolute value, so the sign is restored from the gamma signs.
+static Tensor _beta_sign(const Tensor& a, const Tensor& b) {
+  const auto dtype = _beta_result_dtype({a, b});
+  const Tensor _a = a.to(dtype);
+  const Tensor _b = b.to(dtype);
+  return _gamma_sign(_a) * _gamma_sign(_b) * _gamma_sign(_a + _b);
+}
+
+Tensor special_beta(const Tensor& a, const Tensor& b) {
+  return _beta_sign(a, b) * at::exp(at::special_betaln(a, b));
+}
+
+Tensor& special_beta_out(const Tensor& a, const Tensor& b, Tensor& result) {
+  return at::mul_out(result, _beta_sign(a, b), at::exp(at::special_betaln(a, b)));
+}
+
 
 static inline std::tuple<Tensor, Tensor> _betainc_even_partial_numerator(
     const int32_t iteration,

@@ -13893,6 +13893,30 @@
     CPU, CUDA: special_betaincinv_out
   tags: pointwise
 
+- func: special_betaincc(Tensor a, Tensor b, Tensor x) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_betaincc.out(Tensor a, Tensor b, Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_betainccinv(Tensor a, Tensor b, Tensor y) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_betainccinv.out(Tensor a, Tensor b, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_beta(Tensor a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_beta.out(Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: _special_betainc_partials(Tensor a, Tensor b, Tensor x) -> (Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
