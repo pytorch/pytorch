@@ -17,7 +17,7 @@ import inspect
 import itertools
 import operator
 import sys
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -1060,3 +1060,6 @@ class DictItemsIterator(DictViewIterator):
 class SetIterator(DictViewIterator):
     _cpython_type = type(iter(set()))
     view_type = "keys"
+
+    def python_type(self) -> type:
+        return cast(type, self._cpython_type)
