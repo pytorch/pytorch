@@ -3324,7 +3324,9 @@ class TestPredispatchSerialization(TestCase):
         def call_helper_directly_after_keyword(node):
             # Inputs after a keyword input are matched with their values too.
             call_helper_directly_with(cond)(node)
-            node["inputs"].insert(-1, {"name": "k", "arg": {"as_int": 1}, "kind": 2})
+            node["inputs"].insert(
+                -1, {"name": "k", "arg": {"as_int": 1}, "kind": ArgumentKind.KEYWORD}
+            )
 
         return {
             # An input that names an operator would reach the function as a
@@ -3348,7 +3350,7 @@ class TestPredispatchSerialization(TestCase):
             "custom_obj": set_last(
                 arg={"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
             ),
-            "keyword": set_last(arg={"as_int": 0}, kind=2),
+            "keyword": set_last(arg={"as_int": 0}, kind=ArgumentKind.KEYWORD),
             "named": set_last(name="checked_output"),
             # Called directly, the helper would import the module of the class
             # name it gets when the program runs.
@@ -3360,7 +3362,7 @@ class TestPredispatchSerialization(TestCase):
                 {"as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}}
             ),
             "direct_helper_call_keyword": call_helper_directly_with(
-                cond, name="f", kind=2
+                cond, name="f", kind=ArgumentKind.KEYWORD
             ),
             "direct_helper_call_after_keyword": call_helper_directly_after_keyword,
         }
