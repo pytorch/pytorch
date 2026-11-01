@@ -138,8 +138,8 @@ jobs:
         If it already has an oncall label, follow Step 0. Otherwise, before the final decision:
         - Read `labels.json`, `templates.json`, and `umbrellas.json` beside the skill;
           also read `pt2-triage-rubric.md` for PT2/torch.compile issues.
-        - Call `find_duplicate_issues` as described in Step 0.5 and inspect relevant candidate
-          issues/comments. Broaden an empty search rather than treating it as proof of no match.
+        - Use `search_issues` as described in Step 0.5 and read promising candidate issues/comments.
+          Broaden unhelpful queries; neither empty nor nonempty results prove the search is complete.
         - Check the umbrella catalog's scopes and exclusions; include an `umbrella` annotation
           when a configured target fits. Do not infer closure permission from search results.
         Finish by calling `submit_result` with your plan.
