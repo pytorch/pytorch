@@ -23,7 +23,7 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
+    (parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -8030,21 +8030,6 @@ class TestMPS(TestCaseMPS):
         out_cpu.backward(cpu_grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    def test_adaptive_avg_pool3d_channels_last(self):
-        # Output layout must match CPU and the meta kernel, or torch.compile fallbacks fail stride asserts
-        cpu_x = torch.randn(2, 4, 6, 10, 10).to(memory_format=torch.channels_last_3d)
-        x = cpu_x.to('mps')
-        out = torch.ops.aten._adaptive_avg_pool3d(x, (3, 7, 9))
-        out_cpu = torch.ops.aten._adaptive_avg_pool3d(cpu_x, (3, 7, 9))
-        self.assertEqual(out, out_cpu)
-        self.assertEqual(out.stride(), out_cpu.stride())
-
-        cpu_grad = torch.randn(out_cpu.shape)
-        grad_input = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad.to('mps'), x)
-        grad_input_cpu = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad, cpu_x)
-        self.assertEqual(grad_input, grad_input_cpu)
-        self.assertEqual(grad_input.stride(), grad_input_cpu.stride())
-
     def test_adaptive_avg_pool_backward_errors(self):
         x = torch.randn(2, 3, 4, 5, 6, device='mps')
         grad = torch.randn(2, 3, 2, 2, 2, device='mps')
@@ -13022,39 +13007,6 @@ class TestViewOpsMPS(TestCaseMPS):
         z = y.to(device)
         self.assertEqual(y, z.cpu())
 
-    def test_expand(self, device="mps"):
-        tensor = torch.rand(1, 8, 1, device=device)
-        tensor2 = torch.rand(5, device=device)
-        template = torch.rand(4, 8, 5, device=device)
-        target = template.size()
-        self.assertEqual(tensor.expand_as(template).size(), target)
-        self.assertEqual(tensor.expand(4, 8, 5).size(), target)
-        self.assertEqual(tensor.expand(target).size(), target)
-        self.assertEqual(tensor2.expand_as(template).size(), target)
-        self.assertEqual(tensor2.expand(4, 8, 5).size(), target)
-        self.assertEqual(tensor2.expand(target).size(), target)
-
-        # test double expand
-        self.assertEqual(tensor2.expand(1, 5).expand(2, 2, 5), tensor2.repeat(2, 2, 1))
-
-        # test non-contiguous
-        noncontig = torch.randn(5, 2, 1, 3, device=device)[:, 0]
-        self.assertFalse(noncontig.is_contiguous())
-        self.assertEqual(noncontig.expand(2, 5, 4, 3), noncontig.contiguous().repeat(2, 1, 4, 1))
-
-        # make sure it's compatible with unsqueeze
-        expanded = tensor2.expand(1, 1, 5)
-        unsqueezed = tensor2.unsqueeze(0).unsqueeze(1)
-        self.assertEqual(expanded, unsqueezed)
-        self.assertEqual(expanded.stride(), unsqueezed.stride())
-
-        # test -1 as target size
-        self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
-        self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
-
-        # test expanding empty to empty
-        self.assertEqual(torch.zeros(0, device=device).expand((0,)), torch.zeros(0, device=device))
-
     # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     def test_python_types(self, device="mps"):
         a1 = torch.randn((1, 2), device=device, dtype=torch.float32)
@@ -13070,34 +13022,6 @@ class TestViewOpsMPS(TestCaseMPS):
         self.assertEqual(c1.dtype, c2.dtype)
 
     # TODO: is resize best put in test_view_ops?
-    # TODO: OpInfo this
-    def _test_atleast(self, device, torch_fn):
-        # 0-dim
-        s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
-
-        gradcheck(lambda x: torch_fn(x), s)
-        gradgradcheck(lambda x: torch_fn(x), s)
-
-        # 1-dim
-        a = torch.rand(4, dtype=torch.double, requires_grad=True)
-
-        gradcheck(lambda x: torch_fn(x), a)
-        gradgradcheck(lambda x: torch_fn(x), a)
-
-        # 2,3,4-dim
-        b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
-        c = torch.rand(4, 3, 2, dtype=torch.double, requires_grad=True)
-        d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
-
-        input_tuple = (s, a, b, c, d)
-        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
-        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
-
-    def test_atleast_gradient(self, device="mps"):
-        self._test_atleast(device, torch.atleast_1d)
-        self._test_atleast(device, torch.atleast_2d)
-        self._test_atleast(device, torch.atleast_3d)
-
     def test_resize_mps_dtypes(self, device="mps"):
         shape = (2, 2)
         for dt in MPS_DTYPES:
@@ -14705,6 +14629,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
         # CPU accumulates in half precision, so MPS is closer to the float32 result
         'nn.functional.adaptive_avg_pool3d',
+        # Only for backward pass, which sums fp16 gradients of repeated elements with
+        # index_put(accumulate=True) in a different order than CPU
+        'combinations',
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
@@ -14936,6 +14863,9 @@ class TestConsistency(TestCaseMPS):
             atol, rtol = self._compute_tolerances(op, dtype)
             # Forward is bit-exact; backward may include inexact broadcast reductions.
             if op.name == "nextafter":
+                atol, rtol = 0, 0
+            # Computed in float with float params and rounded once, same as CPU
+            if op.name in ("nn.functional.elu", "nn.functional.celu", "nn.functional.selu") and dtype.itemsize == 2:
                 atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and

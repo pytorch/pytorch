@@ -228,7 +228,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(VariableTracker):
+class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
@@ -481,7 +481,7 @@ def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
     return descriptor.__get__(obj, type(obj))
 
 
-class BoundBuiltinMethodVariable(VariableTracker):
+class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     """Bound builtin_function_or_method (PyCFunction_Type).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
@@ -838,6 +838,10 @@ class StaticMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "StaticMethodVariable":
+        return StaticMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -915,6 +919,10 @@ class ClassMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "ClassMethodVariable":
+        return ClassMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -928,7 +936,7 @@ class ClassMethodVariable(VariableTracker):
         # as `owner.<name>`, so build the VT that can source it.
         # A classmethod may wrap any callable, so let the builder pick the VT;
         # tp_descr_get_impl rejects the ones it cannot bind.
-        return ClassAttrClassMethodVariable(
+        return ClassAttrClassMethodVariable(  # noqa: RVT001
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
             source=source,

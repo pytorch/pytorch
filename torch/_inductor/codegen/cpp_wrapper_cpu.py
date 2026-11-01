@@ -2134,9 +2134,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         )
                 self.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
-                output_raii_handles.append(
-                    f"RAIIAtenTensorHandle {name}({output_handle_name});"
-                )
+                if name in V.graph.removed_buffers:
+                    # Unused output (e.g. SDPA's logsumexp): free it right away
+                    # instead of holding it until the end of the wrapper.
+                    output_raii_handles.append(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
+                    )
+                else:
+                    output_raii_handles.append(
+                        f"RAIIAtenTensorHandle {name}({output_handle_name});"
+                    )
             elif isinstance(output, int):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"int64_t {output_name} = {output};")
