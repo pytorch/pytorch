@@ -3267,8 +3267,10 @@ class TestPredispatchSerialization(TestCase):
             return change
 
         def call_helper_directly(node):
+            # The helper gets the name of the class to call as its first input.
             node["target"] = helper
             node["inputs"] = node["inputs"][2:]
+            node["inputs"][0]["arg"] = {"as_string": "os.system"}
 
         # Looking up a name outside torch.ops reads attributes of torch, which
         # can import a torch module, so load refuses the name first.
@@ -3312,12 +3314,12 @@ class TestPredispatchSerialization(TestCase):
             ),
             ("keyword", set_last(arg={"as_int": 0}, kind=2), "keyword input"),
             ("named", set_last(name="checked_output"), "keyword input"),
-            # Export calls the helper only through flat_apply. Called directly,
-            # it would import the module that the file names when it runs.
+            # Called directly, the helper would import the module of the class
+            # name it gets when the program runs.
             (
-                "helper called directly",
+                "helper called directly with another name",
                 call_helper_directly,
-                "only be called through flat_apply",
+                "not a class or function defined",
             ),
         ]:
             with self.subTest(name), self.assertRaisesRegex(SerializeError, reason):
@@ -3335,12 +3337,12 @@ class TestPredispatchSerialization(TestCase):
             node.target = (
                 torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             )
-            node.args = node.args[2:]
+            node.args = ("os.system", *node.args[3:])
 
         for change, reason in [
             (keyword_input, "keyword input"),
             (higher_order_op_input, "not an operator overload"),
-            (direct_helper_call, "only be called through flat_apply"),
+            (direct_helper_call, "not a class or function defined"),
         ]:
             ep, _ = self._index_in_vmap_artifact()
             (node,) = ep.graph.find_nodes(
@@ -3352,6 +3354,27 @@ class TestPredispatchSerialization(TestCase):
                 self.assertRaisesRegex(SerializeError, reason),
             ):
                 serialize(ep)
+
+    def test_predispatch_custom_autograd_helper_called_directly(self):
+        # A pass may call the helper directly instead of through flat_apply.
+        # Save and load then find its class name the same way.
+        ep, _ = self._index_in_vmap_artifact()
+        (node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        spec = torch.fx.graph_module._get_attr(ep.graph_module, node.args[1].target)
+        node.args, node.kwargs = pytree.tree_unflatten(node.args[2:], spec)
+        node.target = (
+            torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        )
+        for unused in [n for n in ep.graph.nodes if n.op == "get_attr" and not n.users]:
+            ep.graph.erase_node(unused)
+        ep.graph_module.recompile()
+        inp = (torch.arange(4), torch.tensor([3, 1]))
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.export.load(buffer).module()(*inp), ep.module()(*inp))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

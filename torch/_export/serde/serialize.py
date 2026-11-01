@@ -877,13 +877,24 @@ def _find_flat_apply_func(
         or not isinstance(flat_args[0], str)
     ):
         raise SerializeError("Expected an autograd function name as the first input")
-    function_cls = _find_imported(flat_args[0])
+    _find_autograd_function(flat_args[0])
+    return func
+
+
+def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
+    """
+    Find the custom autograd function that the helper for custom autograd
+    functions calls by name, with ``_find_imported``. The helper imports that
+    name's module when the program runs, so save and load check the name
+    first, whether the helper is called through flat_apply or directly.
+    """
+    function_cls = _find_imported(name) if isinstance(name, str) else None
     if not (
         isinstance(function_cls, type)
         and issubclass(function_cls, torch.autograd.Function)
     ):
-        raise SerializeError(f"{flat_args[0]} is not a torch.autograd.Function")
-    return func
+        raise SerializeError(f"{name} is not a torch.autograd.Function")
+    return function_cls
 
 
 @final
@@ -1229,18 +1240,20 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
-        elif (
-            node.target
-            is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-        ):
-            # Load refuses this, see deserialize_operator.
-            raise SerializeError(
-                f"{self.serialize_operator(node.target)} can only be called "
-                "through flat_apply"
-            )
         elif callable(node.target):
             # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
             # as plain Python function call_function nodes in pre_dispatch graphs.
+            if (
+                node.target
+                is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+            ):
+                # Load checks the class name, see deserialize_node.
+                try:
+                    _find_autograd_function(node.args[0] if node.args else None)
+                except SerializeError as e:
+                    raise SerializeError(
+                        f"Cannot serialize node {node.name}: {e}"
+                    ) from e
             ex_node = Node(
                 name=node.name,
                 target=self.serialize_operator(node.target),
@@ -2652,17 +2665,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 return serialized_target
             else:
                 target = getattr(target, name)
-        if (
-            target
-            is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-        ):
-            # The verifier allows this helper as a node target, but export calls
-            # it only through flat_apply, whose function load finds separately
-            # and checks with the class name it gets. A node that calls it
-            # directly would import a module that the file names when it runs.
-            raise SerializeError(
-                f"{serialized_target} can only be called through flat_apply"
-            )
         return target
 
     def _parse_sym_expr(
@@ -3041,6 +3043,13 @@ class GraphModuleDeserializer(metaclass=Final):
         elif callable(target):
             # Handle predispatch wrapper functions (vmap, JVP, etc.)
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            if (
+                target
+                is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+            ):
+                # The helper would import the module of the class it gets by
+                # name when the program runs, so load finds the class first.
+                _find_autograd_function(args[0] if args else None)
             name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
