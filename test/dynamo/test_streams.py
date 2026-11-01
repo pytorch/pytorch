@@ -3005,13 +3005,24 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         compiled = torch.compile(f, backend=backend, fullgraph=True)
+        # Devices 3 and 5 needn't exist, so keep Dynamo's current-stream setup and the
+        # synchronize itself off the hardware.
+        stream = torch.accelerator.current_stream()
+        synced = []
         for index in (3, 5):
-            with patch.object(
-                torch.accelerator, "current_device_index", return_value=index
+            with (
+                patch.object(
+                    torch.accelerator, "current_device_index", return_value=index
+                ),
+                patch.object(torch.accelerator, "current_stream", return_value=stream),
+                patch.object(
+                    torch.accelerator, "synchronize", side_effect=synced.append
+                ),
             ):
                 compiled()
 
         self.assertEqual(emitted(), [("cuda", 3), ("cuda", 5)])
+        self.assertEqual(synced, [torch.device("cuda", 3), torch.device("cuda", 5)])
 
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
