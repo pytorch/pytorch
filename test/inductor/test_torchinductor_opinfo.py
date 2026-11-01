@@ -416,6 +416,9 @@ wrapper_noop_set_seed_decorator = patch(
 inductor_override_kwargs = defaultdict(dict)
 
 inductor_override_kwargs["cpu"] = {
+    # composite ops: half rounds once in the fused kernel, per op in eager
+    ("special.beta", f16): {"atol": 1e-4, "rtol": 2e-3},
+    ("special.betainccinv", f16): {"atol": 3e-4, "rtol": 5e-3},
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
     "empty_permuted": {"assert_equal": False},
@@ -469,6 +472,12 @@ if IS_LINUX and IS_ARM64:
     )
 
 inductor_override_kwargs["cuda"] = {
+    # beta family: half rounds once in the fused kernel, per op in eager
+    ("special.beta", f16): {"atol": 2e-4, "rtol": 2e-2},
+    ("special.betainc", f16): {"atol": 2e-4, "rtol": 2e-2},
+    ("special.betaincc", f16): {"atol": 2e-4, "rtol": 2e-2},
+    ("special.betaincinv", f16): {"atol": 2e-4, "rtol": 2e-2},
+    ("special.betainccinv", f16): {"atol": 2e-4, "rtol": 2e-2},
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
     "empty_permuted": {"assert_equal": False},

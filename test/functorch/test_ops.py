@@ -1437,6 +1437,9 @@ class TestOperatorsDevice(TestCase):
                 xfail("special.betainc", ""),
                 xfail("special.betaincinv", ""),
                 xfail("special.betaln", ""),
+                xfail("special.beta", ""),
+                xfail("special.betaincc", ""),
+                xfail("special.betainccinv", ""),
                 xfail("fft.ihfft2"),  # conj_physical fallback
                 xfail("fft.ihfftn"),  # conj_physical fallback
                 xfail("nn.functional.max_unpool3d", "grad"),
@@ -1812,6 +1815,11 @@ class TestOperatorsDevice(TestCase):
                     "_segment_reduce", "lengths"
                 ),  # NYI: forward-AD for _segment_reduce
                 xfail("native_dropout_backward"),  # NYI
+                # the betainc partials have no derivative: no forward AD over the backward
+                xfail("special.betainc", ""),
+                xfail("special.betaincc", ""),
+                xfail("special.betaincinv", ""),
+                xfail("special.betainccinv", ""),
             }
         ),
     )
@@ -2081,6 +2089,11 @@ class TestOperatorsDevice(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
+                # the betainc partials have no derivative: no forward AD over the backward
+                xfail("special.betainc", ""),
+                xfail("special.betaincc", ""),
+                xfail("special.betaincinv", ""),
+                xfail("special.betainccinv", ""),
             }
         ),
     )
