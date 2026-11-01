@@ -47,8 +47,9 @@ def _graph_ownership_tokens(
     """Return C++ nodes that keep the autograd graph alive after outputs are detached.
 
     Python ``grad_fn`` objects for custom ``autograd.Function`` nodes do not pin
-    the C++ graph. A view node's ``grad_fn`` is C++-owned and does, matching
-    ``torch.autograd.graph.get_gradient_edge``.
+    the C++ graph. A view node's ``grad_fn`` is C++-owned and does.
+    ``get_gradient_edge`` tokens only a ``_FunctionBase`` root; this helper
+    tokens every tensor output that has a ``grad_fn``.
     """
     tokens: list[Node] = []
     for stage_output in stage_outputs_or_loss:
@@ -302,11 +303,18 @@ def stage_backward_input(
                 else:
                     inp.grad += dinput
 
-        # Pin the graph before detach. Custom autograd.Function nodes die with
-        # the output tensor unless a C++-owned token keeps them for dW.
-        ownership_tokens = _graph_ownership_tokens(stage_outputs_or_loss)
-        for param_group in param_groups:
-            param_group["ownership_tokens"] = ownership_tokens
+        # Pin only when a Python autograd node is a weight-boundary intermediate.
+        # C++ intermediates already own the subgraph below them, so a token on
+        # the output would keep saved tensors above that boundary until dW.
+        needs_ownership_token = any(
+            isinstance(node, torch._C._FunctionBase)
+            for param_group in param_groups
+            for node in param_group["intermediates"]
+        )
+        if needs_ownership_token:
+            ownership_tokens = _graph_ownership_tokens(stage_outputs_or_loss)
+            for param_group in param_groups:
+                param_group["ownership_tokens"] = ownership_tokens
 
         # Drop output-side graph state we no longer need. A view cannot be
         # detached in place (e.g. the output of an identity autograd.Function,
