@@ -14,7 +14,7 @@ import functools
 import inspect
 import sys
 import types
-from typing import Any, cast, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeAlias, TypeVar
 
 from torch._C._dynamo import get_type_tp_name
 from torch._guards import Source
@@ -68,6 +68,10 @@ DescriptorTypes: TypeAlias = (
     | types.WrapperDescriptorType
     | types.MemberDescriptorType
     | types.GetSetDescriptorType
+)
+
+_CallableDescriptor = TypeVar(
+    "_CallableDescriptor", types.MethodDescriptorType, types.WrapperDescriptorType
 )
 
 
@@ -134,6 +138,16 @@ class DescriptorVariable(VariableTracker):
         ),
     }
 
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return hash(self.as_python_constant()), False
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
@@ -148,9 +162,32 @@ class DescriptorVariable(VariableTracker):
         )
 
 
+class CallableDescriptorVariable(DescriptorVariable, Generic[_CallableDescriptor]):
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: _CallableDescriptor,
+        owner: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+        self.owner = owner
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.owner)
+        codegen.load_attr(self.descriptor.__name__)
+
+
 # descr_members: __objclass__ and __name__ are PyMemberDef on all descriptor
 # types. https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
-class WrapperDescriptorVariable(DescriptorVariable):
+class WrapperDescriptorVariable(
+    CallableDescriptorVariable[types.WrapperDescriptorType]
+):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
     CPython types define behavior through C-level slots on PyTypeObject
@@ -166,21 +203,6 @@ class WrapperDescriptorVariable(DescriptorVariable):
     PyWrapper_New to produce a bound method-wrapper (_PyMethodWrapper_Type).
     The tp_descr_get_impl method on this class mirrors that binding step.
     """
-
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
-    }
-
-    def __init__(
-        self,
-        descriptor: types.WrapperDescriptorType,
-        owner: VariableTracker,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.descriptor = descriptor
-        self.owner = owner
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # wrapperdescr_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L71-L76
@@ -199,18 +221,6 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
         return self.descriptor
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.owner)
-        codegen.load_attr(self.descriptor.__name__)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # PyWrapperDescr_Type inherits object_richcompare, like PyMethodDescr_Type.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -224,7 +234,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
             raise_type_error(
                 tx,
                 f"descriptor '{self.descriptor.__name__}' of "
-                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+                f"'{get_type_tp_name(self.descriptor.__objclass__)}' object needs an argument",
             )
         obj, *rest = args
         _check_descriptor_obj_type(tx, self.descriptor, obj, is_wrapper_call=True)
@@ -366,7 +376,7 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         return python_constant_richcompare_impl(self, tx, other, op)
 
 
-class MethodDescriptorVariable(DescriptorVariable):
+class MethodDescriptorVariable(CallableDescriptorVariable[types.MethodDescriptorType]):
     """Unbound C method descriptor (method_descriptor on a type).
 
     CPython types expose their PyMethodDef-based C methods as
@@ -381,21 +391,6 @@ class MethodDescriptorVariable(DescriptorVariable):
     (PyCFunction_Type).  The tp_descr_get_impl method mirrors that step.
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
     """
-
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
-    }
-
-    def __init__(
-        self,
-        descriptor: types.MethodDescriptorType,
-        owner: VariableTracker,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.descriptor = descriptor
-        self.owner = owner
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
@@ -413,10 +408,6 @@ class MethodDescriptorVariable(DescriptorVariable):
 
     def get_real_python_backed_value(self) -> types.MethodDescriptorType:
         return self.descriptor
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.owner)
-        codegen.load_attr(self.descriptor.__name__)
 
     def call_function(
         self,
@@ -469,18 +460,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
-
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
-        # object_richcompare from object.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
 
 @functools.cache
@@ -591,8 +570,6 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         | types.ClassMethodDescriptorType,
         obj: VariableTracker,
         value: types.BuiltinMethodType | None = None,
-        is_method_load: bool = False,
-        method_load_qualname: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -600,16 +577,6 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         self.obj = obj
         # The ID_MATCH-guarded runtime method, when built from one.
         self.value = value
-        self.is_method_load = is_method_load
-        self.method_load_qualname = method_load_qualname
-
-    def _call_qualname(self, tx: "InstructionTranslatorBase") -> str:
-        # Only wrong-arity calls need guards distinguishing LOAD_METHOD from binding.
-        if self.is_method_load and isinstance(self.obj, UserDefinedObjectVariable):
-            self.obj.install_method_load_guards(tx)
-            if self.method_load_qualname is not None:
-                return self.method_load_qualname
-        return self._qualname(tx).as_python_constant()
 
     def __repr__(self) -> str:
         cls_name = getattr(
@@ -626,7 +593,29 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         # real hash; a method bound during tracing gets a compile-time-only one.
         if self.value is not None:
             return hash(self.value), False
-        return id(self), True
+        obj = self.obj.realize()
+        if obj.source:
+            # Equal-valued receivers can have different identity-based method hashes.
+            install_guard(obj.source.make_guard(GuardBuilder.ID_MATCH))
+            receiver = tx.output.resolve_source_value(obj.source)
+        else:
+            receiver = obj.get_real_python_backed_value()
+            # Container VTs may materialize copies with no runtime-stable identity.
+            if (
+                receiver is NO_SUCH_SUBOBJ
+                or receiver is not obj.get_real_python_backed_value()
+            ):
+                # A receiver-only fake hash would conflate different C functions.
+                unimplemented(
+                    gb_type="builtin method hash with unstable receiver",
+                    context=f"{self}",
+                    explanation="Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
+        method = self.descriptor
+        if hasattr(method, "__get__"):
+            method = _bind_builtin_method(method, receiver)
+        return hash(method), True
 
     def tp_richcompare_impl(self, tx, other, op):
         # meth_richcompare: equal iff both are builtin methods with the same
@@ -699,7 +688,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                 args,
                 kwargs,
                 descriptor=descriptor,
-                qualname=lambda: self._call_qualname(tx),
+                qualname=lambda: self._qualname(tx).as_python_constant(),
             )
             if result is not None:
                 return result
@@ -732,19 +721,9 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             # METH_STATIC functions are already bound, e.g. tuple.__new__.
             codegen.append_output(load_descriptor)
             return
-        if self.method_load_qualname is not None and isinstance(
-            self.obj, UserDefinedObjectVariable
-        ):
-            # LOAD_METHOD selected descriptor + self before evaluating arguments.
-            # Binding across a graph break would change its TypeError qualname.
-            self.obj.install_method_load_guards(codegen.tx)
-            codegen.add_push_null(
-                lambda: codegen.load_import_from("functools", "partial")
-            )
-        else:
-            codegen.add_push_null(
-                lambda: codegen.load_import_from(__name__, "_bind_builtin_method")
-            )
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(__name__, "_bind_builtin_method")
+        )
         codegen.append_output(load_descriptor)
         codegen(self.obj)
         codegen.extend_output(create_call_function(2, False))
