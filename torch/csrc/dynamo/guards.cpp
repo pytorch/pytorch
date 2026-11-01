@@ -6,7 +6,6 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
-#include <c10/util/SmallVector.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
@@ -2041,118 +2040,6 @@ class LAMBDA_GUARD : public LeafGuard {
   py::function _guard_check_fn;
 };
 
-// Prefixes of CPython's private structs in Objects/odictobject.c, unchanged
-// from Python 3.11 through 3.15:
-// https://github.com/python/cpython/blob/v3.11.0/Objects/odictobject.c
-// The public OrderedDict iterator hashes each key. Walking the nodes directly
-// avoids invoking user hash/equality callbacks.
-struct OrderedDictNodePrefix {
-  PyObject* key;
-  Py_hash_t hash;
-  OrderedDictNodePrefix* next;
-};
-
-struct OrderedDictObjectPrefix {
-  PyDictObject dict;
-  OrderedDictNodePrefix* first;
-};
-
-static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
-  TORCH_CHECK_TYPE(PyODict_Check(value.ptr()), "expected an OrderedDict");
-  std::optional<std::vector<py::object>> result;
-  Py_BEGIN_CRITICAL_SECTION(value.ptr());
-  const auto size = static_cast<size_t>(PyDict_GET_SIZE(value.ptr()));
-  std::vector<py::object> keys;
-  keys.reserve(size);
-  auto* node = reinterpret_cast<OrderedDictObjectPrefix*>(value.ptr())->first;
-  while (node != nullptr && keys.size() < size) {
-    keys.push_back(py::reinterpret_borrow<py::object>(node->key));
-    node = node->next;
-  }
-  if (node == nullptr && keys.size() == size) {
-    result = std::move(keys);
-  }
-  Py_END_CRITICAL_SECTION();
-  return result;
-}
-
-// Order records dense storage indices in linked order, independent of key IDs.
-// This leaf prevents its mapping from being included in a tag-safe subtree.
-class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
- public:
-  ORDERED_DICT_ORDER_MATCH(
-      RootGuardManager* root_guard_manager,
-      std::vector<Py_ssize_t> order,
-      py::object verbose_code_parts,
-      py::object user_stack)
-      : LeafGuard(
-            root_guard_manager,
-            std::move(verbose_code_parts),
-            std::move(user_stack)),
-        _order(std::move(order)) {
-    std::vector<bool> seen(_order.size(), false);
-    for (const auto i : c10::irange(_order.size())) {
-      const auto index = _order[i];
-      TORCH_CHECK_VALUE(
-          index >= 0 && static_cast<size_t>(index) < _order.size() &&
-              !seen[index],
-          "OrderedDict order must be a permutation of its storage positions");
-      seen[index] = true;
-      _storage_order &= static_cast<size_t>(index) == i;
-    }
-  }
-
-  bool check_nopybind(PyObject* value) override {
-    if (!PyODict_Check(value)) {
-      return false;
-    }
-    c10::SmallVector<PyObject*, 16> keys(_storage_order ? 0 : _order.size());
-    bool result;
-    // CPython 3.14.1+ protects OrderedDict mutations with this lock.
-    // Older free-threaded releases have upstream OrderedDict races.
-    // No Python callbacks run while the lock is held.
-    Py_BEGIN_CRITICAL_SECTION(value);
-    result = check_order(value, keys);
-    Py_END_CRITICAL_SECTION();
-    return result;
-  }
-
- private:
-  bool check_order(PyObject* value, c10::SmallVectorImpl<PyObject*>& keys)
-      const {
-    if (PyDict_GET_SIZE(value) != static_cast<Py_ssize_t>(_order.size())) {
-      return false;
-    }
-    auto* node = reinterpret_cast<OrderedDictObjectPrefix*>(value)->first;
-    PyObject *key = nullptr, *item = nullptr;
-    Py_ssize_t pos = 0;
-    if (_storage_order) {
-      while (PyDict_Next(value, &pos, &key, &item)) {
-        if (node == nullptr || node->key != key) {
-          return false;
-        }
-        node = node->next;
-      }
-    } else {
-      size_t index = 0;
-      while (PyDict_Next(value, &pos, &key, &item)) {
-        keys[index++] = key;
-      }
-      for (const auto index : _order) {
-        if (node == nullptr || node->key != keys[index]) {
-          return false;
-        }
-        node = node->next;
-      }
-    }
-    return node == nullptr;
-  }
-
-  std::vector<Py_ssize_t> _order;
-  bool _storage_order = true;
-};
-
 class TYPE_MATCH : public LeafGuard {
  public:
   // type_id = id(type(obj))
@@ -2910,6 +2797,83 @@ class RelationalGuard : public LeafGuard {
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
   virtual void reset_state() = 0;
+};
+
+struct NNModuleHookMembership {
+  PyObject* hooks = nullptr;
+  PyObject* flags = nullptr;
+  std::vector<bool> expected;
+
+  bool check() const {
+    if (PyDict_GET_SIZE(hooks) != static_cast<Py_ssize_t>(expected.size())) {
+      return false;
+    }
+    PyObject *key = nullptr, *value = nullptr;
+    Py_ssize_t pos = 0;
+    // Restrict both sides to integer hook IDs, so lookup cannot run callbacks.
+    while (PyDict_Next(flags, &pos, &key, &value)) {
+      if (!PyLong_CheckExact(key)) {
+        return false;
+      }
+    }
+    pos = 0;
+    size_t index = 0;
+    while (PyDict_Next(hooks, &pos, &key, &value)) {
+      if (!PyLong_CheckExact(key)) {
+        return false;
+      }
+      const int contains = PyDict_Contains(flags, key);
+      if (contains < 0) {
+        PyErr_Clear();
+        return false;
+      }
+      if (static_cast<bool>(contains) != expected[index++]) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+// Compare membership by hook storage position without specializing module IDs.
+// Two role-tagged leaves permit either guard manager to run first.
+class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
+ public:
+  NN_MODULE_HOOK_MEMBERSHIP(
+      RootGuardManager* root,
+      std::shared_ptr<NNModuleHookMembership> state,
+      bool is_hooks,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _state(std::move(state)),
+        _is_hooks(is_hooks) {}
+
+  bool check_nopybind(PyObject* value) override {
+    if (!PyDict_Check(value)) {
+      return false;
+    }
+    (_is_hooks ? _state->hooks : _state->flags) = value;
+    if (_state->hooks == nullptr || _state->flags == nullptr) {
+      return true;
+    }
+    bool result;
+    Py_BEGIN_CRITICAL_SECTION2(_state->hooks, _state->flags);
+    result = _state->check();
+    Py_END_CRITICAL_SECTION2();
+    return result;
+  }
+
+  void reset_state() final {
+    (_is_hooks ? _state->hooks : _state->flags) = nullptr;
+  }
+
+ private:
+  std::shared_ptr<NNModuleHookMembership> _state;
+  bool _is_hooks;
 };
 
 /**
@@ -5149,13 +5113,11 @@ class DictGuardManager : public GuardManager {
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
     // DictGuardManager handles TYPE_MATCH and LENGTH_CHECK inline.
     // Most leaf guards should go on key/value child managers instead.
-    // Container identity and OrderedDict linked order are not covered by the
-    // inline type/length checks or storage-position child managers.
+    // ID_MATCH is the exception — it guards the container's identity,
+    // not its contents, and is needed when user code calls id() on a dict.
     TORCH_CHECK(
-        dynamic_cast<ID_MATCH*>(leaf_guard.get()) != nullptr ||
-            dynamic_cast<ORDERED_DICT_ORDER_MATCH*>(leaf_guard.get()) !=
-                nullptr,
-        "DictGuardManager only supports identity and order leaf guards");
+        dynamic_cast<ID_MATCH*>(leaf_guard.get()) != nullptr,
+        "DictGuardManager only supports ID_MATCH as a leaf guard");
     GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
@@ -7620,6 +7582,24 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+void install_nn_module_hook_membership_guard(
+    GuardManager* hooks,
+    GuardManager* flags,
+    std::vector<bool> expected,
+    py::object verbose_code_parts,
+    py::object user_stack) {
+  TORCH_CHECK(hooks->get_root() == flags->get_root());
+  auto state = std::make_shared<NNModuleHookMembership>();
+  state->expected = std::move(expected);
+  for (bool is_hooks : {true, false}) {
+    auto* manager = is_hooks ? hooks : flags;
+    auto guard = std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
+        manager->get_root(), state, is_hooks, verbose_code_parts, user_stack);
+    manager->get_root()->add_relational_guard_resetter(guard);
+    manager->add_permitted_leaf_guard(std::move(guard));
+  }
+}
+
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -8036,18 +8016,6 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LAMBDA_GUARD")
       .def(py::init<RootGuardManager*, py::function, py::list, py::object>())
       .def("__call__", &LAMBDA_GUARD::check);
-  py::class_<
-      ORDERED_DICT_ORDER_MATCH,
-      LeafGuard,
-      std::shared_ptr<ORDERED_DICT_ORDER_MATCH>>(
-      py_m, "ORDERED_DICT_ORDER_MATCH")
-      .def(py::init<
-           RootGuardManager*,
-           std::vector<Py_ssize_t>,
-           py::list,
-           py::object>())
-      .def("__call__", &ORDERED_DICT_ORDER_MATCH::check);
-  py_m.def("ordered_dict_keys", ordered_dict_keys);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -8212,6 +8180,12 @@ PyObject* torch_c_dynamo_guards_init() {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
       py_m, "RelationalGuard");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      NN_MODULE_HOOK_MEMBERSHIP,
+      RelationalGuard,
+      std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP>>(
+      py_m, "NN_MODULE_HOOK_MEMBERSHIP");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       OBJECT_ALIASING,
@@ -8501,19 +8475,6 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<LENGTH_CHECK>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts),
-                std::move(user_stack)));
-          })
-      .def(
-          "add_ordered_dict_order_guard",
-          [](GuardManager& self,
-             std::vector<Py_ssize_t> order,
-             py::object verbose_code_parts,
-             py::object user_stack) -> void {
-            SKIP_IF_GUARD_ALREADY_PRESENT("ORDERED_DICT_ORDER_MATCH");
-            self.add_leaf_guard(std::make_shared<ORDERED_DICT_ORDER_MATCH>(
-                self.get_root(),
-                std::move(order),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
@@ -9331,6 +9292,9 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
+  py_m.def(
+      "install_nn_module_hook_membership_guard",
+      install_nn_module_hook_membership_guard);
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);

@@ -1959,13 +1959,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
+            if kwargs:
+                raise_type_error(tx, "wrapper __setattr__() takes no keyword arguments")
             if len(args) != 3:
-                raise AssertionError(
-                    f"object.__setattr__ expects 3 args, got {len(args)}"
-                )
-            if len(kwargs) != 0:
-                raise AssertionError(
-                    f"object.__setattr__ expects no kwargs, got {len(kwargs)}"
+                raise_type_error(
+                    tx, f"__setattr__ expected 2 arguments, got {len(args) - 1}"
                 )
             obj, name_var, val = args
             obj = obj.realize()
@@ -2635,7 +2633,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
         if isinstance(args[0], variables.ConstDictVariable):
-            args[0].install_dict_order_guard(tx)
+            args[0].install_dict_keys_match_guard()
+            if args[0].source:
+                tx.output.guard_on_key_order.add(args[0].source)
+            if isinstance(args[0], variables.NNModuleHooksDictVariable):
+                args[0].install_key_escape_guard()
         if isinstance(
             args[0],
             (

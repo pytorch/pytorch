@@ -39,17 +39,9 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import (
-    AttrSource,
-    ChainedSource,
-    ConstDictKeySource,
-    DictGetItemSource,
-    DictKeysSource,
-    Source,
-)
+from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
-from .variables.constant import FakeIdVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
@@ -144,9 +136,6 @@ class PyCodegen:
             items = value.items
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
-        elif isinstance(value, FakeIdVariable):
-            # Aggregate constant conversion already accepts compile-time fake hashes.
-            return False
         else:
             # `is_safe_constant` accepts slices without checking their members.
             # Symbolic and mutable members must be reconstructed.
@@ -756,9 +745,7 @@ class PyCodegen:
 
         def extract_nested_sources(source: Source) -> list[Source]:
             nested_sources: list[Source] = []
-            if isinstance(source, ConstDictKeySource):
-                nested_sources.append(DictKeysSource(source.base))
-            elif isinstance(source, ChainedSource):
+            if isinstance(source, ChainedSource):
                 nested_sources.append(source.base)
             if isinstance(source, DictGetItemSource) and isinstance(
                 source.index, Source

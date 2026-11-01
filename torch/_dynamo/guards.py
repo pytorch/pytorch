@@ -66,12 +66,12 @@ from torch._C._dynamo.guards import (
     GuardAccessor,
     GuardDebugInfo,
     GuardManager,
+    install_nn_module_hook_membership_guard,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
-    ORDERED_DICT_ORDER_MATCH,
     profile_guard_manager,
     RelationalGuard,
     RootGuardManager,
@@ -209,12 +209,10 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
-    enumerate_items_with_dict_position,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
-    InvalidOrderedDict,
     istype,
     key_is_id,
     key_to_id,
@@ -614,11 +612,7 @@ class GuardManagerWrapper:
             if has_unoptimized_relational_guard:
                 return tag_safe_roots, has_unoptimized_relational_guard
 
-            # move_to_end changes linked order without changing the dict tag.
-            is_subtree_tag_safe = not any(
-                isinstance(guard, ORDERED_DICT_ORDER_MATCH)
-                for guard in node.get_leaf_guards()
-            )
+            is_subtree_tag_safe = True
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -676,9 +670,6 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe = all(
                     isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
-                ) and not any(
-                    isinstance(guard, ORDERED_DICT_ORDER_MATCH)
-                    for guard in node.get_leaf_guards()
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
@@ -969,7 +960,6 @@ def _get_closure_vars() -> dict[str, object]:
         _CLOSURE_VARS = {
             "___check_type_id": check_type_id,
             "___check_obj_id": check_obj_id,
-            "___check_hook_membership": _nn_module_hook_membership,
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
@@ -977,7 +967,6 @@ def _get_closure_vars() -> dict[str, object]:
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
-            "___ordered_dict_order": _ordered_dict_order,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___list_reverseiterator_len": list_reverseiterator_len,
             "___list_reverseiterator_backing_list": list_reverseiterator_backing_list,
@@ -1467,27 +1456,6 @@ def check_closure(value: object, metadata: Any) -> bool:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
         return value.__code__ is metadata
     return id(value) == metadata
-
-
-def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
-    if not issubclass(type(value), collections.OrderedDict):
-        return None
-    try:
-        value = cast(collections.OrderedDict[Any, Any], value)
-        return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
-    except InvalidOrderedDict:
-        return None
-
-
-def _nn_module_hook_membership(
-    module: Any, hooks_name: str, flags_name: str
-) -> tuple[bool, ...]:
-    # Local hook IDs can also be tested against a global flag registry.
-    flags_owner = (
-        torch.nn.modules.module if flags_name.startswith("_global_") else module
-    )
-    flags = getattr(flags_owner, flags_name)
-    return tuple(key in flags for key in dict.keys(getattr(module, hooks_name)))
 
 
 def _constant_subclass_base_value(value: object) -> Any:
@@ -3806,65 +3774,39 @@ class GuardBuilder(GuardBuilderBase):
         )
         self._set_guard_export_info(guard, code)
 
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
-        eval_fn=lambda value, order: order is not None
-        and _ordered_dict_order(value) == order,
-    )
-    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
-        order = _ordered_dict_order(self.get(guard))
-        if order is None:
-            raise AssertionError("Expected a valid OrderedDict snapshot")
-        ref = self.arg_ref(guard)
-        code = [f"___ordered_dict_order({ref}) == {order!r}"]
-        self.get_guard_manager(guard).add_ordered_dict_order_guard(
-            order, get_verbose_code_parts(code, guard), guard.user_stack
-        )
-        self._set_guard_export_info(guard, code)
-
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: (
-            _guard_create_fn_keyword(guard, "hooks_name"),
-            _guard_create_fn_keyword(guard, "flags_name"),
-            _nn_module_hook_membership(
-                value,
-                _guard_create_fn_keyword(guard, "hooks_name"),
-                _guard_create_fn_keyword(guard, "flags_name"),
-            ),
-        ),
-        eval_fn=lambda value, metadata: _nn_module_hook_membership(
-            value, metadata[0], metadata[1]
-        )
-        == metadata[2],
-    )
+    # Membership relates two sources, including aliases of global registries.
+    @skip_guard_check_spec
     def NN_MODULE_HOOKS_DICT_CONTAINS(
-        self, guard: Guard, hooks_name: str, flags_name: str
+        self,
+        guard: Guard,
+        hooks_name: str,
+        flags_name: str,
+        flags_source: Source | None = None,
     ) -> None:
-        membership = _nn_module_hook_membership(self.get(guard), hooks_name, flags_name)
+        hooks_source = AttrSource(guard.originating_source, hooks_name)
+        if flags_source is None:
+            flags_source = AttrSource(guard.originating_source, flags_name)
+        flags = self.get(flags_source)
+        membership = tuple(key in flags for key in dict.keys(self.get(hooks_source)))
+        if self.save_guards:
+            if name := get_local_source_name(flags_source):
+                self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(flags_source):
+                self.check_fn_manager.additional_used_global_vars.add(name)
         code = (
-            f"___check_hook_membership({self.arg_ref(guard)}, "
-            f"{hooks_name!r}, {flags_name!r}) == {membership!r}"
+            f"tuple(key in {flags_source.name} for key in "
+            f"dict.keys({hooks_source.name})) == {membership!r}"
         )
         if code in self.already_added_code_parts:
             return
-        # Keep local hook dictionaries available when rebuilding serialized guards.
-        names = (
-            (hooks_name,)
-            if flags_name.startswith("_global_")
-            else (hooks_name, flags_name)
-        )
-        for name in names:
-            self.get_guard_manager_from_source(
-                AttrSource(guard.originating_source, name)
-            )
-
-        def guard_fn(module: Any) -> bool:
-            return (
-                _nn_module_hook_membership(module, hooks_name, flags_name) == membership
-            )
-
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts([code], guard), guard.user_stack
+        # Attach both leaves to their dictionaries so version-tag shortcuts
+        # cannot skip changes to either side of this membership relation.
+        install_nn_module_hook_membership_guard(
+            self.get_guard_manager_from_source(hooks_source),
+            self.get_guard_manager_from_source(flags_source),
+            membership,
+            get_verbose_code_parts([code], guard),
+            guard.user_stack,
         )
         self._set_guard_export_info(guard, [code])
         self.already_added_code_parts.add(code)
@@ -5004,35 +4946,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         return dict.fromkeys(elems).keys()
 
     @classmethod
-    def _restore_ordered_dict_state(
-        cls,
-        value: collections.OrderedDict[Any, Any],
-        state: tuple[Any, tuple[int, ...]],
-    ) -> None:
-        attrs, order = state
-        keys = list(dict.keys(value))
-        for index in order:
-            collections.OrderedDict.move_to_end(value, keys[index])
-        if attrs is None:
-            return
-        try:
-            setstate = cast(Any, value).__setstate__
-        except AttributeError:
-            slots = None
-            if isinstance(attrs, tuple):
-                attrs, slots = attrs
-            if attrs is not None:
-                # Preserve constructor attributes and aliases to the saved state.
-                for name, item in value.__dict__.items():
-                    attrs.setdefault(name, item)
-                object.__setattr__(value, "__dict__", attrs)
-            if slots:
-                for name, item in slots.items():
-                    setattr(value, name, item)
-        else:
-            setstate(attrs)
-
-    @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
 
@@ -5346,43 +5259,6 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
-
-        if (
-            issubclass(type(obj), collections.OrderedDict)
-            and type(obj) not in copyreg.dispatch_table
-            and inspect.getattr_static(obj, "__reduce__")
-            is collections.OrderedDict.__reduce__
-            and inspect.getattr_static(obj, "__reduce_ex__")
-            is collections.OrderedDict.__reduce_ex__
-        ):
-            if type(obj).__qualname__ != type(obj).__name__:
-                raise_local_type_error(type(obj))
-            # Native pickle normalizes storage to linked order, invalidating
-            # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
-            # Custom constructors/items/setitem must retain native callback order.
-            preserve_storage = type(type(obj)).__call__ is type.__call__ and all(
-                getattr(type(obj), name) is getattr(collections.OrderedDict, name)
-                for name in ("__new__", "__init__", "__setitem__", "items")
-            )
-            order = _ordered_dict_order(obj)
-            if order is None:
-                # Native pickle may accept raw dict writes on an unguarded value.
-                return NotImplemented
-            if not preserve_storage and order != tuple(range(dict.__len__(obj))):
-                raise torch._dynamo.exc.PackageError(
-                    "Cannot preserve OrderedDict storage order with custom "
-                    "construction or item methods"
-                )
-            reduced = obj.__reduce__()
-            state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
-            return (
-                reduced[0],
-                reduced[1],
-                (state, order if preserve_storage else ()),
-                reduced[3],
-                iter(dict.items(obj)) if preserve_storage else reduced[4],
-                type(self)._restore_ordered_dict_state,
-            )
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
