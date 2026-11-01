@@ -432,7 +432,7 @@ def _expand_dict_returning_deps(
                 new_gi.meta.update(old_gi.meta)
                 if isinstance(new_gi.meta.get("val"), dict):
                     raise AssertionError(
-                        f"nested dict in triton kernel output for key {key}"
+                        f"nested dict in user kernel output for key {key}"
                     )
                 visited.add(new_gi)
                 expanded.append(new_gi)
@@ -495,7 +495,7 @@ def _wrap_sync_node(
         if any(pred(user) for user in dep.users):
             deps_with_uses_after_sync.append(dep)
 
-    # Expand dict-returning nodes (triton_kernel_wrapper_functional) into
+    # Expand dict-returning nodes (triton_kernel_wrapper_functional, ...) into
     # individual getitem outputs.  Passing a dict-valued node through
     # control_deps breaks post-grad passes: reinplace + decomposition replace
     # the dict node with a Python dict, corrupting any user that expected an
