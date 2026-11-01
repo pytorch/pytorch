@@ -26,10 +26,8 @@ from typing import Annotated, Any, cast, final, Optional
 import sympy
 
 import torch
-
-# Load finds ModIndex, which export uses for indexing inside vmap, only if
-# its module is imported.
 import torch._dynamo._trace_wrapped_higher_order_op
+import torch.export.custom_ops
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
@@ -716,15 +714,25 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
+# The torch modules that define the flat_apply functions export produces, such
+# as ModIndex, which indexing inside vmap uses. Load finds functions only in
+# imported modules, and this module imports these, so programs that use them
+# load after a plain ``import torch``.
+_TORCH_FLAT_APPLY_MODULES = (
+    torch._dynamo._trace_wrapped_higher_order_op,
+    torch.export.custom_ops,
+)
+
+
 def _find_imported(name: str) -> Any:
     """
     Find the class or function that a saved flat_apply node names, without
     running code from a module that the file chooses. Importing a module runs
     its code, so nothing is imported: the module that defines a name has to be
-    imported before loading. The torch modules that export itself uses here
-    are imported by then. Only top-level classes and functions are found, and
-    the object must report the same qualified name, so aliases such as
-    ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
+    imported before loading, as ``_TORCH_FLAT_APPLY_MODULES`` are. Only
+    top-level classes and functions are found, and the object must report the
+    same qualified name, so aliases such as ``torch.nn.Module`` (defined in
+    ``torch.nn.modules.module``) are refused.
     Names in ``__main__`` modules are refused too, because a script differs
     between processes. That includes ``__mp_main__``, the main script of a
     multiprocessing child.
