@@ -124,7 +124,8 @@ def alpha_dropout(
         return self
 
     # Compute in the input's computation dtype (fp16/bf16 -> fp32, fp64 -> fp64)
-    # so fp64 keeps full precision; bool * python-float would otherwise force fp32.
+    # so fp64 keeps full precision; otherwise bool * python-float promotes to
+    # torch.get_default_dtype() and the fp64 coefficients lose precision.
     computation_dtype = utils.get_computation_dtype(self.dtype)
 
     dropout_mask = _dropout_helper(self, 1 - p)
