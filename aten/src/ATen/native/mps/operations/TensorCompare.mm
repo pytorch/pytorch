@@ -37,21 +37,39 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   }
   // Above this many test elements, sorting them once and binary searching beats a linear scan per element
   constexpr int64_t max_linear_scan_test_elements = 8;
+  // Same for elements when one thread per test element searches them
+  constexpr int64_t max_linear_scan_elements = 4;
+  // Parallelize over test elements (sorting elements instead) once they outnumber elements by more than this
+  constexpr int64_t test_parallel_min_ratio = 2;
   const auto common_type = at::result_type(elements, test_elements);
   const auto elements_c = elements.to(common_type).contiguous();
-  const auto sorted = test_elements.numel() > max_linear_scan_test_elements;
-  auto test_c = test_elements.to(common_type).contiguous();
-  const auto test_s = sorted ? std::get<0>(test_c.view(-1).sort()) : std::move(test_c);
-  const auto num_test = c10::checked_convert<uint32_t>(test_s.numel(), "uint32_t");
-  const auto kernel = (sorted ? "isin_sorted_" : "isin_") + scalarToMetalTypeString(common_type);
+  const auto test_c = test_elements.to(common_type).contiguous();
+  const auto test_parallel =
+      test_c.numel() > max_linear_scan_test_elements && test_c.numel() > test_parallel_min_ratio * elements_c.numel();
+  const auto& lookup_c = test_parallel ? elements_c : test_c;
+  const auto sorted = lookup_c.numel() > (test_parallel ? max_linear_scan_elements : max_linear_scan_test_elements);
+  const auto lookup = sorted ? std::get<0>(lookup_c.view(-1).sort()) : lookup_c;
+  const auto lookup_size = c10::checked_convert<uint32_t>(lookup.numel(), "uint32_t");
+  const auto found = test_parallel ? elements_c.new_zeros({elements_c.numel()}, kInt) : Tensor();
+  const auto suffix = (sorted ? "sorted_" : "") + scalarToMetalTypeString(common_type);
   const auto out_c = out.contiguous();
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto enc = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(kernel);
+      if (test_parallel) {
+        auto mark = lib.getPipelineStateForFunc("isin_mark_" + suffix);
+        [enc setComputePipelineState:mark];
+        mtl_setArgs(enc, lookup, test_c, found, lookup_size);
+        mtl_dispatch1DJob(enc, mark, test_c.numel());
+      }
+      auto pso = lib.getPipelineStateForFunc((test_parallel ? "isin_gather_" : "isin_") + suffix);
       [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, elements_c, test_s, out_c, num_test, invert);
+      if (test_parallel) {
+        mtl_setArgs(enc, elements_c, lookup, out_c, lookup_size, invert, found);
+      } else {
+        mtl_setArgs(enc, elements_c, lookup, out_c, lookup_size, invert);
+      }
       mtl_dispatch1DJob(enc, pso, elements_c.numel());
     }
   });
