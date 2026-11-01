@@ -929,7 +929,8 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
     functions calls by name, with ``_find_imported``. The helper imports that
     name's module when the program runs, so save and load check the name
     first in a flat_apply call of the helper and in a direct call. They accept
-    only a function whose apply export calls.
+    only a function that export calls, one with an apply decorated for export
+    in its class or in a base class.
     """
     function_cls = _find_imported(name) if isinstance(name, str) else None
     if not (
@@ -937,11 +938,16 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
         and issubclass(function_cls, torch.autograd.Function)
     ):
         raise SerializeError(f"{name} is not a torch.autograd.Function")
-    apply = getattr(inspect.getattr_static(function_cls, "apply"), "__func__", None)
-    if not inspect.getattr_static(apply, "_allowed_in_pre_dispatch_graph", False):
+    applies = [
+        getattr(vars(c).get("apply"), "__func__", None) for c in function_cls.__mro__
+    ]
+    if not any(
+        inspect.getattr_static(apply, "_allowed_in_pre_dispatch_graph", False)
+        for apply in applies
+    ):
         raise SerializeError(
-            f"{name} is not a torch.autograd.Function that export calls: its "
-            "apply is not decorated with "
+            f"{name} is not a torch.autograd.Function that export calls: no "
+            "apply in its class hierarchy is decorated with "
             "torch._export.wrappers.allow_in_pre_dispatch_graph"
         )
     return function_cls

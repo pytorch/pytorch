@@ -364,7 +364,8 @@ def load(
 
     This is not a safety guarantee: as the warning above says, load unpickles
     data, and other parts of the file, such as the specs of the program's
-    inputs and outputs, can import modules too.
+    inputs and outputs or the inputs of other higher order ops, can import
+    modules too.
 
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to

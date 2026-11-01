@@ -3024,13 +3024,25 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return AddPair.apply(Pair(x, x * 3), Pt(x, x))
 
+        class ScaleViaSuper(Scale):
+            # Export calls the decorated apply of the base class, which gets
+            # this class.
+            @classmethod
+            def apply(cls, *args, **kwargs):
+                return super().apply(*args, **kwargs)
+
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                return ScaleViaSuper.apply(x) + 1
+
         # An autograd function from an imported module saves, loads and runs,
         # also with a dataclass input whose __post_init__ reads its tensors.
-        module = self._import_test_module(Scale=Scale, AddPair=AddPair)
-        Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
-        AddPair.__module__, AddPair.__qualname__ = module.__name__, "AddPair"
+        functions = {"Scale": Scale, "AddPair": AddPair, "ScaleViaSuper": ScaleViaSuper}
+        module = self._import_test_module(**functions)
+        for qualname, function in functions.items():
+            function.__module__, function.__qualname__ = module.__name__, qualname
         x = torch.randn(4)
-        for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4)):
+        for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4), (Baz(), x * 2 + 1)):
             with self.subTest(module=type(m).__name__):
                 buffer = io.BytesIO()
                 torch.export.save(export(m, (x,), strict=False), buffer)
