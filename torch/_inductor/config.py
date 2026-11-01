@@ -3015,10 +3015,10 @@ class cuda(cutlass):
     # also tunes a range of sizes of each GEMM's dynamic dim, the traced shape
     # among them. A GEMM the ladder skips (ladder off, static, several dynamic
     # symbols, dynamic K, a non-dense operand, an unsupported choice) is covered
-    # only by max-autotune benchmarking the aten choice, or a later run with
-    # PYTORCH_TUNABLEOP_ENABLED. "reuse" instead borrows the nearest recorded
-    # shape, benchmarks it against the default kernel, and records the winner.
-    # Run as separate passes: "tune" builds the results file, "reuse" reads.
+    # only with PYTORCH_TUNABLEOP_ENABLED set: by max-autotune benchmarking
+    # the aten choice here, or by a later run. "reuse" instead borrows the
+    # nearest recorded shape, benchmarks it against the default kernel, and
+    # records the winner. Run as separate passes: "tune" writes, "reuse" reads.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
@@ -3035,7 +3035,7 @@ class cuda(cutlass):
     # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic
     # dim. It gives runtime a chance of an exact hit on a size the compile never
     # saw, and is nearly all of the tuning cost. Off, Inductor submits nothing:
-    # only max-autotune, or a later run with the env var, covers the shape.
+    # only PYTORCH_TUNABLEOP_ENABLED covers it, via max-autotune or a later run.
     autotune_tunableop_ladder: bool = (
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_LADDER", "1") == "1"
     )
