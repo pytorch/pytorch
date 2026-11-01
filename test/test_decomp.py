@@ -1542,7 +1542,7 @@ class DecompOneOffTests(TestCase):
         torch.float8_e4m3fn,
         torch.float8_e5m2,
     )
-    def test_uniform_integral_dtype(self, device, dtype):
+    def test_uniform_unsupported_dtype(self, device, dtype):
         # gh-195673: the uniform decomposition sampled [0, 1) and truncated to an
         # unsupported dtype (integral, bool or float8), so the traced path returned a
         # constant where eager raises.
@@ -1562,6 +1562,15 @@ class DecompOneOffTests(TestCase):
         # the uniform decomposition rejects too (exercised via uniform_ on meta)
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             torch.empty(4, device="meta", dtype=dtype).uniform_()
+
+        # the compiled path must reject too; fullgraph keeps the error from being
+        # swallowed by a graph break to eager
+        @torch.compile(fullgraph=True)
+        def compiled_rand():
+            return torch.rand(4, device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            compiled_rand()
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
