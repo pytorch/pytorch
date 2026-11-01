@@ -1012,14 +1012,15 @@ class TestExport(TestCase):
         gm.recompile()
         self.assertEqual(gm(x), M()(x))
 
+    # run_decompositions fails on a TwoTensor input, with or without vmap.
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
     def test_vmap_over_tensor_subclass(self) -> None:
         # A wrapped tensor subclass may not support the view that is recorded
         # for a plain fake tensor, so its values keep their functorch wrapper,
-        # also in nested vmap and inside jvp. This exports directly:
-        # run_decompositions fails on a TwoTensor input with or without vmap,
-        # so the decomposition variants would fail.
+        # also in nested vmap and inside jvp.
         class Vmap(torch.nn.Module):
             def forward(self, x):
                 return torch.vmap(lambda row: row * 2 + 1)(x)
@@ -1035,8 +1036,7 @@ class TestExport(TestCase):
         x = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
         for m in (Vmap(), NestedVmap(), VmapInJvp()):
             with self.subTest(type(m).__name__):
-                ep = torch.export.export(m, (x,))
-                self.assertEqual(ep.module()(x), m(x))
+                self.assertEqual(export(m, (x,)).module()(x), m(x))
 
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
