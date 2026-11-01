@@ -539,9 +539,10 @@ class TestTunableOpPretune(TestCase):
                 mock.patch(
                     "torch._inductor.tunableop.submit", side_effect=_fake_submit
                 ),
+                # The module, not time.monotonic, which is process-wide.
                 mock.patch(
-                    "torch._inductor.tunableop.time.monotonic",
-                    side_effect=_fake_monotonic,
+                    "torch._inductor.tunableop.time",
+                    SimpleNamespace(monotonic=_fake_monotonic),
                 ),
             ):
                 tunableop.maybe_range_pretune(winner)
@@ -788,6 +789,9 @@ class TestTunableOpPretune(TestCase):
             pretune.assert_not_called()
         else:
             pretune.assert_called_once_with(winner)
+        if scenario == "force_extern":
+            # It freezes flexible input layouts; the flag must short out first.
+            sched._has_layout_conflict_for_template.assert_not_called()
         winner.output_node.assert_called_once()
 
     def test_enabled_modes_bypass_the_fx_graph_cache(self):
