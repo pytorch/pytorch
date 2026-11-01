@@ -1248,6 +1248,15 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
+        elif (
+            node.target
+            is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        ):
+            # Load refuses this, see deserialize_operator.
+            raise SerializeError(
+                f"{self.serialize_operator(node.target)} can only be called "
+                "through flat_apply"
+            )
         elif callable(node.target):
             # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
             # as plain Python function call_function nodes in pre_dispatch graphs.

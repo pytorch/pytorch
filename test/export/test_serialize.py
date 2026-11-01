@@ -3274,12 +3274,25 @@ class TestPredispatchSerialization(TestCase):
             with self.subTest(name), self.assertRaisesRegex(SerializeError, reason):
                 self._load_changed(artifact, change)
 
-        # Save refuses the same inputs, so it never writes what load refuses.
+        # Save refuses the same inputs and calls, so it never writes what load
+        # refuses.
         (flat_apply_node,) = ep.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.flat_apply
         )
         flat_apply_node.kwargs = {"checked_output": False}
         with self.assertRaisesRegex(SerializeError, "keyword input"):
+            serialize(ep)
+        ep, _ = self._index_in_vmap_artifact()
+        (flat_apply_node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        flat_apply_node.target = (
+            torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        )
+        flat_apply_node.args = flat_apply_node.args[2:]
+        with self.assertRaisesRegex(
+            SerializeError, "only be called through flat_apply"
+        ):
             serialize(ep)
 
 
