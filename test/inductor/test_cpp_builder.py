@@ -392,7 +392,9 @@ class TestCppBuilder(TestCase):
         libtorch_free = builder(aot_mode=True, link_libtorch=False)
         args = libtorch_free.get_command_line().split()
         # The linker applies the flag only to libraries listed after it.
-        first_library = next(i for i, arg in enumerate(args) if arg.startswith("-l"))
+        first_library = next(
+            (i for i, arg in enumerate(args) if arg.startswith("-l")), len(args)
+        )
         self.assertLess(args.index("-Wl,--as-needed"), first_library)
 
         with tempfile.NamedTemporaryFile("r", suffix=".txt") as cmake_file:
