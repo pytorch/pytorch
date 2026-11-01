@@ -26,8 +26,7 @@ from typing import Annotated, Any, cast, final, Optional
 import sympy
 
 import torch
-import torch._dynamo._trace_wrapped_higher_order_op
-import torch.export.custom_ops
+import torch._dynamo._trace_wrapped_higher_order_op  # defines ModIndex, which load finds by name
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
@@ -714,29 +713,17 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-# The torch modules that define names that export writes into flat_apply
-# nodes: the helper for custom autograd functions, and ModIndex, the autograd
-# function that indexing inside vmap passes to it. Load finds names only in
-# imported modules, so this module imports these. The tuple exists only to
-# keep those imports, so programs that use them load after ``import torch``.
-_TORCH_FLAT_APPLY_MODULES = (
-    torch._dynamo._trace_wrapped_higher_order_op,
-    torch.export.custom_ops,
-)
-
-
 def _find_imported(name: str) -> Any:
     """
     Find the class or function that a saved flat_apply node names, without
     running code from a module that the file chooses. Importing a module runs
     its code, so nothing is imported: the module that defines a name has to be
-    imported before loading, as ``_TORCH_FLAT_APPLY_MODULES`` are. Only
-    top-level classes and functions are found, and the object must report the
-    same qualified name, so aliases such as ``torch.nn.Module`` (defined in
-    ``torch.nn.modules.module``) are refused.
-    Names in ``__main__`` modules are refused too, because a script differs
-    between processes. That includes ``__mp_main__``, the main script of a
-    multiprocessing child.
+    imported before loading, as torch's own are. Only top-level classes and
+    functions are found, and the object must report the same qualified name, so
+    aliases such as ``torch.nn.Module`` (defined in ``torch.nn.modules.module``)
+    are refused. Names in ``__main__`` modules are refused too, because a script
+    differs between processes. That includes ``__mp_main__``, the main script of
+    a multiprocessing child.
     """
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
