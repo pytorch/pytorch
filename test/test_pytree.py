@@ -1243,8 +1243,13 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         class Second:
             pass
 
-        python_pytree.register_constant(First)
-        python_pytree.register_constant(Second)
+        def deregister(cls):
+            if cls in python_pytree.SUPPORTED_NODES:
+                python_pytree._deregister_pytree_node(cls)
+
+        for cls in (First, Second):
+            python_pytree.register_constant(cls)
+            self.addCleanup(deregister, cls)
         python_pytree._deregister_pytree_node(First)
         python_pytree._deregister_pytree_node(Second)
         self.assertNotIn(Second, python_pytree.SUPPORTED_NODES)
@@ -1257,7 +1262,7 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
                 lambda children, context: None,
                 serialized_type_name=name,
             )
-        self.addCleanup(python_pytree._deregister_pytree_node, Second)
+            self.addCleanup(deregister, cls)
         python_pytree._deregister_pytree_node(First)
         self.assertIs(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[name], Second)
 

@@ -6,6 +6,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import enum
+import functools
 import importlib.util
 import io
 import json
@@ -3047,7 +3048,7 @@ class TestPredispatchSerialization(TestCase):
         self.assertIn("import that module before loading", str(cm.exception.__cause__))
 
     @staticmethod
-    def _index_in_vmap_artifact():
+    def _index_in_vmap_program():
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
         class IndexInVmap(torch.nn.Module):
@@ -3055,10 +3056,16 @@ class TestPredispatchSerialization(TestCase):
                 with TransformGetItemToIndex():
                     return torch.vmap(lambda i: x[i])(indices)
 
-        ep = export(
+        return export(
             IndexInVmap(), (torch.arange(4), torch.tensor([3, 1])), strict=False
         )
-        return ep, serialize(ep)
+
+    @classmethod
+    @functools.cache
+    def _index_in_vmap_artifact(cls):
+        # The load cases copy the saved program before they change it, so they
+        # share one export.
+        return serialize(cls._index_in_vmap_program())
 
     @staticmethod
     def _load_exported_program(artifact, exported_program):
@@ -3142,7 +3149,7 @@ class TestPredispatchSerialization(TestCase):
     def test_predispatch_flat_apply_load_rejects_other_functions(
         self, replaced, name, reason
     ):
-        _, artifact = self._index_in_vmap_artifact()
+        artifact = self._index_in_vmap_artifact()
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_with_name(artifact, replaced, name)
 
@@ -3190,7 +3197,7 @@ class TestPredispatchSerialization(TestCase):
     def test_predispatch_flat_apply_load_runs_no_module_code(
         self, replaced, name, reason
     ):
-        _, artifact = self._index_in_vmap_artifact()
+        artifact = self._index_in_vmap_artifact()
         ran = self._side_effect_modules()
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_with_name(artifact, replaced, name)
@@ -3278,7 +3285,7 @@ class TestPredispatchSerialization(TestCase):
         name_fn=lambda case, reason: case,
     )
     def test_predispatch_flat_apply_load_rejects_bad_specs(self, case, reason):
-        _, artifact = self._index_in_vmap_artifact()
+        artifact = self._index_in_vmap_artifact()
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(artifact, self._bad_spec_changes()[case])
 
@@ -3375,7 +3382,7 @@ class TestPredispatchSerialization(TestCase):
         name_fn=lambda case, reason: case,
     )
     def test_predispatch_flat_apply_load_rejects_other_inputs(self, case, reason):
-        _, artifact = self._index_in_vmap_artifact()
+        artifact = self._index_in_vmap_artifact()
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(artifact, self._other_input_changes()[case])
 
@@ -3393,7 +3400,7 @@ class TestPredispatchSerialization(TestCase):
     def test_predispatch_flat_apply_save_rejects_other_inputs(self, case, reason):
         # Save refuses the same inputs and calls, so it never writes what load
         # refuses.
-        ep, _ = self._index_in_vmap_artifact()
+        ep = self._index_in_vmap_program()
         (node,) = ep.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.flat_apply
         )
@@ -3439,7 +3446,7 @@ class TestPredispatchSerialization(TestCase):
         x = torch.randn(4)
         cases = {
             "index_in_vmap": (
-                self._index_in_vmap_artifact()[0],
+                self._index_in_vmap_program(),
                 (torch.arange(4), torch.tensor([3, 1])),
             ),
             "dict_input": (export(UsesKey(), (x,), strict=False), (x,)),
