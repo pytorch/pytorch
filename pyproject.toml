@@ -799,3 +799,4 @@ package = 'torch'
 
 [project.entry-points."torch.distributed.transports"]
 nixl = "torch.distributed._transport.nixl:NIXLTransport"
+mooncake = "torch.distributed._transport.mooncake:MooncakeTransport"
