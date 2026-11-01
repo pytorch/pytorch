@@ -4392,9 +4392,10 @@ def _maybe_pretune_tunableop(choice: ChoiceCaller) -> None:
     empty-timings fallback, best-choice) so all of them are covered, not just
     the deferred multi-template path handled by
     Scheduler.finalize_multi_template_buffers. Queued rather than run: these
-    paths fire while lowering, before finalize() decides layouts, so the
-    operand strides here are placeholders. Function-local tunableop import:
-    select_algorithm is imported widely and must not gain a module-level edge.
+    paths fire while lowering, before finalize() decides layouts, so reading
+    operand strides here would record placeholders. Function-local tunableop
+    import: select_algorithm is imported widely and must not gain a
+    module-level edge.
     """
     if not isinstance(choice, ExternKernelCaller):
         return

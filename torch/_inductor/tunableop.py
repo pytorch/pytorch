@@ -1113,26 +1113,23 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             )
 
 
-# Extern winners waiting for the ladder. The select_algorithm hooks fire while
-# lowering, before finalize() decides layouts, so reading operand strides there
-# records placeholders; graph.py drains this once the layouts are decided.
-_pending_ladder: list[Any] = []
-
-
 def queue_range_pretune(winner: ExternKernelCaller) -> None:
-    _pending_ladder.append(winner)
+    """Hold an extern winner until the graph's layouts are decided.
+
+    The select_algorithm hooks fire while lowering, before finalize() runs, so
+    an operand that is still flexible would be read at placeholder strides.
+    """
+    if is_tune_mode() and config.cuda.autotune_tunableop_ladder:
+        V.graph.pending_tunableop_ladder.append(winner)
 
 
-def run_queued_pretunes() -> None:
-    """Ladder every queued winner, now that layouts are final."""
-    pending, _pending_ladder[:] = list(_pending_ladder), []
+def run_queued_pretunes(graph: Any) -> None:
+    """Ladder the graph's queued winners, now that layouts are final."""
+    pending, graph.pending_tunableop_ladder = graph.pending_tunableop_ladder, []
     for winner in pending:
-        try:
-            layouts = [_as_buffer(n).get_layout() for n in winner.input_nodes]
-        except (AttributeError, TypeError):
-            continue
-        # Still flexible means finalize() has not decided this one; tune
-        # nothing rather than guess at its strides.
-        if any(isinstance(lay, ir.FlexibleLayout) for lay in layouts):
+        # A layout still flexible here means finalize() has not decided it;
+        # tune nothing rather than guess at its strides.
+        layouts = [_as_buffer(n).maybe_get_layout() for n in winner.input_nodes]
+        if any(lay is None or isinstance(lay, ir.FlexibleLayout) for lay in layouts):
             continue
         maybe_range_pretune(winner)

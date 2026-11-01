@@ -75,6 +75,7 @@ class _FakeGraph:
         self.sizevars = sizevars
         # Empty: no buffer is layout-constrained, so strides come from the node.
         self.buffer_layout_constraints = {}
+        self.pending_tunableop_ladder = []
 
 
 def _buffer(name, sizes, strides):
@@ -176,11 +177,9 @@ class TestTunableOpPretune(TestCase):
         # traced shapes (most build _mm_winner("mm", s) at hint 512) pollute
         # each other depending on run order.
         tunableop._pretuned_gemms.cache_clear()
-        tunableop._pending_ladder.clear()
 
     def tearDown(self):
         tunableop._pretuned_gemms.cache_clear()
-        tunableop._pending_ladder.clear()
         super().tearDown()
 
     def _mm_winner(self, name, s):
@@ -697,8 +696,8 @@ class TestTunableOpPretune(TestCase):
 
     def test_select_algorithm_hook_queues_until_layouts_are_final(self):
         # The hook fires while lowering, before finalize() decides layouts, so
-        # it queues; graph.py drains once they are decided. Triton winners are
-        # ignored by the isinstance gate.
+        # it queues on the graph; _update_scheduler drains it afterwards.
+        # Triton winners are ignored by the isinstance gate.
         from torch._inductor import select_algorithm as _sa
 
         s = sympy.Symbol("s_hook", positive=True, integer=True)
@@ -706,8 +705,22 @@ class TestTunableOpPretune(TestCase):
             _sa._maybe_pretune_tunableop(self._mm_winner("mm", s))
             _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
             self.assertEqual(submitted, [], "the hook must not ladder in place")
-            tunableop.run_queued_pretunes()
+            self.assertEqual(len(V.graph.pending_tunableop_ladder), 1)
+            tunableop.run_queued_pretunes(V.graph)
             self.assertTrue(submitted, "the drain must ladder the extern winner")
+
+    def test_the_queue_is_empty_unless_tune_mode_is_on(self):
+        # Queuing before the mode check would hold extern IR in every compile
+        # and walk it at scheduling.
+        from torch._inductor import select_algorithm as _sa
+
+        s = sympy.Symbol("s_inert", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        graph = _FakeGraph(_FakeSizevars(s, 512, (2, 2**31 - 1)))
+        with V.set_graph_handler(graph):
+            with config.patch({"cuda.autotune_tunableop_mode": "off"}):
+                _sa._maybe_pretune_tunableop(winner)
+            self.assertEqual(graph.pending_tunableop_ladder, [])
 
     def test_a_still_flexible_operand_is_not_tuned(self):
         # finalize() should have decided every layout by drain time; one that
@@ -716,8 +729,8 @@ class TestTunableOpPretune(TestCase):
         winner = self._mm_winner("mm", s)
         winner.input_nodes[0].layout = ir.FlexibleLayout(DEVICE, DTYPE, [s, 256])
         with _ladder(s) as submitted:
-            tunableop.queue_range_pretune(winner)
-            tunableop.run_queued_pretunes()
+            V.graph.pending_tunableop_ladder.append(winner)
+            tunableop.run_queued_pretunes(V.graph)
         self.assertEqual(submitted, [], "a flexible operand must not be tuned")
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
