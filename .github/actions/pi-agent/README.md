@@ -108,9 +108,10 @@ Sol remains available through the `model` dispatch input. Distributed triage use
    matching `.github/pi/schemas/issue-triage-plan.json`.
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
-   dropped), only adds labels, posts only `templates.json` comments the bot has not already
-   posted, closes only usage questions and expected numerical behavior, and adds
-   `bot-triaged`. It then hands the issue to `distributed-triage-pi.yml`.
+   dropped), only adds labels, posts fixed template or umbrella-reference comments the bot
+   has not already posted, and adds `bot-triaged`. It closes usage questions, expected
+   numerical behavior, or covered reports for catalog-enabled closing umbrellas. It then
+   hands the issue to `distributed-triage-pi.yml`.
 
 Duplicate discovery binds `TRIAGE_SOURCE_ISSUE` to the matrix issue in live and replay runs;
 repository and source are not model inputs. It accepts 1-2 ordered groups of 1-4 literal ASCII
