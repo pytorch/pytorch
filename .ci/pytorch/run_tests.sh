@@ -238,9 +238,10 @@ fi
 if [[ "$cuda_ver" != 'cpu' ]]; then
 
     #
-    # DistributedDataParallelTest
+    # DistributedDataParallelTest / DistributedDataParallelCudaTest
     # All of these seem to fail
     tests_to_skip+=('DistributedDataParallelTest')
+    tests_to_skip+=('DistributedDataParallelCudaTest')
 
     #
     # RendezvousEnvTest

@@ -2160,41 +2160,17 @@ class ProcessGroupGlooCudaTest(_ProcessGroupGlooBase):
         self._test_alltoall_multidim(lambda t: t.clone().cuda())
 
 
-class _DistributedDataParallelTestBase(MultiProcessTestCase):
-    """Shared setup and helpers for DDP test classes.
+class _DistributedDataParallelTestBase(
+    test_c10d_common.CommonDistributedDataParallelHelpers,
+    MultiProcessTestCase,
+):
+    """Shared setup for DDP test classes.
 
-    Borrow Common helpers without inheriting its test_* methods so GENERIC does
-    not double-collect GPU tests that belong on DistributedDataParallelCudaTest.
+    Inherits helpers/tearDown/world_size from CommonDistributedDataParallelHelpers
+    (not CommonDistributedDataParallelTest) so GENERIC does not double-collect the
+    GPU test_* methods that belong on DistributedDataParallelCudaTest. Helpers
+    before MultiProcessTestCase keeps tearDown on the MRO.
     """
-
-    # Helpers only — Common's test_* stay on the CUDA class via mixin there.
-    _CommonDDP = test_c10d_common.CommonDistributedDataParallelTest
-    _get_store = _CommonDDP._get_store
-    _test_ddp_with_process_group = _CommonDDP._test_ddp_with_process_group
-    _prepare_single_device_module = _CommonDDP._prepare_single_device_module
-    _prepare_multi_device_module = _CommonDDP._prepare_multi_device_module
-    _simple_hook = _CommonDDP._simple_hook
-    _run_and_verify_hook = _CommonDDP._run_and_verify_hook
-    _gpu_model_with_builtin_ddp_comm_hook = (
-        _CommonDDP._gpu_model_with_builtin_ddp_comm_hook
-    )
-    _train_model = _CommonDDP._train_model
-    _prepare_dummy_data = _CommonDDP._prepare_dummy_data
-    _test_ddp_checkpointing = _CommonDDP._test_ddp_checkpointing
-    _test_not_nan = _CommonDDP._test_not_nan
-    _test_dataclass_output = _CommonDDP._test_dataclass_output
-    _create_ddp_model = _CommonDDP._create_ddp_model
-    _create_manual_ddp_model = _CommonDDP._create_manual_ddp_model
-    _register_finalize_backward_hook = _CommonDDP._register_finalize_backward_hook
-    _register_ones_comm_hook = _CommonDDP._register_ones_comm_hook
-    _assert_gradients_equal = _CommonDDP._assert_gradients_equal
-    _assert_gradients_equal_across_ranks = (
-        _CommonDDP._assert_gradients_equal_across_ranks
-    )
-
-    @property
-    def world_size(self):
-        return 2
 
     def setUp(self):
         super().setUp()
@@ -2349,6 +2325,12 @@ class DistributedDataParallelTest(
     _DistributedDataParallelTestBase,
 ):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_invalid_powerSGD_state(self):
+        # CPU-only validation; keep on GENERIC so --hw-classification GENERIC runs it.
+        return test_c10d_common.CommonDistributedDataParallelTest.test_invalid_powerSGD_state(
+            self
+        )
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
@@ -2678,7 +2660,8 @@ class DistributedDataParallelTest(
 
 
 class DistributedDataParallelCudaTest(
-    _DistributedDataParallelTestBase, test_c10d_common.CommonDistributedDataParallelTest
+    test_c10d_common.CommonDistributedDataParallelTest,
+    _DistributedDataParallelTestBase,
 ):
     hw_classification = HardwareClassification.CUDA
 
@@ -3650,21 +3633,6 @@ class CommTest(_CommTestBase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gloo_rank_membership(self):
-        self._test_rank_membership(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_tensor_dtype_mismatch(self):
-        self._test_tensor_dtype_mismatch(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_tensor_dtype_complex(self):
-        self._test_tensor_dtype_complex(backend="gloo")
-
     @requires_gloo()
     def test_bool_tensors(self):
         self._test_bool_tensors(backend="gloo")
@@ -3760,6 +3728,21 @@ class CommCudaTest(_CommTestBase):
     @requires_gloo()
     def test_gloo_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_rank_membership(self):
+        self._test_rank_membership(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_mismatch(self):
+        self._test_tensor_dtype_mismatch(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="gloo")
 
 
 class GlooProcessGroupWithDispatchedCollectivesTests(
