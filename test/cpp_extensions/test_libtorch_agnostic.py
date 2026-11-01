@@ -866,8 +866,8 @@ class TestLibtorchAgnostic(TestCase):
         for t, fill_value in ((conj_t, 1 + 2j), (neg_t, 3.0)):
             out = libtorch_agnostic.ops.my_narrow(t, 0, 0, 1)
             self.assertEqual(out, torch.narrow(t, 0, 0, 1))
+            # only fixed in 2.16+
             if _torchVersionLessThan(2, 16):
-                # Runtime predates the fix: the c_shim_aten shim clones conj/neg inputs.
                 self.assertFalse(out.is_conj() or out.is_neg())
                 self.assertNotEqual(out.data_ptr(), t.data_ptr())
                 continue
