@@ -13,6 +13,7 @@ signatures match the ones runtime produces -- both need real hardware.
 """
 
 import contextlib
+import math
 import os
 import tempfile
 import unittest
@@ -339,57 +340,72 @@ class TestTunableOpPretune(TestCase):
     def test_expanded_bias_still_produces_buckets(self):
         # A broadcast bias arrives stride-0 and is exempt from the density
         # check; mat1/mat2/output are not.
-        s = sympy.Symbol("s_expbias", positive=True, integer=True)
-        b, m, k, n = s, 32, 256, 512
-        mat1 = _buffer("mat1", [b, m, k], _contiguous_strides([b, m, k]))
-        mat2 = _buffer("mat2", [b, k, n], _contiguous_strides([b, k, n]))
-        # [N] broadcast to [B, M, N]: zero stride on both leading dims.
-        bias = _buffer("bias", [b, m, n], [0, 0, 1])
-        winner = _FakeWinner("baddbmm", [bias, mat1, mat2], [b, m, n])
-        submitted = _run(winner, sym=s)
-        self.assertTrue(submitted, "an expanded bias must not block the ladder")
-        for bmreq in submitted:
-            bias_meta = bmreq.input_tensor_meta[0]
-            self.assertEqual(
-                bias_meta.strides,
-                _contiguous_strides(bias_meta.sizes),
-                "the bias must be rebuilt dense, not left stride-0",
+        m, k, n = 32, 256, 512
+
+        def _baddbmm(sym, mat1_strides):
+            # bias is [N] broadcast to [B, M, N]: zero stride on both leading
+            # dims, which is how mm_args hands it over.
+            return _FakeWinner(
+                "baddbmm",
+                [
+                    _buffer("bias", [sym, m, n], [0, 0, 1]),
+                    _buffer("mat1", [sym, m, k], mat1_strides),
+                    _buffer("mat2", [sym, k, n], _contiguous_strides([sym, k, n])),
+                ],
+                [sym, m, n],
             )
 
+        s = sympy.Symbol("s_expbias", positive=True, integer=True)
+        submitted = _run(_baddbmm(s, _contiguous_strides([s, m, k])), sym=s)
+        self.assertTrue(submitted, "an expanded bias must not block the ladder")
+        for bmreq in submitted:
+            meta = bmreq.input_tensor_meta[0]
+            self.assertEqual(meta.strides, _contiguous_strides(meta.sizes))
         # A non-dense mat1 is still rejected: that ld is in the signature.
         tunableop._pretuned_gemms.cache_clear()
         s2 = sympy.Symbol("s_expbias2", positive=True, integer=True)
-        padded_mat1 = _buffer("mat1", [s2, m, k], [m * 300, 300, 1])
-        winner2 = _FakeWinner(
-            "baddbmm",
-            [
-                _buffer("bias", [s2, m, n], [0, 0, 1]),
-                padded_mat1,
-                _buffer("mat2", [s2, k, n], _contiguous_strides([s2, k, n])),
-            ],
-            [s2, m, n],
-        )
-        self.assertEqual(_run(winner2, sym=s2), [])
+        self.assertEqual(_run(_baddbmm(s2, [m * 300, 300, 1]), sym=s2), [])
 
-    def test_memo_distinguishes_output_stride(self):
-        # Two GEMMs differing only in output layout get different keys;
-        # winner.layout is a Layout, so its stride comes via _as_buffer.
-        s = sympy.Symbol("s_outstride", positive=True, integer=True)
-        m, k, n = s, 256, 512
-        inputs = [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])]
-        contiguous = _FakeWinner("mm", inputs, [m, n])
-        # Same inputs and output sizes, column-major output: a different ld, so
-        # it needs its own tuning entry.
-        transposed = _FakeWinner("mm", inputs, [m, n], out_strides=[1, m])
-
-        with _ladder(s) as submitted:
-            tunableop.maybe_range_pretune(contiguous)
-            first = len(submitted)
-            self.assertTrue(first, "the first winner must submit")
-            tunableop.maybe_range_pretune(transposed)
-            self.assertGreater(
-                len(submitted), first, "a different output stride must not be memoed"
+    @parametrize("case", ("output_stride", "stride_order", "dynamic_axis"))
+    def test_memo_distinguishes_layout(self, case):
+        # Each variant has a different TunableOp signature from the plain mm
+        # it follows, so it must ladder rather than hit that one's memo entry.
+        s = sympy.Symbol(f"s_memo_{case}", positive=True, integer=True)
+        if case == "output_stride":
+            # Same operands, column-major output: a different ldc.
+            second = _FakeWinner(
+                "mm",
+                [
+                    _buffer("mat1", [s, 256], [256, 1]),
+                    _buffer("mat2", [256, 512], [512, 1]),
+                ],
+                [s, 512],
+                out_strides=[1, s],
             )
+        elif case == "stride_order":
+            # mat2 as a .t() view: NN vs NT.
+            second = _FakeWinner(
+                "mm",
+                [
+                    _buffer("mat1", [s, 256], [256, 1]),
+                    _buffer("mat2", [256, 512], [1, 256]),
+                ],
+                [s, 512],
+            )
+        else:
+            # Same hinted sizes, dynamic N instead of M: a different ladder.
+            second = _FakeWinner(
+                "mm",
+                [
+                    _buffer("mat1", [512, 256], [256, 1]),
+                    _buffer("mat2", [256, s], [s, 1]),
+                ],
+                [512, s],
+            )
+            # _contiguous_strides cannot build an N-dynamic output ([1, 1]).
+            second.layout = ir.FixedLayout(DEVICE, DTYPE, [512, s], [s, 1])
+        self.assertTrue(_run(self._mm_winner("mm", s), sym=s))
+        self.assertTrue(_run(second, sym=s), f"{case} must not share a memo key")
 
     def test_unbacked_symbol_is_skipped(self):
         # optimization_hint() invents a fallback rather than raising. Unbacked
@@ -418,11 +434,10 @@ class TestTunableOpPretune(TestCase):
             return mock.Mock(status="timeout", time=None)
 
         def _one_pass():
-            with _ladder(s):
-                with mock.patch(
-                    "torch._inductor.tunableop.submit", side_effect=_always_timeout
-                ):
-                    tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+            with _ladder(s), mock.patch(
+                "torch._inductor.tunableop.submit", side_effect=_always_timeout
+            ):
+                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
 
         _one_pass()
         per_pass = len(attempts)
@@ -511,28 +526,20 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(dims[1:], sorted(dims[1:], reverse=True))
 
     def test_deadline_skips_remaining_buckets(self):
-        # The clock advances on submission, not per monotonic() call, so this
-        # does not depend on how many times the loop reads the time.
-        import time as _time
-
         s = sympy.Symbol("s_budget", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
-        timeouts = []
-        submit_calls = {"n": 0}
-
-        t0 = _time.monotonic()
+        timeouts: list = []
 
         def _fake_submit(job, timeout=None):
             timeouts.append(timeout)
-            submit_calls["n"] += 1
             return mock.Mock(status="ok", time=1.0)
 
         def _fake_monotonic():
-            # t0 until something has been submitted, then a sliver short of the
+            # 0 until the first submission, then a sliver short of the
             # deadline: too little for a fair trial, so the loop must stop
             # rather than submit a rung that could only time out.
             budget = config.cuda.autotune_tunableop_timeout
-            return t0 if submit_calls["n"] == 0 else t0 + budget - 1
+            return 0.0 if not timeouts else budget - 1
 
         with _ladder(s):
             with (
@@ -546,9 +553,9 @@ class TestTunableOpPretune(TestCase):
                 ),
             ):
                 tunableop.maybe_range_pretune(winner)
-        # Exactly one bucket ran; the rest were left rather than submitted
-        # with too little budget to be anything but a timeout.
-        self.assertEqual(submit_calls["n"], 1)
+        # One bucket ran; the rest had too little budget to be anything but
+        # a timeout, so they were left rather than charged.
+        self.assertEqual(len(timeouts), 1)
         self.assertGreaterEqual(timeouts[0], tunableop._TUNABLEOP_MIN_BUCKET_BUDGET)
         self.assertFalse(tunableop._pretuned_gemms.failed, "healthy rung charged")
 
@@ -652,37 +659,6 @@ class TestTunableOpPretune(TestCase):
         retried = {b.input_tensor_meta[0].sizes[0] for b in second}
         self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
-    def test_memo_distinguishes_stride_order(self):
-        # Same sizes, different stride order (plain vs transposed B): the
-        # TunableOp signatures differ (NN vs NT), so the second GEMM must
-        # still ladder. Guards the memo key carrying strides.
-        s = sympy.Symbol("s_stride", positive=True, integer=True)
-        first = _run(self._mm_winner("mm", s), sym=s)
-        self.assertTrue(first)
-        mat1 = _buffer("mat1", [s, 256], [256, 1])
-        mat2 = _buffer("mat2", [256, 512], [1, 256])  # .t() view
-        winner = _FakeWinner("mm", [mat1, mat2], [s, 512])
-        second = _run(winner, sym=s)
-        self.assertTrue(second)
-
-    def test_memo_distinguishes_dynamic_axis(self):
-        # Same hinted sizes but a different dynamic axis (M vs N): the ladders
-        # cover different dims, so the second GEMM must still run. Guards the
-        # memo key carrying the symbolic expressions, not just hints.
-        s = sympy.Symbol("s_axis", positive=True, integer=True)
-        first = _run(self._mm_winner("mm", s), sym=s)
-        self.assertTrue(first)
-        # Same hint 512 on N instead of M.
-        mat1 = _buffer("mat1", [512, 256], [256, 1])
-        mat2 = _buffer("mat2", [256, s], [s, 1])
-        winner = _FakeWinner("mm", [mat1, mat2], [512, s])
-        # _contiguous_strides cannot build the N-dynamic output (it would
-        # yield [1, 1]): give it the real dense strides like the
-        # symbol-spanning test does.
-        winner.layout = ir.FixedLayout(DEVICE, DTYPE, [512, s], [s, 1])
-        second = _run(winner, sym=s)
-        self.assertTrue(second)
-
     def test_bias_addmm_is_skipped(self):
         # bias_addmm rewrites its own bias (inp[0]) before dispatching, so the
         # meta the ladder rebuilds is not what aten receives. Excluded from
@@ -713,18 +689,13 @@ class TestTunableOpPretune(TestCase):
         self.assertTrue(submitted, "smaller rungs must still submit")
         for bmreq in submitted:
             # Summed, as the cap is: the worker allocates them all at once.
-            total = 0
-            for meta in [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]:
-                numel = 1
-                for d in meta.sizes:
-                    numel *= int(d)
-                total += numel * meta.dtype.itemsize
+            total = sum(
+                math.prod(int(d) for d in meta.sizes) * meta.dtype.itemsize
+                for meta in [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
+            )
             self.assertLessEqual(total, tunableop._TUNABLEOP_MAX_LADDER_BYTES)
-        # And the 16384 rung itself is absent.
-        batches = set()
-        for bmreq in submitted:
-            batches.add(bmreq.input_tensor_meta[0].sizes[0])
-        self.assertNotIn(16384, batches)
+        batches = {b.input_tensor_meta[0].sizes[0] for b in submitted}
+        self.assertNotIn(16384, batches, "the oversize rung must be absent")
 
     def test_select_algorithm_hook_fires_on_extern(self):
         # The select_algorithm hook covers concrete extern winners; triton
@@ -766,10 +737,8 @@ class TestTunableOpPretune(TestCase):
         sched.nodes = [sched_node]
         sched._has_layout_conflict_for_template.return_value = conflict
 
-        # Spec'd so the finalizer's isinstance checks pass and both branches
-        # run to the end (_replace_node is a no-op on the mocked scheduler).
-        # Asserting on the hook alone keeps this independent of the IR
-        # machinery around it; output_node must still run before the hook.
+        # Spec'd so the isinstance checks pass and both branches run to the
+        # end (_replace_node is a no-op on the mocked scheduler).
         out_buffer = mock.Mock(spec=_ir.OperationBuffer)
         out_storage = mock.Mock(spec=_ir.StorageBox, data=out_buffer)
         winner.output_node = mock.Mock(
@@ -819,17 +788,15 @@ class TestTunableOpPretune(TestCase):
 
 
 class TunableOpPretuneRealGpuTest(InductorTestCase):
-    """The ladder against a real compile, a real worker and a real results file.
+    """The ladder against a real compile, worker and results file.
 
-    The tests above stop at what the ladder decides. This is the only one that
-    sends a real ExternKernelGPUBenchmarkRequest through the pipe, so it is what
-    proves the rebuilt metas describe shapes hipBLASLt accepts and that each one
-    reaches the file runtime reads.
+    The only test that sends a real ExternKernelGPUBenchmarkRequest through
+    the pipe, so it is what proves the rebuilt metas describe shapes
+    hipBLASLt accepts and that each reaches the file runtime reads.
 
-    InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it. That also means the compile
-    always starts cold, so this does not exercise the tune-mode cache bypass;
-    test_tune_mode_bypasses_the_fx_graph_cache covers that directly.
+    InductorTestCase enters fresh_cache(), isolating the cache dir and
+    clearing _pretuned_gemms. The compile therefore always starts cold, so
+    this does not cover the tune-mode bypass; that is tested directly above.
     """
 
     hw_classification = HardwareClassification.CUDA
@@ -841,9 +808,8 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             return a @ b
 
         tunable = torch.cuda.tunable
-        # Every setting below is process-global, so leaving one behind makes a
-        # later test in this process tune at a single iteration, and leaves the
-        # worker holding a CUDA context. Cleanups run LIFO: worker down first.
+        # All process-global: leaving one behind makes a later test tune at
+        # a single iteration. Cleanups run LIFO, so the worker goes first.
         self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
         for getter, setter in (
             (tunable.is_enabled, tunable.enable),
@@ -858,8 +824,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             results = os.path.join(d, "results.csv")
             tunable.enable(False)
             tunable.set_filename(results, False)
-            # Tuning cost is per candidate solution, so the caps -- not the
-            # operand size -- are what keep this to a few seconds a bucket.
+            # Cost is per candidate solution, so the caps keep this short.
             tunable.set_max_tuning_duration(1)
             tunable.set_max_tuning_iterations(1)
             tunable.set_rotating_buffer_size(0)
@@ -871,8 +836,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             ):
                 a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
                 b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-                # One dynamic dim only: dynamic=True would mark every dim
-                # and the ladder requires exactly one free symbol.
+                # One dynamic dim: the ladder needs exactly one free symbol.
                 torch._dynamo.mark_dynamic(a, 0)
                 torch.compile(fn)(a, b)
             with open(results) as f:
@@ -889,18 +853,16 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             if len(tokens) > 3:
                 shapes.add(tuple(tokens[1:4]))
 
-        # The ladder is fully determined here: the symbol walks {2, hint=64,
-        # ceiling=16384} plus the powers of two between, and _TUNABLEOP_MIN_DYN_DIM
-        # drops 2 and 4. M is the dynamic dim, so that is one row per value.
+        # Fully determined: the symbol walks {2, hint 64, ceiling 16384} plus
+        # the powers of two between, and the minimum drops 2 and 4.
         expected_dims = {1 << k for k in range(3, 15)}  # 8 .. 16384
         self.assertEqual(
             len(shapes),
             len(expected_dims),
             f"expected one row per ladder bucket, got {sorted(shapes)}",
         )
-        # Whichever signature position varies is the dynamic dim; the other two
-        # are the static K and N. Asserting the set catches a bucket that ran
-        # but recorded the wrong size, which a bare count would not.
+        # The varying position is the dynamic dim. Asserting the set catches
+        # a bucket that ran but recorded the wrong size; a count would not.
         varying = {
             frozenset(int(t[i]) for t in shapes)
             for i in range(3)
