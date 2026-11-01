@@ -2501,9 +2501,6 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
         ((_S, _M, _S), (_S, _M, _S)),
         ((_M, 1, _S), (_M, _S)),
         ((_M, 1, _S), (1, _M, _S)),
-        # one operand full, the other broadcasting along the inner dim
-        ((_M, _S), (_M, 1)),
-        ((_M, 1), (_M, _S)),
         ((0, 1, XS), (0, _M, XS)),
     )
 

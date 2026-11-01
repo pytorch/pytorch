@@ -1032,16 +1032,6 @@ static bool isInnerContiguous(const TensorIteratorBase& iter) {
   return iter.ndim() >= 2 && !iter.is_contiguous() && iter.has_contiguous_first_dim();
 }
 
-// Per-dim magic divisors for the strided kernels; 32-bit chunking keeps every size below 2^31.
-static std::vector<c10::metal::DimDivider> dimDividers(IntArrayRef sizes) {
-  std::vector<c10::metal::DimDivider> dividers;
-  dividers.reserve(sizes.size());
-  for (const auto size : sizes) {
-    dividers.push_back({c10::IntDivider<uint32_t>(static_cast<uint32_t>(size))});
-  }
-  return dividers;
-}
-
 // Binds outer sizes then each operand's outer strides in kernel buffer order,
 // returning the next free buffer index for the caller's packed dims.
 static unsigned bindInnerContiguousOuter(id<MTLComputeCommandEncoder> encoder,

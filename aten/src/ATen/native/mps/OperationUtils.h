@@ -773,6 +773,16 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
   }
 }
 
+// Per-dim magic divisors for the strided kernels; 32-bit chunking keeps every size below 2^31.
+inline std::vector<c10::metal::DimDivider> dimDividers(IntArrayRef sizes) {
+  std::vector<c10::metal::DimDivider> dividers;
+  dividers.reserve(sizes.size());
+  for (const auto size : sizes) {
+    dividers.push_back({c10::IntDivider<uint32_t>(static_cast<uint32_t>(size))});
+  }
+  return dividers;
+}
+
 template <typename T>
 void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter,
                                                         const std::string& name,
@@ -855,8 +865,9 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
+        const auto sizes = dimDividers(iter.shape());
         mtl_setArgs<3>(
-            computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+            computeEncoder, params, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
