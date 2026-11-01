@@ -439,13 +439,12 @@ class TestRefs(TestCase):
         # above does not catch the float64 coefficients being built in a lower
         # precision. Seed so the mask is reproducible, then compare against the
         # formula evaluated entirely in float64.
-        from torch._refs.nn.functional import _dropout_helper
         x = make_tensor((1024,), device=device, dtype=dtype)
         p = 0.5
         torch.manual_seed(0)
         actual = refs.nn.functional.alpha_dropout(x, p=p, training=True)
         torch.manual_seed(0)
-        mask = _dropout_helper(x, 1 - p)
+        mask = refs.nn.functional._dropout_helper(x, 1 - p)
         alpha = -1.7580993408473766
         a = ((alpha * alpha * p + 1) * (1 - p)) ** -0.5
         expected = x * (mask.to(dtype) * a) + (
