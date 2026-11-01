@@ -490,7 +490,7 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
     def side_stream(gm: torch.fx.GraphModule) -> str | None:
         # The generated code can't use side streams during a capture.
         def uses_stream(n: torch.fx.Node) -> bool:
-            if n.meta.get("custom", {}).get("stream") is not None:
+            if graph._get_node_stream(n) is not None:
                 return True
             target = n.target
             return (
