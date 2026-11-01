@@ -138,6 +138,19 @@ def _read_json(path: Path, data: bytes) -> Any:
         raise RuntimeError(f"Unreadable Triton runtime-cache entry: {path}") from exc
 
 
+def _group_child_paths(entry: Any, directory: Path) -> dict[str, Any] | None:
+    children = entry.get("child_paths") if isinstance(entry, dict) else None
+    # Newer Triton stores filenames; older releases store absolute paths.
+    # Resolve filenames against this entry, preserving validation of legacy paths.
+    if isinstance(children, list):
+        if not all(isinstance(name, str) for name in children) or len(children) != len(
+            set(children)
+        ):
+            return None
+        return {name: str(directory / name) for name in children}
+    return children if isinstance(children, dict) else None
+
+
 def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) -> bytes:
     """Snapshot the committed entries of a capture-private Triton cache.
 
@@ -191,8 +204,8 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                     raise RuntimeError(f"Invalid Triton runtime-cache group: {path}")
                 group = _member_name(name.removeprefix("__grp__"))
                 entry = _read_json(path, path.read_bytes())
-                children = entry.get("child_paths") if isinstance(entry, dict) else None
-                if not isinstance(children, dict) or group not in children:
+                children = _group_child_paths(entry, directory)
+                if children is None or group not in children:
                     raise RuntimeError(f"Incomplete Triton runtime-cache group: {path}")
                 members = list(children)
                 if not any(member.endswith(_BINARY_SUFFIXES) for member in members):
@@ -214,7 +227,17 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                 consumed.update(members)
                 consumed.add(name)
                 records.append(
-                    {"kind": "kernel", "key": key, "group": group, "members": members}
+                    {
+                        "kind": "kernel",
+                        "key": key,
+                        "group": group,
+                        "members": members,
+                        "group_format": (
+                            "filenames"
+                            if isinstance(entry["child_paths"], list)
+                            else "paths"
+                        ),
+                    }
                 )
             elif name.endswith(suffix):
                 add_file(key, name)
@@ -338,6 +361,8 @@ def _decode(
         if kind == "kernel":
             group = _member_name(record["group"])
             members = record["members"]
+            if record.get("group_format", "paths") not in ("paths", "filenames"):
+                raise RuntimeError("Invalid Triton runtime-cache group format")
             if group not in members or len(members) != len(set(members)):
                 raise RuntimeError("Incomplete Triton runtime-cache kernel group")
             if not any(name.endswith(_BINARY_SUFFIXES) for name in members):
@@ -370,7 +395,7 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
     if path.is_symlink() or not path.is_file():
         return False
     group = _read_json(path, path.read_bytes())
-    children = group.get("child_paths") if isinstance(group, dict) else None
+    children = _group_child_paths(group, root / record["key"])
     expected = {name: root / record["key"] / name for name in record["members"]}
     # Triton records paths under knobs.cache.dir, which may spell the same
     # directory differently.
@@ -386,7 +411,12 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
 
 
 def _group_contents(root: Path, record: dict[str, Any]) -> str:
-    # The layout FileCacheManager.put_group writes; get_group checks each path.
+    # Preserve the producer's representation: Inductor's strict bundle reload
+    # checks these bytes against its separately captured kernel artifacts.
+    if record.get("group_format", "paths") == "filenames":
+        return json.dumps({"child_paths": record["members"]})
+    # Legacy bundles omit group_format. Paths refer to the final directory,
+    # not the staging directory where this group is assembled.
     key = record["key"]
     return json.dumps(
         {"child_paths": {name: str(root / key / name) for name in record["members"]}}
