@@ -307,7 +307,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
 
 
 # gen.py generates header first and then src, so caching the result here to avoid duplicate work
-declaration_definition_cache: dict[tuple[str, str, str], tuple[str, str]] = {}
+declaration_definition_cache: dict[tuple[str, str, str, bool], tuple[str, str]] = {}
 
 
 _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
@@ -347,12 +347,14 @@ def gen_declaration_and_definition(
     device: str,
     backend_call: str,
     op_metadata: dict[str, str | dict[str, list[str] | str]],
+    resolve_dispatch_flags: bool,
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
     global declaration_definition_cache
-    if (base_name, device, backend_call) in declaration_definition_cache:
-        return declaration_definition_cache[(base_name, device, backend_call)]
+    cache_key = (base_name, device, backend_call, resolve_dispatch_flags)
+    if cache_key in declaration_definition_cache:
+        return declaration_definition_cache[cache_key]
 
     # Check the validity of op_metadata. Each "vN" entry is a dict
     # {"new_args": [...], "since": "TORCH_VERSION_X_Y_Z"} where "since" is optional;
@@ -390,7 +392,6 @@ def gen_declaration_and_definition(
     declarations: list[str] = []
     definitions: list[str] = []
     skipped_args: set[str] = set()
-    resolve_dispatch_flags = device != "aten"
 
     for ver_id, new_args in sorted(indexed_op_metadata.items(), reverse=True):
         # Iterate in the reverse order, so the latest version of an op will get generated first
@@ -451,11 +452,11 @@ def gen_declaration_and_definition(
         declarations.append(decl)
         definitions.append(definition)
 
-    declaration_definition_cache[(base_name, device, backend_call)] = (
+    declaration_definition_cache[cache_key] = (
         "\n".join(declarations),
         "\n".join(definitions),
     )
-    return declaration_definition_cache[(base_name, device, backend_call)]
+    return declaration_definition_cache[cache_key]
 
 
 def gen_static_dispatch_backend_call_signature(f: NativeFunction) -> CppSignature:
@@ -588,16 +589,19 @@ def gen_c_shim(
         func,
         backend_index,
     )
+    # Without a backend kernel, backend_call is at::{op}, which goes through the
+    # dispatcher and so already handles conj/neg.
+    resolve_dispatch_flags = backend_index is not None
 
     try:
         if header:
             declaration, _ = gen_declaration_and_definition(
-                schema, device, backend_call, version_info
+                schema, device, backend_call, version_info, resolve_dispatch_flags
             )
             return declaration
         else:
             _, definition = gen_declaration_and_definition(
-                schema, device, backend_call, version_info
+                schema, device, backend_call, version_info, resolve_dispatch_flags
             )
             return definition
 
