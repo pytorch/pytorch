@@ -592,6 +592,8 @@ class AOTInductorModelContainer {
           kv.second = nullptr;
         }
       }
+      // The array borrows from the map, whose replaced entries are freed.
+      target.update_array(&model);
       throw;
     }
     target.update_array(&model);
