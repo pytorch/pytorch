@@ -90,6 +90,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    check_setattr_args,
     GetSet,
     Member,
     Method,
@@ -1959,12 +1960,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
-            if kwargs:
-                raise_type_error(tx, "wrapper __setattr__() takes no keyword arguments")
-            if len(args) != 3:
+            if not args:
                 raise_type_error(
-                    tx, f"__setattr__ expected 2 arguments, got {len(args) - 1}"
+                    tx, "descriptor '__setattr__' of 'object' object needs an argument"
                 )
+            check_setattr_args(tx, args[1:], kwargs)
             obj, name_var, val = args
             obj = obj.realize()
             if (
