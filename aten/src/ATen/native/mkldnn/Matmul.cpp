@@ -534,6 +534,7 @@ bool use_mkldnn_matmul(
       use_mkldnn_tf32_matmul(mat1, mat2, result));
 }
 
+#if defined(__aarch64__)
 static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
@@ -565,12 +566,8 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   ideep::attr_t op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto src_desc = src.get_desc();
-#if defined(__aarch64__)
   auto wei_desc = dnnl::memory::desc(
       mat2.sizes().vec(), dnnl::memory::data_type::s8, dnnl::memory::format_tag::any);
-#else
-  auto wei_desc = wei.get_desc();
-#endif
   auto dst_desc = dst.get_desc();
   auto prim_desc = dnnl::matmul::primitive_desc(
       engine, src_desc, wei_desc, dst_desc, op_attr);
@@ -587,6 +584,19 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   auto primitive = dnnl::matmul(prim_desc);
   primitive.execute(ideep::stream::default_stream(), args);
 }
+#else
+// How oneDNN's row-major gemm can read `t` in place: as itself ('N') or as its
+// transpose ('T'), with a leading dimension spanning a full row or column.
+static std::optional<std::pair<char, int64_t>> _blas_layout(const Tensor& t) {
+  const int64_t rows = t.size(0), cols = t.size(1);
+  if ((cols == 1 || t.stride(1) == 1) && (rows == 1 || t.stride(0) >= cols)) {
+    return std::make_pair('N', rows == 1 ? cols : t.stride(0));
+  }
+  if ((rows == 1 || t.stride(0) == 1) && (cols == 1 || t.stride(1) >= rows)) {
+    return std::make_pair('T', cols == 1 ? rows : t.stride(1));
+  }
+  return std::nullopt;
+}
 
 template <typename a_type>
 static void _mkldnn_gemm_i8i8i32_with_blas(
@@ -597,12 +607,9 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
     const int n = result.size(1);
     const int k = self.size(1);
 
-    const char transa = self.strides()[1] == 1 ? 'N' : 'T';
-    const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
+    const auto [transa, lda] = _blas_layout(self).value();
+    const auto [transb, ldb] = _blas_layout(mat2).value();
     const char offsetc = 'F';
-
-    const int lda = transa == 'T' ? (k > 1 ? self.stride(1) : m) : (m > 1 ? self.stride(0) : k);
-    const int ldb = transb == 'T' ? (n > 1 ? mat2.stride(1) : k) : (k > 1 ? mat2.stride(0) : n);
     const int ldc = n;
 
     const float alpha = 1;
@@ -637,6 +644,7 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
       ", self sizes=", self.sizes(), " strides=", self.strides(),
       ", mat2 sizes=", mat2.sizes(), " strides=", mat2.strides());
   }
+#endif
 
 void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
@@ -650,18 +658,12 @@ void mkldnn_matmul_i8i8i32(
   // contiguous() is a no-op when mat1 is already row-major.
   _mkldnn_matmul_i8i8i32_with_primitive(mat1.contiguous(), mat2, result);
 #else
-  // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
-  bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
-  bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
-
-  if (a_is_contigous && b_is_contigous) {
-    if (mat1.scalar_type() == at::kByte) {
-      _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(mat1, mat2, result);
-    } else {
-      _mkldnn_gemm_i8i8i32_with_blas<int8_t>(mat1, mat2, result);
-    }
+  const Tensor a = _blas_layout(mat1) ? mat1 : mat1.clone(at::MemoryFormat::Preserve);
+  const Tensor b = _blas_layout(mat2) ? mat2 : mat2.clone(at::MemoryFormat::Preserve);
+  if (a.scalar_type() == at::kByte) {
+    _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(a, b, result);
   } else {
-    _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
+    _mkldnn_gemm_i8i8i32_with_blas<int8_t>(a, b, result);
   }
 #endif
 }
