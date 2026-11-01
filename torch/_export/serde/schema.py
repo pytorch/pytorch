@@ -257,6 +257,9 @@ class Argument(_Union):
     as_graph: Annotated[GraphArgument, 200]
     as_optional_tensors: Annotated[list[OptionalTensorArgument], 190]
     as_custom_obj: Annotated[CustomObjArgument, 210]
+    # The first input of a flat_apply node uses as_operator for the qualified
+    # name of the function the node calls, and its second input is its input
+    # spec, saved with treespec_dumps as as_string.
     as_operator: Annotated[str, 220]
     as_sym_float: Annotated[SymFloatArgument, 230]
     as_sym_floats: Annotated[list[SymFloatArgument], 240]

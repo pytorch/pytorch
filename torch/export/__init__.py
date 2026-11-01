@@ -353,6 +353,14 @@ def load(
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
 
+    A program can call your own tensor subclasses and custom autograd
+    functions. Import the modules that define them before loading: load does
+    not import them, because importing a module runs its code::
+
+        import my_project.ops  # defines a custom autograd function the program calls
+
+        ep = torch.export.load("exported_program.pt2")
+
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
