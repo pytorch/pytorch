@@ -187,6 +187,7 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -2443,8 +2444,9 @@ def object_generic_getattr(
       4. Non-data descriptor -> invoke tp_descr_get
       5. Plain class variable -> wrap in VT
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
-      7. AttributeError for a known runtime type with generic attribute lookup;
-         otherwise defer to the tracker's fallback.
+      7. AttributeError only for an immutable runtime type with generic lookup,
+         no instance dictionary, and no __getattr__; otherwise defer to the
+         tracker's fallback, which may guard mutable class attributes.
     """
     from .user_defined import is_data_descriptor
 
@@ -2502,27 +2504,36 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # A tracker can model a different type, e.g. odict_values as ListVariable.
-    # Only generic lookup on the actual runtime type proves the attribute absent.
+    # Step 7: A tracker can model a different type, e.g. odict_values as
+    # ListVariable. Mutable classes also need guards for later class writes.
     modeled_type = obj._cpython_type
     modeled_types = modeled_type if isinstance(modeled_type, tuple) else (modeled_type,)
     if (
-        not py_type.__dictoffset__
+        type.__dict__["__flags__"].__get__(py_type) & Py_TPFLAGS_IMMUTABLETYPE
+        and not py_type.__dictoffset__
         and is_generic_getattr(py_type)
         and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
-        and (
-            type(tx.output.resolve_source_value(obj.source)) is py_type
-            if obj.source
-            else any(py_type is candidate for candidate in modeled_types)
-        )
     ):
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"],
-        )
+        try:
+            actual_type_matches = (
+                type(tx.output.resolve_source_value(obj.source)) is py_type
+                if obj.source
+                else any(py_type is candidate for candidate in modeled_types)
+            )
+        except (AttributeError, KeyError, NameError):
+            # Some sources require guard helpers unavailable to source evaluation.
+            actual_type_matches = False
+        if actual_type_matches:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"
+                ],
+                kwargs={"name": ConstantVariable.create(name), "obj": obj},
+            )
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
+    # Attribute absence was not proven -- signal to the caller to fall back.
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )

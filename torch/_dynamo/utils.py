@@ -1510,14 +1510,15 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
-        (
+    # These types cannot be subclassed. Identity avoids spoofed __class__ and metaclass equality.
+    return any(
+        type(value) is function_type
+        for function_type in (
             types.FunctionType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-        ),
+        )
     )
 
 
@@ -3291,8 +3292,7 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
-    dict_type: type[dict[K, V]] = type(obj)
-    if issubclass(dict_type, OrderedDict):
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
         items = list(dict.items(obj))
         keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
         positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
