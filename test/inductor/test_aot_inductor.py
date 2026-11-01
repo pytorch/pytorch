@@ -41,6 +41,12 @@ from torch._inductor.codegen.wrapper import (
 )
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.graph import GraphLowering
+from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.template.contiguous_mm import ContiguousMMHeuristics
+from torch._inductor.kernel.mm import (
+    addmm_contiguous_subgraph_template,
+    mm_contiguous_subgraph_template,
+)
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.select_algorithm import (
@@ -55,6 +61,7 @@ from torch._inductor.utils import (
     is_big_gpu,
     maybe_aoti_standalone_config,
     run_and_get_cpp_code,
+    use_contiguous,
     use_decompose_k_choice,
 )
 from torch._inductor.virtualized import V
@@ -405,6 +412,65 @@ class AOTInductorTestsTemplate:
         for m in (16, 24) if dynamic else (16,):
             inputs = make_inputs(m)
             self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
+
+    @common_utils.parametrize("op", ["mm", "addmm"])
+    def test_contiguous_mm_transform(self, op):
+        if self.device != GPU_TYPE or not IS_BIG_GPU:
+            raise unittest.SkipTest("requires modern GPU to run max-autotune")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, w, bias):
+                # w.t() is the non-contiguous mat2 that the transform copies.
+                if op == "mm":
+                    return torch.relu(x @ w.t())
+                return torch.relu(torch.addmm(bias, x, w.t()))
+
+        inputs = (
+            torch.randn(64, 1024, device=self.device, dtype=torch.float16) / 8,
+            torch.randn(48, 1024, device=self.device, dtype=torch.float16) / 8,
+            torch.randn(48, device=self.device, dtype=torch.float16),
+        )
+
+        def select_contiguous(choices):
+            selected = [c for c in choices if c.name.startswith(f"contiguous_{op}")]
+            return selected or choices
+
+        selector = get_algorithm_selector_cache()
+        preprocessing_fns = [*selector.preprocessing_fns, select_contiguous]
+        # The transform registers its heuristics and enables use_contiguous only
+        # on ROCm. Registering and stubbing them covers its SubgraphBuffer path on
+        # CUDA too; on ROCm the real use_contiguous decides (K >= 16 * max(M, N)).
+        stub_use_contiguous = (
+            contextlib.nullcontext()
+            if torch.version.hip
+            else patch(
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous",
+                return_value=True,
+            )
+        )
+        use_contiguous.cache_clear()
+        try:
+            with (
+                override_template_heuristics(
+                    device_type=GPU_TYPE,
+                    template_op_pairs=[
+                        (mm_contiguous_subgraph_template.uid, "mm"),
+                        (addmm_contiguous_subgraph_template.uid, "addmm"),
+                    ],
+                    override_heuristic_class=ContiguousMMHeuristics,
+                ),
+                stub_use_contiguous,
+                patch.object(selector, "preprocessing_fns", preprocessing_fns),
+            ):
+                package_path, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, Model(), inputs, {"max_autotune": True}
+                )
+        finally:
+            use_contiguous.cache_clear()
+
+        FileCheck().check(f"// subgraph: contiguous_{op}").run(code)
+        optimized = torch._inductor.aoti_load_package(package_path)
+        self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
 
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])

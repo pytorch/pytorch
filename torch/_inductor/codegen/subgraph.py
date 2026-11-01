@@ -193,6 +193,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             gm=self.gm,
             example_inputs=compile_inputs,
             shape_env=V.graph._shape_env,
+            # The benchmark module is loaded and run in this process, so it must
+            # be Python wrapper code whatever the parent graph's wrapper is. The
+            # chosen SubgraphBuffer is still codegened with the parent's wrapper.
             cpp_wrapper=False,
             aot_mode=False,
             extern_node_serializer=V.graph.extern_node_serializer,
