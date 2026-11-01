@@ -898,6 +898,55 @@ class TestStaticTritonLauncher(TestCase):
             )
 
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_non_default_warp_size(self):
+        # The work-group size is num_warps times the kernel's compiled SIMD
+        # width; the kernel also declares its required work-group size, so
+        # launching a SIMD16 kernel at the default width of 32 fails.
+        @triton.jit
+        def arange_kernel(out, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            tl.store(out + off, off)
+
+        num_warps, warp_size = 4, 16
+        BLOCK = num_warps * warp_size
+        out = torch.zeros(BLOCK, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = arange_kernel[(1,)](
+            out, BLOCK=BLOCK, num_warps=num_warps, warp_size=warp_size
+        )
+        self.assertEqual(compiled_kernel.metadata.threads_per_warp, warp_size)
+        launcher = self._make_launcher(compiled_kernel)
+        new_out = torch.zeros_like(out)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_out)
+        self.assertEqual(new_out, out)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_launch_rejects_non_kernel_capsule(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(ValueError, "PyCapsule"):
+            launcher.C_impl._launch_kernel(
+                None,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                launcher.arg_tys,
+                (arg0,),
+                stream,
+            )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
     def test_xpu_close_releases_kernel_capsule(self):
         # _load_kernel must hand over its only capsule reference. An extra one
         # keeps the capsule alive for the process lifetime, so its destructor
