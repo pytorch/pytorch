@@ -1343,6 +1343,8 @@ class GuardCheckSpec(NamedTuple):
 
     get_metadata_fn: GuardCheckGetMetadataFn
     eval_fn: GuardCheckEvalFn
+    # When present, handlers receive (originating value, *extra values).
+    get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None
 
 
 SKIP_GUARD = object()
@@ -1468,6 +1470,21 @@ def _constant_subclass_base_value(value: object) -> Any:
     raise TypeError(f"Not a constant subclass: {type(value)}")
 
 
+def _nn_module_hook_membership(
+    values: tuple[Any, Any], hooks_name: str
+) -> tuple[bool, ...] | None:
+    module, flags = values
+    hooks = getattr(module, hooks_name, None)
+    if not issubclass(type(hooks), dict) or not issubclass(type(flags), dict):
+        return None
+    hooks = cast(dict[Any, Any], hooks)
+    if any(
+        type(key) is not int for mapping in (hooks, flags) for key in dict.keys(mapping)
+    ):
+        return None
+    return tuple(dict.__contains__(flags, key) for key in dict.keys(hooks))
+
+
 def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
     """Read a keyword bound into a guard's create_fn functools.partial."""
     create_fn = guard.create_fn
@@ -1479,9 +1496,11 @@ def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
 def register_guard_check_spec(
     get_metadata_fn: GuardCheckGetMetadataFn,
     eval_fn: GuardCheckEvalFn,
+    *,
+    get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
-    handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
+    handler = GuardCheckSpec(get_metadata_fn, eval_fn, get_extra_sources_fn)
 
     def decorator(fn):
         fn.guard_check_spec = handler
@@ -3667,6 +3686,24 @@ class GuardBuilder(GuardBuilderBase):
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @skip_guard_check_spec
+    def BUILTIN_METHOD_RECEIVER_ALIAS(
+        self, guard: Guard, source_b: Source, expected_alias: bool
+    ) -> None:
+        if self.save_guards:
+            if name := get_local_source_name(source_b):
+                self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(source_b):
+                self.check_fn_manager.additional_used_global_vars.add(name)
+        code = [
+            f"{self.arg_ref(guard)} is{'' if expected_alias else ' not'} "
+            f"{self.arg_ref(source_b.name)}"
+        ]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code, get_verbose_code_parts(code, guard)
+        )
+
+    @skip_guard_check_spec
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
@@ -3774,25 +3811,44 @@ class GuardBuilder(GuardBuilderBase):
         )
         self._set_guard_export_info(guard, code)
 
-    # Membership relates two sources, including aliases of global registries.
-    @skip_guard_check_spec
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "hooks_name"),
+            _nn_module_hook_membership(
+                value, _guard_create_fn_keyword(guard, "hooks_name")
+            ),
+        ),
+        eval_fn=lambda value, metadata: metadata[1] is not None
+        and _nn_module_hook_membership(value, metadata[0]) == metadata[1],
+        get_extra_sources_fn=lambda guard: (
+            _guard_create_fn_keyword(guard, "flags_source"),
+        ),
+    )
     def NN_MODULE_HOOKS_DICT_CONTAINS(
         self,
         guard: Guard,
         hooks_name: str,
-        flags_name: str,
-        flags_source: Source | None = None,
+        flags_source: Source,
     ) -> None:
         hooks_source = AttrSource(guard.originating_source, hooks_name)
-        if flags_source is None:
-            flags_source = AttrSource(guard.originating_source, flags_name)
         flags = self.get(flags_source)
-        membership = tuple(key in flags for key in dict.keys(self.get(hooks_source)))
         if self.save_guards:
             if name := get_local_source_name(flags_source):
                 self.check_fn_manager.additional_used_local_vars.add(name)
             if name := get_global_source_name(flags_source):
                 self.check_fn_manager.additional_used_global_vars.add(name)
+        if not flags:
+            # Empty flags make every membership false, independent of hook IDs.
+            # Keep the logical relation for nested reuse, but use a tag-safe leaf.
+            code = [f"dict.__len__({flags_source.name}) == 0"]
+            self.get_guard_manager_from_source(
+                flags_source
+            ).add_dict_length_check_guard(
+                0, get_verbose_code_parts(code, guard), guard.user_stack
+            )
+            self._set_guard_export_info(guard, code)
+            return
+        membership = tuple(key in flags for key in dict.keys(self.get(hooks_source)))
         code = (
             f"tuple(key in {flags_source.name} for key in "
             f"dict.keys({hooks_source.name})) == {membership!r}"
@@ -5694,6 +5750,17 @@ def _resolves_by_reference(value: object) -> bool:
             and isinstance(value.name, str)
             and getattr(owner, value.name, None) is value
         )
+    if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        owner = value.__objclass__
+        # Match GuardsStatePickler's immutable-owner descriptor reducer.
+        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+        return (
+            bool(flags & (1 << 8))
+            and _resolves_by_reference(owner)
+            and any(
+                item is value for item in get_type_dict_no_user_code(owner).values()
+            )
+        )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
         return False
@@ -6317,6 +6384,12 @@ class CheckFunctionManager:
                     for guard in sorted_guards
                 )
             ),
+            # Filtered guards need order annotations only for retained dictionaries.
+            guard_on_key_order={
+                source
+                for source in output_graph_guards_state.guard_on_key_order
+                if id(builder.get(source)) in builder.guard_tree_values
+            },
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
                 output_graph_guards_state.input_source_to_sizes_strides,

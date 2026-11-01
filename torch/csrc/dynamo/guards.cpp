@@ -2800,29 +2800,30 @@ class RelationalGuard : public LeafGuard {
 };
 
 struct NNModuleHookMembership {
-  PyObject* hooks = nullptr;
-  PyObject* flags = nullptr;
+  py::object hooks;
+  py::object flags;
   std::vector<bool> expected;
 
   bool check() const {
-    if (PyDict_GET_SIZE(hooks) != static_cast<Py_ssize_t>(expected.size())) {
+    if (PyDict_GET_SIZE(hooks.ptr()) !=
+        static_cast<Py_ssize_t>(expected.size())) {
       return false;
     }
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
     // Restrict both sides to integer hook IDs, so lookup cannot run callbacks.
-    while (PyDict_Next(flags, &pos, &key, &value)) {
+    while (PyDict_Next(flags.ptr(), &pos, &key, &value)) {
       if (!PyLong_CheckExact(key)) {
         return false;
       }
     }
     pos = 0;
     size_t index = 0;
-    while (PyDict_Next(hooks, &pos, &key, &value)) {
+    while (PyDict_Next(hooks.ptr(), &pos, &key, &value)) {
       if (!PyLong_CheckExact(key)) {
         return false;
       }
-      const int contains = PyDict_Contains(flags, key);
+      const int contains = PyDict_Contains(flags.ptr(), key);
       if (contains < 0) {
         PyErr_Clear();
         return false;
@@ -2856,19 +2857,20 @@ class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
     if (!PyDict_Check(value)) {
       return false;
     }
-    (_is_hooks ? _state->hooks : _state->flags) = value;
-    if (_state->hooks == nullptr || _state->flags == nullptr) {
+    (_is_hooks ? _state->hooks : _state->flags) =
+        py::reinterpret_borrow<py::object>(value);
+    if (!_state->hooks || !_state->flags) {
       return true;
     }
     bool result;
-    Py_BEGIN_CRITICAL_SECTION2(_state->hooks, _state->flags);
+    Py_BEGIN_CRITICAL_SECTION2(_state->hooks.ptr(), _state->flags.ptr());
     result = _state->check();
     Py_END_CRITICAL_SECTION2();
     return result;
   }
 
   void reset_state() final {
-    (_is_hooks ? _state->hooks : _state->flags) = nullptr;
+    (_is_hooks ? _state->hooks : _state->flags) = py::object();
   }
 
  private:
@@ -3432,6 +3434,11 @@ bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
 void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer);
+using RecordedDictTagGuard = std::pair<std::shared_ptr<LeafGuard>, PyObject*>;
+void record_dict_tag_guard(
+    RootGuardManager* root,
+    const std::shared_ptr<LeafGuard>& guard,
+    PyObject* dictionary);
 
 GuardManager* clone_guard_manager(
     GuardManager* from,
@@ -3779,6 +3786,12 @@ class GuardManager {
     _tensor_metadata_pointers[value] = std::move(tensor_metadata);
   }
 
+  void stash_dict_tag_guards(
+      PyObject* value,
+      std::vector<RecordedDictTagGuard>&& guards) {
+    _dict_tag_guards[value] = std::move(guards);
+  }
+
   void disable_recursive_dict_tag_optimization() {
     dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
       disable_recursive_dict_tag_optimization(map);
@@ -3813,10 +3826,13 @@ class GuardManager {
       cloned_mgr->_leaf_guards.emplace_back(guard);
       if (std::shared_ptr<RelationalGuard> relational_guard =
               std::dynamic_pointer_cast<RelationalGuard>(guard)) {
-        // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
-        // guard. Preserve only the classification needed to prevent ordinary
-        // dict-tag skips from omitting an unoptimized relational guard.
-        if (std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) ==
+        // Hook replay uses the role leaf directly, including in cloned trees.
+        // Clones do not own the dedicated NO_TENSOR_ALIASING replay guard.
+        if (auto membership =
+                std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(guard)) {
+          cloned_mgr->add_dict_tag_replay_guard(membership);
+        } else if (
+            std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) ==
             nullptr) {
           cloned_mgr->_has_unoptimized_relational_guard = true;
         }
@@ -3969,6 +3985,18 @@ class GuardManager {
     return true;
   }
 
+  bool check_dict_tag_guards_fast(PyObject* value) {
+    auto it = _dict_tag_guards.find(value);
+    if (it != _dict_tag_guards.end()) {
+      for (auto& [guard, dictionary] : it->second) {
+        if (!guard->check_nopybind(dictionary)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   virtual bool check_nopybind(PyObject* value) {
     // -----------------------------------------------------------------------------
     // Recursive Dict‑Tag Matching
@@ -4041,7 +4069,8 @@ class GuardManager {
             std::optional<bool> no_tensor_aliasing_result =
                 check_no_tensor_aliasing_guards_fast(value);
             if (no_tensor_aliasing_result.has_value()) {
-              if (*no_tensor_aliasing_result) {
+              if (*no_tensor_aliasing_result &&
+                  check_dict_tag_guards_fast(value)) {
                 return true;
               }
               _disable_dict_tag_matching = true;
@@ -4069,6 +4098,11 @@ class GuardManager {
           record_dict_pointer(_root, value);
         } else if (_has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
+        }
+        // Replay both roles even if the other dictionary belongs to a different
+        // tag-safe root. Its current input may differ despite this cache hit.
+        for (const auto& guard : _dict_tag_replay_guards) {
+          record_dict_tag_guard(_root, guard, value);
         }
         // Tensor metadata can mutate in-place without changing dict tags.
         if (_is_immutable && THPVariable_Check(value)) {
@@ -4436,6 +4470,16 @@ class GuardManager {
   }
 
  protected:
+  void add_dict_tag_replay_guard(const std::shared_ptr<LeafGuard>& guard) {
+#ifdef Py_GIL_DISABLED
+    // A concurrent replacement can free a cached dictionary after its watcher
+    // runs. Keep the full traversal until replay can acquire a safe reference.
+    _has_unoptimized_relational_guard = true;
+#else
+    _dict_tag_replay_guards.push_back(guard);
+#endif
+  }
+
   void record_leaf_guard_properties(
       const std::shared_ptr<LeafGuard>& leaf_guard) {
     std::shared_ptr<RelationalGuard> relational_guard =
@@ -4448,7 +4492,11 @@ class GuardManager {
         nullptr) {
       _has_object_aliasing_guard = true;
     }
-    if (std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) !=
+    if (auto membership = std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(
+            relational_guard)) {
+      add_dict_tag_replay_guard(membership);
+    } else if (
+        std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) !=
         nullptr) {
       _has_no_tensor_aliasing_guard = true;
     } else {
@@ -4511,6 +4559,11 @@ class GuardManager {
   std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
       _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+  std::vector<std::shared_ptr<LeafGuard>> _dict_tag_replay_guards;
+  // Borrowed dictionary pointers remain valid through the recorded ownership
+  // paths and their dict tags/watchers, just like _dict_pointers.
+  std::unordered_map<PyObject*, std::vector<RecordedDictTagGuard>>
+      _dict_tag_guards;
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
@@ -4610,6 +4663,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
 
@@ -4621,7 +4677,6 @@ class RootGuardManager : public GuardManager {
     CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
@@ -4641,19 +4696,16 @@ class RootGuardManager : public GuardManager {
     });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        _reset_relational_guard_state();
         return false;
       }
     }
 
-    _reset_relational_guard_state();
     return true;
   }
 
@@ -4675,6 +4727,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -4692,7 +4747,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_leaf.result) {
-      _reset_relational_guard_state();
       return debug_info_leaf;
     }
 
@@ -4709,7 +4763,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      _reset_relational_guard_state();
       return debug_info_accessors;
     }
 
@@ -4719,7 +4772,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
             tmp_debug_info.verbose_code_parts,
@@ -4727,7 +4779,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
 
@@ -4803,6 +4854,7 @@ class RootGuardManager : public GuardManager {
     _recorded_dict_pointers.clear();
     _recorded_tensor_pointers.clear();
     _recorded_tensor_metadata.clear();
+    _recorded_dict_tag_guards.clear();
   }
 
   void stop_recording_dict_pointers(PyObject* value, bool result) {
@@ -4814,6 +4866,8 @@ class RootGuardManager : public GuardManager {
           value, _recorded_tensor_pointers);
       _current_tag_safe_root->stash_tensor_metadata(
           value, std::move(_recorded_tensor_metadata));
+      _current_tag_safe_root->stash_dict_tag_guards(
+          value, std::move(_recorded_dict_tag_guards));
     }
     reset_dict_tag_recording_variables();
   }
@@ -4841,6 +4895,12 @@ class RootGuardManager : public GuardManager {
             tensor,
             coor_device_index_is_current(_compile_on_one_rank, tensor)),
     });
+  }
+
+  void record_dict_tag_guard(
+      const std::shared_ptr<LeafGuard>& guard,
+      PyObject* dictionary) {
+    _recorded_dict_tag_guards.emplace_back(guard, dictionary);
   }
 
   // Whether this graph was traced with compile_on_one_rank. Set from Python
@@ -4908,6 +4968,7 @@ class RootGuardManager : public GuardManager {
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
   std::vector<py::weakref> _recorded_tensor_pointers;
+  std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
 
@@ -5350,6 +5411,13 @@ void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
 
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
   root->record_tensor_pointer(tensor_pointer);
+}
+
+void record_dict_tag_guard(
+    RootGuardManager* root,
+    const std::shared_ptr<LeafGuard>& guard,
+    PyObject* dictionary) {
+  root->record_dict_tag_guard(guard, dictionary);
 }
 
 void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer) {

@@ -6,10 +6,11 @@ higher-order operator.
 
 import collections
 import enum
+import functools
 import logging
 import traceback
 import types
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 
 import torch
@@ -20,6 +21,7 @@ from torch._dynamo.guards import (
     extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
     GuardCheckSpec,
+    install_guard,
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
@@ -477,6 +479,10 @@ def is_reuse_eligible(
     go stale from mutations.
     """
     if not has_reuse_hash_fn:
+        if tracing_info.has_builtin_method_keys:
+            # Stamp-out does not replay remapped receiver-alias guards. Trace
+            # each region to retain its runtime identity constraints.
+            return False
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(
                 traceback.format_list(tracing_info.side_effect_stack)
@@ -592,6 +598,7 @@ def build_reuse_condition(
     for source in all_sources:
         all_relevant_guards.update(tx.output.guards.get_guards_for_source(source))
 
+    traced_sources = traced_sources.copy()
     guard_tuples: list[tuple[Source, GuardCheckSpec, object, Guard]] = []
     for guard in all_relevant_guards:
         source = guard.originating_source
@@ -606,8 +613,18 @@ def build_reuse_condition(
                 f"subgraph_reuse: unsupported guard type '{type_str}' on source '{source.name}'"
             )
 
+        handler = cast(GuardCheckSpec, handler)
         try:
             value = tx.output.resolve_source_value(source)
+            if handler.get_extra_sources_fn is not None:
+                extra_sources = handler.get_extra_sources_fn(guard)
+                traced_sources.update(extra_sources)
+                if has_mutated_vars(tx, traced_sources):
+                    return None
+                value = (
+                    value,
+                    *(tx.output.resolve_source_value(s) for s in extra_sources),
+                )
         except Exception:
             raise RuntimeError(
                 f"subgraph_reuse: failed to resolve source '{source.name}' for {type_str} guard"
@@ -618,7 +635,6 @@ def build_reuse_condition(
         # if type_str == "CONSTANT_MATCH" and isinstance(value, str):
         #     continue
 
-        handler = cast(GuardCheckSpec, handler)
         expected = handler.get_metadata_fn(guard, value)
         guard_tuples.append((source, handler, expected, guard))
 
@@ -642,6 +658,36 @@ def build_source_replacement(
         for old, new in zip(old_arg_sources, new_arg_sources)
         if old is not None and new is not None and old != new
     }
+
+
+def remap_guard(guard: Guard, source_replacement: dict[Source, Source]) -> Guard:
+    def remap(value: Any) -> Any:
+        if isinstance(value, Source):
+            new_source = value.clone(lambda s: source_replacement.get(s, s))
+            return value if new_source == value else new_source
+        return value
+
+    source = remap(guard.originating_source)
+    create_fn = guard.create_fn
+    if isinstance(create_fn, functools.partial):
+        args = tuple(remap(arg) for arg in create_fn.args)
+        keywords = {key: remap(value) for key, value in create_fn.keywords.items()}
+        if any(a is not b for a, b in zip(args, create_fn.args)) or any(
+            value is not create_fn.keywords[key] for key, value in keywords.items()
+        ):
+            create_fn = functools.partial(create_fn.func, *args, **keywords)
+    if source is guard.originating_source and create_fn is guard.create_fn:
+        return guard
+    return replace(
+        guard,
+        originating_source=source,
+        create_fn=create_fn,
+        guard_types=None,
+        code_list=None,
+        obj_weakref=None,
+        guarded_class_weakref=None,
+        _hash=None,
+    )
 
 
 def _treespecs_identical(a: pytree.TreeSpec, b: pytree.TreeSpec, /) -> bool:
@@ -818,14 +864,22 @@ def is_reusable(
     resolve_cache: dict[Source, Any] = {}
 
     for source, handler, expected, guard in condition.guards:
-        new_source = source.clone(replacement_fn)
-        # Source unchanged after replacement — guard already passed during
-        # the original trace, skip re-evaluation.
-        if new_source == source:
+        new_guard = remap_guard(guard, source_replacement)
+        # Both the originating source and any bound sources are unchanged.
+        if new_guard is guard:
             continue
+        new_source = new_guard.originating_source
 
         try:
             value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
+            if handler.get_extra_sources_fn is not None:
+                value = (
+                    value,
+                    *(
+                        s.get_value(resolve_globals, resolve_locals, resolve_cache)
+                        for s in handler.get_extra_sources_fn(new_guard)
+                    ),
+                )
         except Exception:
             hc_log.debug(
                 "subgraph_reuse: reuse failed -- cannot resolve source\n"
@@ -989,6 +1043,15 @@ def save_reuse_entry(
         # rewrite captured variable sources for the current invocation.
         arg_sources=fingerprint.arg_sources,
         num_user_outputs=num_user_outputs,
+        runtime_guards=[guard for _, _, _, guard in condition.guards]
+        if condition
+        else [],
+        guard_on_key_order=tx.output.guard_on_key_order.intersection(
+            condition.traced_sources
+        )
+        if condition
+        else set(),
+        traced_sources=condition.traced_sources if condition else OrderedSet(),
     )
     if condition is not None:
         invoke_subgraph_cache.add_reuse_entry(
@@ -1068,8 +1131,6 @@ def stamp_out_subgraph(
     new_arg_sources = fingerprint.arg_sources
 
     source_replacement = build_source_replacement(cached.arg_sources, new_arg_sources)
-
-    new_lifted_args = []
     # Shared resolution context so get_value memoizes intermediate results
     # (e.g. L['self'].layers) across all freevars in this stamp-out.
     resolve_globals: dict[str, Any] = {
@@ -1079,6 +1140,28 @@ def stamp_out_subgraph(
     resolve_locals: dict[str, Any] = {}
     resolve_cache: dict[Source, Any] = {}
 
+    for guard in cached.runtime_guards:
+        new_guard = remap_guard(guard, source_replacement)
+        if new_guard is guard:
+            continue
+        if guard.create_fn_name() == "TENSOR_MATCH":
+            # Rebuild tensor guards for the new value, including shape-only
+            # captures. VariableBuilder deduplicates existing tensor/alias guards.
+            source = new_guard.originating_source
+            value = source.get_value(resolve_globals, resolve_locals, resolve_cache)
+            VariableBuilder(tx, source)(value)
+        else:
+            install_guard(new_guard)
+    tx.output.guard_on_key_order.update(
+        source.clone(lambda s: source_replacement.get(s, s))
+        for source in cached.guard_on_key_order
+    )
+    tx.output.current_tracer.traced_sources.update(
+        source.clone(lambda s: source_replacement.get(s, s))
+        for source in cached.traced_sources
+    )
+
+    new_lifted_args = []
     # Find the args for the about-to-be-inserted invoke_subgraph call.
     for subgraph_input in cached.subgraph_input_mapping:
         if isinstance(subgraph_input, LiftedUserArg):
