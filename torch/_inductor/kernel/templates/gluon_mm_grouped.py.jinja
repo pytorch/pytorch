@@ -135,6 +135,17 @@ class GroupIterator:
     @gluon.must_use_result
     @gluon.jit
     def next(self):
+        # Skip groups holding none of this program's tiles, so per-group
+        # work (descriptor rebuilds and the drains before them) only runs
+        # where there is a tile.
+        it = self._step()
+        while (it.g < it.G) & (it.tile_idx >= it.tiles_processed + gl.cdiv(it.m_size, it.BLOCK_M) * gl.cdiv(it.n_size, it.BLOCK_N)):
+            it = it._step()
+        return it
+
+    @gluon.must_use_result
+    @gluon.jit
+    def _step(self):
         g = (self.g + 1) if self.has_started else 0
 {%- if M_IS_VARYING %}
         m_start_offset = self.m_start_offset + (self.m_size if self.has_started else 0)
@@ -953,10 +964,10 @@ def store_partition(pargs: PartitionArgs{% if HAS_EPILOGUE_FUSION %}, {{gen_argd
     )
 
     {#- The descriptors' smem scratch is reused for the operand buffers; ordering it once
-        here keeps Triton from fencing and cluster-syncing before every 2-CTA MMA. #}
-    if USE_TWO_CTA:
-        fence_async_shared(cluster=True)
-        gl.barrier(cluster=True)
+        here keeps Triton from fencing (and cluster-syncing for 2-CTA) before every TMA
+        load and MMA. #}
+    fence_async_shared(cluster=USE_TWO_CTA)
+    gl.barrier(cluster=USE_TWO_CTA)
 
     # Launch warp-specialized kernel
     gl.warp_specialize(
