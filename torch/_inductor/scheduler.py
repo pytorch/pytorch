@@ -7240,11 +7240,15 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                layout_conflict = (
+                # Hoisted out of the condition below, which short-circuited
+                # past it under the force-extern test flag: the ladder needs a
+                # real answer, and the freeze it performs is what the ordinary
+                # path does anyway.
+                has_layout_conflict = self._has_layout_conflict_for_template(multi_node)
+                if not (
                     config.test_configs.force_extern_kernel_in_multi_template
-                    or self._has_layout_conflict_for_template(multi_node)
-                )
-                if not layout_conflict:
+                    or has_layout_conflict
+                ):
                     # TODO (PaulZhang12): Potentially support recompilation/benchmark for new strides
                     min_node_unfused, _ = multi_node.get_min_choice()
                 else:
@@ -7295,7 +7299,7 @@ class Scheduler:
                 # the constraint, not the frozen layout the kernel receives.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
-                if not layout_conflict:
+                if not has_layout_conflict:
                     torch._inductor.select_algorithm._maybe_pretune_tunableop(
                         min_node_unfused
                     )
