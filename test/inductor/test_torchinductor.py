@@ -12894,7 +12894,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     def test_small_int_atomic_add_fallback(self):
         # https://github.com/pytorch/pytorch/issues/202878
-        # Triton atomic_add does not support 8/16-bit ints; these must fall back.
         for dtype in (torch.uint8, torch.int8, torch.int16):
             index = torch.tensor([0, 1, 0, 2, 1, 0])
             src = torch.randint(0, 5, (6,), dtype=dtype)
