@@ -1,3 +1,4 @@
+/* Work around #197192: override PyData 0.15.4's fixed .header-article-item height; remove after the theme upgrades to >=0.16.0. */
 .header-article__inner .header-article-items__start .header-article-item {
     height: auto;
 }
