@@ -1559,6 +1559,10 @@ class DecompOneOffTests(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             torch.rand(4, device="meta", dtype=dtype)
 
+        # the uniform decomposition rejects too (exercised via uniform_ on meta)
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.empty(4, device="meta", dtype=dtype).uniform_()
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 

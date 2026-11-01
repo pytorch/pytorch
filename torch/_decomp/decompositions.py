@@ -3572,9 +3572,9 @@ def uniform(
     high: bool | int | float = 1.0,
     generator: torch.Generator | None = None,
 ):
-    # uniform_impl_ only dispatches over floating types, so eager rejects everything
-    # else. Without this the traced path samples [0, 1) and truncates to the integral
-    # dtype, which is a constant.
+    # eager's uniform_ dispatches only over float16/bfloat16/float32/float64 and
+    # complex; without this the traced path samples [0, 1) and truncates to an
+    # unsupported dtype (e.g. integral or float8), which is a constant.
     torch._check_not_implemented(
         utils.is_uniform_supported_dtype(x.dtype),
         lambda: f"uniform_ not implemented for '{x.dtype}'",

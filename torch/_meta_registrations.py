@@ -560,9 +560,10 @@ def meta_randint_low(
 @register_meta([aten.rand.default, aten.rand.out])
 @out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
-    # reject non-floating/complex dtypes during tracing so every backend matches
-    # eager; inductor rewrites aten.rand before the uniform decomposition runs, so
-    # the decomposition's check alone does not cover the compiled path (gh-195673)
+    # reject dtypes eager's uniform_ does not support (it dispatches only over
+    # float16/bfloat16/float32/float64 and complex) during tracing so every backend
+    # matches eager; inductor rewrites aten.rand before the uniform decomposition
+    # runs, so the decomposition's check alone does not cover the compiled path (gh-195673)
     resolved_dtype = torch.get_default_dtype() if dtype is None else dtype
     torch._check_not_implemented(
         utils.is_uniform_supported_dtype(resolved_dtype),
