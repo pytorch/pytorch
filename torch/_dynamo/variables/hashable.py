@@ -6,6 +6,9 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
+import functools
+import inspect
+import types
 from collections.abc import Iterable, Iterator
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
@@ -14,7 +17,15 @@ import torch
 from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import variables
-from ..exc import raise_observed_exception
+from ..exc import raise_observed_exception, unimplemented
+from ..guards import GuardBuilder, install_guard
+from ..source import (
+    AttrSource,
+    ConstDictKeySource,
+    GetItemSource,
+    is_from_skip_guard_source,
+    Source,
+)
 from ..utils import guard_if_dyn, specialize_symnode
 from .base import VariableTracker
 
@@ -80,6 +91,101 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
+class BuiltinMethodKeyTracker:
+    """Guard receiver aliasing without pinning every internal method-key hash."""
+
+    def __init__(self) -> None:
+        self.receivers: dict[Source, object] = {}
+        self.input_methods: set[Source] = set()
+        self.has_method_keys = False
+        self.has_local_receiver = False
+        self.has_custom_keys = False
+        self.has_custom_metaclass_keys = False
+
+    def _guard_custom_collisions(self, tx: "InstructionTranslatorBase") -> None:
+        if not self.has_method_keys or not self.has_custom_keys:
+            return
+        if self.has_custom_metaclass_keys:
+            # Class VTs do not dispatch custom metaclass equality against methods.
+            unimplemented(
+                gb_type="Builtin method keys with custom metaclass equality",
+                context="builtin method key hashing",
+                explanation="Dynamo cannot trace custom metaclass equality against builtin method keys.",
+                hints=[
+                    "Keep these dictionary or set operations outside the compiled region."
+                ],
+            )
+        if self.has_local_receiver:
+            unimplemented(
+                gb_type="Builtin method keys with custom equality and local receivers",
+                context="builtin method key hashing",
+                explanation="Custom key equality can observe runtime method hash collisions, "
+                "but a locally created receiver has no guardable identity.",
+                hints=[
+                    "Keep these dictionary or set operations outside the compiled region."
+                ],
+            )
+        for source in self.receivers:
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+
+    def add_custom_key(
+        self, tx: "InstructionTranslatorBase", *, is_metaclass: bool = False
+    ) -> None:
+        self.has_custom_keys = True
+        self.has_custom_metaclass_keys |= is_metaclass
+        self._guard_custom_collisions(tx)
+
+    def add_input_method(self, tx: "InstructionTranslatorBase", source: Source) -> None:
+        self.input_methods.add(source)
+        if self.has_method_keys:
+            # The receiver relation alone cannot detect a different C function.
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            self.add_receiver(tx, AttrSource(source, "__self__"))
+
+    def activate(self, tx: "InstructionTranslatorBase") -> None:
+        if not self.has_method_keys:
+            self.has_method_keys = True
+            for input_source in self.input_methods:
+                self.add_input_method(tx, input_source)
+        tracer = tx.output.current_tracer
+        while tracer is not None:
+            tracer.has_builtin_method_keys = True
+            tracer = tracer.parent
+
+    def add_receiver(
+        self, tx: "InstructionTranslatorBase", source: Source | None
+    ) -> object:
+        self.activate(tx)
+        if source is None:
+            self.has_local_receiver = True
+            self._guard_custom_collisions(tx)
+            return None
+        if is_from_skip_guard_source(source):
+            unimplemented(
+                gb_type="Unguardable builtin method key receiver",
+                context=source.name,
+                explanation="Builtin method keys require guards on receiver aliasing.",
+                hints=[
+                    "Keep these dictionary or set operations outside the compiled region."
+                ],
+            )
+        receiver = tx.output.resolve_source_value(source)
+        if source not in self.receivers:
+            for other_source, other in self.receivers.items():
+                install_guard(
+                    source.make_guard(
+                        functools.partial(
+                            GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
+                            source_b=other_source,
+                            expected_alias=receiver is other,
+                        )
+                    )
+                )
+            self.receivers[source] = receiver
+        self._guard_custom_collisions(tx)
+        return receiver
+
+
 class RawHash:
     """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
 
@@ -100,6 +206,19 @@ class RawHash:
         return isinstance(other, RawHash) and self.h == other.h
 
 
+def _builtin_method_sources(value: object, source: Source) -> Iterator[Source]:
+    from .builder import bound_builtin_method_descriptor
+
+    if type(value) is tuple:
+        for index, item in enumerate(value):
+            yield from _builtin_method_sources(item, GetItemSource(source, index))
+    elif (
+        type(value) is types.BuiltinMethodType
+        and bound_builtin_method_descriptor(value) is not None
+    ):
+        yield source
+
+
 class HashableTracker:
     """
     Class that wraps a VariableTracker and makes it hashable.
@@ -108,12 +227,87 @@ class HashableTracker:
     """
 
     vt: VariableTracker
+    has_builtin_method: bool = False
 
     _MISSING = object()
 
     def __init__(self, vt: VariableTracker) -> None:
         # We specialize SymNodes
         vt = specialize_symnode(vt)
+
+        from .descriptors import BoundBuiltinMethodVariable
+
+        input_methods = ()
+        if isinstance(vt, variables.LazyVariableTracker):
+            if vt.is_realized() or vt.source is None:
+                vt = vt.realize()
+            else:
+                input_methods = tuple(
+                    _builtin_method_sources(vt.original_value(), vt.source)
+                )
+                if input_methods and not isinstance(vt.source, ConstDictKeySource):
+                    vt = vt.realize()
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if not isinstance(vt, variables.LazyVariableTracker) and isinstance(
+            vt, BoundBuiltinMethodVariable
+        ):
+            self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
+            self.has_builtin_method = True
+            self.vt = vt
+            return
+        # Only exact builtin equality is known not to equate a different type
+        # with a builtin method. User-defined keys can observe hash collisions.
+        key_types: list[type | None]
+        try:
+            if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+                # Exact tuples can hide custom equality behind the lazy-key path.
+                # Inspect actual types without realizing unused keys or their guards.
+                values = [vt.original_value()]
+                key_types = []
+                while values:
+                    value = values.pop()
+                    if type(value) is tuple:
+                        values.extend(value)
+                    else:
+                        key_types.append(type(value))
+            else:
+                key_types = [vt.python_type()]
+        except NotImplementedError:
+            # Let generic hashing preserve its normal unsupported-type fallback.
+            key_types = [None]
+        for key_type in key_types:
+            if not any(
+                key_type is safe_type
+                for safe_type in (
+                    object,
+                    type,
+                    int,
+                    float,
+                    complex,
+                    str,
+                    bytes,
+                    tuple,
+                    frozenset,
+                    type(None),
+                    bool,
+                    types.FunctionType,
+                    types.MethodType,
+                    types.BuiltinMethodType,
+                )
+            ):
+                is_metaclass = key_type is not None and issubclass(key_type, type)
+                if (
+                    is_metaclass
+                    and inspect.getattr_static(key_type, "__eq__") is object.__eq__
+                ):
+                    # Identity-only class equality cannot match a builtin method.
+                    continue
+                tx.output.builtin_method_keys.add_custom_key(
+                    tx,
+                    is_metaclass=is_metaclass,
+                )
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -123,18 +317,31 @@ class HashableTracker:
             and not vt.is_realized()
             and vt.is_hashable_lazy()
         ):
+            # Preserve unused input-key laziness, including methods inside tuples.
+            # Activate guards when a constructed method key can compare with them.
+            for source in input_methods:
+                tx.output.builtin_method_keys.add_input_method(tx, source)
+            self.has_builtin_method = bool(input_methods)
             self._hash = hash(vt.original_value())
             self._hash_is_identity = False
             self.vt = vt
             return
 
+        vt = vt.realize()
+        if type(vt) is variables.TupleVariable:
+            # Propagate internal key hashing without relaxing explicit hash(tuple)
+            # escape rules. Classify nested custom keys for collision guards too.
+            items = [HashableTracker(item) for item in vt.items]
+            self._hash = hash(tuple(RawHash(item._hash) for item in items))
+            self._hash_is_identity = any(item._hash_is_identity for item in items)
+            self.has_builtin_method = any(item.has_builtin_method for item in items)
+            self.vt = vt
+            return
+
         # Compute hash via the tp_hash slot (generic_hash_impl).
         # For unhashable types, hash_impl raises ObservedTypeError.
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
         from .object_protocol import generic_hash_impl
 
-        tx = InstructionTranslator.current_tx()
         # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
         # have no python-constant value, so their key equality is identity.
         self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
