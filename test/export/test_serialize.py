@@ -2830,12 +2830,9 @@ class TestPredispatchSerialization(TestCase):
             p.stdout.strip().splitlines()[-1], str([t.tolist() for t in expected])
         )
 
-    def test_predispatch_flat_apply_save_load_by_name(self):
+    @staticmethod
+    def _scale_function():
         from torch._export.wrappers import allow_in_pre_dispatch_graph
-        from torch.testing._internal.two_tensor import TwoTensor
-
-        class LocalTwoTensor(TwoTensor):
-            pass
 
         class Scale(torch.autograd.Function):
             @staticmethod
@@ -2855,6 +2852,24 @@ class TestPredispatchSerialization(TestCase):
             def apply(cls, *args, **kwargs):
                 return super().apply(*args, **kwargs)
 
+        return Scale
+
+    def _import_test_module(self, **members):
+        module = types.ModuleType("flat_apply_test_module")
+        for name, member in members.items():
+            setattr(module, name, member)
+        # Unlike patch.dict, this removes only this module afterwards, not the
+        # torch modules that export imports the first time it runs.
+        sys.modules[module.__name__] = module
+        self.addCleanup(sys.modules.pop, module.__name__, None)
+        return module
+
+    def test_predispatch_flat_apply_save_refuses_what_load_cannot_find(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class LocalTwoTensor(TwoTensor):
+            pass
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2865,29 +2880,72 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return (x + LocalTwoTensor(x, x) + self.buffer).a
 
-        class Bar(torch.nn.Module):
-            def forward(self, x):
-                return Scale.apply(x) + 1
+        with self.subTest("class defined inside a function"):
+            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+            reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
+            with self.assertRaisesRegex(SerializeError, reason):
+                torch.export.save(ep, io.BytesIO())
 
-        @dataclass(frozen=True)
-        class Config:
-            factor: int
+        with self.subTest("name that finds a different class"):
 
-        pytree.register_constant(Config)
-        self.addCleanup(pytree._deregister_pytree_node, Config)
+            class Other(TwoTensor):
+                pass
 
-        class ScaleBy(Scale):
-            @staticmethod
-            def forward(x, config):
-                return x * config.factor
+            module = self._import_test_module(Sub=Other)
+            Other.__module__, Other.__qualname__ = module.__name__, "Sub"
+            LocalTwoTensor.__module__ = module.__name__
+            LocalTwoTensor.__qualname__ = "Sub"
+            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
+            with self.assertRaisesRegex(SerializeError, "names a different object"):
+                torch.export.save(ep, io.BytesIO())
 
-            @staticmethod
-            def backward(ctx, grad):
-                return grad, None
+        with self.subTest("autograd function defined in the main script"):
+            # It runs in memory, but another process could not find it.
+            Scale = self._scale_function()
+            Scale.__module__, Scale.__qualname__ = "__main__", "Scale"
 
-        class Baz(torch.nn.Module):
-            def forward(self, x):
-                return ScaleBy.apply(x, Config(3))
+            class Bar(torch.nn.Module):
+                def forward(self, x):
+                    return Scale.apply(x) + 1
+
+            with patch.object(sys.modules["__main__"], "Scale", Scale, create=True):
+                x = torch.randn(4)
+                ep = export(Bar(), (x,), strict=False)
+                self.assertEqual(ep.module()(x), x * 2 + 1)
+                with self.assertRaisesRegex(SerializeError, "__main__ module"):
+                    torch.export.save(ep, io.BytesIO())
+
+        with self.subTest("pytree constant input"):
+            # A treespec string cannot store the constant.
+
+            @dataclass(frozen=True)
+            class Config:
+                factor: int
+
+            pytree.register_constant(Config)
+            self.addCleanup(pytree._deregister_pytree_node, Config)
+
+            Scale = self._scale_function()
+
+            class ScaleBy(Scale):
+                @staticmethod
+                def forward(x, config):
+                    return x * config.factor
+
+                @staticmethod
+                def backward(ctx, grad):
+                    return grad, None
+
+            class Baz(torch.nn.Module):
+                def forward(self, x):
+                    return ScaleBy.apply(x, Config(3))
+
+            ep = export(Baz(), (torch.randn(4),), strict=False)
+            with self.assertRaisesRegex(SerializeError, "input spec cannot be saved"):
+                torch.export.save(ep, io.BytesIO())
+
+    def test_predispatch_flat_apply_save_load_by_name(self):
+        Scale = self._scale_function()
 
         @dataclass
         class Pair:
@@ -2915,66 +2973,34 @@ class TestPredispatchSerialization(TestCase):
             def backward(ctx, grad):
                 return None, None
 
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return Scale.apply(x) + 1
+
         class Qux(torch.nn.Module):
             def forward(self, x):
                 return AddPair.apply(Pair(x, x * 3), Pt(x, x))
 
-        # A class defined inside a function cannot be found by name.
-        ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
-        with self.assertRaisesRegex(SerializeError, reason):
-            torch.export.save(ep, io.BytesIO())
-
-        # A pytree constant input cannot be stored in a treespec string.
-        ep = export(Baz(), (torch.randn(4),), strict=False)
-        with self.assertRaisesRegex(SerializeError, "input spec cannot be saved"):
-            torch.export.save(ep, io.BytesIO())
-
-        # An autograd function defined in the main script runs in memory, but
-        # another process could not find it.
-        Scale.__module__, Scale.__qualname__ = "__main__", "Scale"
-        with patch.object(sys.modules["__main__"], "Scale", Scale, create=True):
-            x = torch.randn(4)
-            ep = export(Bar(), (x,), strict=False)
-            self.assertEqual(ep.module()(x), x * 2 + 1)
-            with self.assertRaisesRegex(SerializeError, "__main__ module"):
-                torch.export.save(ep, io.BytesIO())
-
         # An autograd function from an imported module saves, loads and runs,
         # also with a dataclass input whose __post_init__ reads its tensors.
-        # A subclass whose name finds a different class cannot be saved.
-        module = types.ModuleType("flat_apply_test_module")
+        module = self._import_test_module(Scale=Scale, AddPair=AddPair)
         Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
         AddPair.__module__, AddPair.__qualname__ = module.__name__, "AddPair"
-        LocalTwoTensor.__module__, LocalTwoTensor.__qualname__ = module.__name__, "Sub"
-
-        class Other(TwoTensor):
-            pass
-
-        Other.__module__, Other.__qualname__ = module.__name__, "Sub"
-        module.Scale, module.AddPair, module.Sub = Scale, AddPair, Other
-        # Unlike patch.dict, this removes only this module afterwards, not the
-        # torch modules that export imports the first time it runs.
-        sys.modules[module.__name__] = module
-        saved = {}
-        try:
-            x = torch.randn(4)
-            for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4)):
+        x = torch.randn(4)
+        for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4)):
+            with self.subTest(module=type(m).__name__):
                 buffer = io.BytesIO()
                 torch.export.save(export(m, (x,), strict=False), buffer)
-                saved[type(m).__name__] = buffer.getvalue()
-                with self.subTest(module=type(m).__name__):
-                    buffer.seek(0)
-                    self.assertEqual(torch.export.load(buffer).module()(x), expected)
-            ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-            with self.assertRaisesRegex(SerializeError, "names a different object"):
-                torch.export.save(ep, io.BytesIO())
-        finally:
-            del sys.modules[module.__name__]
+                buffer.seek(0)
+                self.assertEqual(torch.export.load(buffer).module()(x), expected)
 
         # Without its module imported, load refuses the name and says why.
+        buffer = io.BytesIO()
+        torch.export.save(export(Bar(), (x,), strict=False), buffer)
+        buffer.seek(0)
+        del sys.modules[module.__name__]
         with self.assertRaisesRegex(RuntimeError, "error when deserializing") as cm:
-            torch.export.load(io.BytesIO(saved["Bar"]))
+            torch.export.load(buffer)
         self.assertIsInstance(cm.exception.__cause__, SerializeError)
         self.assertIn("import that module before loading", str(cm.exception.__cause__))
 
