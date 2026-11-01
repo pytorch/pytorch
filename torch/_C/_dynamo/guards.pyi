@@ -30,6 +30,7 @@ class ORDERED_DICT_ORDER_MATCH(LeafGuard):
 def ordered_dict_keys(value: Any) -> list[Any] | None: ...
 
 class RelationalGuard: ...
+class NN_MODULE_HOOK_MEMBERSHIP(RelationalGuard): ...
 
 class GuardDebugInfo:
     verbose_code_parts: list[str]
@@ -476,6 +477,13 @@ class FuncKwDefaultsGuardAccessor(GuardAccessor): ...
 class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
+def install_nn_module_hook_membership_guard(
+    hooks: GuardManager,
+    flags: GuardManager,
+    expected: Sequence[bool],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,
