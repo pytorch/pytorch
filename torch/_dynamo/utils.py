@@ -1510,14 +1510,15 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
-        (
+    # These types cannot be subclassed. Identity avoids spoofed __class__ and metaclass equality.
+    return any(
+        type(value) is function_type
+        for function_type in (
             types.FunctionType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-        ),
+        )
     )
 
 
@@ -3268,7 +3269,7 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
@@ -3286,7 +3287,7 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
         key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
         return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
