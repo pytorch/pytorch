@@ -6760,6 +6760,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "member_path",
             "group_member",
             "group_format",
+            "group_members_mapping",
             "native_suffix",
             "no_binary",
             "incomplete_group",
@@ -6779,6 +6780,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "member_path": "Invalid Triton runtime-cache member name",
             "group_member": "Invalid Triton runtime-cache member name",
             "group_format": "Invalid Triton runtime-cache group format",
+            "group_members_mapping": "Invalid Triton runtime-cache kernel members",
             "native_suffix": "Invalid Triton runtime-cache native member",
             "no_binary": "has no binary",
             "incomplete_group": "Incomplete or unreferenced",
@@ -6814,6 +6816,10 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     h, "kernel.autotune.json", "__grp__kernel.autotune.json"
                 ),
                 "group_format": lambda h: kernel(h).update(group_format="unknown"),
+                "group_members_mapping": lambda h: kernel(h).update(
+                    group_format="filenames",
+                    members=dict.fromkeys(kernel(h)["members"]),
+                ),
                 "native_suffix": lambda h: rename(h, native, "launcher.txt"),
                 "no_binary": lambda h: kernel(h)["members"].remove("kernel.cubin"),
                 "incomplete_group": lambda h: kernel(h)["members"].append("kernel.ptx"),
