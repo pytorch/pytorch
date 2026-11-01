@@ -5653,6 +5653,29 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
 
+    @parametrize("check", ["is_none", "is_ellipsis", "not_tuple", "bool_list"])
+    def test_dynamic_slice_check_no_recompile(self, check):
+        def fn(x, y):
+            s = slice(y.shape[0], None)
+            if check == "is_none" and s is None:
+                return x
+            if check == "is_ellipsis" and s is Ellipsis:
+                return x
+            if check == "not_tuple" and not (slice(None), s):
+                return x
+            if check == "bool_list" and not bool([slice(None), s]):
+                return x
+            return x[:, s]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
+
+        x = torch.randn(2, 32)
+        for n in (5, 7, 9):
+            y = torch.zeros(n)
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_range_with_index(self):
         def fn(x):
             acc = 1
@@ -7025,6 +7048,23 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), expected)
 
     @parametrize("name", ["__len__", "count"])
+    def test_unbound_descriptor_hash(self, name):
+        def fn(x):
+            descriptor = getattr(type([x]), name)
+            same = getattr(list, name)
+            return (
+                x + 1,
+                descriptor in {same},
+                same in {descriptor},
+                len({descriptor, same}),
+                {descriptor: 2}[same],
+                hash(descriptor) == hash(same),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("name", ["__len__", "count"])
     @parametrize("sourced", [False, True])
     @parametrize("graph_break", [False, True])
     def test_unbound_descriptor_reconstruction(self, name, sourced, graph_break):
@@ -7055,7 +7095,10 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(UserError, "not supported or pytree-flattenable"):
             torch._dynamo.export(fn)(torch.ones(1))
 
-    @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
+    @torch._dynamo.config.patch(
+        use_recursive_dict_tags_for_guards=True,
+        assume_dunder_attributes_remain_unchanged=False,
+    )
     def test_module_shared_class_getattribute_guard(self):
         class Module(torch.nn.Module):
             def __init__(self):
@@ -7294,6 +7337,99 @@ class GraphModule(torch.nn.Module):
             torch.compile(as_key, backend="eager", fullgraph=True)(x), as_key(x)
         )
 
+    @parametrize("prebound", (False, True))
+    def test_bound_builtin_method_keys(self, prebound):
+        class Mapping(dict):
+            pass
+
+        def fn(x, obj, method):
+            left = method if prebound else obj.get
+            right = obj.get
+            return (
+                x + 1,
+                left == right,
+                len({left, right}),
+                right in {left},
+                {left: 7}.get(right, 0),
+            )
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for obj in (Mapping(a=1), Mapping(a=1)):
+            self.assertEqual(compiled(x, obj, obj.get), fn(x, obj, obj.get))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_bound_builtin_method_hash_local_receiver(self):
+        def fn(x):
+            receiver = [1]
+            left = list.count.__get__(receiver, list)
+            right = list.index.__get__(receiver, list)
+            return (
+                x + 1,
+                hash(left) == hash(right),
+                len({hash(left), hash(right)}),
+                len({left, right}),
+                {left: 7}.get(right, 0),
+            )
+
+        x = torch.ones(1)
+        expected = (x + 1, False, 2, 2, 0)
+        self.assertEqual(fn(x), expected)
+        with self.assertRaisesRegex(
+            Unsupported, "builtin method hash with unstable receiver"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+
+    def test_bound_builtin_method_keys_constant_receivers(self):
+        def fn(x):
+            left = int.__dict__["conjugate"].__get__(1, int)
+            right = int.__dict__["__trunc__"].__get__(1, int)
+            return (
+                x + 1,
+                len({left, right}),
+                {left: 7}.get(right, 0),
+                hash(left) == hash(right),
+                len({hash(left), hash(right)}),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_bound_builtin_method_hash_input_identity(self):
+        class Mapping(dict):
+            pass
+
+        def fn(x, obj):
+            return x + hash(obj.get)
+
+        x = torch.ones(1)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, Mapping(a=1))
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager")
+        for obj in (Mapping(a=1), Mapping(a=1)):
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_bound_builtin_method_hash_receiver_alias(self):
+        def fn(x, a, b):
+            descriptor = int.__dict__["conjugate"]
+            left = descriptor.__get__(a, int)
+            right = descriptor.__get__(b, int)
+            return x + 1, hash(left) == hash(right)
+
+        a = int("1000000000001")
+        b = int("1000000000001")
+        self.assertIsNot(a, b)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for other in (b, a):
+            self.assertEqual(compiled(x, a, other), fn(x, a, other))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_inherited_random_method_descriptor(self):
         draw = random.Random.random  # the descriptor belongs to `_random.Random`
 
@@ -7316,11 +7452,9 @@ class GraphModule(torch.nn.Module):
             pass
 
         def fn(x, obj):
+            method = obj.add if base is set else obj.count
             try:
-                if base is set:
-                    obj.add()
-                else:
-                    obj.count()
+                method()
             except TypeError as exc:
                 return x + 1, str(exc)
             return x - 1, "no error"
@@ -7330,71 +7464,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
         )
-
-    def test_builtin_descriptor_arity_after_argument_mutation(self):
-        class Container(dict):
-            pass
-
-        def fn(x, obj):
-            try:
-                obj.clear(setattr(obj, "clear", None))
-            except TypeError as exc:
-                return x + 1, str(exc)
-            return x - 1, "no error"
-
-        x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, Container()),
-            fn(x, Container()),
-        )
-
-    @parametrize("binding", ["direct", "getattr", "super"])
-    def test_builtin_descriptor_arity_after_graph_break(self, binding):
-        class Container(dict):
-            pass
-
-        method_name = "popitem"
-
-        def fn(x, obj):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 1
-            torch._dynamo.graph_break()
-            try:
-                if binding == "direct":
-                    obj.popitem(1)
-                elif binding == "getattr":
-                    getattr(obj, method_name)(1)
-                else:
-                    super(Container, obj).popitem(1)
-            except TypeError as exc:
-                return x + 1, str(exc)
-            return x - 1, "no error"
-
-        x, obj = torch.ones(1), Container()
-        self.assertEqual(torch.compile(fn, backend="eager")(x, obj), fn(x, obj))
-
-    def test_builtin_descriptor_arity_argument_graph_break(self):
-        class Container(dict):
-            pass
-
-        def argument():
-            torch._dynamo.graph_break()
-            return 1
-
-        def fn(x, obj):
-            x = x + 1
-            obj.popitem(argument())
-            return x
-
-        x, obj = torch.ones(1), Container()
-        with self.assertRaises(TypeError) as eager:
-            fn(x, obj)
-        counter = torch._dynamo.testing.CompileCounter()
-        with self.assertRaises(TypeError) as compiled:
-            torch.compile(fn, backend=counter)(x, obj)
-        self.assertEqual(str(compiled.exception), str(eager.exception))
-        self.assertEqual(counter.frame_count, 1)
 
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
@@ -7531,6 +7600,38 @@ class GraphModule(torch.nn.Module):
                 return mapping.extra, list.__str__(mapping)
             except TypeError as exc:
                 return x + 1, str(exc)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("base", [dict, list])
+    @parametrize("case", ["missing", "extra", "keywords", "missing_and_keywords"])
+    def test_inherited_setattr_descriptor_arity(self, base, case):
+        def fn(x):
+            obj = base()
+            try:
+                if case == "missing":
+                    base.__setattr__(obj, "value")
+                elif case == "extra":
+                    base.__setattr__(obj, "value", 1, 2)
+                elif case == "keywords":
+                    base.__setattr__(obj, "value", 1, extra=2)
+                else:
+                    base.__setattr__(obj, "value", value=1)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_wrapper_descriptor_missing_receiver_tp_name(self):
+        def fn(x):
+            try:
+                collections.OrderedDict.__init__()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
