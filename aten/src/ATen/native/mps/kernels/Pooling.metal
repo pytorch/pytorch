@@ -666,6 +666,70 @@ kernel void max_pool_backward(
   grad_input[offsets.output] = static_cast<T>(grad_sum);
 }
 
+// max_pool_backward for 2 pooling dims, with the grid of pool2d_coords over
+// tiles of pool2d_backward_tile_cols grad_input columns
+template <typename T>
+kernel void max_pool2d_backward(
+    device T* grad_input [[buffer(0)]],
+    device const T* grad_output [[buffer(1)]],
+    device const int64_t* indices [[buffer(2)]],
+    constant PoolingParams<5>& params [[buffer(3)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr auto tile_cols = pool2d_backward_tile_cols;
+  auto dims = params.dims;
+  auto in_sizes = params.input_sizes.data() + dims - 2;
+  auto out_sizes = params.output_sizes.data() + dims - 2;
+  const int32_t out_strides[2] = {
+      int32_t(params.output_strides[dims - 2]),
+      int32_t(params.output_strides[dims - 1])};
+  const int32_t index_strides[2] = {
+      int32_t(params.indices_strides[dims - 2]),
+      int32_t(params.indices_strides[dims - 1])};
+  auto IW = in_sizes[1];
+  auto xy = pool2d_coords(
+      pos, params.input_sizes[dims - 3], in_sizes[0], params.channels_last);
+  auto iw0 = xy.w * tile_cols;
+  auto span_h = (params.kernel_size[0] - 1) * params.dilation[0] + 1;
+  auto span_w = (params.kernel_size[1] - 1) * params.dilation[1] + 1;
+  auto oh = pool_output_range(
+      xy.h, params.padding[0], span_h, params.stride[0], out_sizes[0]);
+  auto ow = pool_output_range(
+      iw0, params.padding[1], span_w, params.stride[1], out_sizes[1]);
+  ow.end = pool_output_range(
+               min(iw0 + tile_cols - 1, IW - 1),
+               params.padding[1],
+               span_w,
+               params.stride[1],
+               out_sizes[1])
+               .end;
+  grad_output +=
+      pool2d_offset({xy.n, xy.c, 0, 0}, params.output_strides.data(), dims);
+  indices +=
+      pool2d_offset({xy.n, xy.c, 0, 0}, params.indices_strides.data(), dims);
+  auto flat_index0 = xy.h * IW + iw0;
+
+  opmath_t<T> grad_sum[tile_cols] = {};
+  for (auto o0 = oh.start; o0 < oh.end; o0++) {
+    for (auto o1 = ow.start; o1 < ow.end; o1++) {
+      auto col =
+          indices[o0 * index_strides[0] + o1 * index_strides[1]] - flat_index0;
+      if (col >= 0 && col < tile_cols) {
+        auto grad = static_cast<opmath_t<T>>(
+            grad_output[o0 * out_strides[0] + o1 * out_strides[1]]);
+        for (int32_t v = 0; v < tile_cols; v++) {
+          grad_sum[v] += col == v ? grad : 0;
+        }
+      }
+    }
+  }
+  grad_input +=
+      pool2d_offset({xy.n, xy.c, xy.h, iw0}, params.input_strides.data(), dims);
+  auto in_stride_w = int32_t(params.input_strides[dims - 1]);
+  for (int32_t v = 0; v < tile_cols && iw0 + v < IW; v++) {
+    grad_input[v * in_stride_w] = static_cast<T>(grad_sum[v]);
+  }
+}
+
 template <typename T>
 void max_unpool_impl(
     device T* output,
@@ -1421,14 +1485,21 @@ kernel void avg_pool2d_backward(
   REGISTER_MAX_POOL2D_S1(DTYPE, 3)                                            \
   REGISTER_MAX_POOL2D_S1(DTYPE, 5)
 
-#define REGISTER_MAX_POOL_BACKWARD(DTYPE)                         \
-  template [[host_name("max_pool_backward_" #DTYPE)]] kernel void \
-  max_pool_backward<DTYPE>(                                       \
-      device DTYPE * grad_input [[buffer(0)]],                    \
-      device const DTYPE* grad_output [[buffer(1)]],              \
-      device const int64_t* indices [[buffer(2)]],                \
-      constant PoolingParams<5>& params [[buffer(3)]],            \
-      uint tid [[thread_position_in_grid]]);
+#define REGISTER_MAX_POOL_BACKWARD(DTYPE)                           \
+  template [[host_name("max_pool_backward_" #DTYPE)]] kernel void   \
+  max_pool_backward<DTYPE>(                                         \
+      device DTYPE * grad_input [[buffer(0)]],                      \
+      device const DTYPE* grad_output [[buffer(1)]],                \
+      device const int64_t* indices [[buffer(2)]],                  \
+      constant PoolingParams<5>& params [[buffer(3)]],              \
+      uint tid [[thread_position_in_grid]]);                        \
+  template [[host_name("max_pool2d_backward_" #DTYPE)]] kernel void \
+  max_pool2d_backward<DTYPE>(                                       \
+      device DTYPE * grad_input [[buffer(0)]],                      \
+      device const DTYPE* grad_output [[buffer(1)]],                \
+      device const int64_t* indices [[buffer(2)]],                  \
+      constant PoolingParams<5>& params [[buffer(3)]],              \
+      uint3 pos [[thread_position_in_grid]]);
 
 #define REGISTER_ADAPTIVE_AVG_POOL(DTYPE, IDX_T, SUFFIX)                     \
   template[[host_name("adaptive_avg_pool_simd_" #DTYPE SUFFIX)]] kernel void \

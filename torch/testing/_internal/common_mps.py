@@ -61,6 +61,7 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int64,
                 torch.uint8,
+                torch.bool,
             ],
             "median": [torch.bool],
             "mode": None,
