@@ -33,7 +33,7 @@ READ_ONLY_TOOLS = {
     "ls",
     "get_issue",
     "get_issue_comments",
-    "search_issues",
+    "find_duplicate_issues",
 }
 PLAN_PERMISSIONS = {"contents": "read", "issues": "read", "id-token": "write"}
 
@@ -135,7 +135,14 @@ class TriageWorkflowContract(unittest.TestCase):
 
     def test_model_gets_only_read_only_tools(self):
         agent = step(PLAN, lambda s: s.get("uses") == "./.github/actions/pi-agent")
-        self.assertLessEqual(set(agent["with"]["tools"].split(",")), READ_ONLY_TOOLS)
+        tools = set(agent["with"]["tools"].split(","))
+        self.assertLessEqual(tools, READ_ONLY_TOOLS)
+        self.assertIn("find_duplicate_issues", tools)
+        self.assertNotIn("search_issues", tools)
+
+    def test_duplicate_discovery_source_is_bound_for_live_and_replay_runs(self):
+        self.assertEqual(PLAN["env"]["TRIAGE_SOURCE_ISSUE"], "${{ matrix.issue }}")
+        self.assertEqual(PLAN["env"]["TRIAGE_REPO"], "${{ inputs.repo }}")
 
     def test_metrics_are_best_effort_but_model_failures_block_apply(self):
         metrics = step(PLAN, lambda s: "upload-claude-usage" in s.get("uses", ""))
