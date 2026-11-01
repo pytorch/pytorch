@@ -88,8 +88,14 @@ class CommonTemplate:
         x = torch.randn(1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
 
+    def test_assert_alignment_none(self):
+        from torch._C._dynamo.guards import assert_alignment
+
+        self.assertTrue(assert_alignment(None, 16))
+        with self.assertRaisesRegex(AssertionError, "alignment cannot be 0"):
+            assert_alignment(None, 0)
+
     @config.patch(
-        cpp_wrapper=True,
         fx_graph_cache=False,
         implicit_fallbacks=True,
         alignment_asserts=True,
