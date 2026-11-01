@@ -88,7 +88,12 @@ class CommonTemplate:
         x = torch.randn(1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
 
-    @config.patch(implicit_fallbacks=True)
+    @config.patch(
+        cpp_wrapper=True,
+        fx_graph_cache=False,
+        implicit_fallbacks=True,
+        alignment_asserts=True,
+    )
     def test_fallback_undefined_output(self):
         def fn(*args):
             q, qkv_weight, qkv_bias, proj_weight, proj_bias = (a + 1 for a in args)

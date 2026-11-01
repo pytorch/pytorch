@@ -1264,9 +1264,6 @@ static PyObject* assert_alignment(
     return nullptr;
   }
 
-  if (item == Py_None) {
-    Py_RETURN_TRUE;
-  }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
     std::ostringstream msg;
     msg << "expected Tensor()";
@@ -1284,6 +1281,10 @@ static PyObject* assert_alignment(
     }
     PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
+  }
+
+  if (item == Py_None) {
+    Py_RETURN_TRUE;
   }
 
   const auto& tensor{THPVariable_Unpack(item)};
