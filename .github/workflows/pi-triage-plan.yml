@@ -66,6 +66,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TRIAGE_REPO: ${{ inputs.repo }}
+      TRIAGE_SOURCE_ISSUE: ${{ matrix.issue }}
       TRIAGE_REPLAY_ISSUE: ${{ inputs.replay && matrix.issue || '' }}
     steps:
       # MUST be the first step. The allowlist is pinned by
@@ -107,7 +108,7 @@ jobs:
         with:
           model: ${{ inputs.model }}
           thinking: ${{ inputs.thinking }}
-          tools: read,grep,find,ls,get_issue,get_issue_comments,search_issues
+          tools: read,grep,find,ls,get_issue,get_issue_comments,find_duplicate_issues
           extensions: ${{ github.workspace }}/.github/pi/extensions/github-issue-tools.ts
           skills: ${{ github.workspace }}/.agents/skills/${{ inputs.skill }}
           prompt: ${{ format(inputs.prompt, matrix.issue) }}

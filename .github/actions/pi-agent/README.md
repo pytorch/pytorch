@@ -104,7 +104,7 @@ Sol remains available through the `model` dispatch input. Distributed triage use
 1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
    egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
-   `get_issue_comments`, `search_issues`, fixed to this repository) and submits a plan
+   `get_issue_comments`, `find_duplicate_issues`, fixed to the workflow repository) and submits a plan
    matching `.github/pi/schemas/issue-triage-plan.json`.
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
@@ -112,10 +112,51 @@ Sol remains available through the `model` dispatch input. Distributed triage use
    posted, closes only usage questions and expected numerical behavior, and adds
    `bot-triaged`. It then hands the issue to `distributed-triage-pi.yml`.
 
+Duplicate discovery binds `TRIAGE_SOURCE_ISSUE` to the matrix issue in live and replay runs;
+repository and source are not model inputs. It accepts 1-2 ordered groups of 1-4 literal ASCII
+terms (up to 80 characters each, generated query at most 256): first focused, last broader
+family. Put each group's subject anchor first and essential context last. A third supplied
+group is rejected by the schema. The tool reserves a search slot to automatically relax the
+last group, independent of nonempty results or a second model call. After trimming and removing
+repeated terms in first-occurrence order, it keeps the first and last terms for at least three
+distinct terms, or only the first for two. It adds no query for one distinct term or if the
+relaxed query is identical to a provided query. Provided queries are otherwise unchanged.
+This is a bounded query-relaxation heuristic, not guaranteed recall.
+
+All terms are quoted in fixed `in:title,body,comments` searches: at most three searches of
+10 rows each per call, followed by hydration of up to five distinct candidates ordered by
+their best search rank across searches. Each query result records `origin: "provided"` or
+`"broadened"` and its zero-based `source_group` input index; candidate `matched_queries`
+indices refer to this query-result list, including a generated query when present.
+Two calls per session bound this tool to six search and ten hydration attempts; failures count,
+and each invocation has a 90-second deadline with 30-second subprocess timeouts. Other issue
+readers are outside this budget. Results include open and closed evidence, 3,000-character body
+prefixes, canonical links, query membership, clipping and partial-failure signals, and unhydrated
+candidate IDs and titles. Search requests use GitHub's text-match media type to include matching
+fragments without extra reads: at most three per hydrated candidate and one per unhydrated
+candidate, each clipped to 400 characters, with fragment and count clipping flags. Fragments are
+deduplicated across queries, with comment matches preferred when slots compete. Each fragment
+identifies its issue/comment source, title/body field, and a constructed canonical issue or comment
+link. Only known GitHub Issue title/body and IssueComment body metadata shapes are accepted;
+missing text matches are valid. Numeric repository-ID match URLs rely on the already
+repository-validated search row, and metadata URLs are never returned or followed.
+Fragments are untrusted retrieval hints, not full comments or authenticated author/maintainer
+statements; read full comments before relying on author authority, policy decisions, or quotations.
+`status: "complete"` means bounded retrieval completed without coverage errors, not exhaustive
+recall or full-body/comment evidence. Search rank is not confidence, and empty bounded results
+do not prove absence.
+The tool never decides duplicates or closes issues. Generic `search_issues` remains registered
+but is not in the triage allowlist.
+
+The offline duplicate-tool tests run against Pi installed from the action lockfile, use its real
+argument validator, and replace only `gh` with controlled fixtures (no GitHub access):
+`PI_TEST_RUNTIME=/absolute/path/to/node_modules/@earendil-works/pi-coding-agent node --test .github/pi/tests/github-issue-tools.mjs`.
+
 Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
 triage bot acted (their labels and human comments from before its first label event) and
-compares each plan with the labels added since; `dry-run` plans against the issues as they
-are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
+compares each plan with the labels added since. Source titles/bodies and duplicate-candidate
+evidence are current, including candidates filed later; replay is not a frozen historical snapshot.
+`dry-run` plans against the issues as they are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
 can process batches. Issue transfers become `triage review`. A `request_reproduction` plan
 redacts download/storage links from the current issue body using a fixed policy and posts
 the self-contained-reproduction template. Other issue text is preserved; the model cannot
