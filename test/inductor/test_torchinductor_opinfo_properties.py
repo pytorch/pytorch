@@ -708,7 +708,6 @@ XPU_EAGER_EQUIV_XFAILS = {
     },
     "inductor_default": {
         "exp": {fp32},
-        "exp2": {fp32},
         "expm1": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
