@@ -599,7 +599,10 @@ def _deregister_pytree_node(
     with _NODE_REGISTRY_LOCK:
         del SUPPORTED_NODES[cls]
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
-        del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
+        # A type registered without a name has no entry, and a later
+        # registration may have taken the name.
+        if SERIALIZED_TYPE_TO_PYTHON_TYPE.get(node_def.serialized_type_name) is cls:
+            del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
         CONSTANT_NODES.discard(cls)
 
@@ -684,7 +687,10 @@ def _private_register_pytree_node(
             from_dumpable_context,
         )
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
-        SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
+        # Every type registered without a name gets the placeholder, so it
+        # cannot name one of them.
+        if serialized_type_name != NO_SERIALIZED_TYPE_NAME_FOUND:
+            SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -897,10 +903,7 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
 
 
 def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    if (
-        dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE
-        or dumpable_context == NO_SERIALIZED_TYPE_NAME_FOUND
-    ):
+    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         raise NotImplementedError(
             f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
             "because we couldn't find a serialized name."

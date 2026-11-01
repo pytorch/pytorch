@@ -15,7 +15,6 @@ from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
 from typing import Any, NamedTuple
-from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -1211,6 +1210,14 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             serialized_type_name="test_pytree.test_pytree_deserialize_names.Point",
         )
         self.addCleanup(python_pytree._deregister_pytree_node, Point)
+
+        # The placeholder must not name a type registered without a name.
+        @dataclass(frozen=True)
+        class Nameless:
+            pass
+
+        python_pytree.register_constant(Nameless)
+        self.addCleanup(python_pytree._deregister_pytree_node, Nameless)
         serialized = python_pytree.treespec_dumps(
             python_pytree.tree_structure(Point(1, 2))
         )
@@ -1222,12 +1229,7 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             "namedtuple_without_a_name": {**root, "context": no_name},
             "type_without_a_name": {**root, "type": no_name, "context": "null"},
         }[case]
-        # Some type is always registered under the placeholder name, so the
-        # case does not depend on which tests registered or removed one before.
-        with (
-            patch.dict(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE, {no_name: tuple}),
-            self.assertRaisesRegex(NotImplementedError, reason),
-        ):
+        with self.assertRaisesRegex(NotImplementedError, reason):
             python_pytree.treespec_loads(json.dumps([protocol, node]))
 
     @parametrize(

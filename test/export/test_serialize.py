@@ -2933,14 +2933,6 @@ class TestPredispatchSerialization(TestCase):
             class Config:
                 factor: int
 
-            # Removing a type without a serialized name also removes the
-            # placeholder entry that other such types share, so restore it.
-            names = pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE
-            placeholder = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
-            if placeholder in names:
-                self.addCleanup(names.__setitem__, placeholder, names[placeholder])
-            else:
-                self.addCleanup(names.pop, placeholder, None)
             pytree.register_constant(Config)
             self.addCleanup(pytree._deregister_pytree_node, Config)
 
@@ -3287,13 +3279,7 @@ class TestPredispatchSerialization(TestCase):
     )
     def test_predispatch_flat_apply_load_rejects_bad_specs(self, case, reason):
         _, artifact = self._index_in_vmap_artifact()
-        # Some type is always registered under the placeholder name, so these
-        # cases do not depend on which tests registered or removed one before.
-        no_name = {pytree.NO_SERIALIZED_TYPE_NAME_FOUND: tuple}
-        with (
-            patch.dict(pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE, no_name),
-            self.assertRaisesRegex(SerializeError, reason),
-        ):
+        with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(artifact, self._bad_spec_changes()[case])
 
     @staticmethod
