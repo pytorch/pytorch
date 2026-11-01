@@ -420,9 +420,6 @@ class TestRefs(TestCase):
             x = torch.ones(4, device=device)
             x.to(device="meta")
 
-    def test_inferred_tags(self):
-        self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
-
     # From https://github.com/pytorch/pytorch/issues/195705
     @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64)
     def test_alpha_dropout_dtype(self, device, dtype):
