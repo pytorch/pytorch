@@ -369,8 +369,8 @@ class UserKernelHOPInfo:
     The FX graph cache keys user kernels by source for Triton only
     (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
     it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
-    not cacheable by default, and CuTeDSL's pass cacheable=False: the cache bypasses
-    every graph that contains them.
+    not cacheable by default, and the cache bypasses every graph that contains an
+    uncacheable HOP.
     """
 
     dsl: str
