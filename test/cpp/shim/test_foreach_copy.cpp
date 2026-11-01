@@ -17,15 +17,20 @@ std::vector<AtenTensorHandle> handles(std::vector<at::Tensor>& tensors) {
   return result;
 }
 
-TEST(AOTIForeachCopyTest, CopiesEachTensor) {
-  // Lists of one dtype and layout, then mixed ones.
+// Copies lists of one dtype and layout, which the CUDA kernel fuses, then mixed
+// ones, which it copies one by one.
+void check_copies(c10::Device device) {
+  auto floats = at::TensorOptions().device(device);
+  auto longs = floats.dtype(at::kLong);
   for (bool uniform : {true, false}) {
-    std::vector<at::Tensor> dst = {at::empty({4}), at::empty({3, 2})};
-    std::vector<at::Tensor> src = {at::randn({4}), at::randn({3, 2})};
+    std::vector<at::Tensor> dst = {
+        at::empty({4}, floats), at::empty({3, 2}, floats)};
+    std::vector<at::Tensor> src = {
+        at::randn({4}, floats), at::randn({3, 2}, floats)};
     if (!uniform) {
-      dst[1] = at::empty({2, 3}).t();
-      dst.push_back(at::empty({5}, at::kLong));
-      src.push_back(at::randint(100, {5}, at::kLong));
+      dst[1] = at::empty({2, 3}, floats).t();
+      dst.push_back(at::empty({5}, longs));
+      src.push_back(at::randint(100, {5}, longs));
     }
     auto dst_handles = handles(dst);
     auto src_handles = handles(src);
@@ -38,6 +43,10 @@ TEST(AOTIForeachCopyTest, CopiesEachTensor) {
       EXPECT_TRUE(dst[i].equal(src[i]));
     }
   }
+}
+
+TEST(AOTIForeachCopyTest, CopiesEachTensor) {
+  check_copies(at::kCPU);
 }
 
 TEST(AOTIForeachCopyTest, ChecksItsArguments) {
@@ -56,6 +65,33 @@ TEST(AOTIForeachCopyTest, ChecksItsArguments) {
       aoti_torch__foreach_copy_(
           dst_handles.data(), 2, src_handles.data(), 2, 0),
       AOTI_TORCH_FAILURE);
+}
+
+TEST(AOTIForeachCopyCudaTest, CopiesDeviceTensors) {
+  if (!at::hasCUDA()) {
+    GTEST_SKIP() << "CUDA is not available";
+  }
+  check_copies(at::kCUDA);
+}
+
+TEST(AOTIForeachCopyCudaTest, CopiesFromPinnedMemoryAsynchronously) {
+  if (!at::hasCUDA()) {
+    GTEST_SKIP() << "CUDA is not available";
+  }
+  std::vector<at::Tensor> host = {
+      at::randn({4}).pin_memory(), at::randn({3, 2}).pin_memory()};
+  std::vector<at::Tensor> device = {
+      at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
+  auto host_handles = handles(host);
+  auto device_handles = handles(device);
+  ASSERT_EQ(
+      aoti_torch__foreach_copy_(
+          device_handles.data(), 2, host_handles.data(), 2, 1),
+      AOTI_TORCH_SUCCESS);
+  // cpu() copies on the same stream, after the asynchronous copies.
+  for (size_t i = 0; i < host.size(); ++i) {
+    EXPECT_TRUE(device[i].cpu().equal(host[i]));
+  }
 }
 
 } // namespace
