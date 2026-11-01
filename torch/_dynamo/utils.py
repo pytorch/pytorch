@@ -3299,7 +3299,7 @@ def enumerate_items_with_dict_position(
         if (
             keys is None
             or len(keys) != len(items)
-            or any(id(key) not in positions for key in keys)
+            or {id(key) for key in keys} != positions.keys()
         ):
             raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
         return (positions[id(key)] for key in keys)

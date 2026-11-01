@@ -260,11 +260,12 @@ class BaseSetVariable(VariableTracker):
         # set_update_internal fast path for set/frozenset/dict operands.
         # HashableTracker raises ObservedTypeError for an unhashable element,
         # matching CPython's hash-at-insert behavior.
-        from .dicts import ConstDictVariable
+        from .dicts import ConstDictVariable, NNModuleHooksDictVariable
 
         if isinstance(other, ConstDictVariable):
-            # Escaping keys can be reconstructed by position, even for sets.
             other.install_dict_order_guard(tx)
+            if isinstance(other, NNModuleHooksDictVariable):
+                other.install_key_escape_guard()
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             yield from other.items.keys()
             return
@@ -277,10 +278,12 @@ class BaseSetVariable(VariableTracker):
         # Eager variant: unpack_iterable takes the fast unpack_var_sequence
         # path for builtin iterables instead of the per-element iterator
         # protocol.
-        from .dicts import ConstDictVariable
+        from .dicts import ConstDictVariable, NNModuleHooksDictVariable
 
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
+            if isinstance(other, NNModuleHooksDictVariable):
+                other.install_key_escape_guard()
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
@@ -1333,8 +1336,12 @@ class DictKeySetVariable(BaseSetVariable):
     def _as_set_variable(
         tx: "InstructionTranslatorBase", vt: VariableTracker
     ) -> "SetVariable":
-        from .dicts import ConstDictVariable
+        from .dicts import ConstDictVariable, NNModuleHooksDictVariable
 
+        if isinstance(vt, ConstDictVariable):
+            vt.install_dict_order_guard(tx)
+            if isinstance(vt, NNModuleHooksDictVariable):
+                vt.install_key_escape_guard()
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
             items: list[Any] = list(vt.items.keys())
         else:
