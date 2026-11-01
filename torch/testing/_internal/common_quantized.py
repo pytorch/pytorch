@@ -3,6 +3,7 @@
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
+import functools
 import numpy as np
 import torch
 from torch import Tensor
@@ -175,6 +176,7 @@ def override_cpu_allocator_for_qnnpack(qengine_is_qnnpack):
 # Currently for some of the tests it seems to have inconsistent params
 # for fbgemm vs qnnpack.
 def override_qengines(qfunction):
+    @functools.wraps(qfunction)
     def test_fn(*args, **kwargs):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
@@ -590,6 +592,15 @@ def _bfloat16_to_float4_e2m1fn_x2(x):
     x = pack_uint4(x)
     x = x.view(torch.float4_e2m1fn_x2)
     return x
+
+
+def data_to_nvfp4_scale(x, block_size=16):
+    """Compute per-block E4M3 scales for NVFP4 test inputs."""
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+    max_abs = torch.amax(torch.abs(x), 1) + 1e-12
+    scale = (max_abs / 6.0).clamp(max=torch.finfo(torch.float8_e4m3fn).max)
+    return scale.to(torch.float8_e4m3fn).reshape(orig_shape[0], -1)
 
 
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142

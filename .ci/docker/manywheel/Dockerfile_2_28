@@ -18,15 +18,9 @@ RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 
-# Build CPython 3.15.0 / 3.15.0t from source; quay.io/pypa does not ship them yet.
-# openssl-devel is needed only to build CPython's _ssl module; install and remove
-# it in the same layer so it isn't carried into the base stage.
-COPY ./common/install_cpython.sh install_cpython.sh
-RUN yum install -y openssl-devel && \
-    CPYTHON_VERSIONS="3.15.0 3.15.0t" bash ./install_cpython.sh && \
-    yum remove -y openssl-devel && \
-    yum clean all && \
-    rm install_cpython.sh
+# Use a certifi CA bundle without the compromised eMudhra roots instead of the one vendored by the base image
+RUN /opt/python/cp312-cp312/bin/python -m pip install "certifi>=2026.10.23" && \
+    ln -sf $(/opt/python/cp312-cp312/bin/python -c 'import certifi; print(certifi.where())') /opt/_internal/certs.pem
 
 FROM base as cuda
 ARG BASE_CUDA_VERSION=12.6
@@ -58,6 +52,10 @@ FROM base as libpng
 # Install libpng
 ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
+
+FROM base as llvm
+COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
+RUN bash ./install_llvm_tools.sh && rm install_llvm_tools.sh
 
 FROM ${GPU_IMAGE} as common
 ARG DEVTOOLSET_VERSION=13
@@ -111,6 +109,7 @@ COPY --from=libpng             /usr/local/include/libpng*            /usr/local/
 COPY --from=libpng             /usr/local/lib/libpng*                /usr/local/lib/
 COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/lib/pkgconfig
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
+COPY --from=llvm               /llvm/install/                        /usr/local/
 
 # Install Rust toolchain (needed to build the torch._rust extension when building
 # the Python wheels). In `common` so all *_final wheel-builder targets inherit it.
@@ -179,6 +178,6 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
 ENV XPU_VERSION 2026.1
-ENV OMIX_VERSION 0.3.0
+ENV OMIX_VERSION 0.4.1
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

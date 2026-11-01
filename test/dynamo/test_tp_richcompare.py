@@ -87,59 +87,57 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     _ORDERING_OPS = frozenset({operator.lt, operator.le, operator.gt, operator.ge})
     _LE_GE = frozenset({operator.le, operator.ge})
 
+    def _check_batched(self, expected, result, error_ops, labels):
+        for (op, label), exp, res in zip(labels, expected, result):
+            with self.subTest(op=op.__name__, order=label):
+                raised = isinstance(exp, TypeError)
+                self.assertEqual(raised, op in error_ops)
+                if raised:
+                    self.assertIn("not supported between", res)
+                else:
+                    self.assertEqual(res, exp)
+
+    @staticmethod
+    def _run_all_ops(a, b, *, as_str):
+        out = []
+        for op in TpRichcompareTests._ALL_OPS:
+            try:
+                out.append(op(a, b))
+            except TypeError as e:
+                out.append(str(e) if as_str else e)
+        return out
+
     def _assert_all_cmp_equals(self, a, b, *, error_ops=frozenset()):
-        """Assert all 6 comparison ops match eager for (a, b) and (b, a).
+        """Assert all 6 comparison ops match eager for (a, b) and (b, a), in one compile.
 
         error_ops: set of operator functions expected to raise TypeError.
         Use _ORDERING_OPS for types that support eq/ne but not ordering.
         """
-        for op in self._ALL_OPS:
-            with self.subTest(op=op.__name__, order="a,b"):
-                self._assert_cmp_equals(a, b, op, expect_type_error=(op in error_ops))
-            torch._dynamo.reset()
-            with self.subTest(op=op.__name__, order="b,a"):
-                self._assert_cmp_equals(b, a, op, expect_type_error=(op in error_ops))
-            torch._dynamo.reset()
+        run = self._run_all_ops
+        expected = run(a, b, as_str=False) + run(b, a, as_str=False)
 
-    def _assert_sourceless_cmp_equals(
-        self, make_a, make_b, op, *, expect_type_error=None
-    ):
-        """Like _assert_cmp_equals but for objects created inside the compile region."""
-        try:
-            expected = op(make_a(), make_b())
-        except TypeError:
-            if expect_type_error is not None:
-                self.assertTrue(expect_type_error)
-
-            def fn(_, _op=op, _make_a=make_a, _make_b=make_b):
-                try:
-                    return _op(_make_a(), _make_b())
-                except TypeError as e:
-                    return str(e)
-
-            result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-            self.assertIn("not supported between", result)
-            return
-
-        if expect_type_error is not None:
-            self.assertFalse(expect_type_error)
-
-        def fn(_, _op=op, _make_a=make_a, _make_b=make_b):
-            return _op(_make_a(), _make_b())
+        def fn(_):
+            return run(a, b, as_str=True) + run(b, a, as_str=True)
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(result, expected)
+        labels = [(op, o) for o in ("a,b", "b,a") for op in self._ALL_OPS]
+        self._check_batched(expected, result, error_ops, labels)
+        torch._dynamo.reset()
 
     def _assert_all_sourceless_cmp_equals(
         self, make_a, make_b, *, error_ops=frozenset()
     ):
         """Like _assert_all_cmp_equals but for objects created inside the compile region."""
-        for op in self._ALL_OPS:
-            with self.subTest(op=op.__name__):
-                self._assert_sourceless_cmp_equals(
-                    make_a, make_b, op, expect_type_error=(op in error_ops)
-                )
-            torch._dynamo.reset()
+        run = self._run_all_ops
+        expected = run(make_a(), make_b(), as_str=False)
+
+        def fn(_):
+            return run(make_a(), make_b(), as_str=True)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        labels = [(op, "a,b") for op in self._ALL_OPS]
+        self._check_batched(expected, result, error_ops, labels)
+        torch._dynamo.reset()
 
     # =====================================================================
     # Constants (ConstantVariable)
@@ -884,6 +882,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: works
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_cmp_equals(row1, row1, operator.eq)
         self._assert_cmp_equals(row1, row2, operator.eq)

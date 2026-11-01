@@ -52,12 +52,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import (
-    MI350_ARCH,
-    skipIfRocmArch,
-    skipIfTorchInductor,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -886,7 +881,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
     def test_ddp_baseline_aot_eager_multiprocess(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             self.assertFalse(config.optimize_ddp)
             m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
             m = DDP(m, device_ids=[self.rank])
@@ -895,7 +892,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
 
     def _test_hf_bert_ddp_inductor(self, static_graph):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "inductor")
@@ -919,7 +918,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         self._test_hf_bert_ddp_inductor(static_graph=True)
 
     def _test_hf_bert_aot_eager(self, static_graph):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
@@ -958,7 +959,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             def forward(self, inp):
                 return self.fc3(self.fc2(self.fc1(inp)))
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             self.assertFalse(config.optimize_ddp)
             model = MyModel().to(device=self.device_type)
 
@@ -985,7 +988,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_aot_eager(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
@@ -1027,7 +1032,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 x = self.convp(x)
                 return x
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             net = Net().to(self.rank)
             optimizer = torch.optim.SGD(
                 net.parameters(),
@@ -1054,7 +1061,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_setattr(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             from torch._dynamo.utils import counters
 
@@ -1073,7 +1082,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_unspecialized_forced_getattr_inline(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             from torch._dynamo.utils import counters
 
@@ -1086,12 +1097,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
@@ -1116,7 +1128,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_activation_checkpointing(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             model, inputs = get_toy_model_for_activation_checkpointing(
                 f"{self.device_type}:{self.rank}"
             )
@@ -1152,7 +1166,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             )
             return model
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             for wrap_policy, test_instance in (
                 (None, "FSDP without recursive wrapping"),
             ):
@@ -1190,7 +1206,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_fsdp_activation_checkpointing(self):
         from transformers.models.bert.modeling_bert import BertLayer
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             for wrap_policy, test_instance in (
                 (
                     functools.partial(
@@ -1234,7 +1252,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_tensor(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
 
             class SimpleModel(nn.Module):
                 def __init__(self, input_size, output_size):
@@ -1279,7 +1299,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_scalar(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             # TODO: This should be possible to do inside the function, but
@@ -1307,7 +1329,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_speculation_divergence(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1337,7 +1361,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_graph_break_empty_graph_still_collective(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1369,7 +1395,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_dim_mismatch(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1398,7 +1426,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_missing_source(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1420,7 +1450,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_scalar_missing_source(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1442,7 +1474,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_type_mismatch(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1478,7 +1512,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @enable_guard_collectives()
     def test_guard_collective(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1505,7 +1541,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)
     @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
     def test_multiproc_autotune(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1541,7 +1579,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)
     @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
     def test_multiproc_autotune_dynamic_shapes(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             @torch.compile()
@@ -1612,7 +1652,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_get_pg_attr(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             pg = dist.distributed_c10d._get_default_group()
 
             device = f"{self.device_type}:{self.rank}"
@@ -1637,7 +1679,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_asymmetric_compilation(self):
         from torch._dynamo.comptime import comptime
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             device = f"{self.device_type}:{self.rank}"
@@ -1655,24 +1699,26 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 y = 2 * x
                 return y.sum()
 
-            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
-
             x = torch.ones(4, device=device)
 
-            # NCCL startup is lazy
+            # NCCL startup is lazy; keep it out of the short timeout below
             w = pg.allreduce(x)
             w.wait()
+            torch.accelerator.synchronize(device)
+
+            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
 
             f(x)
             if self.rank != 0:
                 # test fails with NCCL timeout without this line
                 dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                    timedelta(seconds=sleep_time)
+                    timedelta(seconds=30)
                 )
 
             w = pg.allreduce(x)
             w.wait()
             torch.accelerator.synchronize(device)
+            dist.set_timeout(dist.constants.default_pg_nccl_timeout, pg)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
@@ -1690,7 +1736,12 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         from torch._dynamo.utils import counters
         from torch._inductor.utils import fresh_cache
 
-        with fresh_cache(), _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with (
+            fresh_cache(),
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
+        ):
             torch._dynamo.utils.clear_compilation_metrics()
 
             device = f"{self.device_type}:{self.rank}"
@@ -1774,7 +1825,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
@@ -2059,7 +2109,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model(hidden_states)
         torch.accelerator.synchronize()
 
-    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
@@ -2756,6 +2805,28 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, expected):
             fn(x)
 
+    def test_nn_functional_deprecated(self):
+        import torch.distributed.nn.functional as F
+
+        x = torch.randn(4)
+        calls = {
+            "broadcast": lambda: F.broadcast(x, src=0),
+            "gather": lambda: F.gather(x, dst=0),
+            "scatter": lambda: F.scatter([x, x], src=0),
+            "reduce": lambda: F.reduce(x, dst=0),
+            "reduce_scatter": lambda: F.reduce_scatter(x, [x, x]),
+            "all_gather": lambda: F.all_gather(x),
+            "_all_gather_base": lambda: F._all_gather_base(torch.empty(8), x),
+            "all_to_all": lambda: F.all_to_all([x, x], [x, x]),
+            "all_to_all_single": lambda: F.all_to_all_single(torch.empty(4), x),
+            "all_reduce": lambda: F.all_reduce(x),
+        }
+        for name, call in calls.items():
+            with self.subTest(name=name):
+                msg = f"torch.distributed.nn.functional.{name} is deprecated"
+                with self.assertWarnsOnceRegex(FutureWarning, re.escape(msg)):
+                    call()
+
     def test_nn_functional_all_reduce_unsupported(self):
         from torch.distributed.nn.functional import all_reduce
 
@@ -2767,7 +2838,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_reduce",
-            suggestion="torch.distributed._functional_collectives.all_reduce",
+            suggestion="torch.distributed.functional_collectives.all_reduce",
         )
 
     def test_nn_functional_all_gather_unsupported(self):
@@ -2781,7 +2852,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_single",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
         )
 
     def test_nn_functional_reduce_scatter_unsupported(self):
@@ -2796,7 +2867,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             [torch.randn(4, 4), torch.randn(4, 4)],
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
+            suggestion="torch.distributed.functional_collectives.reduce_scatter_single",
         )
 
     def test_nn_functional_all_to_all_single_unsupported(self):
@@ -2811,7 +2882,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_to_all_single",
-            suggestion="torch.distributed._functional_collectives.all_to_all_single",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
         )
 
     def test_nn_functional_broadcast_unsupported(self):
@@ -2825,7 +2896,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4),
             "broadcast",
-            suggestion="torch.distributed._functional_collectives.broadcast",
+            suggestion="torch.distributed.functional_collectives.broadcast",
         )
 
     def test_nn_functional_reduce_unsupported(self):
@@ -2835,7 +2906,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return reduce(x, dst=0)
 
-        self._assert_not_supported(fn, torch.randn(4), "reduce")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "reduce",
+            suggestion="torch.distributed.functional_collectives.all_reduce",
+        )
 
     def test_nn_functional_gather_unsupported(self):
         from torch.distributed.nn.functional import gather
@@ -2844,7 +2920,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return gather(x, dst=0)
 
-        self._assert_not_supported(fn, torch.randn(4), "gather")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "gather",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
+        )
 
     def test_nn_functional_scatter_unsupported(self):
         from torch.distributed.nn.functional import scatter
@@ -2853,7 +2934,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return scatter([x, x], src=0)
 
-        self._assert_not_supported(fn, torch.randn(4), "scatter")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "scatter",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
+        )
 
     def test_nn_functional_all_to_all_unsupported(self):
         from torch.distributed.nn.functional import all_to_all
@@ -2862,7 +2948,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         def fn(x):
             return all_to_all([torch.empty_like(x)], [x])
 
-        self._assert_not_supported(fn, torch.randn(4), "all_to_all")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "all_to_all",
+            suggestion="torch.distributed.functional_collectives.all_to_all_single",
+        )
 
     def test_nn_functional_all_gather_base_unsupported(self):
         from torch.distributed.nn.functional import _all_gather_base
@@ -2872,7 +2963,12 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             output = torch.empty(8)
             return _all_gather_base(output, x)
 
-        self._assert_not_supported(fn, torch.randn(4), "_all_gather_base")
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "_all_gather_base",
+            suggestion="torch.distributed.functional_collectives.all_gather_single",
+        )
 
 
 if __name__ == "__main__":

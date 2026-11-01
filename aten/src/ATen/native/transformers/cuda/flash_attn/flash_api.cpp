@@ -51,6 +51,19 @@ namespace FLASH_NAMESPACE {
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
+// The kernels use 16-byte vectorized global memory accesses at every row.
+void check_aligned(const at::Tensor &x, const char *name) {
+    if (x.numel() == 0) {
+        return;
+    }
+    bool aligned = reinterpret_cast<uintptr_t>(x.const_data_ptr()) % 16 == 0;
+    for (int64_t dim = 0; dim < x.dim() - 1; ++dim) {
+        aligned &= x.size(dim) <= 1 || x.stride(dim) * x.element_size() % 16 == 0;
+    }
+    TORCH_CHECK(aligned, name, " must have a 16-byte aligned data pointer and strides");
+}
+#define CHECK_ALIGNED(x) check_aligned(x, #x)
+
 static_assert(sizeof(at::PhiloxCudaState) <= sizeof(Flash_fwd_params::philox_args),
               "Flash_fwd_params::philox_args buffer is too small for at::PhiloxCudaState");
 static_assert(alignof(at::PhiloxCudaState) <= alignof(decltype(Flash_fwd_params::philox_args)),
@@ -418,6 +431,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
 
     const auto sizes = q.sizes();
 
@@ -487,6 +501,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
         CHECK_DEVICE(out);
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
+        CHECK_ALIGNED(out);
         CHECK_SHAPE(out, batch_size, sizes[1], sizes[2], head_size_og);
         if (seqlenq_ngroups_swapped) {
             out = out.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
@@ -634,6 +649,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
     CHECK_CONTIGUOUS(cu_seqlens_q);
     CHECK_CONTIGUOUS(cu_seqlens_k);
 
@@ -709,6 +725,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
         CHECK_DEVICE(out);
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
+        CHECK_ALIGNED(out);
         CHECK_SHAPE(out, sizes[0], sizes[1], head_size_og);
         if (seqlenq_ngroups_swapped) {
             out = out.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
@@ -889,7 +906,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
+    CHECK_ALIGNED(out);
 
     const auto sizes = q.sizes();
 
@@ -917,6 +936,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     }
 
     TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+    CHECK_ALIGNED(dout);
 
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
@@ -1119,8 +1139,11 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
+    CHECK_ALIGNED(out);
     TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+    CHECK_ALIGNED(dout);
     CHECK_CONTIGUOUS(cu_seqlens_q);
     CHECK_CONTIGUOUS(cu_seqlens_k);
 

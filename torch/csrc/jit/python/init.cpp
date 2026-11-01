@@ -57,12 +57,6 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
-#include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
-#include <torch/csrc/jit/passes/quantization/finalize.h>
-#include <torch/csrc/jit/passes/quantization/fusion_passes.h>
-#include <torch/csrc/jit/passes/quantization/insert_observers.h>
-#include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
-#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 #include <torch/csrc/jit/passes/refine_tuple_types.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -314,90 +308,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_fuse_quantized_add_relu",
-          [](std::shared_ptr<Graph>& g) {
-            return FuseQuantizedAddRelu(g); // overload resolution
-          })
-      .def(
-          "_jit_pass_insert_observers",
-          [](Module& module,
-             const std::string& method_name,
-             const py::dict& qconfig_dict,
-             bool inplace,
-             int quant_type_int) {
-            auto dict = py::cast<std::unordered_map<
-                std::string,
-                std::optional<std::tuple<Module, Module>>>>(qconfig_dict);
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertObservers(
-                module, method_name, dict, inplace, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("qconfig_dict"),
-          py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_observer_method_for_ondevice_ptq",
-          [](Module& module,
-             const std::string& method_name,
-             const py::dict& qconfig_dict,
-             bool inplace,
-             int quant_type_int) {
-            auto dict = py::cast<std::unordered_map<
-                std::string,
-                std::optional<std::tuple<Module, Module>>>>(qconfig_dict);
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertObserversForOnDevicePTQ(
-                module, method_name, dict, inplace, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("qconfig_dict"),
-          py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_quant_dequant",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace,
-             bool debug,
-             int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(
-                module, method_name, inplace, debug, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("inplace"),
-          py::arg("debug"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_quant_dequant_for_ondevice_ptq",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace,
-             bool debug,
-             int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuantOnDevicePTQ(
-                module, method_name, inplace, debug, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("inplace"),
-          py::arg("debug"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_prepack_unpack",
-          [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
-      .def(
-          "_jit_pass_insert_prepack_unpack",
-          [](Module& module) { return InsertPrepackUnpack(module); })
-      .def(
-          "_jit_pass_quant_fusion",
-          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def(
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
       .def(
@@ -436,36 +346,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_fuse_add_relu",
           [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
-      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
-      .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
       .def(
           "_jit_pass_swap_functional_linear",
           [](Module& module) { SwapFunctionalLinear(module); })
-      .def(
-          "_jit_pass_quant_finalize",
-          [](Module& module,
-             int quant_type_int,
-             const std::vector<std::string>& preserved_attrs) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type, preserved_attrs);
-          },
-          py::arg("module"),
-          py::arg("quant_type_int") = 1,
-          py::arg("preserved_attrs") = std::vector<std::string>())
-      .def(
-          "_jit_pass_quant_finalize_for_ondevice_ptq",
-          [](Module& module,
-             int quant_type_int,
-             const std::string& method_name) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return FinalizeOnDevicePTQ(module, quant_type, method_name);
-          },
-          py::arg("module"),
-          py::arg("quant_type_int") = 1,
-          py::arg("preserved_attrs") = std::vector<std::string>())
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -701,9 +587,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_has_cpp_tests", []() { return true; })
       .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
-      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def(
+          "_jit_run_cpp_tests",
+          []() { TORCH_CHECK(false, "PyTorch was not built with C++ tests"); })
       .def("_jit_has_cpp_tests", []() { return false; })
-      .def("_run_tensorexpr_cpp_tests", []() { throw std::exception(); })
+      .def(
+          "_run_tensorexpr_cpp_tests",
+          []() { TORCH_CHECK(false, "PyTorch was not built with C++ tests"); })
       .def("_has_tensorexpr_cpp_tests", []() { return false; })
 #endif
       .def(
@@ -878,8 +768,9 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                throw py::value_error(
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
+                TORCH_CHECK_VALUE(
+                    false,
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
             }
@@ -1715,13 +1606,16 @@ void initJITBindings(PyObject* module) {
               return op->schema();
             }
           }
-          throw std::runtime_error("Found no matching schema");
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
+        // Outside the try: the handler above exists to flatten c10::Error
+        // subtypes from the lookup, and would otherwise catch this and stamp a
+        // second location onto it.
+        TORCH_CHECK(false, "Found no matching schema");
       });
 
   m.def(
@@ -1761,7 +1655,7 @@ void initJITBindings(PyObject* module) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
       });
 
@@ -1795,7 +1689,7 @@ void initJITBindings(PyObject* module) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
       });
 
@@ -1839,7 +1733,7 @@ void initJITBindings(PyObject* module) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
               : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+          TORCH_CHECK(false, msg);
         }
       },
       py::arg("qualified_name"));
@@ -1901,7 +1795,7 @@ void initJITBindings(PyObject* module) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
     if (!type) {
-      throw std::runtime_error(std::move(s).str());
+      TORCH_CHECK(false, std::move(s).str());
     }
     return type.value();
   });
@@ -2383,7 +2277,7 @@ void initJITBindings(PyObject* module) {
       auto _stdout = py::module::import("sys").attr("stdout");
       _stdout.attr("write")(str);
     } catch (py::error_already_set& e) {
-      throw std::runtime_error(e.what());
+      TORCH_CHECK(false, e.what());
     }
   });
 
