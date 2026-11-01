@@ -2947,6 +2947,31 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return ScaleBy.apply(x, Config(3))
 
+        @dataclass
+        class Pair:
+            a: torch.Tensor
+            b: torch.Tensor
+
+            def __post_init__(self):
+                if self.a.shape != self.b.shape:
+                    raise ValueError("a and b must have the same shape")
+
+        pytree.register_dataclass(Pair, serialized_type_name="flat_apply_test.Pair")
+        self.addCleanup(pytree._deregister_pytree_node, Pair)
+
+        class AddPair(Scale):
+            @staticmethod
+            def forward(pair):
+                return pair.a + pair.b
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                return AddPair.apply(Pair(x, x * 3))
+
         # A class defined inside a function cannot be found by name.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
         reason = "__main__ module" if __name__ == "__main__" else "not a top-level"
@@ -2968,23 +2993,26 @@ class TestPredispatchSerialization(TestCase):
             with self.assertRaisesRegex(SerializeError, "__main__ module"):
                 torch.export.save(ep, io.BytesIO())
 
-        # An autograd function from an imported module saves, loads and runs.
+        # An autograd function from an imported module saves, loads and runs,
+        # also with a dataclass input whose __post_init__ reads its tensors.
         # A subclass whose name finds a different class cannot be saved.
         module = types.ModuleType("flat_apply_test_module")
         Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
+        AddPair.__module__, AddPair.__qualname__ = module.__name__, "AddPair"
         LocalTwoTensor.__module__, LocalTwoTensor.__qualname__ = module.__name__, "Sub"
 
         class Other(TwoTensor):
             pass
 
         Other.__module__, Other.__qualname__ = module.__name__, "Sub"
-        module.Scale, module.Sub = Scale, Other
+        module.Scale, module.AddPair, module.Sub = Scale, AddPair, Other
         with patch.dict(sys.modules, {module.__name__: module}):
             x = torch.randn(4)
-            buffer = io.BytesIO()
-            torch.export.save(export(Bar(), (x,), strict=False), buffer)
-            buffer.seek(0)
-            self.assertEqual(torch.export.load(buffer).module()(x), x * 2 + 1)
+            for m, expected in ((Bar(), x * 2 + 1), (Qux(), x * 4)):
+                buffer = io.BytesIO()
+                torch.export.save(export(m, (x,), strict=False), buffer)
+                buffer.seek(0)
+                self.assertEqual(torch.export.load(buffer).module()(x), expected)
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
             with self.assertRaisesRegex(SerializeError, "names a different object"):
                 torch.export.save(ep, io.BytesIO())

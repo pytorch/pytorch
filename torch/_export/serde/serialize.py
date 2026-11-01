@@ -787,26 +787,30 @@ def _find_flat_apply_func(
             "wrapper tensor subclasses and custom autograd functions can be saved "
             "and loaded"
         )
-    try:
-        args, kwargs = pytree.tree_unflatten(list(flat_args), in_spec)
-    except Exception as e:
-        raise SerializeError("flat_apply inputs do not match its input spec") from e
-    # flat_apply calls the helper with *args and **kwargs, so args[0] is the
-    # name it gets only when args is a tuple, as export saves it.
+    if in_spec.num_leaves != len(flat_args):
+        raise SerializeError("flat_apply inputs do not match its input spec")
+    # flat_apply rebuilds (args, kwargs) from the input spec and calls the helper
+    # with *args and **kwargs, so args[0] is the name it gets only when the spec
+    # is a (tuple, dict) pair, as export saves it. Only the spec is read, because
+    # rebuilding the inputs would run the code of registered pytree types on
+    # graph nodes instead of the values they stand for.
+    pair = in_spec.children() if in_spec.type is tuple else []
     if (
-        type(args) is not tuple
-        or type(kwargs) is not dict
-        or not args
-        or "function_cls_name" in kwargs
-        or not isinstance(args[0], str)
+        len(pair) != 2
+        or pair[0].type is not tuple
+        or pair[0].num_children == 0
+        or not pair[0].child(0).is_leaf()
+        or pair[1].type is not dict
+        or "function_cls_name" in pair[1].context
+        or not isinstance(flat_args[0], str)
     ):
         raise SerializeError("Expected an autograd function name as the first input")
-    function_cls = _find_imported(args[0])
+    function_cls = _find_imported(flat_args[0])
     if not (
         isinstance(function_cls, type)
         and issubclass(function_cls, torch.autograd.Function)
     ):
-        raise SerializeError(f"{args[0]} is not a torch.autograd.Function")
+        raise SerializeError(f"{flat_args[0]} is not a torch.autograd.Function")
     return func
 
 
