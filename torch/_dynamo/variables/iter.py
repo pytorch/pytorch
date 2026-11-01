@@ -423,6 +423,8 @@ class ChainVariable(IteratorVariable):
 
 
 class RepeatIteratorVariable(IteratorVariable):
+    _cpython_type = itertools.repeat
+
     # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c
     # repeat carries a `cnt` count: -1 means unbounded; CPython's repeat_new
     # clamps a user-supplied negative `times` to 0. We model that with `times`
@@ -509,6 +511,8 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
+    _cpython_type = itertools.count
+
     # advance_count tracks how many next() calls were made during tracing,
     # used by side_effects.py to replay them on the real iterator post-execution.
     _nonvar_fields = {
