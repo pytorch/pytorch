@@ -863,10 +863,11 @@ class {module_name}(torch.nn.Module):
         true:
         1. It has children that are used
         2. Its forward is called directly via a ``call_module`` node, or a
-        ``get_attr`` node reads it, as for the body of a higher order op.
-        All of its submodules are used too.
+        ``get_attr`` node reads it, as for the body of a higher order op
         3. It has a non-Module attribute that is used from a
         ``get_attr`` node
+
+        The submodules of a module that a node calls or reads are used too.
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.

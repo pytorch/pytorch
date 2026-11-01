@@ -3033,7 +3033,8 @@ class GraphModuleDeserializer(metaclass=Final):
             metadata = self.deserialize_metadata(serialized_node.metadata)
             for x in (*args, *kwargs.values()):
                 if isinstance(x, torch.fx.Node) and x.op == "get_attr":
-                    # this means that we have deserialized a graph argument, but
+                    # this means that we have deserialized a graph argument, or
+                    # the function or input spec of a flat_apply call, but
                     # unfortunately the schema for it does not include metadata;
                     # so we reuse the metadata of the HOP call for such arguments
                     x.meta.update(metadata)
