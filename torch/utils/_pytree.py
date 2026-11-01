@@ -2062,7 +2062,7 @@ def _refuse_enum_object_hook(obj: dict[str, Any]) -> dict[str, Any]:
 
 
 def _json_to_treespec(
-    json_schema: DumpableContext, allow_imports: bool = True
+    json_schema: DumpableContext, *, allow_imports: bool = True
 ) -> TreeSpec:
     if (
         json_schema["type"] is None
@@ -2115,7 +2115,7 @@ def _json_to_treespec(
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
     children_specs = [
-        _json_to_treespec(child_string, allow_imports)
+        _json_to_treespec(child_string, allow_imports=allow_imports)
         for child_string in json_schema["children_spec"]
     ]
 
