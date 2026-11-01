@@ -108,7 +108,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.adaptive_avg_pool3d": None,
             "nn.functional.adaptive_max_pool1d": [
                 torch.int16,
                 torch.int32,
@@ -126,7 +125,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "nn.functional.adaptive_max_pool3d": None,
-            "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.local_response_norm": [
                 torch.int8,
@@ -427,7 +425,7 @@ if torch.backends.mps.is_available():
             },
             "test_reference_numerics_small": {
                 # MPS bug: cancellation for small arguments
-                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), (torch.complex64,)),
+                "sinc": (torch.complex64,),
                 # NumPy deviates from C99 for atan(+-1j)
                 "_refs.atan": (torch.complex64,),
                 # NumPy reference computes int8/uint8 in float16
