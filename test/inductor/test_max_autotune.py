@@ -1916,33 +1916,38 @@ class TestMaxAutotune(TestCase):
                         lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
                     )
 
+        if config.cpp_wrapper:
+            bmm_call = f"aoti_torch_{GPU_TYPE}_bmm_dtype_out"
+            kernel_launch = r"call_triton_\w*_fused_\w*{}\("
+        else:
+            bmm_call = "extern_kernels.bmm_dtype"
+            kernel_launch = "triton_.*_fused_.*{}.run"
+
+        def check_code(code, kernel_suffix=""):
+            # The modules compiled to benchmark decompose_k choices are always
+            # Python wrapper code, and later compiles hit the autotune cache
+            # and skip them, so check the compiled graph itself.
+            graph_code = next(c for c in code if "benchmark_decompose_k" not in c)
+            if dynamic:
+                FileCheck().check_not(bmm_call).check_not("decompose_k").run(graph_code)
+            else:
+                FileCheck().check(bmm_call).check_regex(
+                    kernel_launch.format(kernel_suffix)
+                ).check("decompose_k").run(graph_code)
+                check_divisors(code)
+
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
-
-        if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
+        check_code(code)
+        if not dynamic:
             torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
+        check_code(code)
+        if not dynamic:
             torch.testing.assert_close(
                 compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
             )
@@ -1953,16 +1958,8 @@ class TestMaxAutotune(TestCase):
             lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
         )
         out, code = run_and_get_code(compiled_func, a, b)
-
-        if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
+        check_code(code, "_0")
+        if not dynamic:
             torch.testing.assert_close(
                 compiled_func(a, b),
                 (a.transpose(0, 1) @ b).relu(),
@@ -2063,11 +2060,14 @@ class TestMaxAutotune(TestCase):
             )
 
             out, code = run_and_get_code(compiled_func, a, b)
+            # The symbolic-input binding is checked on a decompose_k benchmark
+            # module, which is Python wrapper code under both wrappers.
+            benchmark_code = next(c for c in code if "benchmark_decompose_k" in c)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"2\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 32").run(code[0])
+            ).check_regex("s[0-9]+ = 32").run(benchmark_code)
             torch.testing.assert_close(
                 out,
                 f(a, b),
@@ -2128,14 +2128,14 @@ class TestMaxAutotune(TestCase):
             with fresh_cache():
                 out, code = run_and_get_code(fwd_bwd)
 
+            # The forward does not use decompose_k, so this is a backward
+            # benchmark module, which is Python wrapper code under both wrappers.
+            benchmark_code = next(c for c in code if "benchmark_decompose_k" in c)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"256\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 8").run(
-                # code[1] in this case given backwards
-                code[1]
-            )
+            ).check_regex("s[0-9]+ = 8").run(benchmark_code)
 
     @unittest.skipIf(
         config.triton.native_matmul,
@@ -2472,7 +2472,6 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(len(configs), 1)
                 self.assertEqual(configs[0], expected_config)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -2486,10 +2485,14 @@ class TestMaxAutotune(TestCase):
         ):
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
-            FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
+            bmm_call = (
+                f"aoti_torch_{GPU_TYPE}_bmm_dtype_out"
+                if config.cpp_wrapper
+                else "extern_kernels.bmm_dtype"
+            )
+            FileCheck().check(bmm_call).run(code[0])
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_triton_bmm_out_dtype(self):
         def f(a, b, out_dtype=torch.float32):
             return torch.bmm(a, b, out_dtype=out_dtype)

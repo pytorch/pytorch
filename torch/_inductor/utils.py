@@ -3335,8 +3335,6 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
                 sympy.Ge(k, contiguous_threshold * n),
             )
         )
-        and not V.graph.aot_mode
-        and not V.graph.cpp_wrapper
     )
 
 
