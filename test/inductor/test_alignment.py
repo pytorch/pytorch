@@ -109,9 +109,8 @@ class CommonTemplate:
 
         mk = lambda *s: torch.randn(*s, device=self.device)  # noqa: E731
         args = (mk(1, 3, 6), mk(18, 6), mk(18), mk(6, 6), mk(6))
-        self.common(fn, args, check_lowp=False)
-
-        _, (code,) = run_and_get_code(torch.compile(fn), *args)
+        out, (code,) = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
         FileCheck().check_count("assert_alignment(", 2, exactly=True).run(code)
 
     @config.patch(implicit_fallbacks=True)
