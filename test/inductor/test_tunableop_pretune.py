@@ -739,15 +739,17 @@ class TestTunableOpPretune(TestCase):
             _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
             pretune.assert_not_called()
 
-    @parametrize("conflict", (False, True))
-    def test_finalize_hook_routes_extern_winners(self, conflict):
+    @parametrize("scenario", ("clean", "conflict", "force_extern"))
+    def test_finalize_hook_routes_extern_winners(self, scenario):
         # The finalizer sends the extern winner through the ladder, except on
         # the layout-conflict fallback where the meta rebuild would read the
-        # constraint. Spec'd mocks so the isinstance gates pass.
+        # constraint. Forcing the extern path is not that case: the metas are
+        # right, so the ladder must still run.
         import torch._inductor.ir as _ir
         from torch._inductor.scheduler import Scheduler, SchedulerNode
 
-        s = sympy.Symbol(f"s_fin{int(conflict)}", positive=True, integer=True)
+        conflict = scenario == "conflict"
+        s = sympy.Symbol(f"s_fin_{scenario}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         multi = mock.Mock(spec=_ir.MultiTemplateBuffer)
         multi.choices = [winner]
@@ -763,20 +765,24 @@ class TestTunableOpPretune(TestCase):
         sched.nodes = [sched_node]
         sched._has_layout_conflict_for_template.return_value = conflict
 
-        # Raise a sentinel from the hook: reaching it proves output_node()
-        # already ran, which is the order the select_algorithm sites use.
-        class _Stop(Exception):
-            pass
-
-        winner.output_node = mock.Mock(return_value=mock.Mock())
-        # Without the hook to stop it, the conflict case runs on into IR the
-        # mocks do not model and trips the finalizer's own type assertion.
-        expected = AssertionError if conflict else _Stop
-        with mock.patch(
-            "torch._inductor.select_algorithm._maybe_pretune_tunableop",
-            side_effect=_Stop,
-        ) as pretune:
-            with self.assertRaises(expected):
+        # Spec'd so the finalizer's isinstance checks pass and both branches
+        # run to the end (_replace_node is a no-op on the mocked scheduler).
+        # Asserting on the hook alone keeps this independent of the IR
+        # machinery around it; output_node must still run before the hook.
+        out_buffer = mock.Mock(spec=_ir.OperationBuffer)
+        out_storage = mock.Mock(spec=_ir.StorageBox, data=out_buffer)
+        winner.output_node = mock.Mock(
+            return_value=mock.Mock(spec=_ir.TensorBox, data=out_storage)
+        )
+        with config.patch(
+            {
+                "test_configs.force_extern_kernel_in_multi_template": scenario
+                == "force_extern"
+            }
+        ):
+            with mock.patch(
+                "torch._inductor.select_algorithm._maybe_pretune_tunableop"
+            ) as pretune:
                 Scheduler.finalize_multi_template_buffers(sched)
         if conflict:
             pretune.assert_not_called()
