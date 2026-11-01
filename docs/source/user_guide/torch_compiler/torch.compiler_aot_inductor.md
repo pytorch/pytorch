@@ -220,9 +220,10 @@ doesn't count as a warm-up.
   replayed after that. Only a thread that has already finished an eager call on
   that instance captures on it, since some libraries set up per thread; any
   thread replays.
-- Each model instance keeps up to `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs (an environment variable read when
-  the model is loaded, default 8; a bad value makes every call fail) in its own
-  memory pool; past that, new layouts run eagerly.
+- Each model instance keeps up to `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs
+  (an environment variable read when the model is loaded, default 8; a bad
+  value makes every `run_with_lazy_cuda_graphs` call fail) in its own memory
+  pool; past that, new layouts run eagerly.
 - Replayed outputs are copies: they don't alias the inputs, and views among
   outputs come back as separate tensors. Eager calls return the model's own
   outputs.

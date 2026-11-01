@@ -459,6 +459,8 @@ class AOTInductorModelContainer {
   }
 
   void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
+    // Exclusive, so that no graph is captured between the check and the reload.
+    std::lock_guard unique_lk(model_exec_mutex_);
     check_no_cuda_graphs();
     return pool_.primary_model().update_constants_from_blob(weight_blob_ptr);
   }
@@ -646,6 +648,8 @@ class AOTInductorModelContainer {
           kv.second = nullptr;
         }
       }
+      // The array borrows from the map, whose replaced entries are freed.
+      target.update_array(&model);
       throw;
     }
     target.update_array(&model);
