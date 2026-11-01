@@ -51,6 +51,8 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/Binary.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 
 namespace at::native {
 
@@ -88,10 +90,10 @@ Tensor& mkldnn_add_out(
   ideep::tensor& z = itensor_from_mkldnn(result);
   if (result.is_same(other)) {
     const std::vector<float> scales{alpha.to<float>(), 1.0};
-    ideep::sum::compute(scales, {y, x}, z);
+    mkldnn::sum(scales, {y, x}, z);
   } else {
     const std::vector<float> scales{1.0, alpha.to<float>()};
-    ideep::sum::compute(scales, {x, y}, z);
+    mkldnn::sum(scales, {x, y}, z);
   }
 
   return result;
@@ -107,7 +109,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) 
 
   ideep::tensor z;
   const std::vector<float> scales{1.0, alpha.to<float>()};
-  ideep::sum::compute(scales, {x, y}, z);
+  mkldnn::sum(scales, {x, y}, z);
 
   return new_with_itensor_mkldnn(std::move(z), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
@@ -125,16 +127,16 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
 
   // for zero_dim tensor
   if (other.ndimension() == 0) {
-    ideep::eltwise_forward::compute(
-      x, z, ideep::algorithm::eltwise_linear,
-      ideep::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
+    mkldnn::eltwise_forward(
+      x, z, dnnl::algorithm::eltwise_linear,
+      dnnl::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
 
     return result;
   } else {
     TORCH_CHECK(self.sizes() == other.sizes(),
                "mkldnn_mul_out: currently mkldnn not support broadcasting");
     ideep::tensor y = itensor_from_mkldnn(other);
-    ideep::binary::compute(x, y, z, dnnl::algorithm::binary_mul);
+    mkldnn::binary(x, y, z, dnnl::algorithm::binary_mul);
 
     return result;
   }
