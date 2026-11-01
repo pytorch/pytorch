@@ -1745,11 +1745,13 @@ class TestForeachDevice(TestCase):
         one = [torch.ones(2, device=device)]
         three = [torch.zeros(2, device=device) for _ in range(3)]
         with self.assertRaisesRegex(
-            RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 3"
+            RuntimeError,
+            "Tensor lists must have the same number of tensors, got 1 and 3",
         ):
             torch.ops.aten._foreach_copy(one, three, False)
         with self.assertRaisesRegex(
-            RuntimeError, "Tensor lists must have the same number of tensors, got 3 and 1"
+            RuntimeError,
+            "Tensor lists must have the same number of tensors, got 3 and 1",
         ):
             torch.ops.aten._foreach_copy(three, one, False)
         with self.assertRaisesRegex(
