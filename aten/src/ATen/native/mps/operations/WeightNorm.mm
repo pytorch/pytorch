@@ -26,6 +26,9 @@ struct WeightNormBackwardCachedGraph : public MPSCachedGraph {
 
 std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int64_t dim) {
   TORCH_CHECK(dim == 0 || dim == v.dim() - 1, "fused kernels can only be applied for first or last dim")
+  if (v.numel() == 0) {
+    return {at::empty_like(v), at::zeros_like(g)};
+  }
   auto norms = at::norm_except_dim(v, 2, dim);
   return {v.mul(g.div(norms)), norms};
 }
