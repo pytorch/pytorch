@@ -52,7 +52,9 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -1008,7 +1010,8 @@ def forward(self, sin, cos):
     """,
         )
 
-    def test_regions_with_cond(self):
+    @parametrize("region", ["wrap_with_set_grad_enabled", "wrap_with_autocast"])
+    def test_regions_with_cond(self, region):
         # The branches of a cond are read with get_attr at the start of the
         # region, which must still be found, with its grad mode and autocast.
         class NoGrad(torch.nn.Module):
@@ -1026,27 +1029,20 @@ def forward(self, sin, cos):
                         x.sum() > 0, lambda a: a @ a.T, lambda a: a.T @ a, (x,)
                     )
 
-        for m, region, x in (
-            (
-                NoGrad(),
-                "wrap_with_set_grad_enabled",
-                torch.randn(4, requires_grad=True),
-            ),
-            (Autocast(), "wrap_with_autocast", torch.randn(4, 4)),
-        ):
-            with self.subTest(region=region):
-                ep = export(m, (x,))
-                target = getattr(torch.ops.higher_order, region)
-                self.assertEqual(
-                    nodes_count(ep.graph.nodes, lambda n: n.target is target), 1
-                )
-                out, expected = ep.module()(x), m(x)
-                self.assertEqual(out, expected)
-                if x.requires_grad:
-                    self.assertEqual(
-                        torch.autograd.grad(out.sum(), x),
-                        torch.autograd.grad(expected.sum(), x),
-                    )
+        if region == "wrap_with_set_grad_enabled":
+            m, x = NoGrad(), torch.randn(4, requires_grad=True)
+        else:
+            m, x = Autocast(), torch.randn(4, 4)
+        ep = export(m, (x,))
+        target = getattr(torch.ops.higher_order, region)
+        self.assertEqual(nodes_count(ep.graph.nodes, lambda n: n.target is target), 1)
+        out, expected = ep.module()(x), m(x)
+        self.assertEqual(out, expected)
+        if x.requires_grad:
+            self.assertEqual(
+                torch.autograd.grad(out.sum(), x),
+                torch.autograd.grad(expected.sum(), x),
+            )
 
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted
@@ -1675,6 +1671,8 @@ class TestMoveToDevicePassCuda(TestCase):
             )
             self.assertEqual(out.device, torch.device("meta"))
 
+
+instantiate_parametrized_tests(TestPasses)
 
 # except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
 instantiate_device_type_tests(

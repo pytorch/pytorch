@@ -799,8 +799,8 @@ def _check_flat_apply_inputs(
             or inp.arg.type not in _FLAT_APPLY_INPUT_KINDS
         ):
             raise SerializeError(
-                f"flat_apply node {node_name} has an input that export does not "
-                f"pass to its function: {inp.arg.type}"
+                f"flat_apply node {node_name} has an input that cannot be saved "
+                f"or loaded: {inp.arg.type}"
             )
 
 
@@ -825,8 +825,13 @@ def _check_flat_apply_in_spec(in_spec_str: str) -> None:
         if node["type"] == "collections.defaultdict":
             raise SerializeError(message)
         # Decode the context as treespec_loads does, so that no spelling of the
-        # enum key gets past this check.
-        if isinstance(node["context"], str):
+        # enum key gets past this check. It decodes JSON, with the hook that
+        # imports enum modules, only for types without their own decoder.
+        typ = pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE.get(node["type"])
+        if (
+            typ is not None
+            and pytree.SUPPORTED_SERIALIZED_TYPES[typ].from_dumpable_context is None
+        ):
             json.loads(node["context"], object_hook=refuse_enum)
         stack.extend(node["children_spec"])
 

@@ -3,8 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-import collections
-
 # Owner(s): ["oncall: export"]
 import copy
 import enum
@@ -19,7 +17,7 @@ import tempfile
 import types
 import unittest
 import zipfile
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -2825,7 +2823,7 @@ class TestPredispatchSerialization(TestCase):
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=60,
             )
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(
@@ -2903,18 +2901,23 @@ class TestPredispatchSerialization(TestCase):
         pytree.register_dataclass(Pair, serialized_type_name="flat_apply_test.Pair")
         self.addCleanup(pytree._deregister_pytree_node, Pair)
 
+        # A namedtuple spec stores its type name as a context that is not JSON.
+        Pt = namedtuple("Pt", ["a", "b"])
+        pytree._register_namedtuple(Pt, serialized_type_name="flat_apply_test.Pt")
+        self.addCleanup(pytree._deregister_pytree_node, Pt)
+
         class AddPair(Scale):
             @staticmethod
-            def forward(pair):
-                return pair.a + pair.b
+            def forward(pair, pt):
+                return pair.a + pair.b + pt.a - pt.b
 
             @staticmethod
             def backward(ctx, grad):
-                return None
+                return None, None
 
         class Qux(torch.nn.Module):
             def forward(self, x):
-                return AddPair.apply(Pair(x, x * 3))
+                return AddPair.apply(Pair(x, x * 3), Pt(x, x))
 
         # A class defined inside a function cannot be found by name.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
@@ -2975,7 +2978,8 @@ class TestPredispatchSerialization(TestCase):
         self.assertIsInstance(cm.exception.__cause__, SerializeError)
         self.assertIn("import that module before loading", str(cm.exception.__cause__))
 
-    def test_predispatch_flat_apply_load_rejects_other_functions(self):
+    @staticmethod
+    def _index_in_vmap_artifact():
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
         class IndexInVmap(torch.nn.Module):
@@ -2986,7 +2990,30 @@ class TestPredispatchSerialization(TestCase):
         ep = export(
             IndexInVmap(), (torch.arange(4), torch.tensor([3, 1])), strict=False
         )
-        artifact = serialize(ep)
+        return ep, serialize(ep)
+
+    @staticmethod
+    def _load_exported_program(artifact, exported_program):
+        return deserialize(
+            SerializedArtifact(
+                exported_program,
+                artifact.state_dict,
+                artifact.constants,
+                artifact.example_inputs,
+            )
+        )
+
+    @staticmethod
+    def _flat_apply_node(program):
+        (node,) = [
+            n
+            for n in program["graph_module"]["graph"]["nodes"]
+            if n["target"] == "torch.ops.higher_order.flat_apply"
+        ]
+        return node
+
+    def test_predispatch_flat_apply_load_rejects_other_functions(self):
+        _, artifact = self._index_in_vmap_artifact()
         func_name = (
             b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
         )
@@ -2997,14 +3024,7 @@ class TestPredispatchSerialization(TestCase):
         deserialize(artifact)
 
         def load(payload):
-            return deserialize(
-                SerializedArtifact(
-                    payload,
-                    artifact.state_dict,
-                    artifact.constants,
-                    artifact.example_inputs,
-                )
-            )
+            return self._load_exported_program(artifact, payload)
 
         for old, new, reason in [
             (func_name, b'"builtins.exec"', "cannot be used as a flat_apply function"),
@@ -3085,13 +3105,15 @@ class TestPredispatchSerialization(TestCase):
                 del sys.modules[holder.__name__]
                 sys.modules.pop("flat_apply_side_effect", None)
 
+    def test_predispatch_flat_apply_load_rejects_bad_specs(self):
+        _, artifact = self._index_in_vmap_artifact()
+
+        def load(payload):
+            return self._load_exported_program(artifact, payload)
+
         # The input spec decides which input the helper gets as the class name.
         program = json.loads(artifact.exported_program)
-        (node,) = [
-            n
-            for n in program["graph_module"]["graph"]["nodes"]
-            if n["target"] == "torch.ops.higher_order.flat_apply"
-        ]
+        node = self._flat_apply_node(program)
         for args_and_kwargs in [
             ((0, 0), {"function_cls_name": 0}),
             # For a dict, *args would pass its keys, not args[0].
@@ -3119,9 +3141,7 @@ class TestPredispatchSerialization(TestCase):
             enum_spec,
             escaped_enum_spec,
             pytree.treespec_dumps(
-                pytree.tree_flatten((("name", collections.defaultdict(int, a=0)), {}))[
-                    1
-                ]
+                pytree.tree_flatten((("name", defaultdict(int, a=0)), {}))[1]
             ),
         ]:
             node["inputs"][1]["arg"]["as_string"] = in_spec
@@ -3137,13 +3157,18 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(SerializeError, "does not start with its function"):
             load(json.dumps(program).encode())
 
+    def test_predispatch_flat_apply_load_rejects_other_inputs(self):
+        ep, artifact = self._index_in_vmap_artifact()
+        func_name = (
+            b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
+        )
+
+        def load(payload):
+            return self._load_exported_program(artifact, payload)
+
         # An input that names an operator would reach the function as a callable.
         program = json.loads(artifact.exported_program)
-        (node,) = [
-            n
-            for n in program["graph_module"]["graph"]["nodes"]
-            if n["target"] == "torch.ops.higher_order.flat_apply"
-        ]
+        node = self._flat_apply_node(program)
         last = node["inputs"][-1]
         last["arg"] = {"as_operator": "torch.os.system"}
         with self.assertRaisesRegex(SerializeError, "does not name an operator"):
@@ -3156,10 +3181,10 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(SerializeError, "as_string_to_argument"):
             load(json.dumps(program).encode())
         last["arg"], last["kind"] = {"as_int": 0}, 2
-        with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
+        with self.assertRaisesRegex(SerializeError, "cannot be saved or loaded"):
             load(json.dumps(program).encode())
         last["kind"], last["name"] = 1, "checked_output"
-        with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
+        with self.assertRaisesRegex(SerializeError, "cannot be saved or loaded"):
             load(json.dumps(program).encode())
         last["name"] = ""
         for target, reason in [
@@ -3178,18 +3203,14 @@ class TestPredispatchSerialization(TestCase):
             op="call_function", target=torch.ops.higher_order.flat_apply
         )
         flat_apply_node.kwargs = {"checked_output": False}
-        with self.assertRaisesRegex(SerializeError, "does not pass to its function"):
+        with self.assertRaisesRegex(SerializeError, "cannot be saved or loaded"):
             serialize(ep)
         flat_apply_node.kwargs = {}
 
         # Export calls the helper only through flat_apply. Called directly, it
         # would import the module that the file names when the program runs.
         program = json.loads(artifact.exported_program)
-        (node,) = [
-            n
-            for n in program["graph_module"]["graph"]["nodes"]
-            if n["target"] == "torch.ops.higher_order.flat_apply"
-        ]
+        node = self._flat_apply_node(program)
         node["target"] = json.loads(func_name)
         node["inputs"] = node["inputs"][2:]
         with self.assertRaisesRegex(
