@@ -791,17 +791,27 @@ _FLAT_APPLY_INPUT_KINDS = frozenset(
 def _check_flat_apply_inputs(
     node_name: str | None, inputs: Sequence[NamedArgument]
 ) -> None:
-    """Save and load both refuse the inputs that export does not pass."""
+    """
+    Save and load both refuse keyword inputs, and inputs other than plain values
+    and operators.
+    """
     for inp in inputs:
-        if (
-            inp.kind != ArgumentKind.POSITIONAL
-            or inp.name
-            or inp.arg.type not in _FLAT_APPLY_INPUT_KINDS
-        ):
+        if inp.kind != ArgumentKind.POSITIONAL or inp.name:
             raise SerializeError(
-                f"flat_apply node {node_name} has an input that cannot be saved "
-                f"or loaded: {inp.arg.type}"
+                f"flat_apply node {node_name} has a keyword input, which cannot "
+                "be saved or loaded"
             )
+        if inp.arg.type not in _FLAT_APPLY_INPUT_KINDS:
+            raise SerializeError(
+                f"flat_apply node {node_name} has an input of kind {inp.arg.type}, "
+                "which cannot be saved or loaded"
+            )
+
+
+def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
+    return pytree.is_constant_class(spec.type) or any(
+        _has_pytree_constant(child) for child in spec.children()
+    )
 
 
 def _check_flat_apply_in_spec(in_spec_str: str) -> None:
@@ -1468,6 +1478,11 @@ class GraphModuleSerializer(metaclass=Final):
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: expected its function "
                 "and input spec to be TreeSpec graph attributes"
+            )
+        if _has_pytree_constant(in_spec_value):
+            raise SerializeError(
+                f"Cannot serialize flat_apply node {node.name}: an input is a "
+                "pytree constant, which an input spec cannot store"
             )
         try:
             in_spec_str = self.serialize_treespec(in_spec_value)

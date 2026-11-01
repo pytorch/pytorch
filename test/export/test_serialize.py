@@ -2941,7 +2941,7 @@ class TestPredispatchSerialization(TestCase):
                     return ScaleBy.apply(x, Config(3))
 
             ep = export(Baz(), (torch.randn(4),), strict=False)
-            with self.assertRaisesRegex(SerializeError, "input spec cannot be saved"):
+            with self.assertRaisesRegex(SerializeError, "input is a pytree constant"):
                 torch.export.save(ep, io.BytesIO())
 
     def test_predispatch_flat_apply_save_load_by_name(self):
