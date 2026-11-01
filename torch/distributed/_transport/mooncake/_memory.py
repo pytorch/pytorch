@@ -3,11 +3,20 @@ from __future__ import annotations
 import operator
 from dataclasses import dataclass
 from typing import Any, Literal, TYPE_CHECKING
+from typing_extensions import Self
 
 from .._serialization import _WireDescriptor
 
 
+# Slicing is part of the transport API but not yet supported by this backend.
+# The methods exist so the runtime-checkable MemoryView/RemoteBuffer protocols
+# still recognize these classes; they raise rather than return a wrong range.
+_SLICE_UNSUPPORTED = "Mooncake transport does not support slicing yet"
+
+
 if TYPE_CHECKING:
+    import builtins
+
     import torch
 
     from ._transport import MooncakeTransport
@@ -36,6 +45,12 @@ class MooncakeRemoteBuffer(_WireDescriptor):
     device_id: int
     memory_type: str
 
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        raise NotImplementedError(_SLICE_UNSUPPORTED)
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        raise NotImplementedError(_SLICE_UNSUPPORTED)
+
 
 @dataclass
 class _Registration:
@@ -62,6 +77,12 @@ class MooncakeMemoryView:
 
     def size(self) -> int:
         return self._length
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        raise NotImplementedError(_SLICE_UNSUPPORTED)
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        raise NotImplementedError(_SLICE_UNSUPPORTED)
 
 
 class MooncakeMutableMemoryView(MooncakeMemoryView):

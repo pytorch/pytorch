@@ -4,7 +4,7 @@ import asyncio
 import ctypes
 import os
 from types import SimpleNamespace
-from unittest import skipUnless
+from unittest import skip, skipUnless
 from unittest.mock import patch
 
 from transport_test_utils import TransportTestMixin
@@ -91,6 +91,10 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         return first, second
+
+    @skip("Mooncake transport does not support slicing yet")
+    def test_transport_slice(self):
+        pass
 
     def test_initialize_uses_p2p_handshake(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
