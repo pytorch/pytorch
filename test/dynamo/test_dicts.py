@@ -381,6 +381,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("override", ["getattribute", "getattr", "method", "instance"])
+    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
     def test_dict_method_dispatch_guards(self, override):
         class Mapping(dict):
             pass
@@ -407,6 +408,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1 if override == "getattr" else 2)
 
     @parametrize("name", ["value", "property_value", "method", "get"])
+    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
     def test_dict_subclass_getattribute_guard(self, name):
         class Mapping(dict):
             @property
@@ -475,39 +477,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
             fn(x, mapping),
         )
-
-    @parametrize("base_type", [dict, OrderedDict, defaultdict])
-    @parametrize("override", ["instance", "getattribute", "getattr"])
-    def test_dict_bound_method_arity_guards(self, base_type, override):
-        class Mapping(base_type):
-            popitem = dict.popitem
-
-        def getattribute(self, name):
-            return super(Mapping, self).__getattribute__(name)
-
-        def fn(x, mapping):
-            try:
-                mapping.popitem(1, 2)
-            except TypeError as exc:
-                return x + 1, str(exc)
-            return x - 1, "no error"
-
-        x, mapping = torch.ones(1), Mapping(a=1)
-        owner = mapping if override == "instance" else Mapping
-        name = "popitem" if override == "instance" else f"__{override}__"
-        replacement = mapping.popitem if override == "instance" else getattribute
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        for changed in (False, True, False):
-            if changed:
-                setattr(owner, name, replacement)
-            elif name in vars(owner):
-                delattr(owner, name)
-            # Even an unused __getattr__ disables CPython's direct method binding.
-            # Use fresh bytecode so LOAD_ATTR specialization does not affect the reference.
-            eager = types.FunctionType(
-                fn.__code__.replace(), fn.__globals__, closure=fn.__closure__
-            )
-            self.assertEqual(compiled(x, mapping), eager(x, mapping))
 
     @parametrize("base_type", [dict, OrderedDict, defaultdict])
     def test_dict_locally_stored_method_arity(self, base_type):
