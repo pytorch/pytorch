@@ -21,7 +21,11 @@ struct VecConvert {
     __at_align__ src_t src_buf[VectorizedN<src_t, src_n>::size()];
     src.store(src_buf);
     __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
-    for (const auto i : c10::irange(count)) {
+    // Keep the `i < count` exit test. With an equality exit test, including
+    // `for (const auto i : c10::irange(count))`, clang 21 crashes building for
+    // aarch64 ("Don't know how to widen the operands for INSERT_SUBVECTOR"),
+    // first seen in the BFloat16/double instantiation of cpu_flash_attention.
+    for (int i = 0; i < count; i++) {
       dst_buf[i] = static_cast<dst_t>(src_buf[i]);
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
