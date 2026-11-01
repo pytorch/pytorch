@@ -565,7 +565,7 @@ def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=
     # the decomposition's check alone does not cover the compiled path (gh-195673)
     resolved_dtype = torch.get_default_dtype() if dtype is None else dtype
     torch._check_not_implemented(
-        resolved_dtype.is_floating_point or resolved_dtype.is_complex,
+        utils.is_uniform_supported_dtype(resolved_dtype),
         lambda: f"uniform_ not implemented for '{resolved_dtype}'",
     )
     return torch.empty(

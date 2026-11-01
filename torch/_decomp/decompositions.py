@@ -3576,7 +3576,7 @@ def uniform(
     # else. Without this the traced path samples [0, 1) and truncates to the integral
     # dtype, which is a constant.
     torch._check_not_implemented(
-        x.dtype.is_floating_point or x.dtype.is_complex,
+        utils.is_uniform_supported_dtype(x.dtype),
         lambda: f"uniform_ not implemented for '{x.dtype}'",
     )
     return prims._uniform_helper(

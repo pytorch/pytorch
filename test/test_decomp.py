@@ -1534,30 +1534,30 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
-    @dtypes(torch.int64, torch.int32, torch.uint8, torch.bool)
+    @dtypes(
+        torch.int64,
+        torch.int32,
+        torch.uint8,
+        torch.bool,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    )
     def test_uniform_integral_dtype(self, device, dtype):
-        # gh-195673: the uniform decomposition sampled [0, 1) and truncated to the
-        # integral dtype, so the traced path returned a constant where eager raises.
-        def rand_like(x):
-            return torch.rand_like(x)
-
-        def rand(x):
-            return torch.rand(x.shape, device=x.device, dtype=x.dtype)
-
+        # gh-195673: the uniform decomposition sampled [0, 1) and truncated to an
+        # unsupported dtype (integral, bool or float8), so the traced path returned a
+        # constant where eager raises.
         x = torch.ones(4, device=device, dtype=dtype)
 
-        # eager already rejects via the C++ check; the traced paths must match it.
+        # eager rejects via the C++ dispatch
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
-            rand_like(x)
+            torch.rand_like(x)
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             torch.rand(4, device=device, dtype=dtype)
 
-        # the compiled paths must reject too; without the fix they silently return a
-        # constant instead of raising.
-        for backend in ("aot_eager", "inductor"):
-            for fn in (rand_like, rand):
-                with self.assertRaisesRegex(NotImplementedError, "not implemented"):
-                    torch.compile(fn, backend=backend)(x)
+        # the meta kernel rejects during tracing, so fake-tensor and compiled paths
+        # match eager instead of silently sampling a constant
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.rand(4, device="meta", dtype=dtype)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

@@ -1176,6 +1176,17 @@ def is_complex_dtype(dtype: torch.dtype) -> bool:
     return dtype in _complex_dtypes
 
 
+# dtypes over which eager's uniform_ dispatches; float8 reports is_floating_point
+# but is not supported, so is_floating_point alone is too permissive here
+_uniform_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+
+
+def is_uniform_supported_dtype(dtype: torch.dtype) -> bool:
+    if not isinstance(dtype, torch.dtype):
+        raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
+    return dtype in _uniform_dtypes or is_complex_dtype(dtype)
+
+
 def is_grad_dtype(dtype: torch.dtype) -> bool:
     """
     Checks if the dtype can require a gradient.
