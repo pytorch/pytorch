@@ -1006,6 +1006,45 @@ def forward(self, sin, cos):
     """,
         )
 
+    def test_regions_with_cond(self):
+        # The branches of a cond are read with get_attr at the start of the
+        # region, which must still be found, with its grad mode and autocast.
+        class NoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    y = torch.cond(
+                        x.sum() > 0, lambda a: a.sin(), lambda a: a.cos(), (x,)
+                    )
+                return y + x
+
+        class Autocast(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast("cpu", dtype=torch.bfloat16):
+                    return torch.cond(
+                        x.sum() > 0, lambda a: a @ a.T, lambda a: a.T @ a, (x,)
+                    )
+
+        for m, region, x in (
+            (
+                NoGrad(),
+                "wrap_with_set_grad_enabled",
+                torch.randn(4, requires_grad=True),
+            ),
+            (Autocast(), "wrap_with_autocast", torch.randn(4, 4)),
+        ):
+            ep = export(m, (x,))
+            target = getattr(torch.ops.higher_order, region)
+            self.assertEqual(
+                nodes_count(ep.graph.nodes, lambda n: n.target is target), 1
+            )
+            out, expected = ep.module()(x), m(x)
+            self.assertEqual(out, expected)
+            if x.requires_grad:
+                self.assertEqual(
+                    torch.autograd.grad(out.sum(), x),
+                    torch.autograd.grad(expected.sum(), x),
+                )
+
     def test_sequential_split_region_reads_nested_spec(self):
         # split_module reads a pytree spec that lives on a submodule with a
         # dotted get_attr at the start of the region.
