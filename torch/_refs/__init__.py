@@ -6698,9 +6698,8 @@ def geometric(self, p, generator=None):
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
     # geometric is discrete, so an integral self is valid, but a uniform sample of
-    # one is not: draw the sample in floating point. Match eager, which samples in
-    # float64 only for a float64 input and in float32 otherwise; the type-promotion
-    # wrapper casts the result back to self.dtype.
+    # one is not: draw the sample in floating point (float64 for a float64 input,
+    # float32 otherwise) and let the type-promotion wrapper cast back to self.dtype.
     sample_dtype = torch.float64 if self.dtype is torch.float64 else torch.float32
     uniform_val = torch.rand_like(self, dtype=sample_dtype)
     return torch.floor(torch.log1p(-uniform_val) / math.log1p(-p)) + 1

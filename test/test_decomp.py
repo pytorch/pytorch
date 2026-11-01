@@ -1541,6 +1541,9 @@ class DecompOneOffTests(TestCase):
         def rand_like(x):
             return torch.rand_like(x)
 
+        def rand(x):
+            return torch.rand(x.shape, device=x.device, dtype=x.dtype)
+
         x = torch.ones(4, device=device, dtype=dtype)
 
         # eager already rejects via the C++ check; the traced paths must match it.
@@ -1549,11 +1552,12 @@ class DecompOneOffTests(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "not implemented"):
             torch.rand(4, device=device, dtype=dtype)
 
-        # the decomposition's own check is what pins the fix: without it the compiled
-        # paths silently return a constant instead of raising.
+        # the compiled paths must reject too; without the fix they silently return a
+        # constant instead of raising.
         for backend in ("aot_eager", "inductor"):
-            with self.assertRaisesRegex(NotImplementedError, "uniform_ not implemented"):
-                torch.compile(rand_like, backend=backend)(x)
+            for fn in (rand_like, rand):
+                with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+                    torch.compile(fn, backend=backend)(x)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
