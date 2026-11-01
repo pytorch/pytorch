@@ -34,6 +34,7 @@ To run a specific test:
     pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
 """
 
+import functools
 import os
 import sys
 import unittest
@@ -70,6 +71,11 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils import _pytree as pytree
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 # LLM-useful op names to filter from unary_ufuncs
@@ -1351,6 +1357,83 @@ class TestAlphaFMA(TestCase):
         self.assertIn("tl.fma", code)
         self.assertIn("'enable_fp_fusion': False", code)
         self.assertEqual(actual, fn(a, other), atol=0, rtol=0, exact_device=True)
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name in ("add", "sub")],
+        allowed_dtypes=[torch.float16, torch.bfloat16],
+    )
+    @config.patch(freezing=True)
+    @parametrize("other_on_cpu", [False, True])
+    @parametrize("emulate_precision_casts", [False, True])
+    def test_alpha_fma_frozen_scalar_precision(
+        self, device, dtype, op, other_on_cpu, emulate_precision_casts
+    ):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "other",
+                    torch.tensor(
+                        (-1 if op.name == "add" else 1) / 3,
+                        dtype=torch.float32,
+                        device="cpu" if other_on_cpu else device,
+                    ),
+                )
+
+            def forward(self, a):
+                return op(a, self.other, alpha=6)
+
+        fn = Module().eval()
+        a = torch.full([256], 2, device=device, dtype=dtype)
+        with (
+            torch.no_grad(),
+            config.patch(emulate_precision_casts=emulate_precision_casts),
+        ):
+            expected = fn(a)
+            actual, (code,) = run_and_get_code(torch.compile(fn), a)
+        self.assertIn("tl.fma", code)
+        if emulate_precision_casts:
+            self.assertIn("'enable_fp_fusion': False", code)
+        self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=True)
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name in ("add", "sub")],
+        allowed_dtypes=[torch.float16, torch.bfloat16],
+    )
+    @config.patch(
+        emulate_precision_casts=False, emulate_precision_casts_on_saved_tensors=True
+    )
+    def test_alpha_fma_saved_output_rounding(self, device, dtype, op):
+        aten_op = getattr(torch.ops.aten, op.name).Tensor
+
+        def policy(ctx, func, *args, **kwargs):
+            if func == aten_op:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+
+        def inner(a, b, c):
+            return (op(a, b, alpha=2) * c).sum(dtype=torch.float32)
+
+        def fn(a, b, c):
+            return checkpoint(
+                inner, a, b, c, use_reentrant=False, context_fn=context_fn
+            )
+
+        a = torch.full([256], 4, device=device, dtype=dtype)
+        b = torch.full_like(a, (-1 if op.name == "add" else 1) / 3)
+        c = torch.ones_like(a, requires_grad=True)
+        compiled_c = c.detach().clone().requires_grad_(True)
+        expected = fn(a, b, c)
+        expected.backward()
+        actual, codes = run_and_get_code(torch.compile(fn), a, b, compiled_c)
+        actual.backward()
+        self.assertTrue(any("tl.fma" in code for code in codes))
+        self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=True)
+        self.assertEqual(compiled_c.grad, c.grad, atol=0, rtol=0, exact_device=True)
 
 
 instantiate_device_type_tests(

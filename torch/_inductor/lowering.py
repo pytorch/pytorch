@@ -422,7 +422,19 @@ def transform_args(
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
-                return ir.Constant(value=arg.value, dtype=dtype, device=device)
+                value = arg.value
+                if (
+                    arg.device.type == "cuda"
+                    and dtype in (torch.float16, torch.bfloat16)
+                    and arg.dtype != dtype
+                ):
+                    # CUDA tensor scalars narrow before opmath; CPU scalars do not.
+                    value = (
+                        torch.tensor(value, dtype=arg.dtype, device="cpu")
+                        .to(dtype)
+                        .item()
+                    )
+                return ir.Constant(value=value, dtype=dtype, device=device)
             else:
                 return arg
 
