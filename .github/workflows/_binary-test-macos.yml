@@ -95,8 +95,10 @@ jobs:
           source "${RUNNER_TEMP}/test_venv/bin/activate"
           python - <<'EOF'
           import torch
+          print(f"torch {torch.__version__}")
           if not torch.backends.mps.is_available():
               raise RuntimeError("MPS is not available")
+          print(f"MPS device: {torch.backends.mps.get_name()}")
           a = torch.rand(64, 64) + 64 * torch.eye(64)
           torch.testing.assert_close(torch.linalg.inv(a.to("mps")).cpu(), torch.linalg.inv(a))
           EOF
