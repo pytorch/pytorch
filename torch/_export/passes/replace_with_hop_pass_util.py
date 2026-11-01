@@ -18,19 +18,6 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 
-def _first_node_after_inputs(sub_gm: torch.fx.GraphModule) -> torch.fx.Node | None:
-    """
-    Returns the first node of a region submodule after its inputs. split_module
-    reads submodules and pytree specs, such as the branches of a cond or the
-    specs flat_apply takes, with get_attr nodes at the start of the submodule,
-    so those are skipped too.
-    """
-    for node in sub_gm.graph.nodes:
-        if node.op not in ("placeholder", "get_attr"):
-            return node
-    return None
-
-
 def _replace_with_hop_helper(
     node: torch.fx.Node,
     enter_block_node: torch.fx.Node,
