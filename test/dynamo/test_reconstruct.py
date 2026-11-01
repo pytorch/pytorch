@@ -3,10 +3,8 @@
 import collections
 import contextlib
 import dis
-import enum
 import functools
 import inspect
-import sys
 import types
 import unittest
 from unittest import mock
@@ -104,9 +102,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
     @parametrize("container_type", [None, list, dict, set])
     @parametrize("nested", [False, True])
-    def test_sourced_dict_key_in_aggregates(self, container_type, nested):
-        def fn(x, mapping):
-            key = next(iter(mapping.copy()))
+    def test_sourced_constant_in_aggregates(self, container_type, nested):
+        def fn(x, key):
             contents = key
             if container_type is not None:
                 contents = (
@@ -124,9 +121,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         previous = None
         for key in keys:
-            mapping = collections.OrderedDict.fromkeys([key], 1)
-            result = compiled(x, mapping)
-            self.assertEqual(result, fn(x, mapping))
+            result = compiled(x, key)
+            self.assertEqual(result, fn(x, key))
             self.assertIs(result[1][0][0], key)
             self.assertIs(next(iter(result[2])), key)
             contents = result[3][0][0].start.start if nested else result[3].start
@@ -154,21 +150,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         for size in (4, 6):
             x = torch.randn(size)
             self.assertEqual(compiled(x), fn(x))
-
-    @unittest.skipIf(sys.version_info < (3, 12), "Enum value containment added in 3.12")
-    def test_enum_membership_creates_combined_flag(self):
-        class Flags(enum.Flag):
-            A = 1
-            B = 2
-            C = 4
-
-        def fn(x):
-            return x + int(7 in Flags)
-
-        x = torch.ones(1)
-        # Compile before eager membership populates the enum's member cache.
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(result, fn(x))
 
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""

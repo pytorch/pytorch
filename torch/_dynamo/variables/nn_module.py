@@ -1618,6 +1618,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             "_forward_pre_hooks_with_kwargs",
             "_forward_pre_hooks",
         ):
+            if self.source is not None:
+                # These custom trackers bypass VariableBuilder's source recording,
+                # which nested-region reuse needs to collect their guards.
+                tx.output.current_tracer.traced_sources.update(
+                    (self.source, AttrSource(self.source, name))
+                )
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
