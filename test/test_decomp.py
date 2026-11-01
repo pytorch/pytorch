@@ -37,9 +37,11 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    subtest,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -1258,6 +1260,56 @@ class DecompOneOffTests(TestCase):
                     torch.ops.aten.softshrink_backward(grad, x, lambd)
                 with self.assertRaisesRegex(RuntimeError, "overflow"):
                     softshrink_backward(grad, x, lambd)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "shapes, dims",
+        [
+            # normal trilinear operations
+            subtest(
+                ([(4, 3), (5, 3, 6), (4, 6)], ([1, 3], [0], [1, 2], [2, 3], 1)),
+                name="bilinear",
+            ),
+            # negative dimension indices
+            subtest(
+                ([(4, 3), (5, 3, 6), (4, 6)], ([-3, -1], [0], [1, -2], [2, 3], 2)),
+                name="neg_dims",
+            ),
+            # no dimensions to sum
+            subtest(
+                ([(2, 3), (3, 4), (2, 4)], ([2], [0], [1], [], 0)), name="no_sumdim"
+            ),
+            # zero size input dimensions
+            subtest(
+                ([(0, 3), (5, 3, 6), (0, 6)], ([1, 3], [0], [1, 2], [2, 3], 1)),
+                name="zero_size",
+            ),
+        ],
+    )
+    def test_trilinear(self, device, shapes, dims):
+        from torch._decomp.decompositions import _trilinear
+
+        inputs = [torch.randn(s, device=device) for s in shapes]
+        args = (*inputs, *dims)
+
+        actual = _trilinear(*args)
+        expected = torch._trilinear(*args)
+
+        self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_trilinear_dim_expanded_by_all_inputs(self, device):
+        # (i1.unsqueeze(expand1) * i2.unsqueeze(expand2) * i3.unsqueeze(expand3)).sum(sumdim)
+        from torch._decomp.decompositions import _trilinear
+
+        x = torch.randn(2, 3, device=device)
+
+        actual = _trilinear(x, x, x, [0], [0], [0], [2], 1)
+        expected = (x * x * x).sum(1).unsqueeze(0)
+
+        self.assertEqual(actual, expected)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
