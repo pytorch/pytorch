@@ -2956,29 +2956,36 @@ class TestPredispatchSerialization(TestCase):
             with self.assertRaisesRegex(SerializeError, "input is a pytree constant"):
                 torch.export.save(ep, io.BytesIO())
 
-        with self.subTest("enum in an input"):
-            # Load would import the module of the enum, so save refuses it.
-            class Key(enum.Enum):
-                A = 0
-
+        def keyed(key):
             Scale = self._scale_function()
 
             class ByKey(Scale):
                 @staticmethod
                 def forward(d):
-                    return d[Key.A] * 2
+                    return d[key] * 2
 
                 @staticmethod
                 def backward(ctx, grad):
                     return None
 
-            class UsesEnum(torch.nn.Module):
+            class UsesKey(torch.nn.Module):
                 def forward(self, x):
-                    return ByKey.apply({Key.A: x})
+                    return ByKey.apply({key: x})
 
-            ep = export(UsesEnum(), (torch.randn(4),), strict=False)
+            return export(UsesKey(), (torch.randn(4),), strict=False)
+
+        with self.subTest("enum in an input"):
+            # Load would import the module of the enum, so save refuses it.
+            class Key(enum.Enum):
+                A = 0
+
             with self.assertRaisesRegex(SerializeError, "module of an enum"):
-                torch.export.save(ep, io.BytesIO())
+                torch.export.save(keyed(Key.A), io.BytesIO())
+
+        with self.subTest("dict key that JSON cannot store"):
+            # The tuple key would load back as a list, which run cannot hash.
+            with self.assertRaisesRegex(SerializeError, "would load back different"):
+                torch.export.save(keyed((0, 1)), io.BytesIO())
 
     def test_predispatch_flat_apply_save_load_by_name(self):
         Scale = self._scale_function()

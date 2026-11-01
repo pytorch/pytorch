@@ -1535,12 +1535,18 @@ class GraphModuleSerializer(metaclass=Final):
         try:
             in_spec_str = self.serialize_treespec(in_spec_value)
             # Load refuses specs that would import a module, see below.
-            pytree._treespec_loads_without_imports(in_spec_str)
+            loaded_spec = pytree._treespec_loads_without_imports(in_spec_str)
         except Exception as e:
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 f"cannot be saved: {e}"
             ) from e
+        if loaded_spec != in_spec_value:
+            raise SerializeError(
+                f"Cannot serialize flat_apply node {node.name}: its input spec "
+                "would load back different, because JSON cannot store a part of "
+                "it, such as a tuple used as a dict key"
+            )
         try:
             constant_func = pytree._retrieve_constant(func_spec).func
             func_name = ".".join(
