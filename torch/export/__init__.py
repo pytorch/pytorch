@@ -402,13 +402,15 @@ def load(
 
     from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
 
+    load_error = None
     try:
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
         )
-    except RuntimeError:
+    except RuntimeError as e:
         log.warning("Ran into the following error when deserializing", exc_info=True)
+        load_error = e
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
@@ -423,7 +425,7 @@ def load(
             raise RuntimeError(
                 "We ran into an error when deserializing the saved file. "
                 "Please check the warnings above for possible errors. "
-            )
+            ) from load_error
 
         log.warning(
             "Trying to deserialize for the older format. This version of file is "

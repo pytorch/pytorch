@@ -2812,7 +2812,7 @@ class TestPredispatchSerialization(TestCase):
         buffer.seek(0)
         self.assertEqual(expected, torch.export.load(buffer).module()(*inp))
 
-    def test_predispatch_flat_apply_unloadable_function_raises(self):
+    def test_predispatch_flat_apply_save_load_by_name(self):
         from torch._export.wrappers import allow_in_pre_dispatch_graph
         from torch.testing._internal.two_tensor import TwoTensor
 
@@ -2940,6 +2940,13 @@ class TestPredispatchSerialization(TestCase):
             ep = export(Foo(), (torch.randn(4, 4),), strict=False)
             with self.assertRaisesRegex(SerializeError, "names a different object"):
                 torch.export.save(ep, io.BytesIO())
+
+        # Without its module imported, load refuses the name and says why.
+        buffer.seek(0)
+        with self.assertRaises(RuntimeError) as cm:
+            torch.export.load(buffer)
+        self.assertIsInstance(cm.exception.__cause__, SerializeError)
+        self.assertIn("import it first", str(cm.exception.__cause__))
 
     def test_predispatch_flat_apply_load_rejects_other_functions(self):
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
