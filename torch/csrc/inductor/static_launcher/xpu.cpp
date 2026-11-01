@@ -418,8 +418,9 @@ void setKernelArg(
   Neither is checked here, so a caller must guarantee:
     - numParams == strlen(argTypes), and argStorage has numParams slots. It may
       only be null when numParams is 0.
-    - bindLocal only if the kernel's own argument count is numParams + 1.
-      Otherwise set_arg(numParams, ...) binds an argument it does not have.
+    - loadedKernel->numArgs == numParams + (bindLocal ? 1 : 0). Otherwise a
+      kernel argument is left unbound, or set_arg binds one the kernel does
+      not have.
   The kernel argument count check in launchKernel() is what establishes the
   second one today.
 */
