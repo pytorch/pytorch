@@ -2421,6 +2421,56 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "requires flash attention")
+    def test_sdpa_unused_outputs_freed(self):
+        # The flash attention fallback also returns logsumexp and RNG state,
+        # which are unused in inference. They must be freed right after the
+        # call, otherwise every layer's logsumexp stays alive until the end of
+        # the model and peak memory grows with depth.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, n_layers, n_heads=8, head_dim=8):
+                super().__init__()
+                self.n_heads = n_heads
+                d = n_heads * head_dim
+                self.qkv = torch.nn.ModuleList(
+                    torch.nn.Linear(d, 3 * d) for _ in range(n_layers)
+                )
+
+            def forward(self, x):
+                b, s, d = x.shape
+                for qkv in self.qkv:
+                    q, k, v = (
+                        qkv(x)
+                        .view(b, s, 3, self.n_heads, -1)
+                        .permute(2, 0, 3, 1, 4)
+                        .unbind(0)
+                    )
+                    attn = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                    x = x + attn.transpose(1, 2).reshape(b, s, d)
+                return x
+
+        x = torch.randn(8, 1024, 64, device=self.device, dtype=torch.half)
+
+        def run_and_get_peak(n_layers):
+            model = Model(n_layers).to(self.device).half().eval()
+            with torch.no_grad():
+                package_path = AOTIRunnerUtil.compile(model, (x,))
+                runner = torch._inductor.aoti_load_package(package_path)
+                runner(x)
+                torch.cuda.synchronize()
+                baseline = torch.cuda.memory_allocated()
+                torch.cuda.reset_peak_memory_stats()
+                actual = runner(x)
+                torch.cuda.synchronize()
+                peak = torch.cuda.max_memory_allocated() - baseline
+                self.assertEqual(actual, model(x), atol=1e-2, rtol=1e-2)
+            return peak
+
+        self.assertEqual(run_and_get_peak(n_layers=32), run_and_get_peak(n_layers=2))
+
     @skipIfNoFBGEMM
     def test_quantized_linear(self):
         class Model(torch.nn.Module):
