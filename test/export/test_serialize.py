@@ -3270,6 +3270,15 @@ class TestPredispatchSerialization(TestCase):
             node["target"] = helper
             node["inputs"] = node["inputs"][2:]
 
+        # Looking up a name outside torch.ops reads attributes of torch, which
+        # can import a torch module, so load refuses the name first.
+        onnx_imported = "torch.onnx" in sys.modules
+        with self.assertRaisesRegex(SerializeError, "not an operator overload"):
+            self._load_changed(
+                artifact, set_last(arg={"as_operator": "torch.onnx.export"})
+            )
+        self.assertEqual("torch.onnx" in sys.modules, onnx_imported)
+
         for name, change, reason in [
             # An input that names an operator would reach the function as a
             # callable.
@@ -3286,7 +3295,7 @@ class TestPredispatchSerialization(TestCase):
             (
                 "helper",
                 set_last(arg={"as_operator": helper}),
-                "only be called through flat_apply",
+                "not an operator overload",
             ),
             # A dict of arguments could hold one too, and export passes neither
             # dicts nor keyword arguments through flat_apply.

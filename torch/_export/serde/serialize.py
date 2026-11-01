@@ -792,8 +792,9 @@ def _check_flat_apply_inputs(
     node_name: str | None, inputs: Sequence[NamedArgument]
 ) -> None:
     """
-    Save and load both refuse keyword inputs, and inputs other than plain values
-    and operators.
+    Save and load both refuse keyword inputs, inputs other than plain values
+    and operators, and operator names outside torch.ops: looking one up reads
+    attributes of torch, which can import a torch module.
     """
     for inp in inputs:
         if inp.kind != ArgumentKind.POSITIONAL or inp.name:
@@ -805,6 +806,14 @@ def _check_flat_apply_inputs(
             raise SerializeError(
                 f"flat_apply node {node_name} has an input of kind {inp.arg.type}, "
                 "which cannot be saved or loaded"
+            )
+        if inp.arg.type == "as_operator" and not (
+            isinstance(inp.arg.as_operator, str)
+            and inp.arg.as_operator.startswith("torch.ops.")
+        ):
+            raise SerializeError(
+                f"flat_apply node {node_name} has an operator input that is not "
+                f"an operator overload: {inp.arg.as_operator}"
             )
 
 
