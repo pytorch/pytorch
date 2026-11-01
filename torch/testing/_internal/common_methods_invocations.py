@@ -12172,6 +12172,10 @@ def sample_inputs_ternary_beta_family(op_info, device, dtype, requires_grad, **k
         )
         yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
 
+    # A probability of exactly 0.5 equals the initial upper bracket of betaincinv in double
+    half = torch.full((S,), 0.5, dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(make_arg_params((S,)), make_arg_params((S,)), half)
+
 def sample_inputs_binary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
     make_arg_params = partial(
         make_tensor,
@@ -12626,7 +12630,8 @@ op_db: list[OpInfo] = [
            skips=_beta_family_vmap_skips),
     OpInfo('special.betaincc',
            aten_name='special_betaincc',
-           ref=scipy.special.betaincc if TEST_SCIPY else None,
+           # scipy.special.betaincc needs SciPy 1.11; CI pins 1.10 for Python <= 3.11
+           ref=(lambda a, b, x: 1 - scipy.special.betainc(a, b, x)) if TEST_SCIPY else None,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12640,7 +12645,8 @@ op_db: list[OpInfo] = [
            skips=_beta_family_vmap_skips),
     OpInfo('special.betainccinv',
            aten_name='special_betainccinv',
-           ref=scipy.special.betainccinv if TEST_SCIPY else None,
+           # scipy.special.betainccinv needs SciPy 1.11; CI pins 1.10 for Python <= 3.11
+           ref=(lambda a, b, y: scipy.special.betaincinv(a, b, 1 - y)) if TEST_SCIPY else None,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),

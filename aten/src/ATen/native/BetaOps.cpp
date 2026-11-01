@@ -400,10 +400,16 @@ static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Te
       initial_high = at::ones_like(_y) * 0.5;
   }
 
-  Tensor should_stop = (_y == initial_low) | (_y == initial_high);
+  // Only y in {0, 1} is solved up front (set after the loop). TFP also stops
+  // when y == initial_high, but initial_high bounds x, not y, so y == 0.5
+  // returned the initial approximation in double.
+  Tensor should_stop = (_y == 0.0) | (_y == 1.0);
   Tensor low = initial_low;
   Tensor high = initial_high;
-  Tensor candidate = initial_candidate;
+  // A root within rounding of x == 0.5 sits on the end of the bracket, where
+  // Halley overshoots and bisection converges too slowly; start from 0.5.
+  Tensor x_near_half = at::abs(error_at_half) <= tolerance * at::minimum(y_orig, 1.0 - y_orig);
+  Tensor candidate = at::where(x_near_half, 0.5, initial_candidate);
 
   // root_finding_iteration
   for (int i = 0; i < max_iterations; i++) {
