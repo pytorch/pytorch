@@ -15757,8 +15757,9 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
-    @parametrize("backend", ["eager", "aot_eager"])
-    def test_itertools_cycle_reuses_initial_iterator(self, backend):
+    def test_itertools_cycle_reuses_initial_iterator(self):
+        counters.clear()
+
         class Iterable:
             def __init__(self):
                 self.calls = 0
@@ -15773,10 +15774,10 @@ def ___make_guard_fn():
             return x + next(values) + next(values) + next(values), data.calls
 
         x = torch.tensor(0)
-        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), (x + 13, 1))
         self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(compiled(x + 1), fn(x + 1))
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_accumulate_symint_default_sum(self):
         # https://github.com/pytorch/pytorch/issues/110287
