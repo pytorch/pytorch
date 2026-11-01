@@ -181,6 +181,31 @@ struct StoreWithCast {
   }
 };
 
+#ifdef USE_ROCM
+// LoadWithCast / StoreWithCast for tensor dtypes known at compile time.
+template <typename... CastFromTs>
+struct LoadWithStaticCast {
+  template <typename scalar_t, int i = 0>
+  __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
+    using cast_from_t = std::tuple_element_t<i, std::tuple<CastFromTs...>>;
+    if constexpr (i + 1 < sizeof...(CastFromTs)) {
+      if (arg != i) {
+        return load<scalar_t, i + 1>(base_ptr, offset, arg);
+      }
+    }
+    return c10::convert<scalar_t>(c10::load<cast_from_t>(base_ptr + sizeof(cast_from_t) * offset));
+  }
+};
+
+template <typename CastToT>
+struct StoreWithStaticCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
+    *(reinterpret_cast<CastToT *>(base_ptr) + offset) = c10::convert<CastToT>(value);
+  }
+};
+#endif
+
 // aligned vector generates vectorized load/store on CUDA
 template<typename scalar_t, int vec_size>
 struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {

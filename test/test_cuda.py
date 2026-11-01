@@ -2974,6 +2974,36 @@ raise RuntimeError("device assert did not fire")
                 y = torch.randn(2, 1, device="cuda")
                 x + y
 
+    def test_mixed_dtype_binary_remainder_sizes(self):
+        # Sizes around the 2048 / 16384 boundaries of the remainder block of the
+        # mixed-dtype vectorized kernel, alone and after full blocks.
+        sizes = [1, 512, 2047, 2048, 2049, 16383, 16384, 16385]
+        sizes += [16384 + 512, 16384 + 2048, 3 * 16384 + 17]
+        f32 = torch.float32
+        for out_dtype, a_dtype, b_dtype in [
+            (f32, f32, torch.bfloat16),
+            (f32, torch.bfloat16, f32),
+            (torch.bfloat16, torch.bfloat16, f32),
+            (f32, f32, torch.half),
+            (f32, torch.half, f32),
+            (torch.half, torch.half, f32),
+        ]:
+            for n in sizes:
+                a = torch.randn(n, device="cuda").to(a_dtype)
+                b = torch.randn(n, device="cuda").to(b_dtype)
+                out = torch.full((n + 64,), 7, device="cuda", dtype=out_dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], (a.double() + b.double()).to(out_dtype))
+                self.assertEqual(
+                    out[n:], torch.full((64,), 7, device="cuda", dtype=out_dtype)
+                )
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x = torch.randn(n, device="cuda")
+            y = torch.randn(n, device="cuda").bfloat16()
+            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
+
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     @serialTest()
     def test_cuda_kernel_loop_overflow(self):
@@ -8984,7 +9014,6 @@ print(value, end="")
         )
         self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180227")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
@@ -9001,7 +9030,6 @@ print(value, end="")
         matching = all(any(uuid in raw_id for raw_id in raw_uuids) for uuid in uuids)
         self.assertEqual(True, matching)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180123")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
