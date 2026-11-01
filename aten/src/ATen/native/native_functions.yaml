@@ -15247,6 +15247,8 @@
   variants: function
   tags: nondeterministic_seeded
 
+# Despite the name, this is the fused Metal kernel that MPS selects as the flash
+# attention backend; the name is kept for AOTI shim and serialization BC.
 - func: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None, bool enable_gqa=False) -> (Tensor, Tensor)
   dispatch:
     MPS: _scaled_dot_product_attention_math_mps
