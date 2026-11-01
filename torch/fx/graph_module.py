@@ -12,7 +12,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -894,18 +894,15 @@ class {module_name}(torch.nn.Module):
                 used.update(itertools.accumulate(fullpath, join_fn))
 
                 # A submodule that a node calls or reads keeps all of its own
-                # submodules, which run with it.
-                try:
-                    str_target = cast(str, node.target)
-                    submod = self.get_submodule(str_target)
-
+                # submodules, which run with it. Most get_attr targets are
+                # parameters or buffers, so look them up without raising.
+                submod: Any = self
+                for atom in fullpath:
+                    submod = getattr(submod, atom, None)
+                if isinstance(submod, torch.nn.Module):
                     for submod_name, _ in submod.named_modules():
                         if submod_name != "":
-                            used.add(".".join([str_target, submod_name]))
-                except AttributeError:
-                    # The target is not a submodule, or does not exist, so there
-                    # is nothing more to keep
-                    pass
+                            used.add(".".join([node.target, submod_name]))
 
         to_delete = [name for name, _ in self.named_modules() if name not in used]
 
