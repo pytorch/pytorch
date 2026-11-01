@@ -736,7 +736,9 @@ def _find_imported(name: str) -> Any:
     ``torch.nn.Module`` (defined in ``torch.nn.modules.module``) are refused.
     Names in ``__main__`` modules are refused too, because a script differs
     between processes. That includes ``__mp_main__``, the main script of a
-    multiprocessing child.
+    multiprocessing child. This covers names only: like any pytree spec in a
+    saved program, the input spec of a flat_apply node is loaded with
+    ``treespec_loads``, which can import the module of an enum it names.
     """
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
@@ -2935,9 +2937,10 @@ class GraphModuleDeserializer(metaclass=Final):
                 target
                 is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             ):
-                # Export calls this helper only through flat_apply, where load
-                # checks the class name it gets. Called directly, it would import
-                # a module that the file names when the program runs.
+                # The verifier allows this helper, but export calls it only
+                # through flat_apply, where load checks the class name it gets.
+                # Called directly, it would import a module that the file names
+                # when the program runs.
                 raise SerializeError(
                     f"{serialized_node.target} can only be called through flat_apply"
                 )
