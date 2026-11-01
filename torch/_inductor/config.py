@@ -3013,12 +3013,13 @@ class cuda(cutlass):
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
     # autotuning and records the solutions; with autotune_tunableop_ladder it
     # also tunes a range of sizes of each GEMM's dynamic dim, the traced shape
-    # among them. A GEMM the ladder skips (ladder off, static, several dynamic
-    # symbols, dynamic K, a non-dense operand, an unsupported choice) is covered
-    # only with PYTORCH_TUNABLEOP_ENABLED set: by max-autotune benchmarking
-    # the aten choice here, or by a later run. "reuse" instead borrows the
-    # nearest recorded shape, benchmarks it against the default kernel, and
-    # records the winner. Run as separate passes: "tune" writes, "reuse" reads.
+    # among them. A GEMM it skips (ladder off, static, several dynamic symbols,
+    # dynamic K, a non-dense operand, an unsupported choice, a CPU winner, an
+    # unbacked dim with no user hint, the layout-conflict fallback) is covered
+    # only with PYTORCH_TUNABLEOP_ENABLED set, by max-autotune benchmarking the
+    # aten choice here or a later run. "reuse" instead borrows the nearest
+    # recorded shape, benchmarks it against the default, and records the
+    # winner. Run as separate passes: "tune" writes, "reuse" reads.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
