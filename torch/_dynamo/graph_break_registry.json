@@ -1547,6 +1547,46 @@
       ]
     }
   ],
+  "GB0799": [
+    {
+      "Gb_type": "int() with non-constant arguments",
+      "Context": "int(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call int() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9845": [
+    {
+      "Gb_type": "float() with non-constant arguments",
+      "Context": "float(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call float() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8114": [
+    {
+      "Gb_type": "complex() with non-constant arguments",
+      "Context": "complex(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call complex() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3976": [
+    {
+      "Gb_type": "str() with non-constant arguments",
+      "Context": "str(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call str() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0096": [
     {
       "Gb_type": "Should not compile partial graph (STORE_ATTR)",
@@ -4018,6 +4058,14 @@
     }
   ],
   "GB9890": [
+    {
+      "Gb_type": "bytes() with non-constant arguments",
+      "Context": "bytes(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call bytes() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "bytes() with non-constant arguments",
       "Context": "bytes(*{args}, **{kwargs})",

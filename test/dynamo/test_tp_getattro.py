@@ -13,7 +13,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
 )
 from torch.utils._triton import has_triton_package
 
@@ -239,6 +241,57 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 42)
+
+    @parametrize("fullgraph", [False, True])
+    def test_property_subclass_spoofed_class(self, fullgraph):
+        class MyProperty(property):
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    return types.ClassMethodDescriptorType
+                return super().__getattribute__(name)
+
+        class MyObj:
+            @MyProperty
+            def val(self):
+                return 3
+
+        def fn(x, obj):
+            return x + obj.val
+
+        x, obj = torch.tensor(1), MyObj()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("fullgraph", [False, True])
+    def test_property_subclass_spoofed_class_escape(self, fullgraph):
+        class MyProperty(property):
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    return types.GetSetDescriptorType
+                return super().__getattribute__(name)
+
+        class MyObj:
+            @MyProperty
+            def val(self):
+                return 3
+
+        def fn(x, cls):
+            descriptor = cls.val
+            return x + descriptor.__get__(cls(), cls), descriptor, cls.val
+
+        x = torch.tensor(1)
+        descriptor = MyObj.__dict__["val"]
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        for _ in range(2):
+            result = compiled(x, MyObj)
+            self.assertEqual(result, fn(x, MyObj))
+            self.assertIs(result[1], descriptor)
+            self.assertIs(result[2], descriptor)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_udov_getattr_fallback(self):
         class MyObj:
@@ -2295,6 +2348,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         expected = fn(x)
         actual = compiled_fn(x)
         self.assertEqual(actual, expected)
+
+
+instantiate_parametrized_tests(TpGetattroTests)
 
 
 if __name__ == "__main__":

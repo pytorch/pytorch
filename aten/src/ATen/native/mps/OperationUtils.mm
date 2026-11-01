@@ -957,7 +957,11 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
+      // Listed newest first: a kernel defined by several sections resolves to the first one
       const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
+#ifdef CAN_BUILD_METAL_41
+          {"metal_41", has_metal_4_1},
+#endif
 #ifdef CAN_BUILD_METAL_4
           // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
           // cooperative-tensor ABI); every kernel it defines shadows the
