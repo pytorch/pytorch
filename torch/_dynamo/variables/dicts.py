@@ -178,11 +178,7 @@ def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return obj.python_type() is dict
 
 
-# Mirror PyODict_{Check,CheckExact} in Include/cpython/odictobject.h.
-def pyodict_check(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
-    return issubclass(obj.python_type(), collections.OrderedDict)
-
-
+# Mirror PyODict_CheckExact in Include/cpython/odictobject.h.
 def pyodict_checkexact(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
     return obj.python_type() is collections.OrderedDict
 
@@ -666,6 +662,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # Reuse a previous lookup result to avoid repeating key comparisons.
         # None means the caller has not looked up the key yet.
         arg = key.vt
+        if key.has_builtin_method:
+            # Materializing a constant method can copy its receiver. Guard the
+            # input keys; method-key tracking guards the receiver relationship.
+            self.install_dict_keys_match_guard()
+            return
         if key_present is None:
             value = self.items.get(key)
             key_present = (
@@ -2090,10 +2091,6 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        if not self.items and isinstance(item, variables.LazyConstantVariable):
-            item.python_type()
-            self.install_dict_keys_match_guard()
-            return ConstantVariable.create(False)
         source = item.source
         if (
             isinstance(source, ConstDictKeySource)
@@ -2109,7 +2106,12 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         ):
             key = _get_literal_key(item)
             keys = [_get_literal_key(k.vt) for k in self.items]
-            if type(key) is int and all(type(k) is int for k in keys):
+            hooks = tx.output.resolve_source_value(source.base)
+            if (
+                type(key) is int
+                and all(type(k) is int for k in keys)
+                and all(type(k) is int for k in dict.keys(hooks))
+            ):
                 item.python_type()
                 for stored_key in self.items:
                     stored_key.vt.python_type()
@@ -2122,13 +2124,15 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
                         functools.partial(
                             GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
                             hooks_name=source.base.member,
-                            flags_name=self.global_flags_name
-                            or cast(AttrSource, self.source).member,
                             flags_source=self.source,
                         )
                     )
                 )
                 return ConstantVariable.create(key in keys)
+        if not self.items and isinstance(item, variables.LazyConstantVariable):
+            item.python_type()
+            self.install_dict_keys_match_guard()
+            return ConstantVariable.create(False)
         return super().sq_contains_impl(tx, item)
 
 

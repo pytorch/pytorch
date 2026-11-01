@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import io
 import operator
 import unittest
 from collections import defaultdict, OrderedDict
@@ -203,7 +204,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), (x + 1, 1))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "export"])
     @parametrize("construct", [False, True])
     def test_allowed_function_argument(self, backend, construct):
         @torch.compiler.allow_in_graph
@@ -219,10 +220,27 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 mapping = builtins.frozendict(x=x, nested=builtins.frozendict(y=x * 2))
             return consume(mapping)
 
+        class Module(torch.nn.Module):
+            def forward(self, x, mapping):
+                return fn(x, mapping)
+
         try:
-            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            if backend == "export":
+                x = torch.ones(2)
+                mapping = builtins.frozendict(
+                    x=x + 1, nested=builtins.frozendict(y=x * 2)
+                )
+                exported = torch.export.export(Module(), (x, mapping), strict=True)
+                buffer = io.BytesIO()
+                torch.export.save(exported, buffer)
+                buffer.seek(0)
+                compiled = torch.export.load(buffer).module()
+            else:
+                compiled = torch.compile(fn, backend=backend, fullgraph=True)
             for x in (torch.ones(2), torch.full((2,), 3.0)):
-                mapping = builtins.frozendict(x=x, nested=builtins.frozendict(y=x * 2))
+                mapping = builtins.frozendict(
+                    x=x + 1, nested=builtins.frozendict(y=x * 2)
+                )
                 self.assertEqual(compiled(x, mapping), fn(x, mapping))
         finally:
             torch._dynamo.disallow_in_graph(consume)
