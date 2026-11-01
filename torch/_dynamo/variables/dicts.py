@@ -514,6 +514,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # Reuse a previous lookup result to avoid repeating key comparisons.
         # None means the caller has not looked up the key yet.
         arg = key.vt
+        if key.has_builtin_method:
+            # Materializing a constant method can copy its receiver. Guard the
+            # input keys; method-key tracking guards the receiver relationship.
+            self.install_dict_keys_match_guard()
+            return
         if key_present is None:
             value = self.items.get(key)
             key_present = (
