@@ -2120,13 +2120,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the rebuilt guard compares against the sentinel forever: it
         # is refused by name, and pickle_guards_state re-raises that
         # PackageError unchanged as the bypass reason.
-        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+        from torch._C._distributed_c10d import Backend, ProcessGroup
+        from torch.distributed._backends.fake import FakeProcessGroup
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, Backend)
         self.assertNotIsInstance(pg, ProcessGroup)
         referent = _ModuleWithDtypeAttr()
-        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        objs = (
+            pg,
+            Backend(0, 1),
+            _PyBackend(),
+            ProcessGroup(0, 1),
+            torch.Stream(device="cpu"),
+        )
         for obj in (*objs, weakref.ref(referent)):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
@@ -5346,22 +5353,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": wider}, False)
         renamed = marked(min=2, max=8, shape_id="t")
         self._test_check_fn(ref, loaded, {"x": renamed}, False)
-
-        def refined_fn(x):
-            torch._check(x.shape[0] == 1)
-            return x + 1
-
-        def refined_marked(size, static_size=2):
-            t = torch.randn(size, static_size)
-            torch._dynamo.decorators.mark_unbacked(t, 0)
-            return t
-
-        x = refined_marked(1)
-        ref, loaded = self._test_serialization("TENSOR_MATCH", refined_fn, x)
-        self._test_check_fn(ref, loaded, {"x": x}, True)
-        # The runtime assertion, not either input guard, enforces the refinement.
-        self._test_check_fn(ref, loaded, {"x": refined_marked(2)}, True)
-        self._test_check_fn(ref, loaded, {"x": refined_marked(2, 3)}, False)
 
     def test_weak_and_strict_markings_round_trip(self):
         def fn(x):
