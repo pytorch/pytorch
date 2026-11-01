@@ -1951,8 +1951,7 @@ def _propagate_user_kernel_eager_input_vals(
 
 def decompose_user_kernel_wrapper_functional(graph):
     """Decomposes user-kernel functional HOP nodes (triton_kernel_wrapper_functional,
-    cutedsl_kernel_wrapper_functional, ...) into clones and the underlying mutation
-    node.
+    ...) into clones and the underlying mutation node.
 
     We assume that the reinplacing pass runs before this; the reinplacing pass
     tells us (via rewriting the arguments or .meta to those nodes) which

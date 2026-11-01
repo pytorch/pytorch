@@ -1904,10 +1904,8 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        if is_user_kernel_mutation_hop(fx_node.target):
-            user_kernel_hop = get_user_kernel_hop_info(fx_node.target)
-            if user_kernel_hop is None:
-                raise AssertionError(f"{fx_node.target} is not a user-kernel HOP")
+        user_kernel_hop = get_user_kernel_hop_info(fx_node.target)
+        if user_kernel_hop is not None and fx_node.target is user_kernel_hop.mutation:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
