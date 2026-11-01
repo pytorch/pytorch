@@ -43,6 +43,7 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -4869,6 +4870,39 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
                 self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
+
+    def test_stale_base_adds_no_base_guard_and_no_recompile(self):
+        # A rebound tensor's _base is not a live view base, so dynamo must not
+        # fakify it or build a symbolic context from it. Before this change both
+        # call sites read e._base directly: a tracked fake showed up under
+        # AttrSource(source, "_base") and _automatic_dynamic unified its size
+        # with unrelated inputs under duck sizing, adding a guard that forced a
+        # recompile.
+        def fn(dest, storage):
+            return dest[0] + storage[0]
+
+        def fresh(n):
+            storage = torch.arange(float(n))
+            dest = storage[:3]
+            dest.set_(torch.full((3,), 7.0))
+            return dest, storage
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt, dynamic=True)
+
+        dest, storage = fresh(5)
+        self.assertEqual(opt(dest, storage), storage[0] + 7.0)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+        self.assertNotIn("_base", guard_str)
+
+        # A different storage length must not recompile. A spurious duck-sized
+        # guard on the stale base's size is what would trip this.
+        dest2, storage2 = fresh(6)
+        self.assertEqual(opt(dest2, storage2), storage2[0] + 7.0)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_set_new_base_stays_aliased(self):
         # After dest.set_(src), dest must alias src, not its old base.

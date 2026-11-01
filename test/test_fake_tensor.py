@@ -31,6 +31,8 @@ from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
+from torch._subclasses.meta_utils import _live_view_base
+from torch.testing._internal.two_tensor import TwoTensor
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
@@ -4647,6 +4649,99 @@ class FakeTensorViewCopy(TestCase):
                     ValueError, "Cannot view a tensor with shape *"
                 ):
                     _ = yf.view(-1)
+
+
+
+class TestLiveViewBase(TestCase):
+    """Direct coverage for ``torch._subclasses.meta_utils._live_view_base``.
+
+    The exemption list has broken this PR twice already (nested tensors, then
+    sparse ``values()``), both times inside tests that only ran end to end
+    through ``torch.compile``. These pin the rule and each exemption directly.
+    """
+
+    def _stale_pair(self):
+        # dest was a view of storage, then got rebound onto src's storage.
+        storage = torch.arange(5.0)
+        dest = storage[:3]
+        src = torch.full((3,), 7.0)
+        dest.set_(src)
+        return dest, src, storage
+
+    def test_stale_base_is_not_a_live_view_base(self):
+        dest, src, storage = self._stale_pair()
+        self.assertIsNotNone(dest._base)
+        self.assertIs(_live_view_base(dest), None)
+        # The un-rebound case is still a view base.
+        self.assertIs(_live_view_base(storage[:3]), storage)
+
+    def test_stale_base_is_described_standalone_and_aliases_src(self):
+        dest, src, storage = self._stale_pair()
+        mode = FakeTensorMode()
+        with mode:
+            f_dest = mode.from_tensor(dest)
+            f_src = mode.from_tensor(src)
+        self.assertFalse(f_dest._is_view())
+        self.assertEqual(
+            f_dest.untyped_storage()._cdata, f_src.untyped_storage()._cdata
+        )
+        f_storage = FakeTensorMode().from_tensor(storage)
+        self.assertNotEqual(
+            f_dest.untyped_storage()._cdata, f_storage.untyped_storage()._cdata
+        )
+
+    def test_live_view_base_keeps_nested_tensor_view(self):
+        from torch.nested._internal.nested_tensor import jagged_from_list
+
+        nt, _ = jagged_from_list(
+            [torch.randn(3, 4), torch.randn(5, 4)], torch.tensor([0, 3, 8])
+        )
+        values = nt.values()
+        self.assertIsNotNone(values._base)
+        # A nested view need not share its base's repacked storage, so the
+        # storage test must not run on it.
+        self.assertIs(_live_view_base(values), values._base)
+
+    def test_live_view_base_keeps_traceable_wrapper_subclass_view(self):
+        inner = torch.randn(4)
+        wrapped = TwoTensor(inner, inner.clone())
+        view = wrapped[:2]
+        self.assertIsNotNone(view._base)
+        self.assertIs(_live_view_base(view), view._base)
+
+    def test_live_view_base_keeps_wrapper_subclass_base(self):
+        # A plain tensor whose _base is a wrapper subclass: the wrapper's outer
+        # storage is fresh even though it is a real view.
+        inner = torch.randn(4)
+        wrapped = TwoTensor(inner, inner.clone())
+        child = wrapped[:2]
+        self.assertIs(_live_view_base(child), child._base)
+
+    def test_live_view_base_keeps_sparse_compressed_values(self):
+        base = torch.randn(4, 4).to_sparse_csr()
+        values = base.values()
+        self.assertIsNotNone(values._base)
+        self.assertIs(_live_view_base(values), values._base)
+
+    def test_live_view_base_skips_non_traceable_wrapper_subclass(self):
+        # Documented boundary. The exemption is keyed on the traceable
+        # protocol, not on "is any tensor subclass": there is no cheap
+        # predicate for the latter, and type(t) is not torch.Tensor would also
+        # exempt _make_subclass tensors, which do share their base's storage and
+        # would then hide genuinely stale bases. So a non-traceable wrapper
+        # subclass is still subject to the storage test. Pinning the predicate
+        # here keeps that choice deliberate rather than accidental.
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        class _NonTraceableWrapper(torch.Tensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise NotImplementedError
+
+        wrapped = torch.Tensor._make_wrapper_subclass(
+            _NonTraceableWrapper, torch.randn(4).size()
+        )
+        self.assertFalse(is_traceable_wrapper_subclass(wrapped))
 
 
 if __name__ == "__main__":

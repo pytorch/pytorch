@@ -243,29 +243,46 @@ def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
     does not, and must be described as standalone rather than merged with a base
     it no longer aliases.
 
-    This is the single answer to "is ``_base`` still a live view base?". Callers
-    in fakification, in the AOTAutograd synthetic-base wrapper and in dynamo all
-    route through here so the compile-time alias choice cannot drift from the
-    runtime one. Storage identity uses ``StorageWeakRef``, the same identity the
-    synthetic-base grouping uses to decide which inputs share a base.
+    This is the single answer to "is ``_base`` still a live view base?".
+    Fakification, the AOTAutograd synthetic-base wrapper and dynamo all route
+    through here, so the compile-time and runtime alias choices are made by one
+    rule rather than two that can drift apart. That guarantee is per call: the
+    answer is recomputed every time, so a tensor that is rebound between two
+    calls can still be treated as a live view on the first and not the second.
+    ``AOTSyntheticBaseWrapper`` asserts the consequence of that at runtime
+    rather than relying on the guard to keep the two calls consistent.
+
+    Storage identity is compared with ``untyped_storage()._cdata``, which is
+    the same comparison ``StorageWeakRef.__eq__`` performs. ``StorageWeakRef``
+    additionally takes and releases a weak reference per construction, which is
+    too much for a helper that runs per input per call, and the identity it
+    yields is exactly this pointer.
 
     The storage test only has meaning for plain strided tensors, so ``_base`` is
     kept for everything else:
 
     * a nested tensor repacks values/offsets, so a real nested view need not
       share its base's storage;
-    * a traceable wrapper subclass (e.g. ``AsyncCollectiveTensor``) can rewrap a
-      view output, giving the wrapper a fresh outer storage even though it is a
-      real view;
+    * a wrapper subclass built with ``_make_wrapper_subclass`` gets a fresh
+      null-data storage even when it is a real view, so its outer storage says
+      nothing about aliasing. The exemption is keyed on the traceable protocol,
+      which is the only wrapper shape with a cheap discriminator: there is no
+      predicate for "any wrapper subclass", and testing ``type(t) is not
+      torch.Tensor`` would also exempt ``_make_subclass`` tensors, which do
+      share their base's storage and would then hide genuinely stale bases. A
+      non-traceable wrapper subclass is therefore still subject to the storage
+      test and is described standalone when its outer storage differs, which is
+      the pre-existing behaviour for anything with a fresh outer storage and is
+      pinned by ``test_live_view_base_skips_non_traceable_wrapper_subclass``;
     * sparse, mkldnn, functorch-wrapped and legacy batched tensors either throw
       on ``untyped_storage()`` or do not expose a storage that identifies the
       tensor's aliasing.
     """
-    from torch.multiprocessing.reductions import StorageWeakRef
-
     base = t._base
     if base is None:
         return None
+    # Cheap structural exclusions first: they are the common answer for exotic
+    # tensors, and the storage test below allocates two UntypedStorage objects.
     if (
         t.is_nested
         or base.is_nested
@@ -274,8 +291,8 @@ def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
     ):
         return base
     if (
-        t.layout != torch.strided
-        or base.layout != torch.strided
+        t.layout is not torch.strided
+        or base.layout is not torch.strided
         or is_functorch_wrapped_tensor(t)
         or is_functorch_wrapped_tensor(base)
         or is_legacy_batchedtensor(t)
@@ -284,7 +301,28 @@ def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
         or base.is_mkldnn
     ):
         return base
-    if StorageWeakRef(t.untyped_storage()) == StorageWeakRef(base.untyped_storage()):
+    if t.untyped_storage()._cdata == base.untyped_storage()._cdata:
+        return base
+    return None
+
+
+def _plain_live_view_base(t: torch.Tensor) -> torch.Tensor | None:
+    """``_live_view_base`` for inputs already known to be plain tensors.
+
+    ``AOTSyntheticBaseWrapper`` refuses to build a synthetic base for a tensor
+    subclass input, so every member of a synthetic-base group is a plain strided
+    tensor and none of the structural exemptions in ``_live_view_base`` can
+    fire on it. This is that rule with the dead branches removed, because the
+    wrapper runs it once per input on every call.
+
+    If that precondition ever stops holding, this stops being equivalent to
+    ``_live_view_base`` and the two must be reconciled. It is not a second rule;
+    it is the same rule under a stated precondition.
+    """
+    base = t._base
+    if base is None:
+        return None
+    if t.untyped_storage()._cdata == base.untyped_storage()._cdata:
         return base
     return None
 

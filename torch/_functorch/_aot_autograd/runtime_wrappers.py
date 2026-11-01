@@ -50,7 +50,7 @@ from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
-from torch._subclasses.meta_utils import _live_view_base
+from torch._subclasses.meta_utils import _plain_live_view_base
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType
@@ -2062,7 +2062,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         buf.bind(
             torch=torch,
             _compiled_fn_=compiled_fn,
-            _live_view_base=_live_view_base,
+            _plain_live_view_base=_plain_live_view_base,
         )
 
         with buf.indent():
@@ -2074,7 +2074,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 buf.writeline("_b = None")
                 buf.writeline(f"for _i in [{indices_str}]:")
                 with buf.indent():
-                    buf.writeline("_b = _live_view_base(args[_i])")
+                    buf.writeline("_b = _plain_live_view_base(args[_i])")
                     buf.writeline("if _b is not None:")
                     with buf.indent():
                         buf.writeline("break")
@@ -2084,6 +2084,23 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
+                # The base is recomputed on every call while the guards that
+                # admitted this graph do not watch view-ness, so a group member
+                # rebound by set_() between compile and this call can come back
+                # with no live base and still pass them. The graph would then
+                # replay the other members' views onto a storage they no longer
+                # alias. Catch it here rather than silently producing that.
+                buf.writeline(f"for _i in [{indices_str}]:")
+                with buf.indent():
+                    buf.writeline(
+                        "if args[_i].untyped_storage()._cdata != _b.untyped_storage()._cdata:"
+                    )
+                    with buf.indent():
+                        buf.writeline(
+                            "raise RuntimeError("
+                            "'synthetic base group member no longer shares storage with the base; "
+                            "an input was rebound by set_() after this graph was compiled')"
+                        )
                 buf.writeline(f"_bases[{base_idx}] = _b")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
