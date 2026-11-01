@@ -370,40 +370,35 @@ class TestTunableOpPretune(TestCase):
     def test_memo_distinguishes_layout(self, case):
         # Each variant has a different TunableOp signature from the plain mm
         # it follows, so it must ladder rather than hit that one's memo entry.
+        # Output strides are explicit: _contiguous_strides cannot build a
+        # symbolic-N output.
         s = sympy.Symbol(f"s_memo_{case}", positive=True, integer=True)
-        if case == "output_stride":
-            # Same operands, column-major output: a different ldc.
-            second = _FakeWinner(
-                "mm",
-                [
-                    _buffer("mat1", [s, 256], [256, 1]),
-                    _buffer("mat2", [256, 512], [512, 1]),
-                ],
+        mat1 = _buffer("mat1", [s, 256], [256, 1])
+        variants = {
+            # column-major output: a different ldc
+            "output_stride": (
+                [mat1, _buffer("mat2", [256, 512], [512, 1])],
                 [s, 512],
-                out_strides=[1, s],
-            )
-        elif case == "stride_order":
-            # mat2 as a .t() view: NN vs NT.
-            second = _FakeWinner(
-                "mm",
-                [
-                    _buffer("mat1", [s, 256], [256, 1]),
-                    _buffer("mat2", [256, 512], [1, 256]),
-                ],
+                [1, s],
+            ),
+            # mat2 as a .t() view: NN vs NT
+            "stride_order": (
+                [mat1, _buffer("mat2", [256, 512], [1, 256])],
                 [s, 512],
-            )
-        else:
-            # Same hinted sizes, dynamic N instead of M: a different ladder.
-            second = _FakeWinner(
-                "mm",
+                [512, 1],
+            ),
+            # dynamic N instead of M: a different ladder
+            "dynamic_axis": (
                 [
                     _buffer("mat1", [512, 256], [256, 1]),
                     _buffer("mat2", [256, s], [s, 1]),
                 ],
                 [512, s],
-            )
-            # _contiguous_strides cannot build an N-dynamic output ([1, 1]).
-            second.layout = ir.FixedLayout(DEVICE, DTYPE, [512, s], [s, 1])
+                [s, 1],
+            ),
+        }
+        inputs, out_sizes, out_strides = variants[case]
+        second = _FakeWinner("mm", inputs, out_sizes, out_strides=out_strides)
         self.assertTrue(_run(self._mm_winner("mm", s), sym=s))
         self.assertTrue(_run(second, sym=s), f"{case} must not share a memo key")
 
@@ -713,10 +708,9 @@ class TestTunableOpPretune(TestCase):
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
-        # The finalizer sends the extern winner through the ladder, except on
-        # the layout-conflict fallback where the meta rebuild would read the
-        # constraint. Forcing the extern path is not that case: the metas are
-        # right, so the ladder must still run.
+        # The finalizer sends the extern winner through the ladder, except
+        # on the layout-conflict fallback. Forcing the extern path is not that
+        # case: the metas are right, so the ladder must still run.
         import torch._inductor.ir as _ir
         from torch._inductor.scheduler import Scheduler, SchedulerNode
 
