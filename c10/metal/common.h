@@ -1,6 +1,8 @@
 #pragma once
 // Set of global constants that could be shareable between CPU and Metal code
 
+#include <c10/util/IntegerDivider.h>
+
 #ifdef __METAL__
 #include <c10/metal/float8.h>
 #include <metal_array>
@@ -90,6 +92,13 @@ using complex = ::c10::complex<T>;
 using half = ::c10::Half;
 using bfloat = ::c10::BFloat16;
 #endif
+
+// Per-dim divisor for the strided kernels. The box only pads c10::IntDivider
+// (12 bytes) to a 16-byte stride so a kernel fetches a dim's divisor with one
+// load; Metal has no struct inheritance, hence the member.
+struct alignas(16) DimDivider {
+  ::c10::IntDivider<uint32_t> d;
+};
 
 namespace detail {
 template <typename T>
