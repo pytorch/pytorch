@@ -3250,6 +3250,8 @@ class TestPredispatchSerialization(TestCase):
                 )
             ),
             "not_a_treespec": set_spec("not a treespec"),
+            # FX writes attribute names into the code it generates.
+            "name_not_identifier": lambda node: node.update(name='x")\nimport os  # '),
             "no_function": lambda node: node["inputs"].pop(0),
             "function_not_a_string": lambda node: node["inputs"][0]["arg"].update(
                 as_operator=5
@@ -3268,6 +3270,7 @@ class TestPredispatchSerialization(TestCase):
             ("no_name_type", "does not name one type"),
             ("no_name_namedtuple", "couldn't find a serialized name"),
             ("not_a_treespec", "Cannot load the input spec"),
+            ("name_not_identifier", "is not an identifier"),
             ("no_function", "does not start with its function"),
             ("function_not_a_string", "does not start with its function"),
         ],

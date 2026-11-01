@@ -3411,6 +3411,15 @@ class GraphModuleDeserializer(metaclass=Final):
         the input spec, and add both back to the graph as TreeSpec attributes.
         """
         inputs = serialized_node.inputs
+        # The node name becomes part of attribute names, which FX writes into
+        # the code it generates, so it must be an identifier.
+        if not (
+            isinstance(serialized_node.name, str)
+            and serialized_node.name.isidentifier()
+        ):
+            raise SerializeError(
+                f"flat_apply node name {serialized_node.name!r} is not an identifier"
+            )
         if (
             len(inputs) < 2
             or inputs[0].arg.type != "as_operator"
