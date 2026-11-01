@@ -68,7 +68,6 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
-    GlobalWeakRefSource,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -3923,7 +3922,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
-        self.install_accessor_guard(tx, "__getattribute__")
+        if not config.assume_dunder_attributes_remain_unchanged and self.cls_source:
+            source = mro_attr_source(
+                tx, type(self.value), self.cls_source, "__getattribute__"
+            )
+            if source is not None:
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3934,9 +3938,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # The accessor is guarded through the class above. Building
-                    # another instance-bound function guard here would disable
-                    # recursive module dictionary tag checks.
+                    # Keep this off the builder so the instance-bound function
+                    # guard does not disable recursive module dictionary tags.
                     VariableBuilder.create_internal_user_function(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -4035,50 +4038,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
         return VariableTracker.build(tx, resolved, source)
-
-    def method_load_qualname(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        descriptor: object,
-    ) -> str | None:
-        from ..side_effects import _MUTABLE_GETATTRIBUTES
-
-        # _PyObject_GetMethod skips binding for an unshadowed class descriptor
-        # with generic getattr, e.g. D().popitem(1) reports dict.popitem().
-        if (
-            isinstance(descriptor, types.MethodDescriptorType)
-            and self.lookup_class_mro_attr("__getattribute__") in _MUTABLE_GETATTRIBUTES
-            and self.lookup_class_mro_attr("__getattr__") is NO_SUCH_SUBOBJ
-            and self.lookup_class_mro_attr(name) is descriptor
-            and self.lookup_instance_dict(tx, name) is None
-        ):
-            return descriptor.__qualname__
-        return None
-
-    def install_accessor_guard(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> None:
-        # TYPE_MATCH cannot detect replacing an accessor on the same class.
-        # Attribute reads and LOAD_METHOD binding must share this guard policy.
-        if self.cls_source:
-            # Keep class guards separate from module instances so they do not
-            # disable recursive instance-dictionary tag checks.
-            cls_source = GlobalWeakRefSource(
-                tx.store_global_weakref_by_id("__accessor_class", type(self.value))
-            )
-            source = mro_attr_source(tx, type(self.value), cls_source, name)
-            if source is None:
-                guard = cls_source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            else:
-                guard = source.make_guard(GuardBuilder.FUNCTION_MATCH)
-            install_guard(guard)
-
-    def install_method_load_guards(self, tx: "InstructionTranslatorBase") -> None:
-        for name in ("__getattribute__", "__getattr__"):
-            self.install_accessor_guard(tx, name)
 
     def resolve_type_attr(
         self,

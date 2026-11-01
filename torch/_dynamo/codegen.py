@@ -49,7 +49,6 @@ from .source import (
 )
 from .utils import is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
-from .variables.constant import FakeIdVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
@@ -144,9 +143,6 @@ class PyCodegen:
             items = value.items
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
-        elif isinstance(value, FakeIdVariable):
-            # Aggregate constant conversion already accepts compile-time fake hashes.
-            return False
         else:
             # `is_safe_constant` accepts slices without checking their members.
             # Symbolic and mutable members must be reconstructed.

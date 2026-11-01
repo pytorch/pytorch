@@ -5114,7 +5114,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
 
     @parametrize("flag_name", ["with_kwargs", "always_call"])
-    def test_global_hook_membership(self, flag_name):
+    @parametrize("replace_registry", [False, True])
+    def test_global_hook_membership(self, flag_name, replace_registry):
         def hook(module, args, *rest):
             return rest[-1]
 
@@ -5138,9 +5139,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization(
             "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
         )
-        self._test_check_fn(ref, loaded, {"x": x, "module": module}, True)
-        module._forward_hooks[handle.id] = module._forward_hooks.pop(local_handle.id)
-        self._test_check_fn(ref, loaded, {"x": x, "module": module}, False)
+        inputs = {"x": x, "module": module, "flags": flags}
+        self._test_check_fn(ref, loaded, inputs, True)
+        registry_name = (
+            "_global_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_global_forward_hooks_always_called"
+        )
+        with mock.patch.object(
+            torch.nn.modules.module,
+            registry_name,
+            collections.OrderedDict() if replace_registry else flags,
+        ):
+            self._test_check_fn(ref, loaded, inputs, True)
+            module._forward_hooks[handle.id] = module._forward_hooks.pop(
+                local_handle.id
+            )
+            self._test_check_fn(ref, loaded, inputs, False)
 
     @parametrize("reordered", [False, True])
     @parametrize("mapping_type", [collections.OrderedDict, _ODictSubclass])
