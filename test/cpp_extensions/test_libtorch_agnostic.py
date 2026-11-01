@@ -2209,6 +2209,16 @@ except RuntimeError as e:
         self.assertEqual(result_both.dtype, torch.int64)
         self.assertEqual(result_both.device.type, "cpu")
 
+        # Test with a device that has an explicit index
+        result_indexed = libtorch_agnostic.ops.my_new_empty(t, [2, 3], device=t.device)
+        self.assertEqual(result_indexed.device, t.device)
+
+        if torch.cuda.is_available():
+            result_pinned = libtorch_agnostic.ops.my_new_empty(
+                t, [2, 3], device="cpu", pin_memory=True
+            )
+            self.assertTrue(result_pinned.is_pinned())
+
     @skipIfTorchVersionLessThan(2, 10)
     @skipIfTorchDynamo(
         "AssertionError(tensor's device must be `meta`, got cpu instead)"
@@ -2242,6 +2252,16 @@ except RuntimeError as e:
         )
         expected_both = t.new_zeros([4, 5], dtype=torch.int64, device="cpu")
         self.assertEqual(result_both, expected_both, exact_device=True)
+
+        # Test with a device that has an explicit index
+        result_indexed = libtorch_agnostic.ops.my_new_zeros(t, [2, 3], device=t.device)
+        self.assertEqual(result_indexed, t.new_zeros([2, 3]), exact_device=True)
+
+        if torch.cuda.is_available():
+            result_pinned = libtorch_agnostic.ops.my_new_zeros(
+                t, [2, 3], device="cpu", pin_memory=True
+            )
+            self.assertTrue(result_pinned.is_pinned())
 
     def test_my_unsqueeze(self, device):
         """Test unsqueeze op."""
