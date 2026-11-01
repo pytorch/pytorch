@@ -2931,6 +2931,16 @@ class GraphModuleDeserializer(metaclass=Final):
             )
             self.deserialize_outputs(serialized_node, fx_node)
         elif callable(target):
+            if (
+                target
+                is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+            ):
+                # Export calls this helper only through flat_apply, where load
+                # checks the class name it gets. Called directly, it would import
+                # a module that the file names when the program runs.
+                raise SerializeError(
+                    f"{serialized_node.target} can only be called through flat_apply"
+                )
             # Handle predispatch wrapper functions (vmap, JVP, etc.)
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             name = serialized_node.name if serialized_node.name else None
@@ -3293,7 +3303,17 @@ class GraphModuleDeserializer(metaclass=Final):
         Reverse of ``serialize_flat_apply_inputs``: find the function, load
         the input spec, and add both back to the graph as TreeSpec attributes.
         """
-        func_input, in_spec_input, *flat_inputs = serialized_node.inputs
+        inputs = serialized_node.inputs
+        if (
+            len(inputs) < 2
+            or inputs[0].arg.type != "as_operator"
+            or inputs[1].arg.type != "as_string"
+        ):
+            raise SerializeError(
+                f"flat_apply node {serialized_node.name} does not start with its "
+                "function and input spec"
+            )
+        func_input, in_spec_input, *flat_inputs = inputs
         func_name = func_input.arg.as_operator
         try:
             in_spec = treespec_loads(in_spec_input.arg.as_string)

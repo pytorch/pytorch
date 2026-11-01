@@ -3060,6 +3060,24 @@ class TestPredispatchSerialization(TestCase):
         node["inputs"][1]["arg"]["as_string"] = "not a treespec"
         with self.assertRaisesRegex(SerializeError, "Cannot load the input spec"):
             load(json.dumps(program).encode())
+        del node["inputs"][0]
+        with self.assertRaisesRegex(SerializeError, "does not start with its function"):
+            load(json.dumps(program).encode())
+
+        # Export calls the helper only through flat_apply. Called directly, it
+        # would import the module that the file names when the program runs.
+        program = json.loads(artifact.exported_program)
+        (node,) = [
+            n
+            for n in program["graph_module"]["graph"]["nodes"]
+            if n["target"] == "torch.ops.higher_order.flat_apply"
+        ]
+        node["target"] = json.loads(func_name)
+        node["inputs"] = node["inputs"][2:]
+        with self.assertRaisesRegex(
+            SerializeError, "only be called through flat_apply"
+        ):
+            load(json.dumps(program).encode())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
