@@ -85,8 +85,8 @@ base_type_to_callsite_expr = {
 # resolve_dispatch_flags: whether to manually materialize conj/neg input tensors
 # before the call. Device-specific shims call kernels directly and need this.
 # Device-generic (aten) shims go through the dispatcher, which already handles these
-# flags. Then, one must pass tensors through as-is so that view ops called on
-# complex Tensors keep aliasing their inputs instead of operating on a temporary copy.
+# flags, so one must pass tensors through as-is so that view ops called on complex
+# Tensors keep aliasing their inputs instead of operating on a temporary copy.
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
@@ -589,8 +589,7 @@ def gen_c_shim(
         func,
         backend_index,
     )
-    # at::{op} goes through the dispatcher, and CompositeImplicitAutograd kernels
-    # decompose into at:: calls, so both already handle conj/neg.
+    # CompositeImplicitAutograd kernels re-dispatch through at:: ops.
     resolve_dispatch_flags = (
         backend_index is not None
         and backend_index.dispatch_key != DispatchKey.CompositeImplicitAutograd
