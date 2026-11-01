@@ -41,16 +41,6 @@ class Partition:
         )
 
 
-def _get_attr_in_partition(attr: Any) -> bool:
-    # Submodules and pytree specs (such as the flat_apply specs export emits) are
-    # read with get_attr inside the partition instead of being passed to it.
-    # Export turns some partitions into the bodies of higher order ops, whose
-    # inputs it expects to be values, and a spec is not one.
-    return isinstance(
-        attr, torch.nn.Module
-    ) or torch.utils._pytree._is_pytreespec_instance(attr)
-
-
 def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
     attr_val = mod
     for atom in qualname.split("."):  # type: ignore[union-attr]
@@ -481,7 +471,9 @@ def split_module(
             if (
                 orig_node.op == "get_attr"
                 and isinstance(orig_node.target, str)
-                and _get_attr_in_partition(_get_attr_from_qualname(m, orig_node.target))
+                and isinstance(
+                    _get_attr_from_qualname(m, orig_node.target), torch.nn.Module
+                )
             ):
                 get_attr_inputs.append(inp)
             else:
@@ -513,7 +505,7 @@ def split_module(
                     )
 
                 orig_attr = _get_attr_from_qualname(m, orig_node.target)
-                if _get_attr_in_partition(orig_attr):
+                if isinstance(orig_attr, torch.nn.Module):
                     placeholder = partition.graph.get_attr(orig_node.target)
                     partition.targets[orig_node.target] = orig_attr
                 else:

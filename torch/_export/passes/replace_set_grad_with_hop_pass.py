@@ -33,18 +33,16 @@ def _is_set_grad_enabled_sub_mod(
         if not isinstance(node.target, str):
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
-        # split_module reads submodules and pytree specs, such as the branches
-        # of a cond, with get_attr nodes before the first call of a region.
-        first_call = nodes_first(
-            subgm.graph.nodes, lambda node: node.op not in ("placeholder", "get_attr")
+        first_non_ph = nodes_first(
+            subgm.graph.nodes, lambda node: node.op != "placeholder"
         )
         if (
-            first_call
-            and first_call.op == "call_function"
-            and first_call.target is torch._C._set_grad_enabled
+            first_non_ph
+            and first_non_ph.op == "call_function"
+            and first_non_ph.target is torch._C._set_grad_enabled
         ):
             return (
-                first_call.args[0] != torch.is_grad_enabled()  # type: ignore[bad-return]
+                first_non_ph.args[0] != torch.is_grad_enabled()  # type: ignore[bad-return]
                 if omit_if_same_with_ambient
                 else True
             )

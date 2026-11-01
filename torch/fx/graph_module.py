@@ -12,7 +12,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -862,12 +862,9 @@ class {module_name}(torch.nn.Module):
         A Module is considered "used" if any one of the following is
         true:
         1. It has children that are used
-        2. Its forward is called directly via a ``call_module`` node, or a
-        ``get_attr`` node reads it, as for the body of a higher order op
+        2. Its forward is called directly via a ``call_module`` node
         3. It has a non-Module attribute that is used from a
         ``get_attr`` node
-
-        The submodules of a module that a node calls or reads are used too.
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
@@ -893,16 +890,20 @@ class {module_name}(torch.nn.Module):
                 # `foo.bar.baz` to the set.
                 used.update(itertools.accumulate(fullpath, join_fn))
 
-                # A submodule that a node calls or reads keeps all of its own
-                # submodules, which run with it. Most get_attr targets are
-                # parameters or buffers, so look them up without raising.
-                submod: Any = self
-                for atom in fullpath:
-                    submod = getattr(submod, atom, None)
-                if isinstance(submod, torch.nn.Module):
-                    for submod_name, _ in submod.named_modules():
-                        if submod_name != "":
-                            used.add(".".join([node.target, submod_name]))
+                # For a `call_module` node, also register all recursive submodules
+                # as used
+                if node.op == "call_module":
+                    try:
+                        str_target = cast(str, node.target)
+                        submod = self.get_submodule(str_target)
+
+                        for submod_name, _ in submod.named_modules():
+                            if submod_name != "":
+                                used.add(".".join([str_target, submod_name]))
+                    except AttributeError:
+                        # Node referenced nonexistent submodule, don't need to
+                        # worry about GCing anything
+                        pass
 
         to_delete = [name for name, _ in self.named_modules() if name not in used]
 

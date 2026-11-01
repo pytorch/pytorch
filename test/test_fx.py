@@ -4439,19 +4439,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         gm2.delete_all_unused_submodules()
         torch.testing.assert_close(gm2(inputs), model(inputs))
 
-    def test_delete_unused_submodules_get_attr(self):
-        # A submodule that a get_attr reads, such as the body of a higher order
-        # op, keeps its own submodules.
-        root = torch.nn.Module()
-        root.submod = torch.nn.Sequential(torch.nn.Linear(10, 10), torch.nn.ReLU())
-        graph = torch.fx.Graph()
-        graph.output(graph.get_attr("submod"))
-        gm = torch.fx.GraphModule(root, graph)
-        gm.delete_all_unused_submodules()
-        self.assertEqual(
-            [name for name, _ in gm.named_modules()], ["", "submod", "submod.0", "submod.1"]
-        )
-
     def test_fx_stateless(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:

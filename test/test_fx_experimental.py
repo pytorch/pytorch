@@ -1159,27 +1159,6 @@ terrible spacing
                         f"in submodule '{name}'",
                     )
 
-    @parametrize("keep_original_order", [True, False])
-    def test_split_module_reads_treespec_get_attr_in_partition(
-        self, keep_original_order
-    ):
-        # A pytree spec is not a value, so the partition reads it with get_attr,
-        # like a submodule, instead of taking it as an input.
-        root = torch.nn.Module()
-        root.spec = pytree.tree_flatten((0, 0))[1]
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        spec = graph.get_attr("spec")
-        graph.output(graph.call_function(pytree.tree_unflatten, ([x, x], spec)))
-        gm = torch.fx.GraphModule(root, graph)
-        split_gm = split_module(
-            gm, None, lambda node: 0, keep_original_order=keep_original_order
-        )
-        (submod,) = split_gm.children()
-        inputs = [n.op for n in submod.graph.nodes if n.op != "call_function"]
-        self.assertEqual(inputs, ["placeholder", "get_attr", "output"])
-        self.assertEqual(split_gm(torch.ones(1)), gm(torch.ones(1)))
-
     @staticmethod
     def _build_partition_map(graph, ops_per_partition=1):
         """Build a node-to-partition dict assigning ops_per_partition ops per partition."""

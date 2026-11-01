@@ -4347,8 +4347,13 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(ri, ei)
 
     def _cleanup_pytree_registration(self, cls):
-        if cls in pytree.SUPPORTED_NODES:
-            pytree._deregister_pytree_node(cls)
+        # _deregister_pytree_node raises KeyError for classes registered
+        # without serialized_type_name (they share a sentinel key in
+        # SERIALIZED_TYPE_TO_PYTHON_TYPE), so pop the registries directly
+        # instead, as in test_activation_checkpointing.py.
+        pytree.SUPPORTED_NODES.pop(cls, None)
+        pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+        pytree.CONSTANT_NODES.discard(cls)
 
     def test_subgraph_reuse_dataclass_pytree_arg(self):
         """Reuse must work for args that are registered pytree dataclasses.

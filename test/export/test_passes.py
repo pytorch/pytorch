@@ -4,7 +4,6 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["oncall: export"]
-import io
 import math
 import operator
 import unittest
@@ -22,7 +21,6 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
-    replace_set_grad_with_hop_pass,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     get_view_copy_of_view_op,
@@ -45,7 +43,6 @@ from torch.export._remove_auto_functionalized_pass import (
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
@@ -53,9 +50,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -1011,77 +1006,6 @@ def forward(self, sin, cos):
     """,
         )
 
-    @parametrize("region", ["wrap_with_set_grad_enabled", "wrap_with_autocast"])
-    def test_regions_with_cond(self, region):
-        # The branches of a cond are read with get_attr at the start of the
-        # region, which must still be found, with its grad mode and autocast.
-        class NoGrad(torch.nn.Module):
-            def forward(self, x):
-                with torch.no_grad():
-                    y = torch.cond(
-                        x.sum() > 0, lambda a: a.sin(), lambda a: a.cos(), (x,)
-                    )
-                return y + x
-
-        class Autocast(torch.nn.Module):
-            def forward(self, x):
-                with torch.autocast("cpu", dtype=torch.bfloat16):
-                    return torch.cond(
-                        x.sum() > 0, lambda a: a @ a.T, lambda a: a.T @ a, (x,)
-                    )
-
-        if region == "wrap_with_set_grad_enabled":
-            m, x = NoGrad(), torch.randn(4, requires_grad=True)
-        else:
-            m, x = Autocast(), torch.randn(4, 4)
-        ep = export(m, (x,))
-        target = getattr(torch.ops.higher_order, region)
-        self.assertEqual(nodes_count(ep.graph.nodes, lambda n: n.target is target), 1)
-        out, expected = ep.module()(x), m(x)
-        self.assertEqual(out, expected)
-        if x.requires_grad:
-            self.assertEqual(
-                torch.autograd.grad(out.sum(), x),
-                torch.autograd.grad(expected.sum(), x),
-            )
-        # The region body with its cond can be saved, loaded and decomposed.
-        buffer = io.BytesIO()
-        torch.export.save(ep, buffer)
-        buffer.seek(0)
-        self.assertEqual(torch.export.load(buffer).module()(x), expected)
-        self.assertEqual(ep.run_decompositions().module()(x), expected)
-
-    def test_set_grad_pass_reads_nested_spec(self):
-        # A pytree spec that lives on a submodule is read with a dotted
-        # get_attr, before, inside and after the region.
-        root = torch.nn.Module()
-        root.sub = torch.nn.Module()
-        root.sub.spec = pytree.tree_flatten((0, 0))[1]
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        before = graph.call_function(
-            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
-        )
-        graph.call_function(torch._C._set_grad_enabled, (False,))
-        inside = graph.call_function(
-            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
-        )
-        y = graph.call_function(torch.ops.aten.mul.Tensor, (x, 2))
-        graph.call_function(torch._C._set_grad_enabled, (True,))
-        after = graph.call_function(
-            pytree.tree_unflatten, ([y, y], graph.get_attr("sub.spec"))
-        )
-        graph.output((before, inside, after))
-        gm = torch.fx.GraphModule(root, graph)
-        with FakeTensorMode() as mode:
-            FakeTensorProp(gm, mode).propagate(mode.from_tensor(torch.ones(2)))
-        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
-        region = torch.ops.higher_order.wrap_with_set_grad_enabled
-        self.assertEqual(
-            nodes_count(new_gm.graph.nodes, lambda n: n.target is region), 1
-        )
-        self.assertEqual(new_gm(torch.ones(2)), gm(torch.ones(2)))
-
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
         self._check_node_users_in_the_same_graph(mod)
@@ -1678,8 +1602,6 @@ class TestMoveToDevicePassCuda(TestCase):
             )
             self.assertEqual(out.device, torch.device("meta"))
 
-
-instantiate_parametrized_tests(TestPasses)
 
 # except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
 instantiate_device_type_tests(

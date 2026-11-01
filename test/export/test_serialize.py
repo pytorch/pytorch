@@ -2750,33 +2750,20 @@ class TestPredispatchSerialization(TestCase):
                     ),
                     in_dims=(0, None),
                 )
-                # Outside any region, and inside autocast and no_grad regions,
-                # which export moves into submodules.
                 with TransformGetItemToIndex():
                     pairs = rows(q, q)
-                with torch.autocast("cpu", torch.bfloat16), TransformGetItemToIndex():
-                    mask = rows(q, q)
-                with torch.no_grad():
-                    y = TwoTensor(x, x * 2)
-                return pairs & mask, (x + y + self.buffer).b
+                y = TwoTensor(x, x * 2)
+                return pairs, (x + y + self.buffer).b
 
         m = M()
         inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
         expected = m(*inp)
         ep = export(m, inp, strict=False)
-        # Four indexing calls that share one function spec, and one constructor.
-        flat_apply_nodes = [
-            n
-            for gm in ep.graph_module.modules()
-            if isinstance(gm, torch.fx.GraphModule)
-            for n in gm.graph.nodes
-            if n.target is torch.ops.higher_order.flat_apply
-        ]
-        self.assertEqual(len(flat_apply_nodes), 5)
-        # The calls outside the regions read the shared spec through one attribute.
-        self.assertEqual(
-            len({n.args[0].target for n in flat_apply_nodes if n.graph is ep.graph}), 1
+        # Two indexing calls and one constructor.
+        flat_apply_nodes = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
         )
+        self.assertEqual(len(flat_apply_nodes), 3)
 
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)

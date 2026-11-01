@@ -485,7 +485,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 pytree._deregister_pytree_node(cls)
 
         def register(cls):
-            pytree.register_pytree_node(cls, lambda n: ([], None), lambda c, _: cls())
+            # The name is only a registry key here, so the <locals> in it is
+            # harmless; it must be unique because nameless registrations share
+            # one slot of SERIALIZED_TYPE_TO_PYTHON_TYPE, so the first
+            # deregistration deletes it and the next raises KeyError after it has
+            # already dropped its class from SUPPORTED_NODES.
+            name = f"{__name__}.{cls.__qualname__}"
+            pytree.register_pytree_node(
+                cls, lambda n: ([], None), lambda c, _: cls(), serialized_type_name=name
+            )
             self.addCleanup(deregister, cls)
 
         class Node:

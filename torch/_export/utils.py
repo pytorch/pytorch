@@ -877,25 +877,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     raise AssertionError(
                         f"Expected str target for get_attr, got {type(node.target)}"
                     )
-                attr = torch.fx.graph_module._get_attr(sub_gm, node.target)
                 new_target_name = new_node.target
-                # Several get_attr nodes can read one attribute, such as a pytree
-                # spec, so reuse it and rename only when the name holds another object.
-                *path, field = new_target_name.split(".")
-                owner = gm
-                for atom in path:
-                    owner = getattr(owner, atom, None)
-                taken = owner is not None and hasattr(owner, field)
-                if not taken or getattr(owner, field) is not attr:
-                    if taken:
-                        # Loop through and find the "submod_{i}" that have no name collision
-                        i = 1
+                if hasattr(gm, new_target_name):
+                    # Loop through and find the "submod_{i}" that have no name collision
+                    i = 1
+                    new_target_name = f"submod_{i}"
+                    while hasattr(gm, new_target_name):
+                        i += 1
                         new_target_name = f"submod_{i}"
-                        while hasattr(gm, new_target_name):
-                            i += 1
-                            new_target_name = f"submod_{i}"
-                    torch.fx.graph_module._assign_attr(attr, gm, new_target_name)
                 new_node.target = new_target_name
+                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:

@@ -2298,8 +2298,12 @@ class GraphModule(torch.nn.Module):
 
         def cleanup():
             # Clean up pytree registrations to avoid leaking state to other tests.
+            # We manually remove from the registries since _deregister_pytree_node
+            # has issues with classes registered without serialized_type_name.
             for cls in [InputNode, OutputNode]:
-                pytree._deregister_pytree_node(cls)
+                pytree.SUPPORTED_NODES.pop(cls, None)
+                pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+                pytree.CONSTANT_NODES.discard(cls)
 
         try:
 
