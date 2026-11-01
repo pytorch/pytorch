@@ -4328,16 +4328,17 @@ def _maybe_pretune_tunableop(choice: ChoiceCaller) -> None:
     Fires on every concrete extern-winner path (single-choice, deterministic,
     empty-timings fallback, best-choice) so all of them are covered, not just
     the deferred multi-template path handled by
-    Scheduler.finalize_multi_template_buffers. Queued rather than run: these
-    paths fire while lowering, before finalize() decides layouts, so the
-    operand strides here are placeholders. Function-local tunableop import:
-    select_algorithm is imported widely and must not gain a module-level edge.
+    Scheduler.finalize_multi_template_buffers. These paths fire while lowering,
+    before finalize() decides layouts, so an operand that is still flexible is
+    read at its placeholder strides; #201769 defers the ladder past that.
+    Function-local tunableop import: select_algorithm is imported widely and
+    must not gain a module-level edge.
     """
     if not isinstance(choice, ExternKernelCaller):
         return
     from . import tunableop
 
-    tunableop.queue_range_pretune(choice)
+    tunableop.maybe_range_pretune(choice)
 
 
 class AlgorithmSelectorCache(PersistentCache):
