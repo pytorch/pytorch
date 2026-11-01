@@ -356,8 +356,8 @@ class MetaTensorDescriber:
                     # A traceable wrapper subclass (e.g. AsyncCollectiveTensor) can
                     # rewrap a view output, giving the wrapper a fresh outer storage
                     # even though it is a real view, so the storage test would wrongly
-                    # mark it stale. Skip it for those.
-                    and not is_traceable_wrapper_subclass_v
+                    # mark it stale. Skip it when either side is such a wrapper.
+                    and not (is_traceable_wrapper_subclass_v or is_traceable_wrapper_subclass(base))
                     and base.untyped_storage()._cdata != t.untyped_storage()._cdata
                 ):
                     is_view = False

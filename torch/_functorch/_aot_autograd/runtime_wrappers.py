@@ -1863,8 +1863,8 @@ def _view_base_sharing_storage(arg: torch.Tensor) -> torch.Tensor | None:
     # A traceable wrapper subclass (e.g. AsyncCollectiveTensor) can rewrap a
     # view output, giving the wrapper a fresh outer storage even though it is a
     # real view, so the storage test below would wrongly report it stale. Keep
-    # trusting _base for those, mirroring meta_utils.py.
-    if is_traceable_wrapper_subclass(arg):
+    # trusting _base when either side is such a wrapper, mirroring meta_utils.py.
+    if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(base):
         return base
     # Sparse layouts throw on untyped_storage(), so only run the storage
     # identity test on strided pairs and trust _base elsewhere. This mirrors

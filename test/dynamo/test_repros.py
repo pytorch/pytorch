@@ -4821,8 +4821,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         expected = fn(*fresh())
         for backend in ["eager", "aot_eager", "inductor"]:
-            torch._dynamo.reset()
-            self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
     def test_stale_base_at_entry_not_aliased(self):
         # The input is already stale when the compiled function is called:
@@ -4839,10 +4840,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         expected_storage = storage.clone()
         for backend in ["eager", "aot_eager", "inductor"]:
-            torch._dynamo.reset()
-            s = expected_storage.clone()
-            torch.compile(fn, backend=backend)(dest, s)
-            self.assertEqual(s, expected_storage)
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                s = expected_storage.clone()
+                torch.compile(fn, backend=backend)(dest, s)
+                self.assertEqual(s, expected_storage)
 
     def test_set_new_base_stays_aliased(self):
         # After dest.set_(src), dest must alias src, not its old base.
@@ -4857,8 +4859,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         expected = fn(*fresh())
         for backend in ["eager", "aot_eager", "inductor"]:
-            torch._dynamo.reset()
-            self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
