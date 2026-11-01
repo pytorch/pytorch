@@ -808,6 +808,18 @@ def _check_flat_apply_inputs(
             )
 
 
+def _check_flat_apply_operators(
+    node_name: str | None, inputs: Sequence[NamedArgument], args: Sequence[Any]
+) -> None:
+    """Save and load both refuse operator inputs other than operator overloads."""
+    for inp, arg in zip(inputs, args):
+        if inp.arg.type == "as_operator" and not isinstance(arg, torch._ops.OpOverload):
+            raise SerializeError(
+                f"flat_apply node {node_name} has an operator input that is not "
+                f"an operator overload: {inp.arg.as_operator}"
+            )
+
+
 def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
     return pytree.is_constant_class(spec.type) or any(
         _has_pytree_constant(child) for child in spec.children()
@@ -1528,6 +1540,7 @@ class GraphModuleSerializer(metaclass=Final):
             )
         flat_inputs = self.serialize_hoo_inputs(flat_args, node.kwargs)
         _check_flat_apply_inputs(node.name, flat_inputs)
+        _check_flat_apply_operators(node.name, flat_inputs, flat_args)
         return [
             NamedArgument(
                 name="",
@@ -3439,14 +3452,7 @@ class GraphModuleDeserializer(metaclass=Final):
             ) from e
         _check_flat_apply_inputs(serialized_node.name, flat_inputs)
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
-        for inp, arg in zip(flat_inputs, args):
-            if inp.arg.type == "as_operator" and not isinstance(
-                arg, torch._ops.OpOverload
-            ):
-                raise SerializeError(
-                    f"flat_apply node {serialized_node.name} has an input that "
-                    f"does not name an operator: {inp.arg.as_operator}"
-                )
+        _check_flat_apply_operators(serialized_node.name, flat_inputs, args)
         func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []

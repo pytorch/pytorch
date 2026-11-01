@@ -3215,7 +3215,7 @@ class TestPredispatchSerialization(TestCase):
                 self._load_changed(artifact, change)
 
     def test_predispatch_flat_apply_load_rejects_other_inputs(self):
-        ep, artifact = self._index_in_vmap_artifact()
+        _, artifact = self._index_in_vmap_artifact()
         helper = (
             "torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"
         )
@@ -3236,12 +3236,12 @@ class TestPredispatchSerialization(TestCase):
             (
                 "torch.os.system",
                 set_last(arg={"as_operator": "torch.os.system"}),
-                "does not name an operator",
+                "not an operator overload",
             ),
             (
                 "module",
                 set_last(arg={"as_operator": "torch.os"}),
-                "does not name an operator",
+                "not an operator overload",
             ),
             (
                 "helper",
@@ -3276,24 +3276,33 @@ class TestPredispatchSerialization(TestCase):
 
         # Save refuses the same inputs and calls, so it never writes what load
         # refuses.
-        (flat_apply_node,) = ep.graph.find_nodes(
-            op="call_function", target=torch.ops.higher_order.flat_apply
-        )
-        flat_apply_node.kwargs = {"checked_output": False}
-        with self.assertRaisesRegex(SerializeError, "keyword input"):
-            serialize(ep)
-        ep, _ = self._index_in_vmap_artifact()
-        (flat_apply_node,) = ep.graph.find_nodes(
-            op="call_function", target=torch.ops.higher_order.flat_apply
-        )
-        flat_apply_node.target = (
-            torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-        )
-        flat_apply_node.args = flat_apply_node.args[2:]
-        with self.assertRaisesRegex(
-            SerializeError, "only be called through flat_apply"
-        ):
-            serialize(ep)
+        def keyword_input(node):
+            node.kwargs = {"checked_output": False}
+
+        def higher_order_op_input(node):
+            node.args = (*node.args[:-1], torch.ops.higher_order.cond)
+
+        def direct_helper_call(node):
+            node.target = (
+                torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+            )
+            node.args = node.args[2:]
+
+        for change, reason in [
+            (keyword_input, "keyword input"),
+            (higher_order_op_input, "not an operator overload"),
+            (direct_helper_call, "only be called through flat_apply"),
+        ]:
+            ep, _ = self._index_in_vmap_artifact()
+            (node,) = ep.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.flat_apply
+            )
+            change(node)
+            with (
+                self.subTest(change.__name__),
+                self.assertRaisesRegex(SerializeError, reason),
+            ):
+                serialize(ep)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
