@@ -115,3 +115,69 @@ struct isneginf_functor {
 REGISTER_ISINF_OPS(float);
 REGISTER_ISINF_OPS(half);
 REGISTER_ISINF_OPS(bfloat);
+
+template <typename T>
+inline bool contains(
+    device const T* test_elements,
+    uint num_test,
+    T element,
+    bool_constant<false>) {
+  bool found = false;
+  for (uint i = 0; i < num_test; ++i) {
+    found |= element == test_elements[i];
+  }
+  return found;
+}
+
+template <typename T>
+inline bool contains(
+    device const T* test_elements,
+    uint num_test,
+    T element,
+    bool_constant<true>) {
+  uint lo = 0, hi = num_test;
+  while (lo < hi) {
+    const auto mid = lo + (hi - lo) / 2;
+    if (test_elements[mid] < element) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo < num_test && test_elements[lo] == element;
+}
+
+template <typename T, bool SORTED>
+kernel void isin(
+    device const T* elements [[buffer(0)]],
+    device const T* test_elements [[buffer(1)]],
+    device bool* out [[buffer(2)]],
+    constant uint& num_test [[buffer(3)]],
+    constant bool& invert [[buffer(4)]],
+    uint index [[thread_position_in_grid]]) {
+  const auto found = contains(
+      test_elements, num_test, elements[index], bool_constant<SORTED>{});
+  out[index] = found != invert;
+}
+
+#define REGISTER_ISIN_OP(NAME, T, SORTED)                      \
+  template [[host_name(NAME #T)]] kernel void isin<T, SORTED>( \
+      device const T*,                                         \
+      device const T*,                                         \
+      device bool*,                                            \
+      constant uint&,                                          \
+      constant bool&,                                          \
+      uint)
+
+#define REGISTER_ISIN_OPS(T)           \
+  REGISTER_ISIN_OP("isin_", T, false); \
+  REGISTER_ISIN_OP("isin_sorted_", T, true)
+
+REGISTER_ISIN_OPS(float);
+REGISTER_ISIN_OPS(half);
+REGISTER_ISIN_OPS(bfloat);
+REGISTER_ISIN_OPS(long);
+REGISTER_ISIN_OPS(int);
+REGISTER_ISIN_OPS(short);
+REGISTER_ISIN_OPS(char);
+REGISTER_ISIN_OPS(uchar);
