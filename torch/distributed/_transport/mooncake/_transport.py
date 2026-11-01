@@ -53,17 +53,17 @@ class MooncakeTransport(Transport):
     selected. Transfers require registered views; raw tensors are rejected rather
     than allocated or registered implicitly.
 
-    Completion is event-driven, never polled. Mooncake also exposes a
-    non-blocking ``batch_transfer_async`` API, but its only completion signal is
-    status polling (``get_batch_transfer_status``), so adopting it would require a
-    poll loop. To keep the event loop poll-free, each transfer instead runs the
-    blocking ``transfer_sync`` on a worker thread and settles its Work through the
-    thread future's done callback; ``write_async``/``read_async``/``close_async``
-    are woken by that callback (via the asyncio future bridge) and never poll or
-    block the loop. The short lock-guarded submit/cleanup sections are offloaded
-    with ``asyncio.to_thread`` rather than spinning on the lock. The cost of this
-    choice is one pooled worker thread per in-flight transfer, bounded by
-    ``max_concurrent_transfers``.
+    Mooncake has no completion callback or fd yet: every completion signal it
+    exposes (``transfer_sync``, ``get_batch_transfer_status``) is a status poll.
+    Each transfer runs the blocking ``transfer_sync`` on a worker thread, which
+    polls inside Mooncake until the transfer finishes, and settles its Work
+    through the thread future's done callback. Python code never polls:
+    ``write_async``/``read_async``/``close_async`` are woken by that callback
+    (via the asyncio future bridge) and never block the loop. The short
+    lock-guarded submit/cleanup sections are offloaded with ``asyncio.to_thread``
+    rather than spinning on the lock. The cost is one busy pooled worker thread
+    per in-flight transfer, bounded by ``max_concurrent_transfers``, until
+    Mooncake can notify completion.
 
     """
 
@@ -294,9 +294,9 @@ class MooncakeTransport(Transport):
         local_address = registration.address + local_buffer._offset
         remote_address = remote_buffer.address
 
-        # transfer_sync blocks until completion, so run it on the executor; the
-        # Work settles via the thread future's callback when the worker returns.
-        # This keeps completion event-driven (no polling) at the cost of a thread.
+        # transfer_sync polls inside Mooncake until completion, so run it on the
+        # executor; the Work settles via the thread future's callback when the
+        # worker returns.
         def run() -> None:
             status = engine.transfer_sync(
                 endpoint, local_address, remote_address, size, operation

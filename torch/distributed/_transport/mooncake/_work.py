@@ -23,10 +23,9 @@ _live_transports: set[MooncakeTransport] = set()
 class _MooncakeWork(Work):
     """Completion handle for a transfer run on the transport's executor.
 
-    Mooncake's Python transfer APIs block until the transfer finishes, so there
-    is no nonblocking status to poll. Each async transfer runs its blocking call
-    on a worker thread; this Work tracks that thread's future. A ``None`` future
-    marks a zero-length no-op that is already complete.
+    Each async transfer runs Mooncake's blocking ``transfer_sync`` on a worker
+    thread; this Work tracks that thread's future. A ``None`` future marks a
+    zero-length no-op that is already complete.
     """
 
     def __init__(
