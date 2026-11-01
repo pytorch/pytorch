@@ -3075,6 +3075,17 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(SerializeError, "does not start with its function"):
             load(json.dumps(program).encode())
 
+        # An input that names an operator would reach the function as a callable.
+        program = json.loads(artifact.exported_program)
+        (node,) = [
+            n
+            for n in program["graph_module"]["graph"]["nodes"]
+            if n["target"] == "torch.ops.higher_order.flat_apply"
+        ]
+        node["inputs"][-1]["arg"] = {"as_operator": "torch.os.system"}
+        with self.assertRaisesRegex(SerializeError, "values, not functions"):
+            load(json.dumps(program).encode())
+
         # Export calls the helper only through flat_apply. Called directly, it
         # would import the module that the file names when the program runs.
         program = json.loads(artifact.exported_program)

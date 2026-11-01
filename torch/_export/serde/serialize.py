@@ -777,6 +777,11 @@ def _find_flat_apply_func(
     argument, so that name must find a torch.autograd.Function. Both names
     are found with ``_find_imported``.
     """
+    # Export passes these functions values only. A function among the inputs,
+    # which load can resolve from an operator name in the file, could make an
+    # accepted class run it.
+    if any(callable(arg) for arg in flat_args):
+        raise SerializeError("flat_apply inputs must be values, not functions")
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
         return func
