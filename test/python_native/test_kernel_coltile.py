@@ -494,6 +494,12 @@ class TestOrderedColRoute(TestCase):
         view = torch.empty(shape, device="meta")
         self.assertEqual(kg._ordered_col_route_ok(view, nfields, cc), routed)
 
+    @parametrize("dtype", [torch.float16, torch.float64, torch.int8])
+    def test_gate_admits_measured_dtypes(self, dtype):
+        view = torch.empty((16, 128, 128), device="meta", dtype=dtype)
+        routed = kg._ordered_col_route_ok(view, 1, (10, 0))
+        self.assertEqual(routed, dtype == torch.float16)
+
 
 class TestOrderedColHost(TestCase):
     @parametrize(
@@ -575,18 +581,25 @@ class TestOrderedColDevice(TestCase):
         ran = {k[0] for k in ct._CACHE if k[1] == key}
         self.assertEqual(ran, {"ordered_col1" if split else "ordered_col"})
 
-    @parametrize(
-        "rows,begin,count",
-        [(20, 0, 2), (32768, 4, None), (32768, 3, 2), (32768, -1, None)],
-    )
-    def test_partition_ranges_are_validated(self, device, rows, begin, count):
+    @parametrize("case", ["unsplit", "empty", "past_end", "negative"])
+    def test_partition_ranges_are_validated(self, device, case):
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         trait = T.SumOps(acc=cutlass.Float32)
+        rows = 20 if case == "unsplit" else 32768
         dev = torch.device(device)
         plan = rt.trait_itree_plan(trait, rows, 32, 4, stage=False, device=dev)
+        self.assertEqual(plan.shape == "split", case != "unsplit")
+        n = plan.split[0] if plan.shape == "split" else 1
+        begin, count = {
+            "unsplit": (0, 2),
+            "empty": (n, None),
+            "past_end": (n - 1, 2),
+            "negative": (-1, None),
+        }[case]
+        error = "only split plans" if case == "unsplit" else "out of bounds"
         kwargs = {"partition_begin": begin, "partition_count": count}
-        with self.assertRaisesRegex(ValueError, "partition"):
+        with self.assertRaisesRegex(ValueError, error):
             ct._OrderedColReduce(trait, plan, rows, 32, 1, **kwargs)
 
     def test_full_tiles_exclude_a_ragged_final_partition(self, device):
