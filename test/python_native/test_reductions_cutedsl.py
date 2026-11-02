@@ -1,7 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Wiring tests for routing, fallback, and CUDA graph capture. OpInfo tests cover
-# numerical behavior.
+# Wiring tests for routing, fallback, and CUDA graph capture, plus numerics against ATen
+# for the dtypes and dimension forms the overrides serve.
 
 import unittest
 
@@ -21,7 +21,11 @@ def _disabled():
     return torch.backends.python_native.cutedsl.disabled()
 
 
-@unittest.skipUnless(TEST_CUDA, "CUDA required")
+# The overrides admit compute-capability majors 9 and 10 (overrides._ARCH_MAJORS).
+_ARCH_OK = TEST_CUDA and torch.cuda.get_device_capability()[0] in (9, 10)
+
+
+@unittest.skipUnless(_ARCH_OK, "requires an SM90 or SM100-family GPU")
 @skipIfNoCuteDSL
 class TestCuTeDSLReductionWiring(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -93,10 +97,48 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(x))
 
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
-    def test_other_device_defers(self):
-        """Decline tensors whose device does not own the active stream and caches."""
+    def test_other_device_is_served(self):
+        """Serve tensors on a non-current device under that device's guard."""
         x = torch.randn(128, 512, device="cuda:1")
-        self.assertEqual(self._fired_count(lambda: torch.sum(x, dim=-1)), 0)
+        self.assertEqual(self._fired_count(lambda: torch.sum(x, dim=-1)), 1)
+        with _disabled():
+            ref = torch.sum(x, dim=-1)
+        self.assertEqual(torch.sum(x, dim=-1), ref, atol=1e-4, rtol=1e-4)
+
+    @parametrize("op", ["sum", "mean", "prod", "amax", "amin"])
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_matches_aten(self, op, dtype):
+        """Match ATen across input dtypes, multi-dimension keepdim, and full reductions."""
+        x = torch.rand(6, 33, 40, device="cuda", dtype=dtype) + 0.5
+        fn = getattr(torch, op)
+        calls = [lambda: fn(x, dim=1), lambda: fn(x, dim=1, keepdim=True)]
+        if op != "prod":
+            calls.append(lambda: fn(x, dim=(0, 2), keepdim=True))
+        if op in ("sum", "mean"):
+            calls.append(lambda: fn(x))
+        tol = 1e-4 if dtype == torch.float32 else 1e-2
+        for call in calls:
+            self.assertGreater(self._fired_count(call), 0)
+            with _disabled():
+                ref = call()
+            got = call()
+            self.assertEqual(got.dtype, ref.dtype)
+            self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("op", ["sum", "mean", "prod"])
+    def test_out_dtype_contract(self, op):
+        """Serve widening dtype requests and leave input-casting requests to ATen."""
+        fn = getattr(torch, op)
+        x16 = torch.rand(64, 96, device="cuda", dtype=torch.float16) + 0.5
+        widen = lambda: fn(x16, dim=1, dtype=torch.float32)  # noqa: E731
+        self.assertEqual(self._fired_count(widen), 1)
+        with _disabled():
+            ref = widen()
+        self.assertEqual(widen(), ref, atol=1e-3, rtol=1e-3)
+        # ATen casts the input to a narrower requested dtype before reducing.
+        x32 = torch.tensor([[7e4, -7e4]] * 32, device="cuda")
+        narrow = lambda: fn(x32, dim=1, dtype=torch.float16)  # noqa: E731
+        self.assertEqual(self._fired_count(narrow), 0)
 
     def test_graph_capturable(self):
         """Keep core reduction overrides capture-safe under graph replay."""

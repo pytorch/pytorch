@@ -64,7 +64,6 @@ _ORDERED_COL_CONFIGS = {
         "sum": OrderedColConfig(32),
         "argmaxi32": OrderedColConfig(64),
         "var0": OrderedColConfig(64),
-        "varmean0": OrderedColConfig(64),
     },
 }
 
@@ -132,17 +131,11 @@ def select_ordered_col_config(
         and trait_key in ("mean", "amax", "vnorm2")
     ):
         cfg = OrderedColConfig(32)
-    if cc == (10, 7) and full_tiles:
-        if welford and _full_welford_columns(dtype, rows, columns):
-            cfg = OrderedColConfig(
-                0, tile_columns=WARP if columns == 4096 else 16, full_tiles=True
-            )
-        elif (
-            dtype == torch.float32
-            and rows == 16384
-            and (trait_key, columns) in (("argmaxi32", 256), ("vnorm2", 1024))
-        ):
-            cfg = OrderedColConfig(0, tile_columns=16, full_tiles=True)
+    welford_anchor = welford and _full_welford_columns(dtype, rows, columns)
+    if cc == (10, 7) and full_tiles and welford_anchor:
+        cfg = OrderedColConfig(
+            0, tile_columns=WARP if columns == 4096 else 16, full_tiles=True
+        )
     if (
         cfg is None
         or dtype not in (torch.float32, torch.bfloat16, torch.float16)
@@ -168,17 +161,24 @@ def select_ordered_col_config(
         cfg = cfg._replace(
             tile_columns=16 if size == 256 << 20 else WARP, full_tiles=True
         )
-    elif full_tiles and rows is not None:
+    elif cc == (10, 7) and full_tiles and rows is not None:
+        # select_col_config hands SM107 views off at 256, 1024 or 4096 columns only.
         if rows == 65536 and columns == 1024 and fields != 2:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
         elif column_anchor:
             cfg = cfg._replace(full_tiles=True)
-        elif 32768 <= rows <= 131072 and 33 <= columns <= 257:
+        elif 32768 <= rows <= 131072 and columns == 256:
             minimum = 0 if fields == 3 else 16
             if dtype == torch.bfloat16 and partials >= 8:
                 minimum //= 2
+            cfg = OrderedColConfig(minimum, tile_columns=16, full_tiles=True)
+    # Only routed split views (one field, B = 1, C >= 128) reach these B200 rows.
+    elif cc == (10, 0) and full_tiles and rows is not None:
+        if rows == 65536 and columns == 1024:
+            cfg = cfg._replace(tile_columns=16, full_tiles=True)
+        elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
             width = WARP if partials >= 16 and columns == 257 else 16
-            cfg = OrderedColConfig(minimum, tile_columns=width, full_tiles=True)
+            cfg = OrderedColConfig(0, tile_columns=width, full_tiles=True)
         bf16_amax = dtype == torch.bfloat16 and trait_key == "amax"
         if bf16_amax and rows == 32768 and columns == 4096:
             cfg = cfg._replace(tile_columns=16)
@@ -262,6 +262,8 @@ def select_col_config(
         and alignment >= itemsize
     ):
         narrow = dtype in (torch.float16, torch.bfloat16)
+        # Index and Welford keys come from internal kernel callers; the core overrides
+        # route only sum, mean, prod, amax and amin.
         welford = nfields == 3 and welford_nouts(trait_key) == nouts
         index = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)
         one_field = (
@@ -359,13 +361,14 @@ def select_col_config(
         "argmaxi32": 2,
         "vnorm2": 1,
     }
-    expected_fields = 3 if welford_nouts(trait_key) else fields.get(trait_key)
+    expected_fields = 3 if welford_nouts(trait_key) == 1 else fields.get(trait_key)
+    # Only B200 routes two-output column views (_col_route_ok), so SM107 sees one output.
     if (
         explicit
         or cc != (10, 7)
         or dtype not in (torch.float32, torch.bfloat16)
         or acc_bits != 32
-        or nouts != max(welford_nouts(trait_key), 1)
+        or nouts != 1
         or expected_fields != nfields
         or batches != 1
         or not contiguous
@@ -401,7 +404,7 @@ def select_col_config(
         inner = True
     if inner:
         cfg = cfg._replace(kernel_order="inner_tree")
-    if size not in (256 << 20, 2048 << 20) or (nouts == 2 and columns == 256):
+    if size not in (256 << 20, 2048 << 20):
         return cfg
     # Measured anchors only: interpolate after crossover sweeps, not from byte size alone.
     large = size == 2048 << 20
@@ -874,9 +877,9 @@ def reduce_ordered_col(
         )
         if cfg is None and split:
             return None
-    op_kwargs = {}
+    workers, columns = _ORDERED_WORKER_WARPS, WARP
     if cfg is not None:
-        op_kwargs = {"worker_warps": cfg.worker_warps, "tile_columns": cfg.tile_columns}
+        workers, columns = cfg.worker_warps, cfg.tile_columns
         if full_tiles is None:
             full_tiles = cfg.full_tiles
     if split and full_tiles and plan.split[0] > 1 and plan.split[1] != plan.split[2]:
@@ -889,7 +892,8 @@ def reduce_ordered_col(
                 trait.nfields,
                 full_tiles=True,
                 partition_count=plan.split[0] - 1,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
             _OrderedColReduce(
                 trait,
@@ -899,7 +903,8 @@ def reduce_ordered_col(
                 trait.nfields,
                 partition_begin=plan.split[0] - 1,
                 partition_count=1,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
         )
     else:
@@ -911,7 +916,8 @@ def reduce_ordered_col(
                 C,
                 trait.nfields if split else nouts,
                 full_tiles=False if full_tiles is None else full_tiles,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
         )
     outs = [

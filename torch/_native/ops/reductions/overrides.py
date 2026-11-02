@@ -7,7 +7,7 @@ Supported layouts use a fast path or the general TensorIterator decode.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch
 
@@ -34,30 +34,6 @@ _Red: TypeAlias = set[int] | None
 _ARCH_MAJORS = (9, 10)
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
-_STORABLE_DTYPES = _SUPPORTED_DTYPES
-
-
-def _acc_policy() -> dict[torch.dtype, tuple[Any, torch.dtype]]:
-    # Lazy: the values are `cutlass` dtypes, so resolving at import would pull cutlass in.
-    import cutlass
-
-    return {
-        torch.float16: (cutlass.Float32, torch.float32),
-        torch.bfloat16: (cutlass.Float32, torch.float32),
-        torch.float32: (cutlass.Float32, torch.float32),
-    }
-
-
-def _acc_for_dtype(dtype: torch.dtype, widen: bool = True) -> tuple[Any, torch.dtype]:
-    return _acc_policy()[dtype]
-
-
-def _acc_for(self: torch.Tensor, widen: bool = True) -> tuple[Any, torch.dtype]:
-    return _acc_for_dtype(self.dtype, widen)
-
-
-def _kernel_input(self: torch.Tensor, canonical_bool: bool = True) -> torch.Tensor:
-    return self
 
 
 def _normalize_dims(dim: _Dim, ndim: int) -> _Red:
@@ -100,47 +76,23 @@ def _keepdim_reshape(
     return out.reshape(target)
 
 
-class _Envelope(NamedTuple):
-    inputs: tuple[torch.dtype, ...]
-    outs: tuple[torch.dtype, ...]
+def _out_ok(self: torch.Tensor, dtype: torch.dtype | None) -> bool:
+    # The kernels accumulate the input in fp32. ATen casts the input to any other
+    # requested dtype first, so only these requests keep ATen's results.
+    narrow = (torch.float16, torch.bfloat16)
+    return (
+        dtype is None
+        or dtype == self.dtype
+        or (dtype == torch.float32 and self.dtype in narrow)
+    )
 
 
-_FLOAT_ONLY = _Envelope(_SUPPORTED_DTYPES, _SUPPORTED_DTYPES)
-_NO_OUT_DTYPE = _Envelope(_SUPPORTED_DTYPES, ())
-
-_ENVELOPE = {
-    "sum": _FLOAT_ONLY,
-    "mean": _FLOAT_ONLY,
-    "prod": _FLOAT_ONLY,
-    "amax": _NO_OUT_DTYPE,
-    "amin": _NO_OUT_DTYPE,
-}
-
-
-def _env(key: str) -> _Envelope:
-    return _ENVELOPE[key]
-
-
-def _out_ok(key: str, dtype: torch.dtype | None) -> bool:
-    return dtype is None or dtype in _env(key).outs
-
-
-def _out_dtype(self: torch.Tensor, dtype: torch.dtype | None) -> torch.dtype:
-    return self.dtype if dtype is None else dtype
-
-
-def _sum_out_dtype(self: torch.Tensor, dtype: torch.dtype | None) -> torch.dtype:
-    if dtype is not None:
-        return dtype
-    return self.dtype if self.dtype.is_floating_point else torch.int64
-
-
-def _base_cond(self: torch.Tensor, dim: _Dim, key: str) -> bool:
+def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
     # A condition must decline unsupported calls without raising.
     return (
         not cap.is_traced(self)
         and cap.device_ok(self, _ARCH_MAJORS)
-        and self.dtype in _env(key).inputs
+        and self.dtype in _SUPPORTED_DTYPES
         and not self.is_neg()
         and not self.is_conj()
         and self.const_data_ptr() % 16 == 0  # type: ignore[attr-defined]
@@ -149,59 +101,21 @@ def _base_cond(self: torch.Tensor, dim: _Dim, key: str) -> bool:
     )
 
 
-def _make_cond(key: str) -> Callable[..., bool]:
-    def cond(self: torch.Tensor, dim: _Dim = None, keepdim: bool = False) -> bool:
-        return _base_cond(self, dim, key)
-
-    return cond
+def _cond(self: torch.Tensor, dim: _Dim = None, keepdim: bool = False) -> bool:
+    return _base_cond(self, dim)
 
 
-def _make_dtype_cond(key: str) -> Callable[..., bool]:
-    def cond(
-        self: torch.Tensor,
-        dim: _Dim = None,
-        keepdim: bool = False,
-        *,
-        dtype: torch.dtype | None = None,
-    ) -> bool:
-        return _base_cond(self, dim, key) and _out_ok(key, dtype)
-
-    return cond
-
-
-def _run1(
-    make_trait: Callable[[Any], Any],
-    key: str,
+def _dtype_cond(
     self: torch.Tensor,
-    red: _Red,
-    keepdim: bool,
-    out_torch_dtype: torch.dtype,
-    widen: bool = True,
-    canonical_bool: bool = True,
-    acc_dtype: torch.dtype | None = None,
-) -> torch.Tensor:
-    x = _kernel_input(self, canonical_bool)
-    acc, kout = (
-        _acc_for(x, widen) if acc_dtype is None else _acc_for_dtype(acc_dtype, widen)
-    )
-    trait = make_trait(acc)
-    kern_out = out_torch_dtype if out_torch_dtype in _STORABLE_DTYPES else kout
-    if red is None:
-        out = kg.reduce_all(trait, key, x, kern_out)
-    else:
-        out = kg.reduce_dim(trait, key, x, sorted(red), kern_out)
-    out = _keepdim_reshape(out, self.shape, red, keepdim)
-    return out.to(out_torch_dtype)
-
-
-def _make_impl(
-    trait_type: Callable[[], Any],
-    key: str,
-    out_dtype: Callable[[torch.Tensor, torch.dtype | None], torch.dtype],
+    dim: _Dim = None,
+    keepdim: bool = False,
     *,
-    widen: bool = True,
-    canonical_bool: bool = True,
-) -> Callable[..., torch.Tensor]:
+    dtype: torch.dtype | None = None,
+) -> bool:
+    return _base_cond(self, dim) and _out_ok(self, dtype)
+
+
+def _make_impl(trait_type: Callable[[], Any], key: str) -> Callable[..., torch.Tensor]:
     def impl(
         self: torch.Tensor,
         dim: _Dim = None,
@@ -209,39 +123,36 @@ def _make_impl(
         *,
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
-        return _run1(
-            lambda acc: trait_type()(acc=acc),
-            key,
-            self,
-            _normalize_dims(dim, self.dim()),
-            keepdim,
-            out_dtype(self, dtype),
-            widen=widen,
-            canonical_bool=canonical_bool,
-        )
+        # Lazy: importing cutlass at module import would pull the DSL into `import torch`.
+        import cutlass
+
+        trait = trait_type()(acc=cutlass.Float32)
+        out_dtype = self.dtype if dtype is None else dtype
+        red = _normalize_dims(dim, self.dim())
+        if red is None:
+            out = kg.reduce_all(trait, key, self, out_dtype)
+        else:
+            out = kg.reduce_dim(trait, key, self, sorted(red), out_dtype)
+        return _keepdim_reshape(out, self.shape, red, keepdim)
 
     return impl
 
 
-_sum_impl = _make_impl(lambda: T.SumOps, "sum", _sum_out_dtype)
-_mean_impl = _make_impl(lambda: T.MeanOps, "mean", _out_dtype)
-_prod_impl = _make_impl(lambda: T.ProdOps, "prod", _sum_out_dtype)
-_amax_impl = _make_impl(
-    lambda: T.AMaxOps, "amax", _out_dtype, widen=False, canonical_bool=False
-)
-_amin_impl = _make_impl(
-    lambda: T.AMinOps, "amin", _out_dtype, widen=False, canonical_bool=False
-)
+_sum_impl = _make_impl(lambda: T.SumOps, "sum")
+_mean_impl = _make_impl(lambda: T.MeanOps, "mean")
+_prod_impl = _make_impl(lambda: T.ProdOps, "prod")
+_amax_impl = _make_impl(lambda: T.AMaxOps, "amax")
+_amin_impl = _make_impl(lambda: T.AMinOps, "amin")
 
 
 def register_reduction_overrides() -> None:
     # cu.register_op_override is a no-op when the CuteDSL runtime is unavailable.
     overrides = (
-        ("sum.dim_IntList", _make_dtype_cond("sum"), _sum_impl),
-        ("mean.dim", _make_dtype_cond("mean"), _mean_impl),
-        ("amax", _make_cond("amax"), _amax_impl),
-        ("amin", _make_cond("amin"), _amin_impl),
-        ("prod.dim_int", _make_dtype_cond("prod"), _prod_impl),
+        ("sum.dim_IntList", _dtype_cond, _sum_impl),
+        ("mean.dim", _dtype_cond, _mean_impl),
+        ("amax", _cond, _amax_impl),
+        ("amin", _cond, _amin_impl),
+        ("prod.dim_int", _dtype_cond, _prod_impl),
     )
     for op, cond, impl in overrides:
         impl = cuda_device_guard(impl)
