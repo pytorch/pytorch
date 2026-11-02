@@ -6564,6 +6564,12 @@ class TestStageAFanOut(unittest.TestCase):
 
     def test_sub_agents_get_the_offline_and_security_rules(self):
         sections = self.sections()
+        self.assertTrue(
+            sections["Offline"]
+            .rstrip()
+            .endswith("Your final message is the whole review."),
+            "the Fan-out hand-off drops the Offline section's last line; it must stay the final-message line",
+        )
         self.assertIn(
             "the Offline section above, without its last line", sections["Fan-out"]
         )
@@ -6576,7 +6582,8 @@ class TestStageAFanOut(unittest.TestCase):
     def test_skill_requires_the_fan_out_and_a_fact_check(self):
         self.assertIn("whatever the PR's size", self.skill_step(2))
         self.assertIn(
-            "When Step 4 leaves findings, spawn at least one agent", self.skill_step(5)
+            "When Step 4 leaves findings and you have the Agent tool, spawn at least one agent",
+            self.skill_step(5),
         )
 
 

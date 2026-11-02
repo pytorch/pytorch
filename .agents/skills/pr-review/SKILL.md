@@ -127,7 +127,7 @@ A single line of code can have deep cross-cutting implications: a missing device
 
 ### Using sub-agents
 
-The review checklist is large, and a single pass over a diff misses problems that an independent second pass catches. You cannot hold the full context of every infrastructure system in your head. Fan out on every PR, whatever its size (see Step 2). Also **spawn sub-agents** to investigate whether checklist items apply: read surrounding code or infrastructure the PR should be using. Spawn them in parallel for independent areas.
+The review checklist is large, and a single pass over a diff misses problems that an independent second pass catches. You cannot hold the full context of every infrastructure system in your head. Fan out whatever the PR's size, under the conditions in Step 2. Also **spawn sub-agents** to investigate whether checklist items apply: read surrounding code or infrastructure the PR should be using. Spawn them in parallel for independent areas.
 
 Sub-agents overlap on purpose. Expect the same defect back from two or three of them in different words; that signals importance, not multiplicity. Reconcile in Step 4, before spending verification agents on it.
 
@@ -202,7 +202,7 @@ Only then assign each survivor to exactly one section (see "One finding, one sec
 
 ### Step 5: Fact-Check
 
-Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. When Step 4 leaves findings, spawn at least one agent, even for a small PR, unless the convergence or posting window is open (see "Time Budget"); rarely spawn more than 5.
+Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. When Step 4 leaves findings and you have the Agent tool, spawn at least one agent, even for a small PR, unless the convergence or posting window is open (see "Time Budget"); otherwise fact-check them yourself. Rarely spawn more than 5.
 
 Spawn the agents in parallel. Each independently verifies its findings by re-reading the relevant code and surrounding context (give each agent the paths of any `REVIEW.md` covering its findings' files), and returns **valid**, **invalid**, or **needs rewording** for each. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
 
