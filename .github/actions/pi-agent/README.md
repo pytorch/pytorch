@@ -108,7 +108,7 @@ Sol remains available through the `model` dispatch input. Distributed triage use
    matching `.github/pi/schemas/issue-triage-plan.json`.
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
-   dropped), only adds labels, posts fixed template or umbrella-reference comments the bot
+   dropped), only adds labels, posts fixed template or related-issue comments the bot
    has not already posted, and adds `bot-triaged`. It closes usage questions, expected
    numerical behavior, or covered reports for catalog-enabled closing umbrellas. It then
    hands the issue to `distributed-triage-pi.yml`.
@@ -122,6 +122,12 @@ filtered to issues in `TRIAGE_REPO`, excluding pull requests, `TRIAGE_SOURCE_ISS
 by the workflow), and the replayed issue. Each call returns at most 10 matches; it does not
 prove absence, decide duplicates, or authorize closure. Search and follow-up reads have no
 separate discovery-specific session budget.
+
+An optional `possible_duplicate` issue number produces a fixed suggestion asking the reporter
+to confirm the match; the source stays open. The apply step validates the same-repository
+source and candidate before writing, never writes to the candidate, and suppresses repeated
+suggestions using a bot-authored target marker. This field cannot invoke an umbrella action
+or be combined with a close decision. Umbrella link/close rules remain separate.
 
 The offline issue-tool tests run against Pi installed from the action lockfile, use its real
 argument validator, and replace only `gh` with controlled fixtures (no GitHub access):

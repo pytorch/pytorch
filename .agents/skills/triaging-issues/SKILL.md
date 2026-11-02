@@ -65,6 +65,7 @@ The apply step enforces it:
 - `labels` are only added; existing labels are never removed. List only labels from `labels.json`.
 - `templates` are `templates.json` keys whose comments are posted verbatim; free-form comments are not possible. A template the bot already posted on the issue is not posted again.
 - `close_question` (posts `redirect_to_forum`) and `close_expected_behavior` (posts `numerical_accuracy`) close the issue. A covered approved umbrella may also close it under Step 3.5; the catalog, never a model-supplied action, grants that permission.
+- Optional `possible_duplicate: 123` proposes one ordinary same-repository issue after reading its body and relevant comments. Use only with `label` or `triage_review`, never with `umbrella` or a close decision. The trusted step posts a fixed suggestion on the source issue and keeps it open; it never writes to the candidate.
 - Optional `umbrella: {"issue": 195547, "match": "covered"}` identifies one catalog candidate. `match` is `covered` or `uncertain`; do not submit an action, URL, or comment. The trusted step posts a fixed reference on the new issue only, never on the umbrella or its old members.
 - `bot-triaged` is added automatically; do not list it.
 
@@ -110,6 +111,13 @@ That issue belongs to the sub-oncall team. They own their queue.
 For every issue not skipped in Step 0, use the search-and-read flow above to look for
 related issues before classification. Read `umbrellas.json` and relevant candidate
 bodies/comments before claiming umbrella coverage.
+
+For a plausible duplicate of an ordinary issue, read the candidate's body and relevant
+comments before setting `possible_duplicate` to its issue number. Explain the shared
+underlying problem in `reasoning`; a similar title or operator is not enough. Do not use
+this field for a catalog umbrella, or when the source still reproduces after the candidate's
+fix and may be a regression. The suggestion asks the reporter to confirm the match and
+close their own issue only if it is the same problem; the bot leaves it open.
 
 Discovery supplies context for all later decisions, not permission to close: a related
 sibling operator, a closed historical issue, or shared numerical terminology is not a
@@ -374,7 +382,7 @@ information/reproduction. Other decisions do not receive automatic completion.
 - Assign issues to users
 - Add `high priority` directly without human confirmation
 - Add module labels when redirecting to oncall
-- Add comments to bug reports or feature requests, except an info/reproduction request or the fixed approved umbrella reference
+- Add comments to bug reports or feature requests, except an info/reproduction request, a fixed possible-duplicate suggestion (Step 0.5), or the fixed approved umbrella reference
 
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)

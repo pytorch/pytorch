@@ -142,6 +142,9 @@ jobs:
           Broaden unhelpful queries; neither empty nor nonempty results prove the search is complete.
         - Check the umbrella catalog's scopes and exclusions; include an `umbrella` annotation
           when a configured target fits. Do not infer closure permission from search results.
+        - For a plausible ordinary duplicate, read its body and relevant comments before
+          adding `possible_duplicate`. This suggests a match but leaves the source open;
+          do not combine it with `umbrella` or a close decision.
         Finish by calling `submit_result` with your plan.
 
         RELEASE CONTEXT (authoritative: use this and nothing else for the current release
