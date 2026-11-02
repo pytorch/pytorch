@@ -2430,8 +2430,10 @@ class AOTInductorTestsTemplate:
         # layer's copy stays alive until the model returns.
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
-        if op == "sdpa" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            raise unittest.SkipTest("requires flash attention")
+        if op == "sdpa" and (
+            self.device != "cuda" or not PLATFORM_SUPPORTS_FLASH_ATTENTION
+        ):
+            raise unittest.SkipTest("requires CUDA flash attention")
 
         b, s, d, n_heads = 8, 1024, 64, 8
 
@@ -2527,6 +2529,14 @@ class AOTInductorTestsTemplate:
         x = torch.randint(0, 5, (16,), device=self.device)
         with dynamo_config.patch(capture_dynamic_output_shape_ops=True):
             self.check_model(Model(), (x,))
+            _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), (x,))
+
+        defs = re.findall(r"(u\d+) = (\w+)\.size\(0\);", code)
+        self.assertTrue(defs)
+        for symbol, values in defs:
+            FileCheck().check(f"{symbol} = {values}.size(0);").check(
+                f"{values}.reset();"
+            ).run(code)
 
     @skipIfNoFBGEMM
     def test_quantized_linear(self):

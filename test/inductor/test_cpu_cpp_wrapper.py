@@ -60,6 +60,7 @@ class TestCppWrapper(InductorTestCase):
     hw_classification = HardwareClassification.CPU
     device = "cpu"
 
+    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
     @config.patch(cpp_wrapper=True)
     def test_unused_fallback_outputs_freed(self):
         # Each layer uses only the first output of two multi-output fallbacks:
@@ -102,7 +103,11 @@ class TestCppWrapper(InductorTestCase):
             [name for name in unused if f"{name}.reset();" not in code], []
         )
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires mkldnn")
+    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
+    @unittest.skipIf(
+        not torch.backends.mkldnn.is_available() or IS_WINDOWS,
+        "requires mkldnn, not on Windows",
+    )
     @torch._dynamo.config.patch(allow_rnn=True)
     @config.patch(cpp_wrapper=True, freezing=True)
     def test_unused_mkldnn_rnn_outputs_freed(self):
