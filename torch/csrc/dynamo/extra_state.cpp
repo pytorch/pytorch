@@ -130,14 +130,17 @@ CacheEntry* lookup_in_list(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
-    bool* guard_error,
-    PyObject** maybe_cached_code) {
+    bool* guard_error) {
   size_t index = 0;
   for (CacheEntry& cache_entry : entries) {
     bool valid = Py_IsFalse(backend) ||
         backend_match(cache_entry.backend.ptr(), backend);
 
     if (valid) {
+      // Guards can run Python code (e.g. lambda guards), so a weakref finalizer
+      // can invalidate this very entry mid-evaluation and free the guard tree
+      // being walked.
+      py::object guard_manager_keepalive = cache_entry.guard_manager;
       try {
         if (is_skip_guard_eval_unsafe) {
           valid = cache_entry_has_no_guards(
@@ -160,9 +163,15 @@ CacheEntry* lookup_in_list(
               index == entries.size() - 1);
         }
         e.restore();
-        *maybe_cached_code = nullptr;
         *guard_error = true;
         return nullptr;
+      }
+      if (!cache_entry.guard_manager.is(guard_manager_keepalive)) {
+        // Invalidation also moved the entry to the back of `entries`, so the
+        // entries after it have not been checked yet. An entry is invalidated
+        // at most once, so the rescan terminates.
+        return lookup_in_list(
+            entries, f_locals, backend, is_skip_guard_eval_unsafe, guard_error);
       }
     }
     if (valid) {
@@ -230,6 +239,9 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager) {
+  TORCH_CHECK(
+      cache_entry != nullptr && cache_entry->_owner == this,
+      "cache entry does not belong to this ExtraState");
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -238,7 +250,6 @@ void ExtraState::invalidate(
   // function is running.
   Py_INCREF(this->orig_code);
 
-  CHECK(cache_entry->_owner == this);
   CHECK(cache_entry == &*cache_entry->_owner_loc);
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
@@ -280,12 +291,11 @@ bool try_lookup_without_guard_eval(
     PyCodeObject* code,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe) {
+    bool is_skip_guard_eval_unsafe,
+    CacheLookupResult* result) {
   ExtraState* extra_state = get_extra_state(code);
   if (extra_state == nullptr) {
-    *maybe_cached_code = Py_None;
+    result->code = py::none();
     return true;
   }
 
@@ -295,7 +305,7 @@ bool try_lookup_without_guard_eval(
     // may pass.
     const auto& entry = extra_state->precompile_entries.front();
     if (torch::dynamo::root_guard_manager_has_no_guards(entry.root_mgr)) {
-      *maybe_cached_code = entry.code.ptr();
+      result->code = entry.code;
       return true;
     }
     return false;
@@ -323,12 +333,12 @@ bool try_lookup_without_guard_eval(
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    result->code = found->code;
+    result->trace_annotation = found->trace_annotation;
     return true;
   }
 
-  *maybe_cached_code = Py_None;
+  result->code = py::none();
   return true;
 }
 
@@ -337,12 +347,11 @@ void lookup(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe) {
+    bool is_skip_guard_eval_unsafe,
+    CacheLookupResult* result) {
   ExtraState* extra_state = get_extra_state(code);
   if (extra_state == nullptr) {
-    *maybe_cached_code = Py_None;
+    result->code = py::none();
     return;
   }
 
@@ -351,7 +360,7 @@ void lookup(
 
   for (const auto& entry : extra_state->precompile_entries) {
     if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      *maybe_cached_code = entry.code.ptr();
+      result->code = entry.code;
       return;
     }
   }
@@ -372,9 +381,9 @@ void lookup(
           f_locals,
           backend,
           is_skip_guard_eval_unsafe,
-          &guard_error,
-          maybe_cached_code);
+          &guard_error);
       if (guard_error) {
+        result->code = py::object();
         return;
       }
       if (found) {
@@ -387,11 +396,11 @@ void lookup(
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
-    *trace_annotation = found->trace_annotation.c_str();
+    result->code = found->code;
+    result->trace_annotation = found->trace_annotation;
     return;
   }
-  *maybe_cached_code = py::none().ptr();
+  result->code = py::none();
 }
 
 bool has_relevant_cache_entries(
@@ -427,19 +436,20 @@ CompileInputs get_compile_inputs(
   return inputs;
 }
 
-CacheEntry* record_compile_result(
+CacheLookupResult record_compile_result(
     PyCodeObject* code,
     int64_t isolate_recompiles_id,
     bool apply_to_code,
     FrameExecStrategy new_strategy,
     PyObject* guarded_code,
     PyObject* backend) {
+  CacheLookupResult result{py::none(), ""};
   ExtraState* extra_state = get_or_init_extra_state(code);
   if (apply_to_code) {
     set_region_exec_strategy(extra_state, isolate_recompiles_id, new_strategy);
   }
   if (Py_IsNone(guarded_code)) {
-    return nullptr;
+    return result;
   }
 
   int64_t id = get_current_isolate_recompiles_id();
@@ -463,7 +473,9 @@ CacheEntry* record_compile_result(
       py::cast(*new_iter, py::return_value_policy::reference);
   guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
-  return &*new_iter;
+  result.code = new_iter->code;
+  result.trace_annotation = new_iter->trace_annotation;
+  return result;
 }
 
 static PyCodeObject* code_from_handle(const py::handle& code_obj) {
@@ -473,10 +485,21 @@ static PyCodeObject* code_from_handle(const py::handle& code_obj) {
   return (PyCodeObject*)code_obj.ptr();
 }
 
+// Callers copy entries out before building the list, as allocating Python
+// objects can run GC finalizers that mutate the cache being walked.
+template <typename T>
+static py::list to_py_list(std::vector<T>&& entries) {
+  py::list result;
+  for (T& e : entries) {
+    result.append(py::cast(std::move(e), py::return_value_policy::move));
+  }
+  return result;
+}
+
 py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
-  py::list result;
+  std::vector<CacheEntry> copies;
   if (extra != nullptr) {
     // Sort by isolate_recompiles_id for deterministic iteration order.
     std::vector<int64_t> ids;
@@ -486,12 +509,12 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     }
     std::sort(ids.begin(), ids.end());
     for (int64_t id : ids) {
-      for (CacheEntry& e : extra->cache_entry_map[id]) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntry& e : extra->cache_entry_map[id]) {
+        copies.push_back(e.copy_for_python());
       }
     }
   }
-  return result;
+  return to_py_list(std::move(copies));
 }
 
 py::list _get_cache_entries_for_region(
@@ -502,16 +525,16 @@ py::list _get_cache_entries_for_region(
       "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
-  py::list result;
+  std::vector<CacheEntry> copies;
   if (extra != nullptr) {
     auto it = extra->cache_entry_map.find(isolate_recompiles_id);
     if (it != extra->cache_entry_map.end()) {
-      for (CacheEntry& e : it->second) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntry& e : it->second) {
+        copies.push_back(e.copy_for_python());
       }
     }
   }
-  return result;
+  return to_py_list(std::move(copies));
 }
 
 size_t _get_total_cache_entry_count(const py::handle& code_obj) {
@@ -562,11 +585,10 @@ bool _set_lru_cache(py::object boolean) {
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
-  py::list result;
+  std::vector<PrecompileEntry> copies;
   if (extra != nullptr) {
-    for (PrecompileEntry& e : extra->precompile_entries) {
-      result.append(py::cast(e, py::return_value_policy::reference));
-    }
+    copies.assign(
+        extra->precompile_entries.begin(), extra->precompile_entries.end());
   }
-  return result;
+  return to_py_list(std::move(copies));
 }

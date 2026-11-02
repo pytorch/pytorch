@@ -224,7 +224,7 @@ def prepare_cudagraph_post_compile(
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     if boxed_forward_device_index is not None and not is_inference and not is_backward:
-        boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+        boxed_forward_device_index.set(compiled_graph.device_index())
 
 
 def cudagraph_post_compile(
@@ -281,7 +281,7 @@ def cudagraph_post_compile(
             k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
         }
 
-        device_index = next(iter(compiled_graph.device_idxs))
+        device_index = compiled_graph.device_index()
         cudagraphify_kwargs = dict(
             device_index=device_index,
             stack_traces=stack_traces,
@@ -372,7 +372,7 @@ def cudagraph_partition_post_compile(
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
     mutated_input_idxs = compiled_graph.mutated_input_idxs
-    device_index = next(iter(compiled_graph.device_idxs))
+    device_index = compiled_graph.device_index()
 
     # Filter to only tensor constants (exclude opaque value type classes)
     tensor_constants = {
@@ -529,6 +529,8 @@ class CompiledFxGraph(OutputCode):
         repr=False
     )  # Do not display graph
     cache_linemap: list[tuple[int, str]] | None
+    # See PyCodeCache.load_by_key_path.
+    kernel_sources: dict[str, tuple[str, str]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -609,9 +611,13 @@ class CompiledFxGraph(OutputCode):
         self.inductor_provenance_mapping_str = inductor_provenance_mapping_str
         self.inductor_provenance_stack_traces_str = inductor_provenance_stack_traces_str
         self.cache_linemap = graph.cache_linemap
+        self.kernel_sources = graph.wrapper_code.kernel_sources
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
-        self.device_idxs = OrderedSet(graph.device_idxs)
+        # Under compile-on-one-rank the index is the compiling rank's, and this
+        # artifact is shared across ranks; see device_index().
+        coor = torch.compiler.config.compile_on_one_rank
+        self.device_idxs = OrderedSet() if coor else OrderedSet(graph.device_idxs)
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
 
@@ -841,6 +847,11 @@ class CompiledFxGraph(OutputCode):
             ):
                 self._compile_context = None
 
+    def device_index(self) -> int:
+        if torch.compiler.config.compile_on_one_rank:
+            return torch.cuda.current_device()
+        return next(iter(self.device_idxs))
+
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
@@ -1035,6 +1046,14 @@ class CompiledFxGraph(OutputCode):
         from torch._inductor.codecache import PyCodeCache
 
         artifact_path = self.write_to_disk()
+        kernel_sources = self.kernel_sources
+        if kernel_sources:
+            # The module may already be on disk as someone's hand-edited copy (e.g. a
+            # standalone_compile artifact saved unpacked). Its defs must then compile
+            # themselves, not bind the kernels built from this entry's sources.
+            with open(artifact_path) as f:
+                if f.read() != self.source_code:
+                    kernel_sources = {}
 
         try:
             with dynamo_timed(
@@ -1046,6 +1065,7 @@ class CompiledFxGraph(OutputCode):
                     artifact_path,
                     self.cache_linemap,
                     constants.unwrap(self),
+                    kernel_sources=kernel_sources,
                 )
                 self.current_callable = code_cache.call
                 self.recursively_apply_fns = getattr(
