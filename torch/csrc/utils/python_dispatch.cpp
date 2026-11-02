@@ -21,6 +21,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
@@ -680,6 +681,76 @@ static PyObject* pyobject_dispatch_normalize_results(
   return normalized.release().ptr();
 }
 
+static void pyobject_dispatch_collect_overloaded_tensors(
+    PyObject* value,
+    std::vector<PyObject*>& overloaded_args) {
+  if (THPVariable_Check(value)) {
+    if (THPVariable_Unpack(value)
+            .unsafeGetTensorImpl()
+            ->key_set()
+            .has(c10::DispatchKey::Python)) {
+      torch::append_overloaded_tensor(&overloaded_args, value);
+    }
+    return;
+  }
+  if (PyList_CheckExact(value)) {
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(value); ++i) {
+      pyobject_dispatch_collect_overloaded_tensors(
+          PyList_GET_ITEM(value, i), overloaded_args);
+    }
+  }
+}
+
+// Match PyInterpreter::dispatch without boxing Tensor arguments into IValues.
+// A missing mode/subclass is handled by the regular dispatcher instead.
+template <typename Func>
+static PyObject* pyobject_dispatch_call_python_key(
+    Func* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
+    Py_ssize_t op_args_start) {
+  const Py_ssize_t nkwargs = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
+  std::vector<PyObject*> overloaded_args;
+  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+    pyobject_dispatch_collect_overloaded_tensors(args[i], overloaded_args);
+  }
+  if (overloaded_args.empty() && !c10::impl::dispatch_mode_enabled()) {
+    return nullptr;
+  }
+
+  auto py_args = py::reinterpret_steal<py::object>(
+      PyTuple_New(nargs - op_args_start));
+  TORCH_CHECK_PYTHON(py_args.ptr() != nullptr);
+  for (Py_ssize_t i = op_args_start; i < nargs; ++i) {
+    PyTuple_SET_ITEM(py_args.ptr(), i - op_args_start, Py_NewRef(args[i]));
+  }
+  auto py_kwargs = py::reinterpret_steal<py::object>(PyDict_New());
+  TORCH_CHECK_PYTHON(py_kwargs.ptr() != nullptr);
+  for (Py_ssize_t i = 0; i < nkwargs; ++i) {
+    TORCH_CHECK_PYTHON(
+        PyDict_SetItem(
+            py_kwargs.ptr(), PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) ==
+        0);
+  }
+
+  auto op = torch::detail::getTorchApiFunction(*self->handle);
+  auto result = py::reinterpret_steal<py::object>(
+      torch::handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          py_args.ptr(),
+          py_kwargs.ptr(),
+          nullptr,
+          op.ptr(),
+          nullptr,
+          torch::TorchFunctionName::TorchDispatch));
+  if (!result) {
+    return nullptr;
+  }
+  return pyobject_dispatch_normalize_results(
+      self->handle->schema(), result.ptr());
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -690,9 +761,14 @@ static PyObject* pyobject_dispatch_with_keyset(
     PyObject* kwnames,
     Py_ssize_t op_args_start) {
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  // TODO(#187974): Figure out why we need a special case to send the Python
-  // key back to the C++ Dispatcher.
   if (C10_UNLIKELY(key_set.has(c10::DispatchKey::Python))) {
+    if (key_set.highestPriorityTypeId() == c10::DispatchKey::Python) {
+      PyObject* result = pyobject_dispatch_call_python_key(
+          self, args, nargs, kwnames, op_args_start);
+      if (result != nullptr || PyErr_Occurred()) {
+        return result;
+      }
+    }
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
         key_set,
