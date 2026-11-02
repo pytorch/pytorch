@@ -12,11 +12,11 @@ Stock Mooncake wheels are not sufficient unless they expose these methods.
 `MooncakeTransport.supported()` checks for the managed submission binding, and
 construction reports a missing binding explicitly.
 
-The companion native patch also fixes explicit TCP protocol selection and uses
-nonblocking CUDA streams for TCP staging copies. The latter is required to avoid
-a default-stream dependency cycle during CUDA graph replay. The draft PR contains
-the exact companion patch and its Mooncake base revision for reproduction; it is
-an external prerequisite, not a change to PyTorch's native libraries.
+Build Mooncake with [kvcache-ai/Mooncake#5150](https://github.com/kvcache-ai/Mooncake/pull/5150).
+It supplies the managed bindings, fixes explicit TCP protocol selection, and uses
+nonblocking CUDA streams for TCP staging copies. The latter avoids a default-stream
+dependency cycle during CUDA graph replay. The native dependency is maintained in
+that companion PR.
 
 ## Usage
 
