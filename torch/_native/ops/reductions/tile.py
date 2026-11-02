@@ -788,7 +788,8 @@ class TileReduce:
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        # Only TMA keys N because its box is static; runtime paths share a vector class.
+        # TMA (static box) and ragged vectors (static row edges) key N; other runtime
+        # paths share a vector class.
         return (
             self.axis,
             self.vec,
