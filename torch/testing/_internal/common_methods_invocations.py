@@ -3544,7 +3544,7 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S), (S, 2 * L))
 
     for shape, sorted, return_inverse, return_counts, dim in \
             product(sizes, [False, True], [False, True], [False, True], [None, -2, -1, 0, 1, 2]):
@@ -9929,7 +9929,9 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                 )
             )
 
-        if dmajor >= 10:
+        # SWIZZLE_32_4_4 and NVFP4 are NVIDIA-only; on ROCm dmajor is the gfx
+        # major (e.g. 12 on gfx120x), not an SM version.
+        if dmajor >= 10 and not torch.version.hip:
             # MXFP8
             scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
             scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
@@ -12148,20 +12150,12 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.cfloat, torch.cdouble]),
                        # ValueError: Expected 2D tensor but got tensor with dimension: 1.
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type='cpu', dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
+                           dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type='cpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
+                           dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
@@ -21274,10 +21268,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # Allowed exception: sparse tensors don't have strides
-               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
-               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
-                            'TestSparseCSR', 'test_sparse_csr_consistency'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
