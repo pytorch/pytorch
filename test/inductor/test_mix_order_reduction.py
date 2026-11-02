@@ -61,6 +61,7 @@ def _supports_tensor_descriptors(device):
     device_type = torch.device(device).type
     return has_triton_stable_tma_api() and (
         device_type == "xpu"
+        or device_type == "npu"
         or (device_type == "cuda" and torch.cuda.get_device_capability()[0] >= 9)
     )
 
@@ -1754,6 +1755,14 @@ class MixOrderReductionNumericTest(TestBase):
     ):
         if not _supports_tensor_descriptors(device):
             self.skipTest("requires tensor descriptor support")
+        if (
+            torch.device(device).type == "npu"
+            and (enable_host_side_tma or num_stages != 1)
+        ):
+            self.skipTest(
+                "host-side TMA materialization is unsupported on npu, and "
+                "fixed multi-stage kernels keep device-side TMA there"
+            )
 
         def f(x, y):
             return x.sum(dim=1), (x + y).float().sum(dim=0)
@@ -1797,6 +1806,8 @@ class MixOrderReductionNumericTest(TestBase):
     def test_fixed_multistage_host_tma_reduction_store(self, device):
         if not _supports_tensor_descriptors(device):
             self.skipTest("requires tensor descriptor support")
+        if torch.device(device).type == "npu":
+            self.skipTest("host-side TMA materialization is unsupported on npu")
 
         def f(x):
             y = x.float()
