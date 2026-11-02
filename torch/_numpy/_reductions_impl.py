@@ -400,6 +400,7 @@ def quantile(
     out: OutArray | None = None,
     overwrite_input: bool = False,
     method: str = "linear",
+    # Bypass KeepDims normalization so leading q dimensions are preserved.
     keepdims: bool = False,
     *,
     interpolation: NotImplementedType = None,
