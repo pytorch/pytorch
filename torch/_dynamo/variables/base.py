@@ -1844,11 +1844,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def lookup_method_descriptor(
         self, descriptor: types.MethodDescriptorType
     ) -> Method | None:
+        from .object_protocol import mro_lookup
+
         # For example, `dict.update(ordered, src)` must bypass `OrderedDict.update`.
         name = descriptor.__name__
         if self._cpython_type is None:
-            # Keep validated name lookup for trackers without a type-to-table mapping.
-            return self.lookup_tp_method(name)
+            if mro_lookup(self.python_type(), name) is descriptor:
+                return self.lookup_tp_method(name)
+            return None
         python_type = self._cpython_type
         for cls in type(self).__mro__:
             python_type = cls.__dict__.get("_cpython_type", python_type)
@@ -1858,7 +1861,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             python_types = (
                 python_type if isinstance(python_type, tuple) else (python_type,)
             )
-            if any(typ is descriptor.__objclass__ for typ in python_types):
+            if any(
+                typ is not None and mro_lookup(typ, name) is descriptor
+                for typ in python_types
+            ):
                 return table[name]
         return None
 
