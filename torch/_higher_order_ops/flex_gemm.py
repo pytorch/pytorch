@@ -426,6 +426,10 @@ def validate_scaled_mm(
     """Validate the fused scaled-mm operands and return their shared QuACK format."""
     op_name = "scaled_grouped_mm" if grouped else "scaled_mm"
     recipe = tuple(recipe_a)
+    if grouped and recipe == (_BLOCKWISE_1X16,):
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm NVFP4 requires BlockWise1x16 and TensorWise scales"
+        )
     contract = QUACK_BLOCKSCALED_RECIPES.get(recipe)
     if contract is None or tuple(recipe_b) != recipe:
         raise NotImplementedError(
@@ -454,6 +458,19 @@ def validate_scaled_mm(
             f"{data_dtype} data and {scale_dtype} scales"
         )
     for scale in (*scale_a[1:], *scale_b[1:]):
+        if grouped:
+            if (
+                scale.dtype is not torch.float32
+                or scale.ndim != 1
+                or (mat_b.ndim == 3 and scale.shape[0] != mat_b.shape[0])
+                or not scale.is_contiguous()
+                or scale.device != mat_a.device
+            ):
+                raise ValueError(
+                    "FlexGEMM NVFP4 scaled_grouped_mm TensorWise scales must be "
+                    "contiguous Float32 tensors of shape (G,) on the input device"
+                )
+            continue
         if scale.dtype is not torch.float32 or tuple(scale.shape) not in (
             (),
             (1,),
@@ -597,8 +614,6 @@ def validate_scaled_grouped_mm(
     mat_a, mat_b, scale_a, scale_b, offs, output_dtype, format_name
 ):
     """Validate the public block-scaled grouped contract before layout adaptation."""
-    if format_name != "mxfp8_e4m3":
-        raise NotImplementedError("FlexGEMM scaled_grouped_mm supports MXFP8 only")
     if output_dtype not in (None, torch.bfloat16):
         raise ValueError("FlexGEMM scaled_grouped_mm supports BF16 output only")
     if mat_a.ndim != 2 or mat_b.ndim not in (2, 3):

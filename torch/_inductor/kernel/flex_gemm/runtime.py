@@ -248,7 +248,10 @@ def flex_gemm_epimod(
     if epimod is not None:
         return epimod
 
-    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
+    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import (
+        GroupScalar,
+        ScalarColVecLoad,
+    )
     from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (
         InterleavedMainStore,
         InterleavedTileLoad,
@@ -258,6 +261,7 @@ def flex_gemm_epimod(
 
     op_types = {
         "scalar": epi_ops.Scalar,
+        "group": GroupScalar,
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,

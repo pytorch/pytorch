@@ -1203,7 +1203,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     mainloop_scale_count = len(mainloop_scale_nodes)
     epilogue_arg_kinds = (
-        *("scalar" for _ in range(mainloop_scale_count)),
+        *(
+            ("group" if scaled_grouped_mm else "scalar")
+            for _ in range(mainloop_scale_count)
+        ),
         *infer_flex_gemm_epilogue_arg_kinds(
             gemm_op, epilogue_args[mainloop_scale_count:], epilogue_lane_size
         ),

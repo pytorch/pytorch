@@ -4,7 +4,9 @@
 import cutlass
 import cutlass.cute as cute
 
-from torch._vendor.quack.epilogue.ops import ColVecLoad, is_floating_dtype
+import torch
+from torch._vendor.quack import utils
+from torch._vendor.quack.epilogue.ops import ColVecLoad, is_floating_dtype, Scalar
 
 
 class ScalarColVecLoad(ColVecLoad):
@@ -44,3 +46,31 @@ class ScalarColVecLoad(ColVecLoad):
         register_dtype = gemm.acc_dtype if is_floating_dtype(dtype) else dtype
         registers = cute.make_rmem_tensor(subtile.layout, register_dtype)
         return [shared, registers]
+
+
+class GroupScalar(Scalar):
+    """Load a caller-owned TensorWise scale for the current expert."""
+
+    def _validate_pointer_value(self, value):
+        if not isinstance(value, torch.Tensor):
+            raise TypeError(f"group scalar '{self.name}' must be a tensor")
+        if (
+            value.ndim != 1
+            or value.dtype is not torch.float32
+            or not value.is_cuda
+            or not value.is_contiguous()
+        ):
+            raise ValueError(
+                f"group scalar '{self.name}' must be contiguous 1-D CUDA Float32"
+            )
+
+    def host_validate(self, value, *, batch, **_):
+        self._validate_pointer_value(value)
+        if value.numel() != batch:
+            raise ValueError(
+                f"group scalar '{self.name}' must contain one value per group"
+            )
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        return utils.load_scalar_or_pointer(param + ctx.batch_idx, dtype=self.dtype)

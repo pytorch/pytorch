@@ -3243,6 +3243,71 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
             self.assertIs(type(raised.exception), error)
 
+    @parametrize(
+        "case", ("single_scale", "global_shape", "global_dtype", "global_stride")
+    )
+    def test_nvfp4_scaled_grouped_mm_rejects_invalid_globals(self, case):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            a = torch.empty(256, 128, device="cuda", dtype=torch.float4_e2m1fn_x2)
+            b = torch.empty(3, 256, 128, device="cuda", dtype=a.dtype).mT
+            sa = torch.empty(256, 16, device="cuda", dtype=torch.float8_e4m3fn)
+            sb = torch.empty(3, 4096, device="cuda", dtype=sa.dtype)
+            global_scale = torch.ones(3, device="cuda")
+            recipe = [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+            swizzle = [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+            if case == "global_shape":
+                global_scale = global_scale[:1]
+            elif case == "global_dtype":
+                global_scale = global_scale.bfloat16()
+            elif case == "global_stride":
+                global_scale = torch.ones(6, device="cuda")[::2]
+            if case == "single_scale":
+                scales = (sa, sb)
+                recipe, swizzle = recipe[:1], swizzle[:1]
+            else:
+                scales = ([sa, global_scale], [sb, global_scale])
+            with (
+                mock.patch.object(
+                    importlib.import_module("torch._higher_order_ops.flex_gemm"),
+                    "flex_gemm_hop",
+                    side_effect=AssertionError("invalid input reached HOP dispatch"),
+                ),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "scaled_grouped_mm.*(requires BlockWise1x16 and TensorWise|TensorWise scales must)",
+                ) as raised,
+            ):
+                flex_gemm(
+                    F.scaled_grouped_mm,
+                    (a, b, *scales),
+                    torch.relu,
+                    gemm_kwargs=dict(
+                        offs=torch.empty(3, device="cuda", dtype=torch.int32),
+                        scale_recipe_a=recipe,
+                        scale_recipe_b=recipe,
+                        swizzle_a=swizzle,
+                        swizzle_b=swizzle,
+                    ),
+                    kernel_options={"backend": "QUACK"},
+                )
+            self.assertIs(type(raised.exception), ValueError)
+
+    def test_nvfp4_scaled_grouped_mm_rejects_grouped_k(self):
+        from torch._higher_order_ops.flex_gemm import validate_scaled_grouped_mm
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            a = torch.empty(256, 128, device="cuda", dtype=torch.float4_e2m1fn_x2)
+            b = torch.empty_like(a).t()
+            scale = torch.empty(256, 16, device="cuda", dtype=torch.float8_e4m3fn)
+            offs = torch.empty(2, device="cuda", dtype=torch.int32)
+            with self.assertRaisesRegex(NotImplementedError, "grouped-M only"):
+                validate_scaled_grouped_mm(
+                    a, b, scale, scale, offs, torch.bfloat16, "nvfp4"
+                )
+
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
@@ -8765,7 +8830,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
 
     @parametrize(
         "case",
-        (("mxfp8_e4m3", "m"), ("mxfp8_e4m3", "k")),
+        (("mxfp8_e4m3", "m"), ("mxfp8_e4m3", "k"), ("nvfp4", "m")),
         name_fn=lambda case: "_".join(case),
     )
     def test_scaled_grouped_mm_empty(self, device, case):
@@ -8809,7 +8874,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
 
     @parametrize(
         "case",
-        (("mxfp8_e4m3", "m"), ("mxfp8_e4m3", "k")),
+        (("mxfp8_e4m3", "m"), ("mxfp8_e4m3", "k"), ("nvfp4", "m")),
         name_fn=lambda case: "_".join(case),
     )
     @parametrize("autotune", (False, True))
@@ -8893,6 +8958,71 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 )
                 padded = compiled(padded_a, b, sa, sb, offs, row)
                 self.assertEqual(padded[: a.shape[0]], captured, rtol=0, atol=0)
+
+    @parametrize(
+        "case",
+        (
+            (32, (1.0, 1.0), False),
+            (96, (0.5, 1.5), False),
+            (256, (1e37, 1e-37), False),
+            (256, (0.5, 0.5), True),
+        ),
+    )
+    def test_nvfp4_scaled_grouped_mm_global_scales(self, device, case):
+        k, global_values, shared_global_scale = case
+        a, b, sa, sb, offs, reference = self.makeScaledGroupedMm(
+            "m", (173, 0, 83, 256), device, format_name="nvfp4", k=k
+        )
+        recipes = [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+        swizzles = [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+        groups = offs.numel()
+        ga = (
+            torch.arange(1, groups + 1, device=device, dtype=torch.float32)
+            * global_values[0]
+        )
+        gb = ga if shared_global_scale else torch.full_like(ga, global_values[1])
+        scale_a, scale_b = [sa[0], ga], [sb[0], gb]
+        reference *= (
+            (ga * gb)
+            .repeat_interleave(torch.tensor((173, 0, 83, 256), device=device))
+            .unsqueeze(-1)
+            .double()
+        )
+        row = self.makeTensor(272, device=device)
+
+        def fn(a, b, scale_a, scale_b, offs, row):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, scale_a, scale_b),
+                lambda acc: (acc + row).relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": recipes,
+                    "scale_recipe_b": recipes,
+                    "swizzle_a": swizzles,
+                    "swizzle_b": swizzles,
+                    "offs": offs,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        actual, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, offs, row)
+        self.assertEqual(
+            actual, (reference + row.double()).relu().bfloat16(), rtol=0.02, atol=0.002
+        )
+        self.assertIn("blockscaled_format='nvfp4'", code)
+        self.assertNotIn("aten._scaled_grouped_mm", code)
+        if global_values is not None:
+            self.assertIn("(acc * (operand0 * operand1))", code)
+            scale_a[1].mul_(0.5)
+            updated = compiled(a, b, scale_a, scale_b, offs, row)
+            factor = 0.25 if shared_global_scale else 0.5
+            self.assertEqual(
+                updated,
+                (reference * factor + row.double()).relu().bfloat16(),
+                rtol=0.02,
+                atol=0.002,
+            )
 
     @parametrize(
         "case",
@@ -9245,7 +9375,7 @@ torch.cuda.synchronize()
         )
         self.assertIn(f"Assertion `{message}` failed.", result.stderr)
 
-    @parametrize("format_name", ("mxfp8_e4m3",))
+    @parametrize("format_name", ("mxfp8_e4m3", "nvfp4"))
     def test_scaled_grouped_mm_native_reference(self, device, format_name):
         from torch.testing._internal.common_cuda import (
             PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
