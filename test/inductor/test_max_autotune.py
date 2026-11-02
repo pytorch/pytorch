@@ -2088,12 +2088,6 @@ class TestMaxAutotune(TestCase):
             )
 
     @unittest.skipIf(
-        config.cpp_wrapper,
-        "flaky: cpp_wrapper kernel launches can lack a current CUDA context on "
-        "the autograd thread, depending on which choice wins and on test order; "
-        "see #144609, remove once #202970 lands",
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )

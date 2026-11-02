@@ -63,6 +63,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def cpp_kernel_launch_supports_pdl(self) -> bool:
         return torch.version.hip is None
 
+    def cpp_ensure_current_context(self, device_idx: str) -> str:
+        return f"ensureCurrentContext({device_idx});"
+
     def kernel_driver(self) -> str:
         """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
         embedded in AOTI-generated wrapper code."""
@@ -89,6 +92,27 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         std::string(msg));                     \\
                 }                                              \\
             } while (0);
+
+            // loadKernel/launchKernel use the driver API, which needs a current
+            // context. A thread whose first CUDA work is this wrapper has none
+            // (e.g. autograd's device threads: the device guard skips setting a
+            // device that already matches), so the wrapper binds the device's
+            // primary context after its first device guard, as Triton's
+            // launcher does. Driver API only: the fbcode JIT build does not
+            // link the CUDA runtime.
+            static inline void ensureCurrentContext(int device) {
+            #ifndef USE_ROCM
+                CUcontext ctx;
+                CUDA_DRIVER_CHECK(cuCtxGetCurrent(&ctx));
+                if (ctx != nullptr) {
+                    return;
+                }
+                CUdevice cu_device;
+                CUDA_DRIVER_CHECK(cuDeviceGet(&cu_device, device));
+                CUDA_DRIVER_CHECK(cuDevicePrimaryCtxRetain(&ctx, cu_device));
+                CUDA_DRIVER_CHECK(cuCtxSetCurrent(ctx));
+            #endif
+            }
 
             static inline CUfunction loadKernel(
                     std::string filePath,

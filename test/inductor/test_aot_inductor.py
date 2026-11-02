@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import uuid
 import zipfile
@@ -1606,6 +1607,58 @@ class AOTInductorTestsTemplate:
         )
         compiled = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(compiled(*input1), model(*input1))
+
+    # run_single_threaded skips the runtime's own device guard around run_impl,
+    # so it checks where the generated wrapper binds the context.
+    @common_utils.parametrize("run_single_threaded", [False, True])
+    @common_utils.parametrize(
+        "device_idx", [0, common_utils.subtest(1, decorators=[requires_multigpu()])]
+    )
+    def test_run_on_thread_without_current_context(
+        self, device_idx, run_single_threaded
+    ):
+        # A serving thread whose first CUDA work is the model starts on device 0
+        # with no current context for the model's driver-API kernel launches.
+        # The call must not move it off device 0.
+        if self.device != "cuda" or torch.version.hip is not None:
+            raise unittest.SkipTest("CUDA driver contexts only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(
+                    torch.nn.functional.layer_norm(x, (64,))
+                )
+
+        # Loading sets the model's device on this thread; keep it scoped.
+        with torch.cuda.device(device_idx):
+            x = torch.randn(32, 64, device=f"cuda:{device_idx}")
+            package_path = torch._inductor.aoti_compile_and_package(
+                torch.export.export(Model(), (x,))
+            )
+            compiled = torch._inductor.aoti_load_package(
+                package_path,
+                run_single_threaded=run_single_threaded,
+                device_index=device_idx,
+            )
+            # Loads and launches the kernels on this thread.
+            expected = compiled(x)
+
+        result = {}
+
+        def run():
+            try:
+                result["out"] = compiled(x)
+                result["device"] = torch.cuda.current_device()
+            except Exception as e:
+                result["error"] = e
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join()
+        if "error" in result:
+            raise result["error"]
+        self.assertEqual(result["out"], expected)
+        self.assertEqual(result["device"], 0)
 
     @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
