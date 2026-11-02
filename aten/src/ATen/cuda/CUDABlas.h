@@ -197,11 +197,17 @@ void scaled_gemm(
     const Tensor* device_beta = nullptr);
 
 struct GroupedGemmScaleOptions {
-  const void* A_scale_ptr;
-  const void* B_scale_ptr;
-  bool use_fast_accum;
-  int A_scale_mode;
-  int B_scale_mode;
+  const void* A_scale_ptr = nullptr;
+  const void* B_scale_ptr = nullptr;
+  bool use_fast_accum = false;
+  at::blas::ScalingType A_scaling_type = at::blas::ScalingType::TensorWise;
+  at::blas::ScalingType B_scaling_type = at::blas::ScalingType::TensorWise;
+  at::blas::SwizzleType A_swizzle_type = at::blas::SwizzleType::NO_SWIZZLE;
+  at::blas::SwizzleType B_swizzle_type = at::blas::SwizzleType::NO_SWIZZLE;
+  ScalarType A_scale_dtype = ScalarType::Float;
+  ScalarType B_scale_dtype = ScalarType::Float;
+  bool A_per_batch = false;
+  bool B_per_batch = false;
 };
 
 void grouped_gemm(

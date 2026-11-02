@@ -2366,7 +2366,7 @@ void grouped_gemm(
   const bool sm90 = prop->major == 9;
   TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
   if (scaled) {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         scales->A_scale_ptr != nullptr && scales->B_scale_ptr != nullptr,
         "scaled grouped cublasLtMatmul requires A and B scales");
   }
@@ -2387,13 +2387,21 @@ void grouped_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, alphaBatchStride);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, betaBatchStride);
   if (scaled) {
+#if CUDA_VERSION >= 13040
+    const int a_scale_mode = scales->A_per_batch ? CUBLASLT_MATMUL_MATRIX_SCALE_PER_BATCH_SCALAR_32F
+        : detail::cublasLtMatmulScaleMode(
+            scales->A_scaling_type, scales->A_swizzle_type, scales->A_scale_dtype, scales->use_fast_accum);
+    const int b_scale_mode = scales->B_per_batch ? CUBLASLT_MATMUL_MATRIX_SCALE_PER_BATCH_SCALAR_32F
+        : detail::cublasLtMatmulScaleMode(
+            scales->B_scaling_type, scales->B_swizzle_type, scales->B_scale_dtype, scales->use_fast_accum);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, scales->A_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, scales->B_scale_ptr);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, scales->A_scale_mode);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, scales->B_scale_mode);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
     // TODO: Add D scaling support
     const int8_t fastAccuMode = scales->use_fast_accum ? 1 : 0;
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
+#endif
   }
 
   CuBlasLtGroupedMatrixLayout Adesc(
