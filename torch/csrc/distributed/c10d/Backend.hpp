@@ -127,6 +127,32 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // not initialized until reconfigure() is called. Backends that support
     // fault tolerance honor this; others ignore it.
     bool enable_reconfigure = false;
+
+    // Holds the Python object of a Python subclass of Backend.Options while
+    // C++ references it, so its Python attributes survive; see
+    // PyBackendOptions.
+    c10::impl::PyObjectSlot* pyobj_slot() {
+      return &pyobj_slot_;
+    }
+
+    const c10::impl::PyObjectSlot* pyobj_slot() const {
+      return &pyobj_slot_;
+    }
+
+    void incref_pyobject() const noexcept final;
+    void decref_pyobject() const noexcept final;
+    bool try_incref_pyobject() const noexcept final;
+
+   private:
+    // A copy is a distinct C++ object and gets its own Python object, if any.
+    struct CopyResetPyObjectSlot : c10::impl::PyObjectSlot {
+      CopyResetPyObjectSlot() = default;
+      CopyResetPyObjectSlot(const CopyResetPyObjectSlot& /* other */) {}
+      CopyResetPyObjectSlot& operator=(const CopyResetPyObjectSlot&) = delete;
+      ~CopyResetPyObjectSlot() = default;
+    };
+
+    CopyResetPyObjectSlot pyobj_slot_;
   };
 
   explicit Backend(int rank, int size);
@@ -859,6 +885,14 @@ template <class T>
 struct TargetTraits<
     T,
     std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<c10d::Backend::Options, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
 };
 #endif

@@ -1,4 +1,7 @@
 {
+  "accelerator_test_refactoring": {
+    "description": "Owns only test-only refactoring PRs that make existing tests reusable across accelerators by sorting them into accelerator-unrelated, accelerator-agnostic, or accelerator-specific tests with these mechanisms in torch/testing/_internal: (1) HardwareClassification labels on test classes (hw_classification = GENERIC, ACCELERATOR, or one device such as CUDA), including marking a test as device-specific; (2) the Capability registry in common_device_type.py: Capability constants, requires_capabilities gates, and DeviceTypeTestBase._capabilities declarations, including moving existing dtype, feature, or library checks (for example TEST_CUDNN, has_triton(), PLATFORM_SUPPORTS_FP8) into it; (3) converting tests that hard-code CUDA to instantiate_device_type_tests, the device argument, or torch.accelerator, including enabling them on another accelerator such as XPU or a PrivateUse1 backend; (4) changes to these mechanisms or to the per-device test base classes. Test code means files under test/ and torch/testing/_internal. Does not own: PRs that change code outside test code; new tests; new skip helpers or availability checks defined outside the Capability registry, such as a quantization helper that checks for FBGEMM; standalone fixes, skips, xfails, or tolerance changes for one device that do not change how a test is classified, gated, or instantiated."
+  },
   "autograd": {
     "description": "Owns autograd engine behavior, gradient recording and execution, and Python autograd APIs."
   },
@@ -7,8 +10,5 @@
   },
   "nn": {
     "description": "Owns neural-network modules, module behavior, and user-facing torch.nn APIs."
-  },
-  "testcase_refactoring": {
-    "description": "Owns PRs that make tests reusable across hardware backends, including out-of-tree accelerators: device-generic test conversions (instantiate_device_type_tests, torch.accelerator), hw_classification labels, capability-based gating, and device-generic test infrastructure in torch/testing/_internal. Does not own fixes, skips, or tolerance changes for tests on one specific device."
   }
 }
