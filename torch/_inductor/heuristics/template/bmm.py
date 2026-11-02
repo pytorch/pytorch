@@ -181,4 +181,8 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         m, n, k = kernel_inputs.mnk_symbolic()
         dtype = kernel_inputs.mat1mat2()[0].get_dtype()
-        return {"ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type, dtype)}
+        # Skip the gate (and its guard) when this template yields no configs.
+        allow_tf32 = self.should_run(kernel_inputs) and mm_allow_tf32(
+            m, n, k, kernel_inputs.device_type, dtype
+        )
+        return {"ALLOW_TF32": allow_tf32}

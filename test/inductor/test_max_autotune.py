@@ -1822,6 +1822,22 @@ class TestMaxAutotune(TestCase):
                 run(m)
         self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
+    )
+    @skipIfRocm
+    @config.patch({"max_autotune": False, "fx_graph_cache": False})
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_dynamic_m_default_mode_no_guard(self):
+        # Without max-autotune no GEMM template runs, so the gate adds no guard.
+        torch._dynamo.reset()
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        b = torch.randn(2, 512, 512, device=GPU_TYPE)
+        cnt, run = self._compile_mm_counting(torch.bmm, b, torch._dynamo.mark_dynamic)
+        for m in (1024, 8, 2048):
+            run(m)
+        self.assertEqual(cnt.frame_count, 1)
+
     @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfRocm
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
