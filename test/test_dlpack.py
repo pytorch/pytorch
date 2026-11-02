@@ -459,6 +459,17 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
     @onlyNativeDeviceTypes
+    def test_asarray_prefers_dlpack_over_buffer(self, device):
+        class DLPackBuffer(TensorDLPackWrapper, bytearray):
+            pass
+
+        # The empty buffer would raise; the device must come from the producer.
+        tensor = make_tensor((2, 3), dtype=torch.float32, device=device)
+        self.assertEqual(torch.asarray(DLPackBuffer(tensor)), tensor)
+
+    @skipMeta
+    @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
+    @onlyNativeDeviceTypes
     def test_max_version(self, device):
         def capsule_name(kwargs):
             is_versioned = "max_version" in kwargs and kwargs["max_version"][0] >= 1
