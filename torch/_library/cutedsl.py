@@ -90,6 +90,17 @@ def wrap_cutedsl(
         TraceableCuteDSLKernelWrapper,
     )
 
+    # A kernel object stands for its bound __call__, as in cute.compile.
+    bound = host_fn
+    if callable(host_fn) and not inspect.ismethod(host_fn):
+        bound = host_fn.__call__
+    if inspect.ismethod(bound) and is_cutedsl_jit_function(bound.__func__):
+        raise RuntimeError(
+            "wrap_cutedsl does not support bound methods or kernel objects (got "
+            f"{bound.__qualname__}): instead, wrap a @cute.jit function that takes "
+            "the object as a cutlass.Constexpr parameter and calls the method on it, "
+            "and pass the object to that wrapper"
+        )
     if not is_cutedsl_jit_function(host_fn):
         raise RuntimeError(
             "wrap_cutedsl only works on host functions decorated with @cute.jit"
