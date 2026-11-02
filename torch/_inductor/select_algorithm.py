@@ -4329,8 +4329,8 @@ def _maybe_pretune_tunableop(choice: ChoiceCaller) -> None:
     empty-timings fallback, best-choice) so all of them are covered, not just
     the deferred multi-template path handled by
     Scheduler.finalize_multi_template_buffers. These paths fire while lowering,
-    before finalize() decides layouts, so an operand that is still flexible is
-    read at its placeholder strides; #201769 defers the ladder past that.
+    before finalize() decides layouts, so a GEMM whose operand is still
+    flexible is skipped here; #201769 defers the ladder past that instead.
     Function-local tunableop import: select_algorithm is imported widely and
     must not gain a module-level edge.
     """
