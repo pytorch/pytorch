@@ -331,7 +331,7 @@ def load_model_from_path(path_and_class_str):
 TP_IDENTITY_HEADERS = ("phase", "tp_size", "prompt_length", "decode_length")
 
 
-def set_current_metadata(args):
+def set_current_metadata(args, *, model_metadata=None):
     global \
         current_backend, \
         current_mode, \
@@ -345,7 +345,7 @@ def set_current_metadata(args):
     dtypes = ("float16", "bfloat16", "float32", "amp")
     current_dtype = next((dtype for dtype in dtypes if getattr(args, dtype)), "")
     current_quantization = args.quantization
-    current_settings = vars(args)
+    current_settings = collections.ChainMap(model_metadata or {}, vars(args))
 
 
 def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
@@ -1289,10 +1289,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     first_fields += tp_fields
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    request_tokens = kwargs.get("request_tokens")
-    if request_tokens is not None:
+    if kwargs.get("report_eager_latency", False):
         headers.append("eager_latency")
         row.append(median[0] * 1000)
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
         for column, tokens in request_tokens.items():
             headers.append(column)
             row.append(times * tokens / median[1])
@@ -2181,9 +2182,15 @@ class BenchmarkRunner:
     def use_model_forward_for_accuracy(self):
         return False
 
+    def report_eager_latency(self):
+        return False
+
+    def get_model_metadata(self, example_inputs):
+        # Override raw CLI settings with effective per-model values in result metadata.
+        return {}
+
     def get_request_tokens(self, example_inputs):
-        # Return {throughput column: tokens per timed request} for token workloads,
-        # which also report eager_latency; None for everything else.
+        # Return {throughput column: tokens per timed request}, or None.
         return None
 
     def iter_models(self, args):
@@ -3361,6 +3368,7 @@ class BenchmarkRunner:
                 )
 
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+            experiment_kwargs["report_eager_latency"] = self.report_eager_latency()
             if setup_fn is not None:
                 experiment_kwargs["setup_fn"] = setup_fn
             request_tokens = self.get_request_tokens(example_inputs)
@@ -5259,7 +5267,9 @@ def run(runner, args, original_dir=None):
             current_name = name
             current_device = device
             current_batch_size = batch_size
-            set_current_metadata(args)
+            set_current_metadata(
+                args, model_metadata=runner.get_model_metadata(example_inputs)
+            )
             set_model_name(name)
 
             # Look for stuff that looks like batch size, and mark it dynamic.
