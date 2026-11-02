@@ -79,7 +79,12 @@ def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
         k_parts = k // k_splits
         a_reshaped = torch.permute(a.reshape(m, k_splits, k_parts), (1, 0, 2))
         b_reshaped = b.reshape(k_splits, k_parts, n)
-        result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+        # fp32 needs no out_dtype, which under AOTI would need the newer
+        # bmm.dtype_out C shim.
+        if a.dtype == torch.float32:
+            result = torch.bmm(a_reshaped, b_reshaped)
+        else:
+            result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
     elif bmm_backend == "triton":
         result = blackwell_decompose_k_partial(
             a,

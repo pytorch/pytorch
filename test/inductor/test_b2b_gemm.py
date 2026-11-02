@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 import os
+import re
 import unittest
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_cpp_code
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import recover_orig_fp32_precision, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -15,6 +16,47 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 @skipIfXpu(msg="Segmentation fault on CI machine")
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
+
+    @fresh_cache()
+    def test_b2b_gemm_unoptimized_two_regions(self):
+        # Two regions of different shapes pick the unoptimized subgraph choice;
+        # each must get its own subgraph under the Python wrapper, the JIT C++
+        # wrapper and AOTInductor.
+        class M(torch.nn.Module):
+            def forward(self, m1, m2, m3, n1, n2, n3):
+                g = torch.nn.GELU()
+                return torch.mm(g(torch.mm(m1, m2)), m3), torch.mm(
+                    g(torch.mm(n1, n2)), n3
+                )
+
+        shapes = [(256, 32), (32, 256), (256, 32), (512, 32), (32, 512), (512, 32)]
+        args = tuple(
+            torch.randn(s, device=GPU_TYPE, dtype=torch.float16) / 4 for s in shapes
+        )
+        expected = M()(*args)
+        configs = {
+            "b2b_gemm_pass": True,
+            # Keep only the unoptimized subgraph choice of each region.
+            "test_configs.autotune_choice_name_regex": r"^(?!b2b_gemm)",
+        }
+        for cpp_wrapper in (False, True):
+            counters.clear()
+            torch._dynamo.reset()
+            with torch._inductor.config.patch({**configs, "cpp_wrapper": cpp_wrapper}):
+                out = torch.compile(M())(*args)
+            self.assertEqual(counters["inductor"]["b2b_gemm"], 2)
+            self.assertEqual(out, expected, atol=5e-2, rtol=1e-2)
+        counters.clear()
+        with torch._inductor.config.patch(configs):
+            ep = torch.export.export(M(), args, strict=True)
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
+            )
+        self.assertEqual(counters["inductor"]["b2b_gemm"], 2)
+        subgraphs = re.findall(r"// subgraph: (unoptimized_b2b_gemm_left_\d+)", code)
+        self.assertEqual(len(set(subgraphs)), 2, subgraphs)
+        out = torch._inductor.aoti_load_package(package_path)(*args)
+        self.assertEqual(out, expected, atol=5e-2, rtol=1e-2)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)

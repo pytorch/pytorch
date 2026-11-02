@@ -1004,6 +1004,7 @@ class GraphLowering(torch.fx.Interpreter):
             example_inputs=example_inputs,
             shape_env=self._shape_env,
             cpp_wrapper=self.cpp_wrapper,
+            fx_wrapper=self.fx_wrapper,
             aot_mode=self.aot_mode,
             extern_node_serializer=self.extern_node_serializer,
             is_inference=self.is_inference,

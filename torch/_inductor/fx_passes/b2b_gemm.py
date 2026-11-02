@@ -437,7 +437,7 @@ def _make_unoptimized_b2b_gemm_choice(
     input_nodes: list[TensorBox],
     layout: FixedLayout,
 ):  # -> SubgraphChoiceCaller (local import)
-    from ..codegen.subgraph import SubgraphChoiceCaller
+    from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 
     tag = "left" if is_left_assoc else "right"
     epilogue = subgraph.graph_module
@@ -462,7 +462,8 @@ def _make_unoptimized_b2b_gemm_choice(
         )(A, B, C)
 
     return SubgraphChoiceCaller(
-        name=f"unoptimized_b2b_gemm_{tag}",
+        # A unique name keeps the inlined subgraphs of different regions apart.
+        name=f"unoptimized_b2b_gemm_{tag}_{next(SubgraphTemplate.index_counter)}",
         # pyrefly: ignore [bad-argument-type]
         input_nodes=input_nodes,
         layout=layout,
@@ -589,10 +590,16 @@ def tuned_b2b_gemm(
                 subgraphs=[subgraph_buffer],
                 **config,
             )
-    # add the unoptimized choice to mitigate performance degradation
-    choices.append(
-        _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
-    )
+    # add the unoptimized choice to mitigate performance degradation, if the
+    # wrapper can codegen its SubgraphBuffer
+    from ..codegen.subgraph import allow_subgraph_choices
+
+    if allow_subgraph_choices(layout.device.type):
+        choices.append(
+            _make_unoptimized_b2b_gemm_choice(
+                is_left_assoc, subgraph, [A, B, C], layout
+            )
+        )
     # autotune
     node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
     return node

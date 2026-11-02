@@ -427,6 +427,38 @@ class CppWrapperCpu(PythonWrapperCodegen):
         finally:
             self.last_seen_device_guard_index = last_seen_device_guard_index
 
+    @classmethod
+    def subgraph_buffer_blocker(cls, stream_idx: int | None) -> str | None:
+        # The subgraph is inlined in its own scope with its own scheduler. Pooled
+        # memory planning (inference graphs only) ignores that scope (cond has
+        # the same problem), the inner scheduler launches Triton kernels on the
+        # entry stream rather than a user stream, multi-kernel picks kernels from
+        # a map the inner scheduler never fills, and ATen calls inside need
+        # libtorch.
+        if config.memory_planning and V.graph.is_inference:
+            return "pooled memory planning"
+        if stream_idx is not None:
+            return "a user stream"
+        if config.triton.multi_kernel:
+            return "multi-kernel"
+        if not config.aot_inductor.link_libtorch:
+            return "a libtorch-free build"
+        return None
+
+    @contextlib.contextmanager
+    def _block_scoped_allocations(self):
+        # Buffers and workspaces first allocated inside a C++ block are not
+        # visible after it; a later block may reuse their names.
+        state = (
+            dict(self.allocated_workspaces),
+            OrderedSet(self.allocated),
+            OrderedSet(self.freed),
+        )
+        try:
+            yield
+        finally:
+            self.allocated_workspaces, self.allocated, self.freed = state
+
     @contextlib.contextmanager
     def _preserve_codegen_state(self, graphs):
         wrapper_state = (
@@ -2980,7 +3012,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Emit ABI-compatible C++ for an invoke_subgraph (nested compile region).
 
         Same shape as codegen_switch / codegen_while_loop: pre-declare an owning
-        handle per output, then inline the region body via codegen_subgraph.
+        handle per output, then inline the region body via
+        codegen_subgraph_with_flattened_outputs.
         """
         outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
 
@@ -2999,14 +3032,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
             outer_outputs.append(out.get_name())
 
-        # The region runs its own Scheduler, which re-emits per-device state such as
-        # `<stream_t> stream0;`; unscoped that redefines the parent's declaration.
-        self.writeline("{")
-        with self._preserve_device_guard_state():
-            self.writeline(EnterSubgraphLine(self, invoke_subgraph.subgraph.graph))
-            self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
-            self.writeline(ExitSubgraphLine(self))
-        self.writeline("}")
+        self.codegen_subgraph_with_flattened_outputs(
+            invoke_subgraph.subgraph, outer_inputs, outer_outputs
+        )
+
+    def codegen_subgraph_buffer(self, node: ir.SubgraphBuffer) -> None:
+        # The C++ wrapper moves the subgraph's output into a handle that must be
+        # declared first, outside the subgraph's scope.
+        self.writeline(f"RAIIAtenTensorHandle {node.get_name()};")
+        super().codegen_subgraph_buffer(node)
 
     def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""
@@ -3113,6 +3147,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
+
+    def codegen_subgraph_with_flattened_outputs(
+        self, subgraph, outer_inputs, outer_flattened_outputs
+    ):
+        """Inline a subgraph, moving its outputs into outer_flattened_outputs, which the
+        caller must already have declared (codegen_invoke_subgraph and
+        codegen_subgraph_buffer do). The Python wrapper's version binds the
+        names instead."""
+        # Scope the inlined subgraph: its input handles and buffers repeat names
+        # when it is inlined again, and if no device guard is active yet it
+        # declares the first one.
+        self.writeline("{")
+        with self._preserve_device_guard_state(), self._block_scoped_allocations():
+            self.writeline(EnterSubgraphLine(self, subgraph.graph))
+            # The subgraph numbers its precomputed sizes (ps0, ...) on its own, so
+            # declare them again in this scope; ExitSubgraphLine restores the set.
+            self.computed_sizes = OrderedSet()
+            self.codegen_subgraph(subgraph, outer_inputs, outer_flattened_outputs)
+            self.writeline(ExitSubgraphLine(self))
+        self.writeline("}")
 
     def codegen_while_loop(self, while_loop, stack_output=False):
         """Emit ABI-compatible C++ for a higher-order while_loop.
