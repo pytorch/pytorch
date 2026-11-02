@@ -3556,9 +3556,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
-                args[0].install_dict_keys_match_guard()
-                if args[0].source:
-                    tx.output.guard_on_key_order.add(args[0].source)
+                args[0].install_dict_order_guard(tx)
+            else:
+                args[0].install_set_order_guard(tx)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
             result.items.update(dict.fromkeys(args[0].items.keys(), value))

@@ -662,11 +662,7 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # guard_on_key_order is deliberately not unioned in, even though a
-    # dict-order check roots a global: guard_filter_fn never prunes that set, so
-    # a name only it contributes is precisely a name no surviving guard checks
-    # the value of. On the default aot_compile filter, which drops every global
-    # guard, an iterated global dict is exactly that shape.
+    # Key-order metadata cannot authorize reading unguarded dictionary values live.
     # Narrower than the serialized global_scope for the same reason: the
     # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
     # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,

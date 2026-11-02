@@ -2536,6 +2536,7 @@ class OutputGraph(OutputGraphCommon):
                         f"Here are the list of potential sources you can double check: {side_effect_refs}"
                     )
 
+        self.builtin_method_keys.install_alias_guard()
         return all_stack_locals_metas
 
     def codegen_cells(self, tx: "InstructionTranslatorBase", cg: PyCodegen) -> None:
