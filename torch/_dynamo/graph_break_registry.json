@@ -1078,26 +1078,6 @@
       ]
     }
   ],
-  "GB4858": [
-    {
-      "Gb_type": "frozendict hashing",
-      "Context": "hash(frozendict)",
-      "Explanation": "Dynamo does not yet support frozendict hashing.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB9945": [
-    {
-      "Gb_type": "frozendict comparison",
-      "Context": "op",
-      "Explanation": "Dynamo does not yet support frozendict comparisons.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0064": [
     {
       "Gb_type": "Fake tensor propagation exception",
@@ -1239,6 +1219,17 @@
       "Hints": []
     }
   ],
+  "GB8974": [
+    {
+      "Gb_type": "synchronize with no accelerator available",
+      "Context": "device={device}",
+      "Explanation": "torch.accelerator.current_device_index() failed while resolving an index-less device for synchronize, so the index cannot be baked into the graph.",
+      "Hints": [
+        "Pass an explicit device index to synchronize.",
+        "Make an accelerator visible to the process."
+      ]
+    }
+  ],
   "GB0072": [
     {
       "Gb_type": "Inplace op on input tensor",
@@ -1288,16 +1279,6 @@
       "Context": "store_targets={store_targets}, iterator_vars={iterator_vars}",
       "Explanation": "Expected exactly one comprehension result assignment.",
       "Hints": []
-    }
-  ],
-  "GB2102": [
-    {
-      "Gb_type": "frozendict fromkeys",
-      "Context": "name",
-      "Explanation": "Dynamo does not yet support frozendict.fromkeys.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
     }
   ],
   "GB6012": [
@@ -2567,7 +2548,7 @@
   "GB9100": [
     {
       "Gb_type": "frozendict operators",
-      "Context": "copy/fromkeys/union/repr",
+      "Context": "frozendict",
       "Explanation": "Dynamo does not yet support these frozendict operators.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
@@ -5729,6 +5710,16 @@
       "Hints": [
         "Avoid comparing id() or hash() of objects created inside ",
         "the compiled region against other values.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "str(type(dict_vt))",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

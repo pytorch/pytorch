@@ -3,6 +3,7 @@
 import builtins
 import io
 import operator
+import types
 import unittest
 from collections import defaultdict, OrderedDict
 from unittest.mock import Mock
@@ -68,6 +69,21 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
             fn(x, mapping),
         )
+
+    def test_input_subclass_keys_view(self):
+        class Mapping(builtins.frozendict):
+            pass
+
+        def fn(x, view):
+            return x + len(view), tuple(view)
+
+        x, view = torch.ones(1), Mapping(a=2).keys()
+        self.assertEqual(torch.compile(fn, backend="eager")(x, view), fn(x, view))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported dictionary view owner"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, view)
 
     def test_input_subclass_inherited_get(self):
         class Mapping(builtins.frozendict):
@@ -301,21 +317,19 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("case", ["missing", "object", "unrelated", "extra"])
-    def test_new_invalid_arguments(self, case):
-        class NotAType:
-            pass
-
-        receiver = NotAType() if case == "object" else dict
-
+    @parametrize(
+        "args",
+        [
+            subtest((), name="missing"),
+            subtest((object(),), name="object"),
+            subtest((dict,), name="unrelated"),
+            subtest((getattr(builtins, "frozendict", dict), {}, {}), name="extra"),
+        ],
+    )
+    def test_new_invalid_arguments(self, args):
         def fn(x):
             try:
-                if case == "missing":
-                    builtins.frozendict.__new__()
-                elif case == "extra":
-                    builtins.frozendict.__new__(builtins.frozendict, {}, {})
-                else:
-                    builtins.frozendict.__new__(receiver)
+                builtins.frozendict.__new__(*args)
             except TypeError:
                 return x + 1
             return x - 1
@@ -373,19 +387,26 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, fn(x, mapping))
         self.assertIs(type(result[0]), builtins.frozendict)
 
-    def test_arbitrary_keys_and_guards(self):
+    @parametrize("construct", [False, True])
+    def test_arbitrary_keys_and_guards(self, construct):
         counter = CompileCounter()
 
         def fn(mapping, key):
+            if construct:
+                mapping = builtins.frozendict(mapping)
             return mapping[key] + next(iter(mapping.values()))
 
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        tensor_key = torch.randn(2)
-        for key in (None, (1, "a"), tensor_key, object()):
-            mapping = builtins.frozendict(
-                [(key, torch.randn(3)), ("last", torch.randn(3))]
-            )
-            self.assertEqual(compiled(mapping, key), fn(mapping, key))
+        for key in (None, (1, "a"), torch.randn(2), object()):
+            items = [(key, torch.randn(3)), ("last", torch.randn(3))]
+            mapping = dict(items) if construct else builtins.frozendict(items)
+            if isinstance(key, torch.Tensor) and not construct:
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "stored key hash"
+                ):
+                    compiled(mapping, key)
+            else:
+                self.assertEqual(compiled(mapping, key), fn(mapping, key))
         self.assertGreater(counter.frame_count, 1)
 
     @parametrize(
@@ -423,6 +444,33 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(key.calls, calls)
         self.assertEqual(torch.compile(fn, backend="eager")(torch.ones(1), mapping), 2)
         self.assertEqual(key.calls, calls)
+
+    @parametrize("base", [object, type, types.ModuleType, torch.Tensor])
+    def test_preexisting_restored_identity_hash(self, base):
+        class Key(base):
+            def __hash__(self):
+                return object.__hash__(self) + 1
+
+        if base is type:
+            key = Key("Key", (), {})
+        elif base is types.ModuleType:
+            key = Key(__name__)
+        else:
+            key = Key()
+        mapping = builtins.frozendict([(key, 7)])
+        if base is type or base is object:
+            Key.__hash__ = object.__hash__
+        else:
+            key.__class__ = base
+
+        def fn(x, mapping):
+            return x + (key in mapping)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hash"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
 
     def test_constructed_custom_keys(self):
         class Key:
@@ -548,48 +596,21 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TypeError, "does not support item assignment"):
             result[4]["a"] = x
 
-    @parametrize("base_type", [dict, OrderedDict, defaultdict])
-    def test_fromkeys_dict_constructor_returns_frozendict(self, base_type):
-        class Mapping(base_type):
-            def __new__(cls, data=(("seed", 5),)):
-                return builtins.frozendict(data)
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("name", ["__eq__", "__ne__", "__or__", "__ror__"])
+    @parametrize("subclass", [False, True])
+    def test_dict_descriptors(self, mapping_type, name, subclass):
+        class Mapping(builtins.frozendict):
+            pass
 
-        def fn(x):
-            try:
-                return Mapping.fromkeys(["b", "a", "b"], x + 1)
-            except TypeError:
-                return {"error": x - 1}
+        def fn(x, mapping):
+            return x + 1, getattr(mapping_type, name)(mapping_type(a=x), mapping)
 
         x = torch.randn(3)
-        expected = fn(x)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertIs(type(result), builtins.frozendict)
-        self.assertEqual(list(result), ["seed", "b", "a"])
-        self.assertEqual(result, expected)
-
-    @parametrize("mapping_type", [OrderedDict, defaultdict])
-    @parametrize("name", ["__or__", "__ror__"])
-    def test_mutable_union_descriptors(self, mapping_type, name):
-        def fn(x):
-            return getattr(mapping_type, name)(
-                mapping_type(a=x), builtins.frozendict(b=x + 1)
-            )
-
-        x = torch.randn(3)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertIs(type(result), mapping_type)
-        self.assertEqual(result, fn(x))
-        self.assertEqual(list(result), list(fn(x)))
-
-    @parametrize("operation", [dict.__eq__, dict.__ne__, dict.__or__])
-    def test_dict_descriptors(self, operation):
-        def fn(x):
-            return x + 1, operation({"a": x}, builtins.frozendict(a=x))
-
-        x = torch.randn(3)
+        mapping = (Mapping if subclass else builtins.frozendict)(a=x)
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "frozendict"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
 
     @parametrize("operation", [operator.setitem, operator.delitem])
     def test_immutable(self, operation):
@@ -705,6 +726,24 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("base_type", [dict, OrderedDict, defaultdict])
+    def test_fromkeys_dict_constructor_returns_frozendict(self, base_type):
+        class Mapping(base_type):
+            def __new__(cls, data=()):
+                return builtins.frozendict(data)
+
+        def fn(x):
+            return Mapping.fromkeys("ab", x)
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "_frozendict_fromkeys"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        result = torch.compile(fn, backend="eager")(x)
+        self.assertIs(type(result), builtins.frozendict)
+        self.assertEqual(result, fn(x))
 
 
 if __name__ == "__main__":

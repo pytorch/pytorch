@@ -9,6 +9,7 @@ import sysconfig
 import unittest
 import weakref
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import torch
@@ -47,6 +48,7 @@ x = torch.tensor(4)
 weakref_x = weakref.ref(x)
 
 default_mgr_enum = torch._dynamo.guards.GuardManagerType.GUARD_MANAGER
+dict_mgr_enum = torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER
 
 
 class Pair:
@@ -89,6 +91,32 @@ def less_match_verbose_code_parts(expected):
 @instantiate_parametrized_tests
 class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("verbose", [False, True])
+    @parametrize("partial", [False, True])
+    def test_hook_membership_guard_clone_reentry(self, verbose, partial):
+        inputs = {"hooks": {1: None}, "middle": None, "flags": {2: True}}
+        root = RootGuardManager()
+        managers = {
+            name: root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in inputs.items()
+        }
+        guards.install_nn_module_hook_membership_guard(
+            managers["hooks"], managers["flags"], (True,), [], None
+        )
+        clone = root.clone_manager(
+            lambda manager: manager.get_source() != "middle"
+            and (not partial or manager.get_source() != "hooks")
+        )
+        managers["middle"].add_lambda_guard(
+            lambda _: clone.check({"hooks": {3: None}, "flags": {3: True}}), [], None
+        )
+        if verbose:
+            self.assertFalse(root.check_verbose(inputs).result)
+        else:
+            self.assertFalse(root.check(inputs))
+        inputs["flags"] = {1: True}
+        self.assertTrue(root.check(inputs))
 
     def test_hook_membership_guard_retains_temporary_dictionary(self):
         references = []
@@ -159,12 +187,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         inputs = {"hooks": hooks, "flags": flags}
         root = RootGuardManager()
         managers = {
-            name: root.dict_getitem_manager(
-                name,
-                name,
-                inputs[name],
-                torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
-            )
+            name: root.dict_getitem_manager(name, name, inputs[name], dict_mgr_enum)
             for name in (reversed(inputs) if reverse else inputs)
         }
         guards.install_nn_module_hook_membership_guard(
@@ -290,12 +313,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         key.fail = True
         root = RootGuardManager()
         managers = [
-            root.dict_getitem_manager(
-                name,
-                name,
-                inputs[name],
-                torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
-            )
+            root.dict_getitem_manager(name, name, inputs[name], dict_mgr_enum)
             for name in ("hooks", "flags")
         ]
         guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
@@ -343,6 +361,27 @@ class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 root.check_verbose(inputs).verbose_code_parts, ["mapping order"]
             )
+
+    def test_ordered_dict_order_guard_shared_scratch(self):
+        roots = []
+        for size in (17, 128, 16, 1024, 2):
+            mapping = OrderedDict.fromkeys(range(size))
+            mapping.move_to_end(0)
+            root = RootGuardManager()
+            root.add_ordered_dict_order_guard(tuple(mapping), [], None)
+            roots.append((root, root.clone_manager(lambda manager: True), mapping))
+
+        def check_roots():
+            for _ in range(20):
+                for root, clone, mapping in roots:
+                    self.assertTrue(root.check(mapping))
+                    self.assertTrue(clone.check(mapping))
+                    wrong = OrderedDict.fromkeys(range(len(mapping)))
+                    self.assertFalse(root.check(wrong))
+                    self.assertFalse(clone.check(wrong))
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(executor.map(lambda _: check_roots(), range(4)))
 
     @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
     @parametrize("clone", [False, True])

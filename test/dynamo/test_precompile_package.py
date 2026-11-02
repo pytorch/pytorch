@@ -301,9 +301,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
         left, right = MethodKeyDict(), MethodKeyDict()
         self.assertEqual(loaded(x, left, right), fn(x, left, right))
+        self.assertTrue(loaded.guard_check(x, left, right))
         if alias_pair:
-            with self.assertRaises(RuntimeError):
-                loaded(x, left, left)
+            self.assertFalse(loaded.guard_check(x, left, left))
 
     @parametrize("caching_precompile", (False, True))
     def test_module_attribute_guard_survives_serialization(self, caching_precompile):
