@@ -5559,6 +5559,10 @@ class TestCppFakeTensorModeBindings(TestCase):
         torch._C._set_dispatch_mode(wrapper)
         try:
             self.assertEqual(self._installed(), (wrapper, True))
+            _, other_wrapper = self._make_mode()
+            with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                torch._C._set_dispatch_mode(other_wrapper)
+            self.assertEqual(self._installed(), (wrapper, True))
             self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
             self.assertEqual(self._installed(), (None, False))
             self.assertIsNone(torch._C._unset_dispatch_mode(fake))
