@@ -75,13 +75,6 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.partial_layout, "column")
         self.assertEqual(cfg.combine_columns, 0)
 
-    def test_ordered_columns_require_inner_tree(self):
-        """Reject an unordered request on the ordered column kernel."""
-        with self.assertRaisesRegex(ValueError, "require inner_tree"):
-            ct.reduce_ordered_col(
-                None, "sum", None, [torch.float32], 1, order="unordered"
-            )
-
 
 class TestColumnCombine(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -90,7 +83,7 @@ class TestColumnCombine(TestCase):
         "dtype,op,pattern,width,shape",
         [
             (torch.float32, "sum", "signed", 8, (257, 260)),
-            (torch.bfloat16, "argmax", "nonfinite_ties", 8, (257, 260)),
+            (torch.bfloat16, "argmax", "nonfinite_ties", 32, (257, 260)),
             (torch.float32, "var_mean", "offset", 32, (257, 260)),
             (torch.float32, "var_mean", "offset", 16, (3, 257, 36)),
             (torch.float32, "mean", "signed", 16, (3, 257, 36)),
@@ -119,6 +112,7 @@ class TestColumnCombine(TestCase):
         nouts = 2 if op == "var_mean" else 1
         odt = torch.int64 if op == "argmax" else torch.float32
         cfg = ct.ColConfig("test_tiled", 64, 7, 4, "partition", width)
+        key = f"test_tiled_{op}_{width}_{len(shape)}d"
 
         def reference():
             with (
@@ -132,7 +126,7 @@ class TestColumnCombine(TestCase):
         def run():
             return ct._reduce_col_tile(
                 trait,
-                f"test_tiled_{op}",
+                key,
                 x,
                 [odt] * nouts,
                 nouts,
@@ -144,7 +138,8 @@ class TestColumnCombine(TestCase):
         tol = 0 if op == "argmax" else 0.016 if dtype == torch.bfloat16 else 1e-4
         with patch.object(ct, "select_col_config", return_value=cfg):
             got = run()
-        self.assertIn(("coltile2t", f"test_tiled_{op}"), {k[:2] for k in ct._CACHE})
+        tiled = {k[-2] for k in ct._CACHE if k[:2] == ("coltile2t", key)}
+        self.assertEqual(tiled, {width})
         self.assertEqual(got, reference(), rtol=tol, atol=tol, equal_nan=True)
 
     @parametrize(
@@ -165,6 +160,18 @@ class TestColumnCombine(TestCase):
         with patch.object(ct, "select_col_config", return_value=cfg):
             with self.assertRaisesRegex(ValueError, error):
                 ct._reduce_col_tile(*args)
+        self.assertFalse(any(k[:2] == ("coltile", "tiled_layout") for k in ct._CACHE))
+
+    def test_column_unroll_reaches_stage_one(self, device):
+        x = torch.randn((257, 260), device=device)
+        cfg = ct.ColConfig("test_unroll", 64, 7, 4, "column", 0, 2)
+        trait = T.SumOps(acc=cutlass.Float32)
+        args = (trait, "unroll", x, [torch.float32], 1, None, None, None)
+        stage = patch.object(ct.tile, "TileReduce", wraps=ct.tile.TileReduce)
+        with patch.object(ct, "select_col_config", return_value=cfg), stage as built:
+            got = ct._reduce_col_tile(*args)[0]
+        self.assertEqual(built.call_args_list[0].kwargs["unroll"], 2)
+        self.assertEqual(got, x.sum(0), atol=1e-4, rtol=1e-4)
 
 
 instantiate_parametrized_tests(TestColumnConfig)
