@@ -1,4 +1,5 @@
-# Column-reduction driver for tile.TileReduce, with launch policy and plan cache.
+# Column-reduction driver for tile.TileReduce, with launch policy and plan cache, plus the
+# PartialColumns stage-two kernel.
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 
@@ -51,7 +52,7 @@ class ColConfig(NamedTuple):
     vec: int
     partial_layout: str
     combine_columns: int = 0
-    unroll: int = 4
+    unroll: int = tile._ROLL_UNROLL
 
 
 def select_col_config(
@@ -90,6 +91,9 @@ class PartialColumns:
     """Combine partition-major states while coalescing adjacent column loads."""
 
     def __init__(self, trait, tile_columns, nouts):
+        # The tuned widths; each tiles the 128-thread block exactly.
+        if tile_columns not in (8, 16, 32):
+            raise ValueError(f"combine_columns must be 8, 16 or 32, got {tile_columns}")
         self.trait = trait
         self.tile_columns = tile_columns
         self.threads = 128
@@ -174,9 +178,13 @@ class _OrderedColReduce:
     ) -> None:
         if plan.shape not in ("multirow", "looped"):
             raise ValueError(f"ordered columns do not support {plan.shape=}")
+        if plan.vec_linear:
+            raise ValueError("ordered columns replay tree vector folds only")
         self.trait = trait
         self.plan = plan
         self.R = R
+        # C stays compile-time: on B200 a runtime row stride ran (16384, 1024) fp32 sums at
+        # 0.66x. Batch counts are runtime, so only new (R, C) pairs compile.
         self.C = C
         self.nouts = nouts
         self.workers = (
@@ -194,6 +202,7 @@ class _OrderedColReduce:
             self.plan.wpr,
             self.plan.depth,
             self.plan.batches,
+            self.plan.kchunk,
             self.nouts,
         )
 
@@ -391,12 +400,8 @@ def reduce_ordered_col(
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
-    *,
-    order: str = "inner_tree",
 ) -> tuple[torch.Tensor, ...] | None:
     """Reduce the middle axis of a contiguous (R, C) or (B, R, C) physical view."""
-    if order != "inner_tree":
-        raise ValueError(f"ordered column reductions require inner_tree, got {order!r}")
     if x.dim() == 2 and x.is_contiguous():
         B, (R, C) = 1, x.shape
         out_shape = (C,)
@@ -405,14 +410,16 @@ def reduce_ordered_col(
         out_shape = (B, C)
     else:
         return None
-    if x.stride(-1) != 1 or C < WARP:
+    # The last block's Int32 output index must not wrap past the outputs.
+    if x.stride(-1) != 1 or C < WARP or B * C + 128 >= _INT32_LIMIT:
         return None
     from . import kernel_rowtile as rt
 
     plan = rt.trait_itree_plan(
         trait, R, B * C, x.element_size(), stage=False, device=x.device
     )
-    if plan is None or plan.shape not in ("multirow", "looped"):
+    # Linear vector folds change the DAG, and this kernel replays tree folds only.
+    if plan is None or plan.shape not in ("multirow", "looped") or plan.vec_linear:
         return None
     op = _OrderedColReduce(trait, plan, R, C, nouts)
     outs = [
@@ -427,16 +434,12 @@ def reduce_ordered_col(
     ]
     args = (Int64(x.storage_offset()), Int32(B * C), _stream())
     key = (
-        (
-            "ordered_col",
-            trait_key,
-            x.dtype,
-            tuple(out_dtypes[:nouts]),
-            str(x.device),
-        )
-        + op.cache_sig
-        + (("order", order),)
-    )
+        "ordered_col",
+        trait_key,
+        x.dtype,
+        tuple(out_dtypes[:nouts]),
+        str(x.device),
+    ) + op.cache_sig
     build = lambda: _compile(op, fake_in, fake_outs, *args)  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
         _L.read_only(kernel_x), kernel_outs, *args
@@ -573,10 +576,10 @@ def _reduce_col_tile(
         raise ValueError(f"unknown partial layout {cfg.partial_layout!r}")
     pc = cfg.partial_layout == "partition"
     width = cfg.combine_columns
-    if width not in (0, 8, 16, 32):
-        raise ValueError(f"combine_columns must be 0, 8, 16 or 32, got {width}")
     if width and not pc:
         raise ValueError("combine_columns reads partition-major partials")
+    # Build the tiled combine first so an invalid width raises before stage one launches.
+    tiled = PartialColumns(trait, width, nouts) if width else None
     op = tile.TileReduce(
         trait,
         torch2cute[kernel_x.dtype],
@@ -660,8 +663,7 @@ def _reduce_col_tile(
     if single:
         return tuple(outs)
 
-    if width:
-        op2 = PartialColumns(trait, width, nouts)
+    if tiled is not None:
         pdt = tuple(pp.dtype for pp in parts)
         key2 = (
             "coltile2t",
@@ -669,9 +671,9 @@ def _reduce_col_tile(
             tuple(out_dtypes[:nouts]),
             pdt,
             str(x.device),
-        ) + op2.cache_sig
+        ) + tiled.cache_sig
         build2 = lambda: _compile(  # noqa: E731
-            op2,
+            tiled,
             [
                 _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
                 for pp in parts
