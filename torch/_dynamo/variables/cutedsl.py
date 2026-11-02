@@ -2,9 +2,10 @@
 Dynamo support for user-defined CuTeDSL kernels (``@cute.jit`` host functions): the
 counterpart of DynamoTritonHOPifier and TritonKernelVariable in functions.py.
 
-A host function reaches Dynamo either raw (a global ``@cute.jit`` function) or
-wrapped (``torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=...)``, called inside
-or outside the compiled region). Both become a CuteDSLKernelVariable, and a call of
+A host function reaches Dynamo either raw (the ``@cute.jit`` function itself, read
+with or without a source) or wrapped
+(``torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=...)``, called inside or
+outside the compiled region). Both become a CuteDSLKernelVariable, and a call of
 either becomes a cutedsl_kernel_wrapper_mutation node. A raw call is written as for
 eager::
 
@@ -18,6 +19,7 @@ CuteDSLCurrentStreamVariable, and the call is captured as
 
 import dataclasses
 import inspect
+import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
@@ -132,13 +134,28 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         )
 
     def wrap_raw(self, variable: "CuteDSLKernelVariable") -> "CuteDSLKernelVariable":
-        return variable.with_mutates_args(RAW_CALL_MUTATES_ARGS)
-
-    def may_overlap(self, a: VariableTracker, b: VariableTracker) -> bool:
-        return _may_overlap(
-            a.as_proxy().node.meta["example_value"],
-            b.as_proxy().node.meta["example_value"],
+        return CuteDSLKernelVariable(
+            variable.kernel,
+            RAW_CALL_MUTATES_ARGS,
+            None,
+            wrapper_type=TraceableCuteDSLKernelWrapper,
+            raw_call=True,
         )
+
+    def overlapping_args(
+        self, tensors: dict[str, VariableTracker]
+    ) -> tuple[str, str] | None:
+        """The names of the first two of ``tensors`` that may share memory (see
+        _may_overlap)."""
+        items = [
+            (key, val.as_proxy().node.meta["example_value"])
+            for key, val in tensors.items()
+        ]
+        for i, (later, tensor) in enumerate(items):
+            for earlier, other in items[:i]:
+                if _may_overlap(other, tensor):
+                    return earlier, later
+        return None
 
     def constant_object(
         self,
@@ -183,13 +200,14 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         # as a list held by its class (cfg.items[0] = 1).
         side_effects = tx.output.side_effects
         for other in side_effects.id_to_variable.values():
-            if not side_effects.is_modified(other):
+            other_source = other.source
+            if other_source is None or not side_effects.is_modified(other):
                 continue
-            source = other.source
+            source = other_source
             while isinstance(source, ChainedSource) and source != val.source:
                 source = source.base
             if source == val.source:
-                self.raise_modified(name, key, other.source.name)
+                self.raise_modified(name, key, other_source.name)
         self.guard_contents(val.source, obj, tx, name, key, {})
         return obj
 
@@ -298,7 +316,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
 
         name = cutedsl_kernel_name(variable.kernel)
         # Written tensors that may overlap would fail check_written_args_disjoint in
-        # the backend: a graph break here, as for a raw call (see unwrap_raw_args).
+        # the backend, which cannot fall back to eager: a graph break here.
         mutates_args = variable.mutates_args or ()
         overlap = self.overlapping_args(
             {
@@ -310,12 +328,17 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         )
         if overlap is not None:
             earlier, later = overlap
+            if variable.raw_call:
+                written = "a raw call counts every tensor as written"
+                fix = f"call wrap_cutedsl({name}, mutates_args=[...])"
+            else:
+                written = f"both are written (mutates_args={mutates_args!r})"
+                fix = "pass tensors that do not overlap, or give mutates_args"
             self.raise_unsupported(
                 f"{name}(): {earlier!r} and {later!r} are the same tensor or views "
-                "that may overlap, and both are written "
-                f"(mutates_args={mutates_args!r}), which PT2 cannot functionalize (one "
-                "write would be lost); pass tensors that do not overlap, or give "
-                "mutates_args naming only the parameters the kernel writes"
+                f"that may overlap, and {written}, which PT2 cannot functionalize "
+                f"(one write would be lost); {fix} naming only the parameters the "
+                "kernel writes"
             )
         # Tensors and symbolic scalars are the node's arguments; every other value
         # is a constant of the launch.
@@ -360,6 +383,8 @@ class CuteDSLKernelVariable(VariableTracker):
     # wrap_cutedsl returns) or the subclass of it passed in; None for the @cute.jit
     # function itself, whose calls are raw.
     wrapper_type: type | None
+    # Whether this is the wrapper that wrap_raw makes for a raw call.
+    raw_call: bool
 
     def __init__(
         self,
@@ -370,6 +395,7 @@ class CuteDSLKernelVariable(VariableTracker):
     ) -> None:
         self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
         self.wrapper_type = kwargs.pop("wrapper_type", None)
+        self.raw_call = kwargs.pop("raw_call", False)
         super().__init__(**kwargs)
         dynamo_cutedsl_hopifier_singleton.init_variable(
             self, kernel, mutates_args, kernel_idx, raw=not self.is_wrapper
@@ -382,9 +408,12 @@ class CuteDSLKernelVariable(VariableTracker):
     def python_type(self) -> type:
         return type(self.kernel) if self.wrapper_type is None else self.wrapper_type
 
-    def get_real_python_backed_value(self) -> object:
-        # Not the wrapper object, which one made in the region does not have.
-        return NO_SUCH_SUBOBJ if self.is_wrapper else self.kernel
+    def as_python_constant(self) -> Any:
+        # The @cute.jit function; not the wrapper object, which one made in the
+        # region does not have.
+        if self.is_wrapper:
+            return super().as_python_constant()
+        return self.kernel
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # A wrapper made by wrap_cutedsl inside the region has no source of its own:
@@ -491,9 +520,9 @@ class CuteDSLFromDlpackVariable(VariableTracker):
         align_vt = arguments.pop("assumed_align", None)
         align = None
         if align_vt is not None:
-            align = (
-                align_vt.as_python_constant() if align_vt.is_python_constant() else 0
-            )
+            if not align_vt.is_python_constant():
+                unsupported("from_dlpack(): assumed_align must be a constant")
+            align = align_vt.as_python_constant()
             if align is not None and (
                 type(align) is not int or not 0 < align <= 16 or align & (align - 1)
             ):
@@ -525,9 +554,8 @@ class CuteDSLTensorVariable(VariableTracker):
         self.assumed_align = assumed_align
 
     def python_type(self) -> type:
-        from cutlass.cute.runtime import _Tensor
-
-        return _Tensor
+        # Already imported: it defines from_dlpack, which made this value.
+        return sys.modules["cutlass.cute.runtime"]._Tensor
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -614,9 +642,8 @@ class CuteDSLCurrentStreamVariable(VariableTracker):
         self.stream_id = stream_id
 
     def python_type(self) -> type:
-        import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
-
-        return cuda.CUstream
+        # Already imported by cutlass.torch, whose current_stream made this value.
+        return sys.modules["cuda.bindings.driver"].CUstream
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
