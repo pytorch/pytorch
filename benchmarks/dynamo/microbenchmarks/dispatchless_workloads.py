@@ -19,10 +19,11 @@ import platform
 import statistics
 import sys
 import time
-from collections.abc import Callable
 from itertools import product
 from pathlib import Path
 from typing import Any
+
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -37,7 +38,10 @@ def pointwise(x: torch.Tensor, scale: float) -> torch.Tensor:
 
 
 def nested_pointwise(payload, *, scale):
-    return {"output": pointwise(payload["tensors"][0], scale), "metadata": (None, scale)}
+    return {
+        "output": pointwise(payload["tensors"][0], scale),
+        "metadata": (None, scale),
+    }
 
 
 def make_variants(workload: str, custom) -> dict[str, Callable]:
@@ -49,7 +53,10 @@ def make_variants(workload: str, custom) -> dict[str, Callable]:
         }
 
     def nested_custom(payload, *, scale):
-        return {"output": custom(payload["tensors"][0], scale), "metadata": (None, scale)}
+        return {
+            "output": custom(payload["tensors"][0], scale),
+            "metadata": (None, scale),
+        }
 
     return {
         "plain": nested_pointwise,
@@ -165,7 +172,9 @@ def benchmark_variant(
         ):
             result, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         if not code:
-            raise AssertionError("No generated code was captured for fusion diagnostics")
+            raise AssertionError(
+                "No generated code was captured for fusion diagnostics"
+            )
         torch.testing.assert_close(result, fn(x))
         fusion = {
             "generated_kernel_count": metrics.generated_kernel_count,
@@ -227,7 +236,9 @@ def benchmark_case(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--devices", choices=("cpu", "cuda"), nargs="+", default=["cpu"])
+    parser.add_argument(
+        "--devices", choices=("cpu", "cuda"), nargs="+", default=["cpu"]
+    )
     parser.add_argument("--sizes", type=int, nargs="+", default=[1, 1024])
     parser.add_argument("--calls", type=int, nargs="+", default=[1, 8])
     parser.add_argument(
@@ -320,3 +331,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
