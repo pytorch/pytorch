@@ -6035,7 +6035,7 @@ class PythonWrapperCodegen(CodeGen):
         return f"del {', '.join(name for name in names_to_del)}"
 
     def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
-        # The Python wrapper frees unused outputs together with the result tuple.
+        # The Python wrapper drops unused outputs when it deletes the result tuple.
         pass
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):

@@ -8,6 +8,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_cpp_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -60,19 +61,31 @@ class TestCppWrapper(InductorTestCase):
     hw_classification = HardwareClassification.CPU
     device = "cpu"
 
+    def _check_freed_before_next_call(self, code, calls):
+        # calls: (a line of each call that names its unused outputs, those
+        # names), in code order. Each unused output must be reset before the
+        # next call, not at the end of the wrapper.
+        self.assertTrue(calls)
+        for i, (line, names) in enumerate(calls):
+            check = FileCheck().check(line)
+            for name in names:
+                check = check.check(f"{name}.reset();")
+            if i + 1 < len(calls):
+                check = check.check(calls[i + 1][0])
+            check.run(code)
+
     @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
     @config.patch(cpp_wrapper=True)
     def test_unused_fallback_outputs_freed(self):
         # Each layer uses only the first output of two multi-output fallbacks:
-        # SDPA through the C shim and a custom op through the dispatcher. The
-        # unused outputs must be freed right after the call instead of staying
-        # alive until the wrapper returns.
+        # SDPA through the C shim and a custom op through the dispatcher.
         n_layers = 3
 
         class Model(torch.nn.Module):
             def forward(self, x):
                 for _ in range(n_layers):
-                    x = x + torch.nn.functional.scaled_dot_product_attention(x, x, x)
+                    sdpa = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu
+                    x = x + sdpa(x, x, x)[0]
                     x = torch.ops.cpp_wrapper_unused_outputs.two(x)[0]
                 return x
 
@@ -92,16 +105,24 @@ class TestCppWrapper(InductorTestCase):
                 actual, code = run_and_get_cpp_code(torch.compile(Model()), x)
                 self.assertEqual(actual, Model()(x))
 
-        unused = re.findall(
-            r"_scaled_dot_product_flash_attention_for_cpu\(.*&(\w+)_handle\)\);", code
-        ) + re.findall(
+        calls = []
+        in_custom_op = False
+        for line in code.splitlines():
+            if "_scaled_dot_product_flash_attention_for_cpu(" in line:
+                # The unused logsumexp is the last output.
+                calls.append((line, re.findall(r"&(\w+)_handle", line)[-1:]))
+            elif 'aoti_torch_call_dispatcher("cpp_wrapper_unused_outputs::two"' in line:
+                in_custom_op = True
+            elif in_custom_op and (
+                m := re.search(
             r"(\w+) = torch::stable::detail::to<AtenTensorHandle>\(dispatch_vars\[1\]\);",
-            code,
+                    line,
         )
-        self.assertEqual(len(unused), 2 * n_layers)
-        self.assertEqual(
-            [name for name in unused if f"{name}.reset();" not in code], []
-        )
+            ):
+                calls.append((line, [m.group(1)]))
+                in_custom_op = False
+        self.assertEqual(len(calls), 2 * n_layers)
+        self._check_freed_before_next_call(code, calls)
 
     @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
     @unittest.skipIf(
@@ -127,15 +148,13 @@ class TestCppWrapper(InductorTestCase):
             actual, code = run_and_get_cpp_code(torch.compile(model), x)
             self.assertEqual(actual, model(x))
 
-        calls = [line for line in code.splitlines() if "mkldnn_rnn_layer(" in line]
-        self.assertEqual(len(calls), 2)
-        unused = [
-            name for line in calls for name in re.findall(r"&(\w+)_handle", line)[1:]
+        calls = [
+            (line, re.findall(r"&(\w+)_handle", line)[1:])
+            for line in code.splitlines()
+            if "mkldnn_rnn_layer(" in line
         ]
-        self.assertEqual(len(unused), 6)
-        self.assertEqual(
-            [name for name in unused if f"{name}.reset();" not in code], []
-        )
+        self.assertEqual([len(names) for _, names in calls], [3, 3])
+        self._check_freed_before_next_call(code, calls)
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):

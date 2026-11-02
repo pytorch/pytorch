@@ -2453,8 +2453,10 @@ class AOTInductorTestsTemplate:
                             .permute(2, 0, 3, 1, 4)
                             .unbind(0)
                         )
-                        y = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-                        y = y.transpose(1, 2).reshape(b, s, d)
+                        # Call the flash kernel directly so that no other SDPA
+                        # backend gets picked.
+                        y = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)
+                        y = y[0].transpose(1, 2).reshape(b, s, d)
                     else:
                         y = torch.ops.aoti_unused_outputs.two(qkv(x))[0][..., :d]
                     x = x + y
@@ -2479,12 +2481,20 @@ class AOTInductorTestsTemplate:
                 package_path, code = run_and_get_cpp_code(
                     AOTIRunnerUtil.compile, model, (x,)
                 )
-                # The dual-wrapper mode emits each call twice, with the same names.
-                unused = set(re.findall(unused_regex, code))
-                self.assertEqual(len(unused), n_layers)
-                self.assertEqual(
-                    [name for name in unused if f"{name}.reset();" not in code], []
-                )
+                # Each unused output must be reset before the next call. The
+                # dual-wrapper mode emits each call twice with the same names, so
+                # keep the first one per name.
+                calls = {}
+                for line in code.splitlines():
+                    if m := re.search(unused_regex, line):
+                        calls.setdefault(m.group(1), line)
+                self.assertEqual(len(calls), n_layers)
+                lines = list(calls.values())
+                for i, (name, line) in enumerate(calls.items()):
+                    check = FileCheck().check(line).check(f"{name}.reset();")
+                    if i + 1 < len(lines):
+                        check = check.check(lines[i + 1])
+                    check.run(code)
 
                 runner = torch._inductor.aoti_load_package(package_path)
                 runner(x)
@@ -2527,9 +2537,7 @@ class AOTInductorTestsTemplate:
                 return inverse + 1
 
         x = torch.randint(0, 5, (16,), device=self.device)
-        with dynamo_config.patch(capture_dynamic_output_shape_ops=True):
-            self.check_model(Model(), (x,))
-            _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), (x,))
+        _, code = run_and_get_cpp_code(self.check_model, Model(), (x,))
 
         defs = re.findall(r"(u\d+) = (\w+)\.size\(0\);", code)
         self.assertTrue(defs)
