@@ -71,14 +71,25 @@ def hub_sparse_mm_inputs(device, dtype, n=10000, k=64, nnz=200000):
     return a, b
 
 
-def check_sparse_mm_repeatable(name, fn, runs=10):
-    """Requires fn to return bit-wise identical results on every run with
-    deterministic algorithms enabled."""
-    # Not TestCase.assertEqual: it widens atol to the class precision override.
+def check_sparse_mm_deterministic(test_case, cases):
+    """Requires each of cases, (name, fn) pairs, to give bit-wise equal
+    results over 10 runs with deterministic algorithms enabled."""
     with DeterministicGuard(True):
-        first = fn()
-        for _ in range(runs - 1):
-            torch.testing.assert_close(fn(), first, rtol=0, atol=0, msg=name)
+        for name, fn in cases:
+            first = fn()
+            for _ in range(9):
+                test_case.assertEqual(fn(), first, atol=0, rtol=0, msg=name)
+
+
+def deterministiconoff(f):
+    """Runs the test with deterministic algorithms disabled, then enabled
+    (warn_only, so ops without a deterministic implementation still run)."""
+    @functools.wraps(f)
+    def wrapped(self, *args, **kwargs):
+        for deterministic in (False, True):
+            with DeterministicGuard(deterministic, warn_only=True):
+                f(self, *args, **kwargs)
+    return wrapped
 
 
 if TEST_SCIPY:
@@ -1801,6 +1812,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
+    @deterministiconoff
     def test_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)
@@ -1926,32 +1938,24 @@ class TestSparse(TestSparseBase):
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_mm_deterministic(self, device, dtype):
-        # gh-202030: repeatability on inputs that expose the atomic adds of the
-        # default cuSPARSE algorithm, then correctness on small inputs at the
-        # default tolerances. The dtypes are all that the CUDA COO kernel
-        # (csrmm2) supports.
+        # gh-202030; values in deterministic mode are checked by the @deterministiconoff tests.
+        # The dtypes are all that the CUDA COO kernel (csrmm2) supports.
         a, b = hub_sparse_mm_inputs(device, dtype)
-        b_col = b.t().contiguous().t()  # column-major, SpMM sees op(B) = B^T
+        c = torch.randn_like(b)
         b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
-        for name, fn in (
-            ("mm", lambda: torch.mm(a, b)),
-            ("mm column-major", lambda: torch.mm(a, b_col)),
-            ("mm n=1", lambda: torch.mm(a, b1)),
-        ):
-            check_sparse_mm_repeatable(name, fn)
 
-        s = self._gen_sparse(2, 20, [7, 8], dtype, device, coalesced=True)[0]
-        s_dense = s.to_dense()
-        d = torch.randn(8, 9, dtype=dtype, device=device)
-        c = torch.randn(7, 9, dtype=dtype, device=device)
-        with DeterministicGuard(True):
-            self.assertEqual(torch.mm(s, d), torch.mm(s_dense, d))
-            self.assertEqual(torch.sparse.mm(s, d.t().contiguous().t()), torch.mm(s_dense, d))
-            self.assertEqual(torch.mm(s, d[:, :1].contiguous()), torch.mm(s_dense, d[:, :1]))
-            self.assertEqual(torch.addmm(c, s, d, beta=0.5, alpha=2),
-                             torch.addmm(c, s_dense, d, beta=0.5, alpha=2))
-            self.assertEqual(torch.sparse.addmm(c, s, d, beta=0.5, alpha=2),
-                             torch.addmm(c, s_dense, d, beta=0.5, alpha=2))
+        def mm_backward():
+            d = b.detach().requires_grad_()
+            torch.sparse.mm(a, d).backward(c)
+            return d.grad
+
+        check_sparse_mm_deterministic(self, [
+            ("mm", lambda: torch.mm(a, b)),
+            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
+            ("mm n=1", lambda: torch.mm(a, b1)),
+            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
+            ("mm backward", mm_backward),
+        ])
 
     @onlyAccelerator
     def test_bmm_oob(self, device):
@@ -2006,6 +2010,7 @@ class TestSparse(TestSparseBase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
     @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16, torch.float16)
+    @deterministiconoff
     def test_sparse_addmm(self, device, dtype, coalesced):
         if (dtype is torch.bfloat16 or dtype is torch.float16) and device.startswith("cuda"):
             self.skipTest('addmm_sparse_cuda is not implemented for BFloat16 and Half')
@@ -2048,6 +2053,7 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
+    @deterministiconoff
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
