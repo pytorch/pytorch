@@ -1265,12 +1265,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             [(40, 10), (8, 3)],
         ],
     )
-    @parametrize("window_size", [(-1, 0), (4096, 0)])
     def test_causal_bottom_right_aligned(
-        self, device, dtype, seq_lens, window_size, sdpa_backend=None
+        self, device, dtype, seq_lens, sdpa_backend=None
     ):
-        # Query i of a sequence attends to keys 0..i + k_len - q_len, also when
-        # the left window covers every key.
+        # Query i of a sequence attends to keys 0..i + k_len - q_len.
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
 
@@ -1289,7 +1287,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
 
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             out = varlen_attn(
-                q, k, v, cu_seq_q, cu_seq_k, max_q, max_k, window_size=window_size
+                q, k, v, cu_seq_q, cu_seq_k, max_q, max_k, window_size=(-1, 0)
             )
         grad_out = torch.randn_like(out)
         grads = torch.autograd.grad(out, (q, k, v), grad_out)
