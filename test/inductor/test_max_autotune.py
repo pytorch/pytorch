@@ -1864,6 +1864,43 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "comprehensive_padding": False,
+            "shape_padding": False,
+            "triton.num_decompose_k_splits": 10,
+        }
+    )
+    def test_max_autotune_decompose_k_compile_failure(self):
+        # A subgraph choice whose benchmark module fails to compile is dropped
+        # instead of failing the whole compile.
+        from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        a, b = self._make_matrices(
+            32, 32768, 32, dtype=torch.float32, device=GPU_TYPE, requires_grad=False
+        )
+        with mock.patch.object(
+            SubgraphChoiceCaller,
+            "_compile_for_benchmarking",
+            side_effect=SubprocException(
+                "injected compile failure", "triton_tem_fused_0"
+            ),
+        ) as compile_mock:
+            out, code = run_and_get_code(torch.compile(lambda a, b: a @ b), a, b)
+        self.assertTrue(compile_mock.called)
+        FileCheck().check_not("decompose_k").run(code[0])
+        torch.testing.assert_close(out, a @ b, atol=1e-3, rtol=1e-3)
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
     @parametrize("dynamic", (True, False))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
@@ -7807,6 +7844,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
+        "test_max_autotune_decompose_k_compile_failure": "Subgraph choices compile eagerly at lowering on this path",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
         "test_max_autotune_mm_rebased_storage_offset_input": "get_inputs is not called on the pipelined path, so the benchmark inputs this test inspects are never built here",
         "test_max_autotune_negative_offset_layout": "test-only lowering patch, drops the benchmark inputs the pipelined path needs",
