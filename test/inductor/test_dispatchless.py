@@ -10,7 +10,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._library.dispatchless import dispatchless_custom_op, flat_dispatchless_call
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 
 
 def apply_transform(fn, transform):
@@ -30,6 +30,9 @@ def apply_transform(fn, transform):
 
 
 class DispatchlessTest(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_make_fx_autograd(self, device):
         @dispatchless_custom_op
         def op(x):
@@ -138,6 +141,7 @@ class DispatchlessTest(TestCase):
         result = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
         self.assertEqual(torch.autograd.grad(result, x), torch.autograd.grad(fn(x), x))
+
 
     @parametrize("requires_grad", [False, True])
     def test_values_gradients_and_decomposition(self, device, requires_grad):
