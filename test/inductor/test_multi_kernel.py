@@ -319,6 +319,12 @@ class MultiKernelTest(TestCase):
     test_softmax_cpp_wrapper = make_cpp_wrapper_test(
         test_softmax, expect_multi_kernel=True
     )
+    test_softmax_autotune_at_compile_time = config.patch(
+        "triton.autotune_at_compile_time", True
+    )(test_softmax)
+    test_triton_gemm_autotune_at_compile_time = config.patch(
+        "triton.autotune_at_compile_time", True
+    )(test_triton_gemm)
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).to(GPU_TYPE)
