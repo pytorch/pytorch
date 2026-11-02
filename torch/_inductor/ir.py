@@ -8783,22 +8783,7 @@ class SubgraphBuffer(ExternKernel):
                     op.set_config_patches(config_patches.copy())
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        class CodegenGraph:
-            def __init__(self, graph: GraphLowering):
-                self.graph = graph
-                self.name = graph.name
-
-        if not is_node_sequence(self.inputs):
-            raise AssertionError("Expected is_node_sequence(self.inputs)")
-        outer_inputs = [t.codegen_reference() for t in self.inputs]
-
-        if V.graph.cpp_wrapper:
-            wrapper.writeline(f"RAIIAtenTensorHandle {self.name};")
-        wrapper.codegen_subgraph_with_flattened_outputs(
-            CodegenGraph(self.subgraph),
-            [*self.sym_inputs, *outer_inputs],
-            [self.name],
-        )
+        wrapper.codegen_subgraph_buffer(self)
 
 
 class UserDefinedTritonKernel(ExternKernel):
