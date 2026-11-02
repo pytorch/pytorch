@@ -159,6 +159,14 @@ T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
+def _create_internal_torch_function(
+    value: Callable[..., Any], kind: "AllowInGraphKind | None" = None
+) -> "TorchInGraphFunctionVariable":
+    from .builder import SourcelessBuilder
+
+    return SourcelessBuilder.create_internal_torch_function(value, kind)
+
+
 def _is_supported_out_tensor_layout(
     fake_out: torch.Tensor, *, false_if_dde: bool
 ) -> bool:
@@ -866,14 +874,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 }
             else:
                 annotation_dict = annotation.as_python_constant()
-            return FxTracebackAnnotateVariable(annotation_dict)
+            return FxTracebackAnnotateVariable.create(annotation_dict)
         elif self.value in (
             torch.fx.traceback._dynamo_annotate,
             torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
             if len(args) != 1 or kwargs:
                 raise AssertionError("_dynamo_annotate expects one positional argument")
-            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
+            return FxTracebackAnnotateVariable.create(
+                dict(args[0].as_python_constant())
+            )
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
@@ -888,7 +898,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"expected a float budget, got {type(budget).__name__}"
                 )
-            return FxTracebackAnnotateVariable(
+            return FxTracebackAnnotateVariable.create(
                 {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
@@ -923,7 +933,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return ProfilerContextVariable()
+            return ProfilerContextVariable()  # noqa: RVT001
         elif (
             self.value is torch._C.DisableTorchFunctionSubclass
             or self.value is torch._C.DisableTorchFunction
@@ -1148,7 +1158,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Read dynamically: the cached dict always has True, but
             # is_exporting() should only be True during torch.export.
             if self.value is torch.compiler.is_exporting:
-                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
+                return VariableTracker.build(tx, torch.compiler.is_exporting())
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
@@ -1174,14 +1184,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # pyrefly: ignore[missing-attribute]
                 example_value = args[0].proxy.node.meta["example_value"]
                 dks = self.value(example_value)
-                # Remove Python and PythonTLSSnapshot from the dispatch key set,
-                # as they originate from FakeTensor propagation.
-                # This should only be done if the example_value is a FakeTensor.
+                # Remove the keys that come from the example value being fake:
+                # Python and PythonTLSSnapshot from a Python FakeTensor, Fake
+                # from a C++ fake. The real tensor would not have them.
+                # This should only be done if the example_value is a fake.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
                 if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
+                        - torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
                         - torch._C.DispatchKeySet(
                             torch._C.DispatchKey.PythonTLSSnapshot
@@ -1407,7 +1419,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 if all(arg.is_tensor() for arg in args):
                     x, y, z = args
-                    addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
+                    addcmul_fn = _create_internal_torch_function(torch.addcmul)
                     return addcmul_fn.call_function(tx, [z, x, y], {})
 
                 # Use math.fma if constants
@@ -1839,7 +1851,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "torch.compile regions.",
                     ],
                 )
-            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+            if tx.output.current_tracer.is_export or torch.compiler.is_exporting():
                 unimplemented(
                     gb_type="COW tensor check during export",
                     context="torch._C._is_cow_tensor during export",
@@ -2135,13 +2147,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
-                result = TorchInGraphFunctionVariable(torch.div).call_function(
+                result = _create_internal_torch_function(torch.div).call_function(
                     tx, [*args[1:]], {}
                 )
-                result = TorchInGraphFunctionVariable(torch.mul).call_function(
+                result = _create_internal_torch_function(torch.mul).call_function(
                     tx, [result, kwargs["value"]], {}
                 )
-                return TorchInGraphFunctionVariable(torch.add).call_function(
+                return _create_internal_torch_function(torch.add).call_function(
                     tx, [args[0], result], {}
                 )
             return None
@@ -2154,8 +2166,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
-                fill_value.python_type(), torch.nn.Parameter
+            # Eager only accepts a 0-d tensor fill_value that does not require
+            # grad, and fill_ would make the result differentiable w.r.t. it.
+            if (
+                isinstance(fill_value, variables.TensorVariable)
+                and fill_value.ndim == 0
+                and not fill_value.requires_grad
             ):
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
@@ -2174,9 +2190,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
-                empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
-                    tx, [size], kwargs
-                )
+                empty_result = _create_internal_torch_function(
+                    torch.empty
+                ).call_function(tx, [size], kwargs)
                 # Call fill_ method on the empty tensor
                 return empty_result.call_method(tx, "fill_", [fill_value], {})
             return None
@@ -2218,7 +2234,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 args = (args[0], sections_vt, *args[2:])
             else:
                 kwargs["indices_or_sections"] = sections_vt
-            return TorchInGraphFunctionVariable(torch.tensor_split).call_function(
+            return _create_internal_torch_function(torch.tensor_split).call_function(
                 tx, list(args), kwargs
             )
 
@@ -2806,7 +2822,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             from ..tensor_version_op import _unsafe_set_version_counter
 
-            return TorchInGraphFunctionVariable(
+            return _create_internal_torch_function(
                 _unsafe_set_version_counter
             ).call_function(tx, [*args], kwargs)
 
@@ -2816,11 +2832,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
-        ) -> UserDefinedObjectVariable:
+        ) -> VariableTracker:
             # Wrap C++ interpreter (torch._C._functorch.CInterpreter) as UserDefinedObjectVariable,
             # but Python interpreter (torch._functorch.pyfunctorch.FuncTorchInterpreter) as FuncTorchInterpreterVariable.
-            return UserDefinedObjectVariable(
-                torch._C._functorch.peek_interpreter_stack()
+            return VariableTracker.build(
+                tx, torch._C._functorch.peek_interpreter_stack()
             )
 
         @register(torch._functorch.pyfunctorch.coerce_cinterpreter)
@@ -2832,8 +2848,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> FuncTorchInterpreterVariable:
             # pyrefly: ignore[missing-attribute]
             cinterpreter = args[0].value
-            return FuncTorchInterpreterVariable(
-                torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
+            return VariableTracker.build(
+                tx, torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
             )
 
         @register(torch.tensor)
@@ -2868,9 +2884,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 # This is slower and less canonical, so only use it if we
                 # have to
-                return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
-                    tx, [*args], kwargs
-                )
+                return _create_internal_torch_function(
+                    torch._refs.tensor
+                ).call_function(tx, [*args], kwargs)
             else:
                 return None
 
@@ -3166,7 +3182,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Under compile-on-one-rank the index must stay None so the runtime
                 # resolves it per rank and one artifact serves them all.
                 if not _coor_enabled():
-                    device_index = 0
+                    # Everywhere else it has to be resolved here, at trace time, and
+                    # guarded. Inductor wraps the call in
+                    # `with torch.cuda._DeviceGuard(<graph device>):`, so an index
+                    # deferred to run time would resolve against the graph's device
+                    # rather than the caller's -- synchronizing whichever device the
+                    # graph happens to be laid out for.
+                    torch_source = ImportSource("torch")
+                    install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
+                    current_device_source = CallFunctionNoArgsSource(
+                        AttrSource(
+                            AttrSource(torch_source, "accelerator"),
+                            "current_device_index",
+                        )
+                    )
+                    install_guard(
+                        current_device_source.make_guard(GuardBuilder.EQUALS_MATCH)
+                    )
+                    try:
+                        device_index = torch.accelerator.current_device_index()
+                    except RuntimeError as e:
+                        # No visible accelerator. Break rather than surface this as
+                        # an InternalTorchDynamoError telling the user to file a bug;
+                        # running the call eagerly reproduces the same error eager
+                        # would have raised.
+                        unimplemented(
+                            gb_type="synchronize with no accelerator available",
+                            context=f"device={device}",
+                            explanation=(
+                                "torch.accelerator.current_device_index() failed while "
+                                "resolving an index-less device for synchronize, so the "
+                                "index cannot be baked into the graph."
+                            ),
+                            hints=[
+                                "Pass an explicit device index to synchronize.",
+                                "Make an accelerator visible to the process.",
+                            ],
+                            from_exc=e,
+                        )
 
             tx.output.create_proxy(
                 "call_function",
@@ -3941,7 +3994,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if isinstance(
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
-            return TorchInGraphFunctionVariable(member, source=source)
+            if source is not None:
+                if type(mro_lookup(type(self.value), name)) is property:
+                    # Guarding the result would call the property getter again.
+                    return TorchInGraphFunctionVariable(  # noqa: RVT001
+                        member, source=source
+                    )
+                return TorchInGraphFunctionVariable.create_with_source(member, source)
+            return _create_internal_torch_function(member)
         # Function metadata (__name__, __module__, __qualname__, ...) is
         # immutable on builtins and descriptors, so it can be constant folded.
         if name in _CONSTANT_FN_METADATA_ATTRS and ConstantVariable.is_literal(member):
