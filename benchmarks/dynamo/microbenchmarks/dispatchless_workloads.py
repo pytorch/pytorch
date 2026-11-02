@@ -19,10 +19,11 @@ import platform
 import statistics
 import sys
 import time
-from collections.abc import Callable
 from itertools import product
 from pathlib import Path
 from typing import Any
+
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -318,3 +319,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+if TYPE_CHECKING:
+    from collections.abc import Callable

@@ -23,7 +23,6 @@ from torch.utils.benchmark import Timer
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    
 
 def clone(x: torch.Tensor) -> torch.Tensor:
     return x.clone()
