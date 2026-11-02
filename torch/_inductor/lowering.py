@@ -375,6 +375,10 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
                 for name in x.get_read_names()
             )
         ):
+            if isinstance(x.data, ir.BaseView):
+                # Realizing a view realizes its backing storage, which is
+                # not 0-dim; copy the view into a 0-dim buffer instead.
+                x = clone(x)
             x.realize()
         return x
     if has_free_unbacked_symbols(x.get_size()):
@@ -427,12 +431,25 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+        # The op runs on the first GPU operand's device, as in make_pointwise,
+        # so CPU scalars are checked against it rather than the first operand's.
+        op_device = next(
+            (
+                d
+                for d in (
+                    *(args[i].get_device() for i in args_indices),
+                    *(kwargs[k].get_device() for k in kwargs_indices),
+                )
+                if d is not None and is_gpu(d.type)
+            ),
+            device,
+        )
 
         for i in args_indices:
-            args[i] = maybe_copy_cpu_scalar(args[i], device)
+            args[i] = maybe_copy_cpu_scalar(args[i], op_device)
 
         for k in kwargs_indices:
-            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], op_device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg: Any) -> Any:

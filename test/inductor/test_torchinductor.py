@@ -19836,6 +19836,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(a, b), torch.compile(fn, dynamic=dynamic)(a, b))
 
     @requires_gpu_and_triton
+    def test_cpu_scalar_view_with_gpu_tensor(self):
+        # squeeze() is the last CPU op, so the operand is a view of a [1]
+        # buffer; it must still reach the GPU kernel as a 0-dim value.
+        def fn(a, b):
+            return a * (b * 2).squeeze()
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.tensor([0.005], dtype=torch.float64)
+        for dynamic in (False, True):
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), torch.compile(fn, dynamic=dynamic)(a, b))
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_expr_first_operand_with_gpu_tensor(self):
+        # The GPU device must be found when the CPU operand comes first.
+        def fn_cpu_first(a, b):
+            return ((1.0 - b.float().squeeze()) * 2.5) * a
+
+        def fn_gpu_first(a, b):
+            return a * ((1.0 - b.float().squeeze()) * 2.5)
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.tensor([0.005], dtype=torch.float64)
+        for fn in (fn_cpu_first, fn_gpu_first):
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), torch.compile(fn)(a, b))
+
+    @requires_gpu_and_triton
     @config.patch(implicit_fallbacks=True)
     def test_cpu_scalar_expr_from_custom_op_with_gpu_tensor(self):
         @torch.library.custom_op("test_inductor::lr_schedule", mutates_args=())
