@@ -123,6 +123,10 @@ class Vectorized<double> {
     }
     return loadu(tmp);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(const Vectorized<double>& mask) const {
+    return _mm256_or_pd(values, mask);
+  }
   Vectorized<double> abs() const {
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
@@ -135,8 +139,7 @@ class Vectorized<double> {
     const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_pd(c10::pi<double>);
 
-    const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
-    auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
+    auto angle = _mm256_blendv_pd(zero_vec, pi, values);
     angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
     return angle;
   }
