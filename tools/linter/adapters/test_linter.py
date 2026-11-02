@@ -113,6 +113,7 @@ class HardwareClassification(Enum):
 
 # Lint message types
 class LintSeverity(str, Enum):
+    ERROR = "error"
     ADVICE = "advice"
 
 
@@ -132,7 +133,7 @@ lint_msg = partial(
     LintMessage,
     char=None,
     code=LINTER_CODE,
-    severity=LintSeverity.ADVICE,
+    severity=LintSeverity.ERROR,
     original=None,
     replacement=None,
 )
