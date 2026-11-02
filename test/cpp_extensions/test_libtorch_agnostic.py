@@ -4,6 +4,7 @@ import gc
 import math
 import sysconfig
 import unittest
+import warnings
 from pathlib import Path
 
 import torch
@@ -21,8 +22,10 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     parametrize,
     run_tests,
+    set_warn_always_context,
     skipIfTorchDynamo,
     skipIfWindows,
+    TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIf,
@@ -65,6 +68,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
     - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
     - libtorch_agn_2_15: Extension built with TORCH_TARGET_VERSION=2.15.0
+    - libtorch_agn_2_16: Extension built with TORCH_TARGET_VERSION=2.16.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -149,6 +153,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.15 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 16):
+            try:
+                import libtorch_agn_2_16  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_16_extension"
+                )
+        else:
+            print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -433,6 +447,90 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(values, expected.values)
         self.assertEqual(indices, expected.indices)
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_masked_select(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(3, 8, 5, device=device)
+        mask = t > 0
+        result = libtorch_agnostic.ops.my_masked_select(t, mask)
+        self.assertEqual(result, torch.masked_select(t, mask))
+
+        t_view = t.transpose(0, 2)[:, ::2, :]
+        mask_view = mask.transpose(0, 2)[:, ::2, :]
+        result = libtorch_agnostic.ops.my_masked_select(t_view, mask_view)
+        self.assertEqual(result, torch.masked_select(t_view, mask_view))
+
+        broadcast_mask = torch.tensor([True, False, True], device=device).view(3, 1, 1)
+        result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
+        self.assertEqual(result, torch.masked_select(t, broadcast_mask))
+
+        with self.assertRaisesRegex(RuntimeError, "expected BoolTensor for mask"):
+            libtorch_agnostic.ops.my_masked_select(t, mask.to(torch.int64))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=dtype)
+        result = stable_op(out, a, b)
+        self.assertEqual(out, torch_op(a, b))
+        self.assertEqual(id(result), id(out))
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_dtype_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out_dtype")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=torch.float32)
+        result = stable_op(out, a, b, torch.float32)
+        self.assertEqual(out, torch_op(a, b, out_dtype=torch.float32))
+        self.assertEqual(id(result), id(out))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_flip(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.arange(24, device=device).reshape(2, 3, 4)
+        dims = [-1, 0]
+        result = libtorch_agnostic.ops.my_flip(t, dims)
+        self.assertEqual(result, torch.flip(t, dims))
+
+    @skipIfWindows(msg="TemporaryFileName cannot unlink a memory-mapped file")
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_from_file(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        data = bytearray(range(256))
+        with TemporaryFileName() as path:
+            Path(path).write_bytes(data)
+            result = libtorch_agnostic.ops.my_from_file(
+                path, shared=False, size=len(data), dtype=torch.uint8
+            )
+            self.assertEqual(result, torch.frombuffer(data, dtype=torch.uint8))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
@@ -597,6 +695,24 @@ class TestLibtorchAgnostic(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
             libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_add(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(3, 4, device=device)
+
+        result = libtorch_agnostic.ops.my_add(a, b, alpha=2)
+        expected = torch.add(a, b, alpha=2)
+        self.assertEqual(result, expected)
+
+        i = torch.ones(3, 4, dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "argument alpha must not be a floating point number"
+        ):
+            libtorch_agnostic.ops.my_add(i, i)
 
     # TODO: Debug this for Python FakeTensor:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
@@ -1084,6 +1200,80 @@ class TestLibtorchAgnostic(TestCase):
         num_threads = libtorch_agnostic.ops.test_get_num_threads()
         expected_num_threads = torch.get_num_threads()
         self.assertEqual(num_threads, expected_num_threads)
+
+    @skipIfTorchVersionLessThan(2, 15)  # Requires 2.15 for C++ warnings to reach Python
+    @skipIfTorchDynamo("Dynamo also runs the op while tracing")
+    @onlyCPU
+    def test_stable_torch_warn(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        values = (3, 3, -7)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for value in values:
+                libtorch_agnostic.ops.test_stable_torch_warn(value)
+
+        self.assertEqual(len(w), len(values))
+        for value, warning in zip(values, w):
+            self.assertIs(warning.category, UserWarning)
+            expected = f"test_stable_torch_warn value={value} scale=0.5 1"
+            self.assertIn(expected, str(warning.message))
+
+    def _run_stable_torch_warn_once(self):
+        """Runs in a subprocess so neither STABLE_TORCH_WARN_ONCE call site has warned yet."""
+        import os
+        import subprocess
+        import sys
+
+        test_script = """
+import warnings
+
+import torch
+import libtorch_agn_2_16 as libtorch_agnostic
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    for warn_always in (False, True, False):
+        torch.set_warn_always(warn_always)
+        for value in (7, 8, -1):
+            libtorch_agnostic.ops.test_stable_torch_warn_once(value)
+
+for warning in w:
+    print(warning.category.__name__, warning.message)
+"""
+        env = os.environ.copy()
+        # Pass the current sys.path to subprocess so it can find the locally installed extension
+        env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_torch_warn_once(self, device):
+        emitted = self._run_stable_torch_warn_once()
+
+        expected = ("value=7", "negative value", "value=7", "value=8", "negative value")
+        self.assertEqual(len(emitted), len(expected))
+        for message, line in zip(expected, emitted):
+            self.assertIn(f"UserWarning test_stable_torch_warn_once {message}", line)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("warn_always", [False, True])
+    def test_is_warn_always_enabled(self, device, warn_always):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with set_warn_always_context(warn_always):
+            enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
+        self.assertEqual(enabled, warn_always)
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])

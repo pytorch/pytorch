@@ -420,6 +420,13 @@ def dictview_richcompare(
     return all(item in self for item in other)
 
 
+def dictview_isdisjoint(self: Iterable[T], other: Iterable[T]) -> bool:
+    """Mirrors dictviews_isdisjoint in Objects/dictobject.c, without its
+    iterate-the-shorter-operand optimization, which does not change the result.
+    """
+    return not any(item in self for item in other)
+
+
 def assert_dict_equal(
     self_: Any, d1: dict[T, U], d2: dict[T, U], msg: str | None = None
 ) -> None:
@@ -443,6 +450,19 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def unpack_mapping_keys_and_values(
+    mapping: Mapping[T, U],
+) -> tuple[tuple[T, ...], tuple[U, ...]]:
+    # Snapshot `items()` once to keep keys and values aligned, including overrides.
+    items = list(mapping.items())
+    keys: list[T] = []
+    values: list[U] = []
+    for key, value in items:
+        keys.append(key)
+        values.append(value)
+    return tuple(keys), tuple(values)
 
 
 def instantiate_user_defined_class_object(

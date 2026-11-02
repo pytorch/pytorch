@@ -51,6 +51,7 @@ namespace at::cuda {
   _(cuGetErrorString)                            \
   _(cuLaunchKernel)                              \
   _(cuLaunchCooperativeKernel)                   \
+  _(cuLaunchKernelEx)                            \
   _(cuCtxGetCurrent)                             \
   _(cuCtxSetCurrent)                             \
   _(cuModuleUnload)                              \
