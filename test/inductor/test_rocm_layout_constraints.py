@@ -16,6 +16,7 @@ from torch._inductor.select_algorithm import AlgorithmSelectorCache, NoValidChoi
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -25,6 +26,8 @@ from torch.testing._internal.common_utils import (
 
 @instantiate_parametrized_tests
 class TestROCmLayoutConstraints(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.graph = Mock(sizevars=SizeVarAllocator(), buffer_layout_constraints={})

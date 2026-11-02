@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -81,7 +82,7 @@ class InductorWarningTests(TestCase):
             inductor_compile_fx._warn_tf32_disabled.cache_clear()
             torch._dynamo.reset()
 
-            x = torch.eye(2, device="cuda")
+            x = torch.eye(2, device=GPU_TYPE)
             log_stream, ctx = logs_to_string("torch._inductor.compile_fx", "perf_hints")
             with ctx(), warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("ignore")
@@ -92,7 +93,7 @@ class InductorWarningTests(TestCase):
                 actual = torch.compile(
                     lambda y: y @ y, backend="inductor", fullgraph=True
                 )(x)
-                torch.cuda.synchronize()
+                torch.accelerator.synchronize()
 
             self.assertEqual(actual, x)
             self.assertEqual([str(w.message) for w in caught], [])
