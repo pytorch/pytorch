@@ -656,7 +656,8 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
     @parametrize("num_iters", [12, 24])
-    def test_nested_step_graph_break_in_loop(self, num_iters):
+    @parametrize("caller_above_loop", [False, True])
+    def test_nested_step_graph_break_in_loop(self, num_iters, caller_above_loop):
         def step(x):
             y = x + 1
             positive = torch.all(y > 0)
@@ -672,20 +673,53 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
                 x = step(x)
             return x
 
+        def outer(x, n):
+            return loop(x + 2, n) + 3
+
+        fn = outer if caller_above_loop else loop
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(loop, backend=cnts)
+        counters = torch._dynamo.utils.counters
+        opt_fn = torch.compile(fn, backend=cnts, dynamic=True)
         x = torch.zeros(3)
-        expected = loop(x, num_iters)
-        self.assertEqual(opt_fn(x, num_iters), expected)
-        frame_count = cnts.frame_count
-        self.assertGreater(frame_count, 0)
-        self.assertEqual(opt_fn(x, num_iters), expected)
-        self.assertEqual(cnts.frame_count, frame_count)
-        expected = loop(x, 2 * num_iters)
-        self.assertEqual(opt_fn(x, 2 * num_iters), expected)
-        self.assertEqual(cnts.frame_count, frame_count)
-        self.assertEqual(opt_fn(x, 2 * num_iters), expected)
-        self.assertEqual(cnts.frame_count, frame_count)
+        caller_frames = 2 if caller_above_loop else 0
+        for n in (num_iters, num_iters, 2 * num_iters, 2 * num_iters):
+            self.assertEqual(opt_fn(x, n), fn(x, n))
+            # loop is skipped; step compiles its add, comparison, and all once.
+            # outer contributes one addition before loop and one after it.
+            self.assertEqual(cnts.frame_count, 1 + caller_frames)
+            self.assertEqual(cnts.op_count, 3 + caller_frames)
+            # The total also includes the skipped loop frame.
+            self.assertEqual(counters["frames"]["total"], 2 + caller_frames)
+            self.assertTrue(
+                any("graph break in loop" in msg for msg in counters["unimplemented"])
+            )
+
+    @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
+    @parametrize("num_iters", [12, 24])
+    def test_step_unsupported_in_caller_loop(self, num_iters):
+        def step(x):
+            y = (x + 1).relu()
+            torch._dynamo.step_unsupported()
+            return y * 2
+
+        def loop(x, n):
+            for _ in range(n):
+                x = step(x)
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        counters = torch._dynamo.utils.counters
+        opt_fn = torch.compile(loop, backend=cnts, dynamic=True)
+        x = torch.zeros(3)
+        for n in (num_iters, num_iters, 2 * num_iters, 2 * num_iters):
+            self.assertEqual(opt_fn(x, n), loop(x, n))
+            # Only step's add and relu compile; loop and step's remainder run eager.
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 2)
+            self.assertEqual(counters["frames"]["total"], 2)
+            self.assertTrue(
+                any("graph break in loop" in msg for msg in counters["unimplemented"])
+            )
 
     @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
     @parametrize("num_iters", [12, 24])
@@ -706,12 +740,18 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             return helper(x + 2, n) + 3
 
         cnts = torch._dynamo.testing.CompileCounter()
+        counters = torch._dynamo.utils.counters
         opt_fn = torch.compile(caller, backend=cnts, dynamic=True)
         x = torch.ones(3)
         for n in (num_iters, num_iters, 2 * num_iters, 2 * num_iters):
             self.assertEqual(opt_fn(x, n), caller(x, n))
+            # The caller+helper prefix has three ops; the caller continuation has one.
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 4)
+            self.assertEqual(counters["frames"]["total"], 2)
+            self.assertFalse(
+                any("graph break in loop" in msg for msg in counters["unimplemented"])
+            )
 
     def test_nested_graph_break_in_try_block(self):
         # NOTE: this also tests nested step_graph_break
@@ -1967,7 +2007,8 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
 
     @parametrize("native_mro", (False, True))
-    def test_getattr_metaclass_metadata(self, native_mro):
+    @parametrize("cache_first", (False, True))
+    def test_getattr_metaclass_metadata(self, native_mro, cache_first):
         class Meta(type):
             @property
             def __mro__(cls):
@@ -1989,10 +2030,16 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
                     calls.append(name)
                 return torch.sin
 
+        class Safe(Wrapper, metaclass=NativeMeta):
+            pass
+
+        safe = Safe()
         wrapper = Wrapper()
         cnts = torch._dynamo.testing.CompileCounter()
 
         def fn(x):
+            if cache_first:
+                safe.method(x)
             return wrapper.method(x)
 
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2000,7 +2047,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         if not native_mro:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "Custom metaclass metadata in __getattr__",
+                "Custom metaclass metadata access",
             ):
                 opt_fn(x)
             self.assertEqual(cnts.frame_count, 0)
@@ -2018,7 +2065,75 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), expected)
             self.assertEqual(cnts.frame_count, 2)
         else:
-            self.assertEqual(calls, ["method", "method"])
+            self.assertEqual(calls, ["method"] * (4 if cache_first else 2))
+
+    @parametrize("metadata", ("__dict__", "__mro__"))
+    def test_property_metaclass_metadata(self, metadata):
+        calls = []
+
+        def accessor(cls):
+            calls.append(metadata)
+            return type.__dict__[metadata].__get__(cls, type(cls))
+
+        Meta = type("Meta", (type,), {metadata: property(accessor)})
+
+        class Base:
+            @property
+            def method(self):
+                return torch.sin
+
+        class Wrapper(Base, metaclass=Meta):
+            pass
+
+        wrapper = Wrapper()
+
+        def fn(x):
+            return wrapper.method(x + 1) + 2
+
+        x = torch.arange(3, dtype=torch.float64)
+        expected = fn(x)
+        self.assertEqual(calls, [])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Custom metaclass metadata access"
+        ):
+            opt_fn(x)
+        self.assertEqual(cnts.frame_count, 0)
+        # Opaque type classification reads __mro__ once before source construction.
+        expected_calls = [metadata] if metadata == "__mro__" else []
+        self.assertEqual(calls, expected_calls)
+        calls.clear()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(calls, expected_calls)
+
+    @parametrize("owner", ("class", "base"))
+    def test_getattr_nn_module_class_shadow(self, owner):
+        class Base(torch.nn.Module):
+            pass
+
+        class Wrapper(Base):
+            pass
+
+        wrapper = Wrapper()
+        wrapper.register_buffer("value", torch.tensor(1.0))
+        target = Wrapper if owner == "class" else Base
+
+        def fn(x):
+            return x + wrapper.value
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+        target.value = torch.tensor(2.0)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_getattr_omitted_receiver_dict(self):
         class Carrier:
@@ -2503,7 +2618,7 @@ class NestedGraphBreakSmokeTests(torch._dynamo.test_case.TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
-    def _check(self, fn, nested, frame_count, *args):
+    def _check(self, fn, nested, frame_count, op_count, *args):
         x = torch.ones(3)
         cnts = torch._dynamo.testing.CompileCounter()
         with torch._dynamo.config.patch(nested_graph_breaks=nested):
@@ -2511,17 +2626,19 @@ class NestedGraphBreakSmokeTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fn, backend=cnts)
             self.assertEqual(opt_fn(x, *args), expected)
             self.assertEqual(cnts.frame_count, frame_count)
+            self.assertEqual(cnts.op_count, op_count)
             # Re-running must reuse the compiled frames and resume functions.
             self.assertEqual(opt_fn(x, *args), expected)
         self.assertEqual(cnts.frame_count, frame_count)
+        self.assertEqual(cnts.op_count, op_count)
 
     @parametrize("nested", [True, False])
     def test_doubly_nested_break(self, nested):
-        self._check(_call_call_break, nested, 2 if nested else 6)
+        self._check(_call_call_break, nested, 2 if nested else 6, 6)
 
     @parametrize("nested", [True, False])
     def test_break_in_submodule_forward(self, nested):
-        self._check(_CallBreakModule(), nested, 2 if nested else 4)
+        self._check(_CallBreakModule(), nested, 2 if nested else 4, 4)
 
     @parametrize("graph_break", [True, False])
     @parametrize(
@@ -2535,13 +2652,17 @@ class NestedGraphBreakSmokeTests(torch._dynamo.test_case.TestCase):
         # manager, and each mode enters it through a different code path.
         if graph_break:
             frame_count = 2 if nested else 4
+            op_count = 8 if nested else 4
         else:
             frame_count = 1
-        self._check(fn, nested, frame_count, graph_break)
+            op_count = 6
+        self._check(fn, nested, frame_count, op_count, graph_break)
 
     @parametrize("nested", [True, False])
     def test_break_with_ctx_manager_active_in_caller(self, nested):
-        self._check(_call_break_under_no_grad, nested, 2 if nested else 4)
+        self._check(
+            _call_break_under_no_grad, nested, 2 if nested else 4, 8 if nested else 6
+        )
 
     @parametrize("nested", [True, False])
     def test_break_mutating_cells(self, nested):
@@ -2557,17 +2678,30 @@ class NestedGraphBreakSmokeTests(torch._dynamo.test_case.TestCase):
 
             return inner() + a
 
-        self._check(fn, nested, 2 if nested else 4)
+        self._check(fn, nested, 2 if nested else 4, 5)
 
     @parametrize("nested", [True, False])
     def test_data_dependent_branch_in_callee(self, nested):
-        self._check(_call_data_dependent, nested, 2 if nested else 4)
+        cnts = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            opt_fn = torch.compile(_call_data_dependent, backend=cnts)
+            frame_count = 2 if nested else 4
+            op_count = 6
+            # The negative branch adds one frame, then both branches reuse it.
+            for sign in (1, 1, -10, -10, 1, -10):
+                x = torch.ones(3) * sign
+                if sign < 0:
+                    frame_count = 3 if nested else 5
+                    op_count = 8 if nested else 7
+                self.assertEqual(opt_fn(x), _call_data_dependent(x))
+                self.assertEqual(cnts.frame_count, frame_count)
+                self.assertEqual(cnts.op_count, op_count)
 
     @parametrize("nested", [True, False])
     def test_break_in_try_block_falls_back(self, nested):
         # Nested resumption cannot cross a try block, so both modes break at
         # the call site.
-        self._check(_call_call_break_in_try, nested, 4)
+        self._check(_call_call_break_in_try, nested, 4, 4)
 
 
 if __name__ == "__main__":
