@@ -307,6 +307,10 @@ def mark_subclass_constructor_exportable_experimental(
         )
         return
 
+    # torch.export.load accepts the name of a tensor subclass only if an
+    # __init__ in its class hierarchy has this mark, because export only
+    # records such constructors.
+    wrapper._allowed_in_pre_dispatch_graph = True  # type: ignore[attr-defined]
     return wrapper
 
 

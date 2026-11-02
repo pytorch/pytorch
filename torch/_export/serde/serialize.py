@@ -892,14 +892,27 @@ def _find_flat_apply_func(
 ) -> Any:
     """
     Find the function of a flat_apply call and check that it is a kind that
-    export produces. Save and load both use this one rule. Only traceable
-    wrapper tensor subclasses and the helper that calls custom autograd
-    functions are accepted. The helper gets its class by name, as its first
-    argument, so that name must find a torch.autograd.Function. Both names
-    are found with ``_find_imported``.
+    export produces. Save and load both use this one rule. Two kinds are
+    accepted. One is a traceable wrapper tensor subclass with an ``__init__``
+    decorated for export, in its class or in a base class. The other is the
+    helper that calls custom autograd functions. It gets its class by name, as
+    its first argument, so that name must find a torch.autograd.Function. Both
+    names are found with ``_find_imported``.
     """
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
+        # Export records the class of the object that a marked __init__
+        # builds, which can be a subclass of the class that has the mark.
+        inits = [vars(c).get("__init__") for c in func.__mro__]
+        if not any(
+            inspect.getattr_static(init, "_allowed_in_pre_dispatch_graph", False)
+            for init in inits
+        ):
+            raise SerializeError(
+                f"{name} is not a tensor subclass that export builds: no "
+                "__init__ in its class hierarchy is decorated with "
+                "torch._export.wrappers.mark_subclass_constructor_exportable_experimental"
+            )
         return func
     if (
         func

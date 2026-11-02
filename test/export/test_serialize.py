@@ -2795,6 +2795,15 @@ class TestPredispatchSerialization(TestCase):
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from torch.testing._internal.two_tensor import TwoTensor
 
+        # Export records the class that the marked TwoTensor.__init__ builds,
+        # here a subclass whose own __init__ is not marked.
+        class Sub(TwoTensor):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+        module = self._import_test_module(Sub=Sub)
+        Sub.__module__, Sub.__qualname__ = module.__name__, "Sub"
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2810,7 +2819,7 @@ class TestPredispatchSerialization(TestCase):
                 )
                 with TransformGetItemToIndex():
                     pairs = rows(q, q)
-                y = TwoTensor(x, x * 2)
+                y = Sub(x, x * 2)
                 return pairs, (x + y + self.buffer).b
 
         m = M()
@@ -3167,6 +3176,16 @@ class TestPredispatchSerialization(TestCase):
             subtest(
                 ("function", "torch.nn.parameter.Parameter", "cannot be used"),
                 name="parameter",
+            ),
+            # Export only builds subclasses with a marked __init__, and torch
+            # imports this traceable one, which has none.
+            subtest(
+                (
+                    "function",
+                    "torch.sparse.semi_structured.SparseSemiStructuredTensor",
+                    "mark_subclass_constructor_exportable_experimental",
+                ),
+                name="subclass_not_for_export",
             ),
             subtest(
                 ("function", "os.system", "not a class or function defined"),
