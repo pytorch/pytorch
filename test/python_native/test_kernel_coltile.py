@@ -132,18 +132,26 @@ class TestKernelColTile(TestCase):
         )
         self.assertEqual(out, x.var(dim=0), atol=1e-4, rtol=1e-4)
 
-    def test_grouped_welford_columns(self):
-        """Equal-count column groups must preserve a ragged tail's statistics."""
-        x = torch.randn(1025, 33, device="cuda")
-        cfg = ct.ColConfig("test_grouped", 64, 1, 1, "column", group=8)
+    @parametrize("group", [4, 8, 16])
+    @parametrize("npar", [1, 16])
+    @parametrize(
+        "shape",
+        [(1025, 33), (1024, 33), (3, 1027, 33)],
+        name_fn=lambda shape: "x".join(map(str, shape)),
+    )
+    def test_grouped_welford_columns(self, group, npar, shape):
+        """Equal-count column groups must preserve ragged tails, partials, and batches."""
+        x = torch.randn(shape, device="cuda")
+        trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        cfg = ct.ColConfig("test_grouped", 64, npar, 1, "column", group=group)
         with mock.patch.object(ct, "select_col_config", return_value=cfg):
-            out = ct.reduce_col_tile(
-                T.WelfordOps(correction=1, acc=cutlass.Float32),
-                "grouped_welford",
-                x,
-                torch.float32,
-            )
-        self.assertEqual(out, x.var(dim=0), atol=1e-5, rtol=1e-5)
+            if x.dim() == 2:
+                out = ct.reduce_col_tile(trait, "grouped_welford", x, torch.float32)
+            else:
+                (out,) = ct.reduce_batched_col_tile(
+                    trait, "grouped_welford", x, [torch.float32], 1
+                )
+        self.assertEqual(out, x.var(dim=-2), atol=1e-5, rtol=1e-5)
 
     def test_dispatcher_routes_a_column_reduction(self):
         # Numerics cannot distinguish the column arm from K0; assert routing and reshape.
@@ -541,6 +549,25 @@ class TestOrderedColHost(TestCase):
             # min_blocks counts 32-column blocks of useful lanes: 3 * 32 < 4 * 32.
             self.assertIsNone(select(columns=32, partials=3))
 
+    def test_welford_keys_share_policies(self):
+        """Map every variance key to the var0 or varmean0 policy by its output count."""
+        var = ct.OrderedColConfig(0, tile_columns=16)
+        varmean = ct.OrderedColConfig(0, tile_columns=8)
+        table = {(9, 0): {"var0": var, "varmean0": varmean}}
+        cases = (
+            ("std1", (torch.float32,), var),
+            ("var1", (torch.bfloat16,), var),
+            ("stdmean0", (torch.float32,) * 2, varmean),
+            ("stdmean0", (torch.float32,), None),
+        )
+        bits = (32,) * 3
+        with mock.patch.dict(ct._ORDERED_COL_CONFIGS, table):
+            for key, outs, want in cases:
+                got = ct.select_ordered_col_config(
+                    (9, 0), outs[0], key, 64, 1, 2, field_bits=bits, out_dtypes=outs
+                )
+                self.assertEqual(got, want, msg=key)
+
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
@@ -648,6 +675,10 @@ class TestOrderedColDevice(TestCase):
                 trait, "decline", x, out, 1, allow_split=allow_split
             )
         self.assertIsNone(got)
+        # The same view runs as a split plan once allowed.
+        got = ct.reduce_ordered_col(trait, "decline", x, out, 1, allow_split=True)
+        self.assertIsNotNone(got)
+        self.assertIn("ordered_col1", {k[0] for k in ct._CACHE if k[1] == "decline"})
 
     @parametrize("pattern", ["negative_zero", "ties"])
     @parametrize("rows", [2048, 32768])
