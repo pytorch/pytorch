@@ -17,7 +17,8 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Min, Mod
+from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
@@ -2431,7 +2432,19 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
+def _bounded_range_spans(dim: Any, threshold: int) -> bool:
+    """Whether dim has a finite upper bound and its range spans threshold."""
+    vr = V.graph.sizevars.shape_env.bound_sympy(sympy.sympify(dim))
+    return vr.upper not in (int_oo, sympy.oo) and vr.lower < threshold <= vr.upper
+
+
+def mm_allow_tf32(
+    m: Any,
+    n: Any,
+    k: Any,
+    device_type: str | None,
+    dtype: torch.dtype | None = None,
+) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
     allow_tf32 = False
     if isinstance(device_type, str):
@@ -2441,13 +2454,26 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
             iface = None
         else:
             allow_tf32 = bool(iface.allow_tf32())
-    if device_type == "cuda":
-        # CUDA applies a shape threshold on top of the backend flag.
-        # Based on reverse engineering H100 CUDA 12.8 behavior.
-        size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+    if device_type == "cuda" and allow_tf32:
+        # Match when cuBLAS uses TF32 (reverse engineered on H100, CUDA 12.8).
+        # Only fp32 dots read ALLOW_TF32. Backed dynamic dims follow their hint
+        # and get a guard; unbacked dims, AOT mode (no runtime guard check) and
+        # dims whose bounded range spans a threshold (a guard would narrow a
+        # user's min/max) need a proof.
+        thresholds = [(m, 16), (n, 512), (k, 512)]
+        size_threshold = sympy.And(*(sympy.Ge(d, t) for d, t in thresholds))
+        fp32_tf32 = (
+            dtype == torch.float32
+            and torch.cuda.is_available()
+            and torch.cuda.is_tf32_supported()
         )
-        return allow_tf32 and size_threshold
+        if (
+            not fp32_tf32
+            or V.graph.aot_mode
+            or any(_bounded_range_spans(d, t) for d, t in thresholds)
+        ):
+            return V.graph.sizevars.statically_known_true(size_threshold)
+        return bool(V.graph.sizevars.guard_or_false(size_threshold))
     return allow_tf32
 
 
@@ -2493,9 +2519,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
-        extra_kwargs = {
-            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
-        }
+        dtype = kernel_inputs.mat1mat2()[0].get_dtype()
+        # Skip the gate (and its guard) when this template yields no configs.
+        allow_tf32 = self.should_run(kernel_inputs) and mm_allow_tf32(
+            m, n, k, kernel_inputs.device_type, dtype
+        )
+        extra_kwargs = {"ALLOW_TF32": allow_tf32}
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
         # triton_mm.py.jinja already renders ascending unconditionally.
