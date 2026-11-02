@@ -73,6 +73,7 @@ class BenchmarkRunnerTests(TestCase):
         self.assertEqual(calls, {"setup": 2, "forward": 2})
 
     @skipIfTorchDynamo("speedup_experiment calls set_stance")
+    @torch._dynamo.config.patch(repro_tolerance=1e-4)
     @parametrize("mode", ("generate", "prefill", "decode"))
     @parametrize("report_eager_latency", (False, True))
     def test_prefill_timing_units_and_setup(self, mode, report_eager_latency):
@@ -309,6 +310,9 @@ class HuggingFacePrefillTestCase(TestCase):
             from benchmarks.dynamo import huggingface
 
         self.huggingface = huggingface
+        # common.run() adds the CPU skips to the cached skip list.
+        common.load_yaml_file.cache_clear()
+        self.addCleanup(common.load_yaml_file.cache_clear)
 
     def _runner_args(self, *extra, mode="prefill"):
         return common.parse_args(
@@ -552,6 +556,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         self.assertEqual(download.call_count, 2)
         sleep.assert_called_once_with(30)
 
+    @torch._dynamo.config.patch(repro_tolerance=1e-4)
     @parametrize("mode", ("prefill", "decode"))
     def test_prefill_performance_run(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
