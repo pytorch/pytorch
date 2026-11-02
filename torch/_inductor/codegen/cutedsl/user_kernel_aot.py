@@ -429,10 +429,14 @@ def _code_objects(code: types.CodeType) -> Iterable[types.CodeType]:
 
 def _function_source(fn: Callable[..., Any]) -> str:
     try:
-        return inspect.getsource(fn)
+        source = inspect.getsource(fn)
     except (OSError, TypeError):
         code = getattr(fn, "__code__", None)
         return code.co_code.hex() if code is not None else repr(fn)
+    # From the def line: the DSL's first compile of a function replaces its code with
+    # one that starts there, so getsource stops returning the decorators.
+    match = re.search(r"^[ \t]*(async[ \t]+)?def\b", source, re.MULTILINE)
+    return source[match.start() :] if match else source
 
 
 def _dsl_function_closure(host_fn: Callable[..., Any]) -> list[str]:
@@ -779,18 +783,17 @@ def export_for_link(
         header_path, object_path = (
             os.path.join(out_dir, f"{prefix}{ext}") for ext in (".h", ".o")
         )
-        for attempt in range(2):
-            try:
-                os.rename(tmp_dir, out_dir)
-                break
-            except OSError:
-                # Stored before, by this or another process: the same bytes.
-                if os.path.exists(header_path) and os.path.exists(object_path):
-                    break
-                if attempt:
-                    raise
-                # A damaged entry, e.g. files deleted by a cache cleanup.
-                shutil.rmtree(out_dir, ignore_errors=True)
+        try:
+            os.rename(tmp_dir, out_dir)
+        except OSError:
+            # Stored before, by this or another process: the same bytes. A damaged
+            # entry (e.g. files deleted by a cache cleanup) is repaired in place:
+            # other processes may be using it, and os.replace leaves no moment
+            # where a path they were given is missing.
+            if not (os.path.exists(header_path) and os.path.exists(object_path)):
+                os.makedirs(out_dir, exist_ok=True)
+                os.replace(exported.object_path, object_path)
+                os.replace(exported.header_path, header_path)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
     exported = replace(exported, header_path=header_path, object_path=object_path)

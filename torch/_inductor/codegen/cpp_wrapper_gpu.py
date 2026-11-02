@@ -2426,8 +2426,9 @@ def cutedsl_param_specs(
 def cutedsl_static_scalar(kernel: Any, name: str, value: int | float) -> Any:
     """A static value for scalar parameter ``name`` of a user CuTeDSL kernel, converted
     as the DSL converts a Python value when the kernel is called: its truthiness for a
-    Boolean, truncated toward zero for another integer type. A value the integer type
-    cannot hold is refused (eager wraps it, and raises for NaN and infinity)."""
+    Boolean, truncated toward zero for another integer type, a float for a float type.
+    A value the integer type cannot hold is refused (eager wraps it, and raises for
+    NaN and infinity)."""
     from cutlass.base_dsl.typing import Boolean, Integer
 
     from .cutedsl.user_kernel_aot import scalar_ctype
@@ -2436,7 +2437,7 @@ def cutedsl_static_scalar(kernel: Any, name: str, value: int | float) -> Any:
     if issubclass(annotation, Boolean):
         return bool(value)
     if not issubclass(annotation, Integer):
-        return value
+        return float(value)
     half = 2 ** (annotation.width - 1)
     lo, hi = (-half, half) if annotation.signed else (0, 2 * half)
     try:
