@@ -926,6 +926,7 @@
 # /test/test_cpp_extensions_mtia_backend.py
 # /test/test_cpp_extensions_stream_and_event.py
 # /test/test_custom_ops.py
+# /test/test_pyobject_dispatch.py
 # /torch/_classes.py
 # /torch/_custom_class_base.py
 # /torch/_custom_op/
