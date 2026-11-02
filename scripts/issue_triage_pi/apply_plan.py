@@ -314,6 +314,12 @@ def umbrella_comment(
     if type(number) is int and number > 0:
         effects.umbrella_issue = number
     effects.umbrella_action = "review"
+    if plan["decision"] == "redirect_oncall" or any(
+        label.startswith("oncall:") and label != "oncall: pt2" for label in labels
+    ):
+        effects.umbrella_action = "skip"
+        effects.notes.append("umbrella reference skipped for oncall redirect")
+        return "", False
     if (
         not policy
         or number == source
@@ -324,12 +330,6 @@ def umbrella_comment(
         or target.get("state") != "open"
     ):
         effects.notes.append("umbrella target is not a configured open issue; review")
-        return "", False
-    if plan["decision"] == "redirect_oncall" or any(
-        label.startswith("oncall:") and label != "oncall: pt2" for label in labels
-    ):
-        effects.umbrella_action = "skip"
-        effects.notes.append("umbrella reference skipped for oncall redirect")
         return "", False
     if plan["decision"] in CLOSING_TEMPLATES or plan["decision"] == "transfer":
         effects.notes.append(
@@ -415,8 +415,10 @@ def plan_effects(
     effects = Effects()
     decision = plan["decision"]
 
+    # Reopening ends the operation authorized by an old close receipt.
     if any(label.startswith("oncall:") for label in existing_labels) and not (
         "oncall: pt2" in valid_labels
+        and (source or {}).get("state_reason") != "reopened"
         and pending_pt2_close(
             repo, plan, existing_labels, bot_comments, umbrella_target
         )
@@ -512,8 +514,10 @@ def plan_effects(
             adding_pt2="oncall: pt2" in labels and "oncall: pt2" not in existing_labels,
         )
         annotation = plan["umbrella"]
-        if effects.umbrella_action == "review" or (
-            isinstance(annotation, dict) and annotation.get("match") == "uncertain"
+        if effects.umbrella_action != "skip" and (
+            effects.umbrella_action == "review"
+            or isinstance(annotation, dict)
+            and annotation.get("match") == "uncertain"
         ):
             labels.append(TRIAGE_REVIEW)
     if "triaged" in labels and TRIAGE_REVIEW in existing_labels | set(labels):
