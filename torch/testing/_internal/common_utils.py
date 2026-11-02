@@ -3050,19 +3050,18 @@ def periodic(fn):
     """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run in CI
-    there. Other periodic jobs can opt in by setting PYTORCH_TEST_WITH_PERIODIC,
-    which runs them without the marker filter; unless such a job also sets
-    PYTORCH_TEST_WITH_SLOW, @periodic tests that are also slow still skip there.
+    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
+    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    Tests in files outside the default Python test sweep (e.g. distributed or
+    quantization) never run in CI unless such a job runs those files.
 
     Gated only in CI and on Sandcastle (which has no periodic config);
     elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
-    while the periodic gate keeps a test marked both out of the slow shards;
-    it runs only in periodic-strict.
+    while the periodic gate keeps a test marked both out of the slow shards.
+    Such a test runs only in jobs that set both flags, like periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
