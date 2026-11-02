@@ -871,6 +871,9 @@ class TensorVariable(VariableTracker):
     ) -> ConstantVariable:
         from . import GetAttrVariable
 
+        if tx.output.current_tracer.dispatchless_capture_policy is not None:
+            tx.output.current_tracer.dispatchless_capture_policy.observe(self)
+
         # TODO - This is not a good solution but solves an accuracy issue.
         # Today, tp_getattro_impl returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
@@ -900,6 +903,8 @@ class TensorVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if tx.output.current_tracer.dispatchless_capture_policy is not None:
+            tx.output.current_tracer.dispatchless_capture_policy.observe(self)
         fake_val = self.as_proxy().node.meta["example_value"]
         if (
             isinstance(fake_val, torch.Tensor)
@@ -1168,6 +1173,9 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, VariableBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if tx.output.current_tracer.dispatchless_capture_policy is not None:
+            tx.output.current_tracer.dispatchless_capture_policy.observe(self)
 
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(

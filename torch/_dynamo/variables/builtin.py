@@ -1963,6 +1963,11 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             return SourcelessBuilder.create(tx, object())
 
+        if tx.output.current_tracer.dispatchless_capture_policy is not None:
+            tx.output.current_tracer.dispatchless_capture_policy.observe_call(
+                args, kwargs
+            )
+
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
