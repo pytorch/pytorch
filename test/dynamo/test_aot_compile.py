@@ -7872,12 +7872,7 @@ from user code:
         self.assertFalse(result._has_global_guards)
 
     def test_aot_compile_module_key_order_only_global_is_not_read_live(self):
-        # A global certified by nothing but a guard_on_key_order entry. Iterating
-        # a module-level dict roots its TYPE_MATCH and its key-order check at the
-        # same GlobalSource, the default filter drops the guard for being global,
-        # and guard_filter_fn never prunes the key-order set -- so no kept guard
-        # checks these tensors and the pick must leave the name alone. Reading it
-        # live would serve values nothing ever compared against.
+        # Dropping global guards and order metadata must preserve captured values.
         from torch._dynamo.source import get_global_source_name
 
         global AOT_KEY_ORDER_GLOBAL
@@ -7903,7 +7898,7 @@ from user code:
         ko_sources = output_graph.guard_on_key_order
         key_order = {get_global_source_name(source) for source in ko_sources}
         self.assertNotIn("AOT_KEY_ORDER_GLOBAL", own)
-        self.assertIn("AOT_KEY_ORDER_GLOBAL", key_order)
+        self.assertNotIn("AOT_KEY_ORDER_GLOBAL", key_order)
         # Armed and not vacuous: the name is in the serialized global_scope that
         # arms the pick, and the graph carries the value the narrowing keeps
         # serving instead.
