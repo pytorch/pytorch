@@ -95,13 +95,6 @@ calculate_swa(std::optional<int64_t> window_size_left,
     window_left = WindowValue::BottomRightAligned;
     window_right = WindowValue::BottomRightAligned;
   }
-  // Like FlashAttention, a window that covers every key is unbounded.
-  if (window_size_left.has_value() && *window_size_left >= max_seqlen_k) {
-    window_size_left.reset();
-  }
-  if (window_size_right.has_value() && *window_size_right >= max_seqlen_k) {
-    window_size_right.reset();
-  }
   if (window_size_left.has_value() || window_size_right.has_value()) {
     needs_swa = true;
     // An unbounded left window with right == 0 is plain causal. AOTriton aligns
