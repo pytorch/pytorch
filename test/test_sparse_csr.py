@@ -3731,6 +3731,7 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
         bsr = input.to_sparse_bsr(1)
         self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5989")
     @onlyAccelerator
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
