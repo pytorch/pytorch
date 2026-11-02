@@ -635,6 +635,10 @@ class TestOrderedColDevice(TestCase):
                 trait, "decline", x, out, 1, allow_split=allow_split
             )
         self.assertIsNone(got)
+        # The same view runs as a split plan once allowed.
+        got = ct.reduce_ordered_col(trait, "decline", x, out, 1, allow_split=True)
+        self.assertIsNotNone(got)
+        self.assertIn("ordered_col1", {k[0] for k in ct._CACHE if k[1] == "decline"})
 
     @parametrize("pattern", ["negative_zero", "ties"])
     @parametrize("rows", [2048, 32768])
