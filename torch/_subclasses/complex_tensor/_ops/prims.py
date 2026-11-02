@@ -40,7 +40,11 @@ def conj_impl(self: ComplexTensor) -> ComplexTensor:
 rev_impl = register_simple(prims.rev)
 
 
-INDUCTOR_OPS = [getattr(prims, op) for op in prims if op.startswith(("fft_", "_fft_"))]
+INDUCTOR_OPS = [
+    prims.fft_r2c,
+    prims.fft_c2c,
+    prims.fft_c2r,
+]
 
 for inductor_op in INDUCTOR_OPS:
     globals()[_get_func_name(inductor_op)] = register_force_test(

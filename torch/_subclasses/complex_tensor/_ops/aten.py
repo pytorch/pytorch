@@ -121,12 +121,22 @@ def register_inplace_view(op: OpType) -> Callable[..., Any]:
     """Register an in-place view op, which must also update the wrapper's own metadata."""
 
     def impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
-        re = op(self.re, *args, **kwargs)
+        # Run on aliases first so that an error leaves both components untouched.
+        re = op(aten.alias(self.re), *args, **kwargs)
+        op(aten.alias(self.im), *args, **kwargs)
+        op(self.re, *args, **kwargs)
         op(self.im, *args, **kwargs)
         # Autograd returns `self` for in-place ops, so its sizes/strides must match `re`'s.
+        # The wrapper's storage is synthetic, so use the meta `set_`, which grows it as needed.
         python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
-        with torch._C._ExcludeDispatchKeyGuard(python_key):
-            aten.as_strided_(self, re.shape, re.stride(), re.storage_offset())
+        with (
+            torch._C._ExcludeDispatchKeyGuard(python_key),
+            torch._C._PreserveDispatchKeyGuard(),
+        ):
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            aten.set_.source_Storage_storage_offset(
+                self, self.untyped_storage(), re.storage_offset(), re.shape, re.stride()
+            )
         return self
 
     func_name = _get_func_name(op)
@@ -173,9 +183,52 @@ for simple_op in SIMPLE_FORCE_TESTED_OPS:
 del simple_op
 
 INDUCTOR_OPS = [
-    getattr(aten, op)
-    for op in aten
-    if op.startswith(("fft_", "_fft_", "linalg", "_linalg"))
+    aten._fft_c2c,
+    aten._fft_c2r,
+    aten._fft_r2c,
+    aten._linalg_det,
+    aten._linalg_eigh,
+    aten._linalg_eigvals,
+    aten._linalg_slogdet,
+    aten._linalg_solve_ex,
+    aten._linalg_svd,
+    aten.fft_fft,
+    aten.fft_fft2,
+    aten.fft_fftn,
+    aten.fft_fftshift,
+    aten.fft_hfft,
+    aten.fft_hfft2,
+    aten.fft_hfftn,
+    aten.fft_ifft,
+    aten.fft_ifft2,
+    aten.fft_ifftn,
+    aten.fft_ifftshift,
+    aten.fft_ihfft,
+    aten.fft_ihfft2,
+    aten.fft_ihfftn,
+    aten.fft_irfft,
+    aten.fft_irfft2,
+    aten.fft_irfftn,
+    aten.fft_rfft,
+    aten.fft_rfft2,
+    aten.fft_rfftn,
+    aten.linalg_cholesky_ex,
+    aten.linalg_cross,
+    aten.linalg_eig,
+    aten.linalg_eigvals,
+    aten.linalg_householder_product,
+    aten.linalg_inv_ex,
+    aten.linalg_ldl_factor_ex,
+    aten.linalg_ldl_solve,
+    aten.linalg_lu,
+    aten.linalg_lu_factor_ex,
+    aten.linalg_lu_solve,
+    aten.linalg_matrix_exp,
+    aten.linalg_matrix_sqrth,
+    aten.linalg_polar,
+    aten.linalg_qr,
+    aten.linalg_solve_triangular,
+    aten.linalg_vector_norm,
 ]
 
 for inductor_op in INDUCTOR_OPS:

@@ -48,6 +48,12 @@ SKIPS = {
     Descriptor(op=aten.empty_like, variant=None): "Non-deterministic output",
     Descriptor(op=aten.randn_like, variant=None): "Non-deterministic output",
     Descriptor(
+        op=aten.linalg_polar, variant=None
+    ): "Non-deterministic output, 0+0i has random phase.",
+    Descriptor(
+        op=aten.linalg_matrix_sqrth, variant=None
+    ): "Non-deterministic output, |x| = 0 has multiple sqrt.",
+    Descriptor(
         op=aten.any, variant=Variant.Distributed
     ): "does not have a sharding strategy registered",
     Descriptor(
@@ -206,6 +212,28 @@ class TestComplexTensorGeneric(TestCase):
         xc = ComplexTensor.from_interleaved(c)
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
+
+    def test_as_strided_inplace_beyond_wrapper_storage(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.zeros(10)[:2], torch.zeros(10)[:2])
+        result = xc.as_strided_((10,), (1,))
+
+        self.assertIs(result, xc)
+        self.assertEqual(xc.shape, (10,))
+        self.assertEqual(xc.re.shape, (10,))
+        self.assertEqual(xc.im.shape, (10,))
+
+    def test_as_strided_inplace_error_leaves_components_untouched(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.zeros(10)[:2], torch.zeros(2))
+        with self.assertRaises(RuntimeError):
+            xc.as_strided_((10,), (1,))
+
+        self.assertEqual(xc.shape, (2,))
+        self.assertEqual(xc.re.shape, (2,))
+        self.assertEqual(xc.im.shape, (2,))
 
     def test_interleaved_views_input(self):
         from torch._subclasses.complex_tensor import (
