@@ -601,6 +601,21 @@ class HuggingfaceRunner(BenchmarkRunner):
     def use_model_forward_for_accuracy(self):
         return self.args.hf_inference_mode in ("prefill", "decode")
 
+    def report_eager_latency(self):
+        return self.args.hf_inference_mode in ("prefill", "decode")
+
+    def get_model_metadata(self, example_inputs):
+        if self.args.hf_inference_mode == "generate":
+            return {}
+        prompt = example_inputs["input_ids"]
+        decode = example_inputs.get("decode_ids")
+        return {
+            "batch_size": prompt.shape[0],
+            "phase": self.args.hf_inference_mode,
+            "prompt_length": prompt.shape[1],
+            "decode_length": decode.shape[1] if decode is not None else 0,
+        }
+
     def get_request_tokens(self, example_inputs):
         if self.args.hf_inference_mode == "prefill":
             return {"input_tokens_per_second": example_inputs["input_ids"].numel()}
