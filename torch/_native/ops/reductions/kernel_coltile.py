@@ -774,8 +774,7 @@ class _OrderedColReduce:
             if const_expr(nf > 1):
                 dynamic_false = lane < Int32(0)
                 padding = tuple(
-                    group_vals[0][f] if dynamic_false else ident[f]
-                    for f in range(nf)
+                    group_vals[0][f] if dynamic_false else ident[f] for f in range(nf)
                 )
             if const_expr(plan.shape != "split" or groups > 1):
                 group_vals.extend([padding] * (WARP - groups))
