@@ -39,6 +39,10 @@ _VEC_MAX = 4
 _THREADS_PER_BLOCK = 32
 _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 _ORDERED_WORKER_WARPS = 16
+# Multi-field lane replays roll by this factor. On B200, ordered argmax and var_mean
+# columns compiled in 0.8-1.2s instead of 7.8-8.6s and ran at 0.92-1.06x. Single-field
+# replays stay static: rolled, fp32 sums ran at as little as 0.46x.
+_ORDERED_LANE_UNROLL = 4
 
 
 class ColConfig(NamedTuple):
@@ -310,25 +314,34 @@ class _OrderedColReduce:
                                 [(lane_roots[i],) for i in range(WARP)], op
                             )
                         else:
-                            lane_tree = []
-                            for original_lane in cutlass.range_constexpr(WARP):
-                                tile._streaming_push(
-                                    lane_tree,
-                                    self._lane_root(
-                                        mIn,
-                                        in_base,
-                                        batch,
-                                        col,
-                                        Int32(batch_off + load * WARP * plan.vec)
-                                        + warp * Int32(warp_chunk)
-                                        + Int32(original_lane * plan.vec),
-                                        active,
-                                    ),
-                                    original_lane,
-                                    5,
-                                    op,
+                            lane_roots = [
+                                cute.make_rmem_tensor(
+                                    cute.make_layout(WARP), trait.fdtypes[f]
                                 )
-                            load_root = lane_tree[0]
+                                for f in range(nf)
+                            ]
+                            for original_lane in cutlass.range(
+                                WARP, unroll=_ORDERED_LANE_UNROLL
+                            ):
+                                root = self._lane_root(
+                                    mIn,
+                                    in_base,
+                                    batch,
+                                    col,
+                                    Int32(batch_off + load * WARP * plan.vec)
+                                    + warp * Int32(warp_chunk)
+                                    + Int32(original_lane) * Int32(plan.vec),
+                                    active,
+                                )
+                                for f in cutlass.range_constexpr(nf):
+                                    lane_roots[f][original_lane] = root[f]
+                            load_root = tile._inner_tree_reduce(
+                                [
+                                    tuple(lane_roots[f][i] for f in range(nf))
+                                    for i in range(WARP)
+                                ],
+                                op,
+                            )
                         tile._streaming_push(load_tree, load_root, load, plan.depth, op)
                     slot = warp * Int32(WARP) + lane
                     for f in cutlass.range_constexpr(nf):
