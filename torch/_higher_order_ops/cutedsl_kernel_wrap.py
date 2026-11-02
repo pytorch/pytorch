@@ -14,7 +14,6 @@ never part of the node: the kernel is launched on the current stream when the no
 runs.
 """
 
-import copy
 import dataclasses
 import inspect
 import itertools
@@ -25,11 +24,11 @@ from typing_extensions import Never
 
 import sympy
 
-import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
-    _object_state,
+    constant_contents,
     functional_hop_dense,
     functional_hop_fake,
     functionalize_functional_hop,
@@ -394,6 +393,10 @@ def _may_overlap(a: Tensor, b: Tensor) -> bool:
     )
 
     if a.element_size() == b.element_size():
+        # TODO(zoranzhao): relies on the compute_overlapping_tensors fix in
+        # https://github.com/pytorch/pytorch/pull/202848, which must land first.
+        # Without it, 2-D views whose rows start inside the other's rows, such as
+        # base[:4, :3] and base[1:5, 2:5], are reported disjoint.
         try:
             return bool(compute_overlapping_tensors([a, b]))
         except GuardOnDataDependentSymNode:
@@ -604,8 +607,8 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         raise NotImplementedError("abstract method")
 
     def leaves(self, val: Any) -> list[Any]:
-        """The values inside a container argument (the value itself otherwise);
-        dataclass instances and plain objects are containers (see _object_state)."""
+        """The values inside a container argument (the value itself otherwise):
+        containers are what the side table keys by content (see constant_contents)."""
         raise NotImplementedError("abstract method")
 
     def specialize_nested(self, variable: Any, val: Any) -> Any:
@@ -626,19 +629,6 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         """The wrapper a raw call of ``variable`` is captured through:
         ``wrap_cutedsl(variable.kernel, mutates_args=RAW_CALL_MUTATES_ARGS)``."""
         raise NotImplementedError("abstract method")
-
-    def may_overlap(self, a: Any, b: Any) -> bool:
-        """Whether tensors ``a`` and ``b`` may share memory (see _may_overlap)."""
-        raise NotImplementedError("abstract method")
-
-    def overlapping_args(self, tensors: Mapping[str, Any]) -> tuple[str, str] | None:
-        """The names of the first two of ``tensors`` that may share memory."""
-        items = list(tensors.items())
-        for i, (later, val) in enumerate(items):
-            for earlier, other in items[:i]:
-                if self.may_overlap(other, val):
-                    return earlier, later
-        return None
 
     def call_HOP(  # type: ignore[no-untyped-def]
         self,
@@ -821,20 +811,6 @@ class CuteDSLHOPifier(UserKernelHOPifier):
                     "outside the compiled region; only from_dlpack(tensor) and "
                     "cutlass.torch.current_stream() called inside it are captured"
                 )
-        # Overlapping tensors for two parameters would fail check_written_args_disjoint
-        # in the backend, which cannot fall back to eager; here it is a graph break.
-        overlap = self.overlapping_args(
-            {key: val for key, val in bound.items() if self.is_tensor(val)}
-        )
-        if overlap is not None:
-            earlier, later = overlap
-            self.raise_unsupported(
-                f"{name}(): {earlier!r} and {later!r} are the same tensor or views "
-                "that may overlap, and a raw call counts every tensor as written, "
-                "which PT2 cannot functionalize (one write would be lost); call "
-                f"wrap_cutedsl({name}, mutates_args=[...]) naming only the "
-                "parameters the kernel writes"
-            )
         return bound
 
     def call_cutedsl_kernel(
@@ -861,26 +837,13 @@ class CuteDSLHOPifier(UserKernelHOPifier):
 
 def _contents(value: Any) -> tuple[list[Any], Callable[[list[Any]], Any]] | None:
     """The values directly inside ``value`` and a function that rebuilds it from new
-    ones, for a pytree container or an object the side table keys by its contents
-    (see _object_state); None for any other value, a tensor included."""
-    if isinstance(value, Tensor):
+    ones, for a container the side table keys by content (see constant_contents);
+    None for any other value, a tensor included, even one of a subclass that does not
+    hash."""
+    contents = None if isinstance(value, Tensor) else constant_contents(value)
+    if contents is None:
         return None
-    # One level by hand: tree_flatten would recurse forever into a list holding itself.
-    node = pytree.SUPPORTED_NODES.get(pytree._get_node_type(value))
-    if node is not None:
-        children, context = node.flatten_fn(value)
-        return list(children), lambda new: node.unflatten_fn(new, context)
-    state = _object_state(value)
-    if state is None:
-        return None
-
-    def rebuild(new: list[Any]) -> Any:
-        obj = copy.copy(value)
-        for name, item in zip(state, new):
-            object.__setattr__(obj, name, item)
-        return obj
-
-    return list(state.values()), rebuild
+    return [item for _, _, item in contents.steps], contents.rebuild
 
 
 class TracingCuteDSLHOPifier(CuteDSLHOPifier):
@@ -987,11 +950,6 @@ class TraceableCuteDSLKernelWrapper:
             self.kernel,
             tracing_cutedsl_hopifier_singleton.bind_args(self, args, kwargs),
         )
-
-
-# Imported after every definition: torch._dynamo imports CuteDSLHOPifier and
-# other names from this module.
-from torch._dynamo.utils import ReInplaceTrigger
 
 
 register_user_kernel_hop(
