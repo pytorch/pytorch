@@ -16,7 +16,10 @@ class UserDefinedTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if func in (torch.Tensor.__divmod__, torch.divmod):
+        if func in (
+            torch.Tensor.__divmod__,  # eager mode
+            torch.divmod,  # dynamo mode
+        ):
             cls.intercepted = True
 
         return super().__torch_function__(func, types, args, kwargs)
@@ -174,6 +177,13 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(ret, opt_fn(x, y))
 
+    def test_divmod_scalar_tensor_gradcheck(self):
+        def fn(o):
+            return torch.divmod(torch.tensor(8.0, dtype=torch.double), o)[1]
+
+        x = torch.tensor([5.0, 7.0], requires_grad=True, dtype=torch.double)
+        torch.autograd.gradcheck(fn, (x,))
+
     def test_divmod_tensor_scalar(self):
         def fn(x):
             return divmod(x, 2), divmod(2, x)
@@ -189,15 +199,15 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
         def fn(x):
             return divmod(8, x)
 
-        x = 2
-        qt, rt = torch.compile(
-            fn,
-            backend="inductor",
-            fullgraph=True,
-        )(torch.as_tensor(x))
-        q, r = fn(x)
-        self.assertEqual(torch.as_tensor(q), qt)
-        self.assertEqual(torch.as_tensor(r), rt)
+        for x in [2, torch.tensor([2.0, 3.0])]:
+            qt, rt = torch.compile(
+                fn,
+                backend="inductor",
+                fullgraph=True,
+            )(torch.as_tensor(x))
+            q, r = fn(x)
+            self.assertEqual(torch.as_tensor(q), qt)
+            self.assertEqual(torch.as_tensor(r), rt)
 
     def test_divmod_compile_subclass_preserve_type(self):
         x, y = (
