@@ -413,6 +413,10 @@ std::vector<rocprofiler_agent_v0_t> get_gpu_device_agents() {
 }
 } // namespace
 
+bool RocprofLogger::isMemsetOrCopyApi(uint32_t id) {
+  return isMemsetApi(id) || isCopyApi(id);
+}
+
 //
 // Static setup
 //

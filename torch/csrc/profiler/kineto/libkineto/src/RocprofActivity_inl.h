@@ -224,10 +224,8 @@ inline bool RuntimeActivity<T>::flowStart() const {
       raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipExtModuleLaunchKernel ||
       raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipMalloc ||
       raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipFree ||
-      raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy ||
-      raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync ||
-      raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyWithStream ||
-      raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphLaunch;
+      raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphLaunch ||
+      RocprofLogger::isMemsetOrCopyApi(raw().cid);
   return should_correlate;
 }
 

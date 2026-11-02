@@ -5631,6 +5631,25 @@ class TestMetadataJsonFormatCUDA(TestCase):
             if act.type() == "kernel":
                 self.assertNotIn("__amd_rocclr_", act.name())
 
+    def test_runtime_memsets_have_flows(self):
+        # The memset API call must start an async CPU->GPU flow that ends on
+        # each of its gpu_memset events.
+        x = torch.empty(1024, device="cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x.zero_()
+            torch.cuda.synchronize()
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                events = json.load(f)["traceEvents"]
+        flows = {(e["ph"], e["id"]) for e in events if e.get("cat") == "ac2g"}
+        memsets = [e for e in events if e.get("cat") == "gpu_memset"]
+        self.assertTrue(memsets, "expected a gpu_memset event")
+        for e in memsets:
+            correlation = e["args"]["correlation"]
+            self.assertIn(("s", correlation), flows)
+            self.assertIn(("f", correlation), flows)
+
     def test_metadata_json_key_value_format(self):
         md = self._get_kernel_metadata()
         # Verify the ": " (colon-space) separator convention that string

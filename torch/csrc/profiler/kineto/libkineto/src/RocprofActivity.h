@@ -13,6 +13,7 @@
 #include "GenericTraceActivity.h"
 #include "ITraceActivity.h"
 #include "MetadataFieldCatalog.h"
+#include "RocmStreamQueue.h"
 #include "RocprofLogger.h"
 #include "ThreadUtil.h"
 
@@ -86,27 +87,7 @@ struct GpuActivity : public RocprofActivity<rocprofAsyncRow> {
       const rocprofAsyncRow* activity,
       const ITraceActivity* linked)
       : RocprofActivity(activity, linked) {
-    switch (activity_.domain) {
-      case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
-        type_ = ActivityType::GPU_MEMCPY;
-        break;
-      case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
-      default:
-        // Kernels dispatched to implement a HIP memset/memcpy API call are
-        // memsets/memcpies, not kernels.
-        switch (activity_.internalApi) {
-          case RocLogger::RuntimeInternalMemset:
-            type_ = ActivityType::GPU_MEMSET;
-            break;
-          case RocLogger::RuntimeInternalMemcpy:
-            type_ = ActivityType::GPU_MEMCPY;
-            break;
-          default:
-            type_ = ActivityType::CONCURRENT_KERNEL;
-            break;
-        }
-        break;
-    }
+    type_ = detail::asyncActivityType(activity_);
   }
   // A dispatch retyped as a memcpy reports the copy direction strings.
   uint32_t memcpyKindDomain() const {
