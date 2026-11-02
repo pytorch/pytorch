@@ -851,16 +851,17 @@ def _check_helper_call_inputs(where: str, inputs: Sequence[NamedArgument]) -> No
         _check_operator_name(where, inp)
 
 
-def _check_flat_apply_operators(
+def _check_operator_inputs(
     where: str,
     inputs: Sequence[NamedArgument],
     args: Sequence[Any],
     kwargs: dict[str, Any],
 ) -> None:
     """
-    Save and load both refuse operator inputs other than operator overloads.
-    Each input is matched with its value as ``deserialize_hoo_inputs`` splits
-    the inputs into args and kwargs.
+    Save and load both refuse operator inputs other than operator overloads, in
+    flat_apply calls and in direct calls of the helper. Each input is matched
+    with its value as ``deserialize_hoo_inputs`` splits the inputs into args
+    and kwargs.
     """
     positional = iter(args)
     for inp in inputs:
@@ -879,6 +880,22 @@ def _check_flat_apply_operators(
             f"{where} has an operator input that is not an operator overload: "
             f"{inp.arg.as_operator}"
         )
+
+
+def _check_helper_call_values(
+    where: str,
+    inputs: Sequence[NamedArgument],
+    args: Sequence[Any],
+    kwargs: dict[str, Any],
+) -> None:
+    """
+    The checks of a direct call of the helper that need its args and kwargs.
+    Save and load both run them after ``_check_helper_call_inputs``. The helper
+    imports the module of the class it gets by name when the program runs, so
+    the class is found first.
+    """
+    _check_operator_inputs(where, inputs, args, kwargs)
+    _find_autograd_function(args[0] if args else None)
 
 
 def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
@@ -1322,15 +1339,11 @@ class GraphModuleSerializer(metaclass=Final):
                 node.target
                 is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             ):
-                # Load checks the call as it checks flat_apply, see
+                # Load checks the call with the same functions, see
                 # deserialize_node.
                 where = f"node {node.name}"
                 _check_helper_call_inputs(where, inputs)
-                _check_flat_apply_operators(where, inputs, node.args, node.kwargs)
-                try:
-                    _find_autograd_function(node.args[0] if node.args else None)
-                except SerializeError as e:
-                    raise SerializeError(f"Cannot serialize {where}: {e}") from e
+                _check_helper_call_values(where, inputs, node.args, node.kwargs)
             ex_node = Node(
                 name=node.name,
                 target=self.serialize_operator(node.target),
@@ -1606,7 +1619,7 @@ class GraphModuleSerializer(metaclass=Final):
             )
         flat_inputs = self.serialize_hoo_inputs(flat_args, node.kwargs)
         _check_flat_apply_inputs(f"flat_apply node {node.name}", flat_inputs)
-        _check_flat_apply_operators(
+        _check_operator_inputs(
             f"flat_apply node {node.name}", flat_inputs, flat_args, node.kwargs
         )
         return [
@@ -3133,14 +3146,14 @@ class GraphModuleDeserializer(metaclass=Final):
                 is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             )
             where = f"node {serialized_node.name}"
+            # The inputs are checked before they are deserialized, because
+            # looking up an operator name outside torch.ops can import a torch
+            # module.
             if helper:
                 _check_helper_call_inputs(where, serialized_node.inputs)
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             if helper:
-                _check_flat_apply_operators(where, serialized_node.inputs, args, kwargs)
-                # The helper would import the module of the class it gets by
-                # name when the program runs, so load finds the class first.
-                _find_autograd_function(args[0] if args else None)
+                _check_helper_call_values(where, serialized_node.inputs, args, kwargs)
             name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
@@ -3540,7 +3553,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"has {in_spec.num_leaves} leaves"
             )
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
-        _check_flat_apply_operators(where, flat_inputs, args, kwargs)
+        _check_operator_inputs(where, flat_inputs, args, kwargs)
         func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []
