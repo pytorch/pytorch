@@ -30,6 +30,142 @@ class Payload:
 
 
 class DispatchlessTest(PytreeRegisteringTestCase):
+    def trace_for_tensor_checks(self, fn, x, execution):
+        if execution == "dynamo":
+            return torch.compile(fn, backend="eager", fullgraph=True)(x)
+        if execution == "pre_dispatch":
+            return make_fx(fn, pre_dispatch=True)(x)
+        return make_fx(fn, tracing_mode=execution)(x)
+
+    @parametrize("execution", ["real", "fake", "symbolic", "pre_dispatch", "dynamo"])
+    @parametrize("mutation", ["inplace", "view", "out", "foreach", "metadata"])
+    def test_rejects_input_mutation(self, execution, mutation):
+        @dispatchless_custom_op
+        def op(payload):
+            x = payload["x"][0]
+            if mutation == "inplace":
+                x.add_(1)
+            elif mutation == "view":
+                x.view(-1).add_(1)
+            elif mutation == "out":
+                torch.add(x, 1, out=x)
+            elif mutation == "foreach":
+                torch._foreach_add_([x], 1)
+            else:
+                x.transpose_(0, 1)
+            return x.sin()
+
+        def fn(x):
+            return op({"x": [x]})
+
+        x = torch.arange(6.0).reshape(2, 3)
+        original = x.clone()
+        original_stride = x.stride()
+        with self.assertRaisesRegex(RuntimeError, "must not mutate input tensors"):
+            self.trace_for_tensor_checks(fn, x, execution)
+        self.assertEqual(x, original)
+        self.assertEqual(x.stride(), original_stride)
+
+    @parametrize("execution", ["real", "fake", "symbolic", "pre_dispatch", "dynamo"])
+    @parametrize("alias", ["input", "input_view", "duplicate_output", "output_view"])
+    def test_rejects_output_aliases(self, execution, alias):
+        @dispatchless_custom_op
+        def op(x):
+            if alias == "input":
+                return {"value": [x]}
+            if alias == "input_view":
+                return {"value": [x.view(-1)]}
+            y = x.sin()
+            return {"value": [y, y if alias == "duplicate_output" else y.view(-1)]}
+
+        x = torch.randn(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "must not alias inputs or other outputs"):
+            self.trace_for_tensor_checks(op, x, execution)
+
+    @parametrize("execution", ["real", "fake", "symbolic", "pre_dispatch", "dynamo"])
+    @parametrize("size", [0, 4])
+    def test_allows_local_mutation_and_repeated_inputs(self, execution, size):
+        @dispatchless_custom_op
+        def inner(x, y):
+            result = x.clone()
+            result.add_(y)
+            return result.view(-1)
+
+        @dispatchless_custom_op
+        def outer(payload):
+            x, y = payload
+            return {"result": inner(x, y), "other": x.clone(), "constant": None}
+
+        def fn(x):
+            return outer([x, x])
+
+        x = torch.arange(float(size))
+        result = self.trace_for_tensor_checks(fn, x, execution)
+        if execution != "dynamo":
+            result = result(x)
+        self.assertEqual(result, {"result": x * 2, "other": x, "constant": None})
+        self.assertEqual(x, torch.arange(float(size)))
+
+    def test_eager_does_not_check_tensor_purity(self):
+        @dispatchless_custom_op
+        def op(x):
+            return x.add_(1)
+
+        x = torch.zeros(3)
+        self.assertIs(op(x), x)
+        self.assertEqual(x, torch.ones(3))
+
+    @parametrize("execution", ["real", "fake", "pre_dispatch", "dynamo"])
+    def test_inference_tensor_mutation_diagnostic(self, execution):
+        @dispatchless_custom_op
+        def op(x):
+            x.add_(1)
+            return x.sin()
+
+        with torch.inference_mode():
+            x = torch.zeros(3)
+            with self.assertRaisesRegex(RuntimeError, "must not mutate input tensors"):
+                self.trace_for_tensor_checks(op, x, execution)
+            self.assertEqual(x, torch.zeros(3))
+
+    @parametrize("execution", ["real", "fake", "pre_dispatch", "dynamo"])
+    def test_tensor_checks_allow_nested_higher_order_operator(self, execution):
+        from torch._higher_order_ops.cond import cond_op
+
+        @dispatchless_custom_op
+        def op(x):
+            return cond_op(x.sum() > 0, torch.sin, torch.cos, (x,))
+
+        x = torch.ones(3)
+        result = self.trace_for_tensor_checks(op, x, execution)
+        if execution != "dynamo":
+            self.assertEqual(result(-x), (-x).cos())
+            result = result(x)
+        self.assertEqual(result, x.sin())
+
+    @parametrize("tracing_mode", ["real", "fake"])
+    def test_tensor_checks_allow_sparse_inputs(self, tracing_mode):
+        @dispatchless_custom_op
+        def op(x):
+            return x.clone()
+
+        x = torch.sparse_coo_tensor([[0, 1], [1, 0]], [2.0, 3.0], (2, 2))
+        gm = make_fx(op, tracing_mode=tracing_mode)(x)
+        self.assertEqual(gm(x), x)
+
+    @parametrize("execution", ["real", "fake", "symbolic", "pre_dispatch", "dynamo"])
+    def test_factory_output_alias_diagnostic(self, execution):
+        @dispatchless_custom_op
+        def op():
+            x = torch.zeros(3)
+            return {"first": x, "second": [x]}
+
+        def fn(unused):
+            return op()
+
+        with self.assertRaisesRegex(RuntimeError, "must not alias inputs or other outputs"):
+            self.trace_for_tensor_checks(fn, torch.zeros(1), execution)
+
     @parametrize("pre_dispatch", [False, True])
     def test_nested_and_disabled_proxy_modes(self, pre_dispatch):
         @dispatchless_custom_op
