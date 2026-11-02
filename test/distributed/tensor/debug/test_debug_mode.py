@@ -32,8 +32,9 @@ from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     parametrize,
-    requires_accelerator,
     run_tests,
+    TEST_CUDA,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -203,7 +204,7 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
-@requires_accelerator
+@unittest.skipUnless(TEST_CUDA or TEST_XPU, "requires CUDA or XPU")
 class TestDTensorDebugMode(TestCase):
     @classmethod
     def setUpClass(cls):

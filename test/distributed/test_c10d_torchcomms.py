@@ -9,13 +9,15 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
     parametrize,
     run_tests,
-    skipIfXpu,
     subtest,
     TestCase,
 )
@@ -234,9 +236,10 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             wait_all_ranks=True,
         )
 
-    @skipIfXpu(
-        msg="a subgroup new_group() makes later new_group() calls hang under torchcomms: "
-        "https://github.com/intel/torch-xpu-ops/issues/6001"
+    @skipXPUIf(
+        True,
+        "a subgroup new_group() makes later new_group() calls hang under torchcomms: "
+        "https://github.com/intel/torch-xpu-ops/issues/6001",
     )
     def test_new_group_delegates_to_split_group(self):
         # Under torchcomms, `new_group` routes through `split_group`. The
@@ -278,9 +281,10 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    @skipIfXpu(
-        msg="ProcessGroupXCCL.Options has no config knobs equivalent to "
-        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385"
+    @skipXPUIf(
+        True,
+        "ProcessGroupXCCL.Options has no config knobs equivalent to "
+        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
     )
     def test_new_group_with_pg_options(self):
         self._skip_if_cpu()
@@ -293,9 +297,10 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    @skipIfXpu(
-        msg="ProcessGroupXCCL.Options has no config knobs equivalent to "
-        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385"
+    @skipXPUIf(
+        True,
+        "ProcessGroupXCCL.Options has no config knobs equivalent to "
+        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
     )
     def test_new_group_sequential_pg_options_produce_distinct_groups(self):
         self._skip_if_cpu()
