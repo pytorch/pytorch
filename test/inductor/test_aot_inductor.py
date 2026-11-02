@@ -381,28 +381,23 @@ class AOTInductorTestsTemplate:
                 torch.randn(2048, 8, device=self.device, dtype=torch.float16) / 8,
             )
 
-        def select_decompose_k(choices):
-            selected = [c for c in choices if c.name.startswith("decompose_k_mm")]
-            return selected or choices
-
         configs = {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
             "triton.decompose_k_threshold": 0,
             "triton.num_decompose_k_splits": 2,
             "triton.autotune_at_compile_time": autotune_at_compile_time,
+            # The decompose_k subgraph lowers its own bmm, which the regex must keep.
+            "test_configs.autotune_choice_name_regex": r"^(decompose_k_mm|bmm)",
         }
         dynamic_shapes = ({0: Dim("m", min=2, max=32)}, None, None) if dynamic else None
-        selector = get_algorithm_selector_cache()
-        preprocessing_fns = [*selector.preprocessing_fns, select_decompose_k]
         inputs = make_inputs(16)
         get_k_splits.cache_clear()
         use_decompose_k_choice.cache_clear()
         try:
-            with patch.object(selector, "preprocessing_fns", preprocessing_fns):
-                package_path, code = run_and_get_cpp_code(
-                    AOTIRunnerUtil.compile, Model(), inputs, configs, dynamic_shapes
-                )
+            package_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), inputs, configs, dynamic_shapes
+            )
         finally:
             get_k_splits.cache_clear()
             use_decompose_k_choice.cache_clear()
@@ -432,6 +427,10 @@ class AOTInductorTestsTemplate:
             torch.randn(48, device=self.device, dtype=torch.float16),
         )
 
+        # Unlike test_decompose_k, autotune_choice_name_regex cannot pin this: it
+        # applies to every autotuned op, and the transform's subgraph lowers the
+        # same op, which offers no contiguous_ choice. So keep the contiguous
+        # choice only where it is offered.
         def select_contiguous(choices):
             selected = [c for c in choices if c.name.startswith(f"contiguous_{op}")]
             return selected or choices
