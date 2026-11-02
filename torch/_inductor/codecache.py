@@ -3005,7 +3005,9 @@ class AotCodeCompiler:
             # n.b.. this file can be multiple megabytes, so don't replace this
             # with anything that is slow or uses lots of memory copy operations.
             def _quick_format_array_to_string(data: bytes | bytearray) -> str:
-                return ",\n".join(str(batch).strip("()") for batch in itertools.batched(data,16))
+                return ",\n".join(
+                    str(batch).strip("()") for batch in itertools.batched(data, 16)
+                )
 
             
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
