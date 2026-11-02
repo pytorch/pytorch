@@ -1274,6 +1274,13 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 code.writeline_jit(
                     f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
                 )
+                # After the guard, so it records the thread's device before the
+                # bind and restores it on exit. Later guards that switch devices
+                # bind the new device's context themselves.
+                ensure_context = V.graph.device_ops.cpp_ensure_current_context
+                if aot_bind := ensure_context("this->device_idx_"):
+                    code.writeline_aot(aot_bind)
+                    code.writeline_jit(ensure_context(str(self.device_idx)))
             else:
                 if V.graph.aot_mode:
                     # AOTI emits a single stream_guard on first use; later

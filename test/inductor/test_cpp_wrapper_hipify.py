@@ -65,10 +65,10 @@ class TestCppWrapperHipify(TestCase):
             // loadKernel/launchKernel use the driver API, which needs a current
             // context. A thread whose first CUDA work is this wrapper has none
             // (e.g. autograd's device threads: the device guard skips setting a
-            // device that already matches), so the entry function binds the
-            // device's primary context, as Triton's launcher does. Guards that
-            // switch devices bind the new device's context themselves. Driver
-            // API only: the fbcode JIT build does not link the CUDA runtime.
+            // device that already matches), so the wrapper binds the device's
+            // primary context after its first device guard, as Triton's
+            // launcher does. Driver API only: the fbcode JIT build does not
+            // link the CUDA runtime.
             static inline void ensureCurrentContext(int device) {
             #ifndef USE_ROCM
                 hipCtx_t ctx;
