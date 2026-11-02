@@ -215,7 +215,6 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "test_determination",
     "test_jit_legacy",
     "test_jit_cuda_fuser",
     "distributed/pipelining/test_dtensor_pp_integration",
@@ -380,7 +379,6 @@ CORE_TEST_LIST = [
     "test_ops_jit",
     "test_torch",
 ]
-
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
