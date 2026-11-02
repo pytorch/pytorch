@@ -151,7 +151,6 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _post_grad_graph_counter = itertools.count()
-_jit_autotune_first_pass_counter = itertools.count()
 
 if config.is_fbcode():
     from torch._inductor.fb.triton_kernel_metadata import (
@@ -2985,9 +2984,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # The JIT wrapper keeps lazy kernel state in function-local statics.
         # Compile a fresh wrapper for each first pass so autotuning always reruns.
-        # id(self) is not unique: a later graph can reuse a freed graph's id.
-        first_pass_id = next(_jit_autotune_first_pass_counter)
-        cpp_source += f"\n// AOTI lazy autotune first pass: {first_pass_id}\n"
+        # Not id(self): a later graph can reuse a freed graph's id.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {self.post_grad_graph_id}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
 
