@@ -104,6 +104,8 @@ class FlyDSLScheduling(BaseScheduling):
                     raise NotImplementedError(
                         "FlyDSL AOT requires static tensor metadata"
                     )
+                if template_name is None:
+                    raise AssertionError("FlyDSL AOT template name is required")
                 from .aot_backend import (
                     compile_flydsl_external_source,
                     register_flydsl_external_artifact,
