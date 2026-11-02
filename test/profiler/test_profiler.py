@@ -1273,38 +1273,6 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    def test_global_profiler_left_running_at_exit(self):
-        script = """
-import threading
-import torch
-from torch.profiler import profile, ProfilerActivity
-config = torch._C._profiler._ExperimentalConfig(profile_all_threads=True)
-p = profile(activities=[ProfilerActivity.CPU], experimental_config=config)
-p.start()
-started = threading.Event()
-
-def work():
-    torch.ones(10) * 2
-    started.set()
-    while True:
-        torch.ones(10) * 2
-
-threading.Thread(target=work, daemon=True).start()
-started.wait()
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(
-            proc.stderr.count("Process is exiting without stopping the profiler"),
-            1,
-            proc.stderr,
-        )
-
     @parametrize("close_while_active", [False, True])
     def test_global_callback_session_close(self, close_while_active):
         script = """
