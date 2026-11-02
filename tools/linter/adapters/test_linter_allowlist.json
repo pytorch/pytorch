@@ -322,7 +322,6 @@
   "test/export/test_export_opinfo.py",
   "test/export/test_nativert.py",
   "test/export/test_serialize.py",
-  "test/functorch/dim/test_getsetitem.py",
   "test/functorch/dim/test_split.py",
   "test/functorch/test_ac.py",
   "test/functorch/test_ac_knapsack.py",
