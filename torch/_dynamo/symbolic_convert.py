@@ -1840,7 +1840,8 @@ class InstructionTranslatorBase(
 
         if (
             not self.stack
-            # Entry RESUME does no user work; defer to the next unprotected instruction.
+            # Entry RESUME does no user work; defer only to an unprotected immediate successor.
+            # A protected successor cannot checkpoint, so retain this frame's entry checkpoint.
             and not (
                 inst.opname == "RESUME"
                 and inst.arg == 0
@@ -5976,12 +5977,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"Avoid calling the function `{fn_qualname}`.",
             ]
             if "_dynamo" not in func.get_filename():
-                hints += [
-                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
-                    "to force tracing into the function. "
-                    "More graph breaks may occur as a result of attempting to trace into the function.",
-                    "Please file an issue to PyTorch.",
-                ]
+                if not trace_rules.is_weakref_finalize_registry_code(func.get_code()):
+                    hints.append(
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function."
+                    )
+                hints.append("Please file an issue to PyTorch.")
             unimplemented(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
