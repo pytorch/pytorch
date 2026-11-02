@@ -29,11 +29,13 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
+from .utils import clear_on_fresh_cache
 from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from .autotune_process import TuningProcess
+    from .autotune_process import TensorMeta, TuningProcess
+    from .select_algorithm import ExternKernelCaller
 
 
 log = logging.getLogger(__name__)
@@ -81,6 +83,7 @@ _REUSE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0"),
 )
+_NO_FILE_ENV = (("PYTORCH_TUNABLEOP_FILENAME", ""),)
 _env_warned: OrderedSet[str] = OrderedSet()
 _warned_faults: OrderedSet[str] = OrderedSet()
 
@@ -103,7 +106,7 @@ def _warn_if_env_blocks(
     if blocking and kind not in _env_warned:
         _env_warned.add(kind)
         log.warning(
-            "TunableOp %s: %s overrides the flags the worker sets. Unset it.",
+            "TunableOp %s: %s is set in the environment. Unset it.",
             consequence,
             " and ".join(blocking),
         )
@@ -254,8 +257,9 @@ class BenchmarkJob:
         tunable._record_borrowed_enable(self.record_borrowed)
         for name, value in settings.items():
             getattr(tunable, name)(value)
-        # benchmark_run_fn captures if either is set, and tuning cannot run
-        # under capture.
+        # TunableOp cannot tune under CUDA-graph capture, and benchmark_run_fn
+        # captures if either flag is set. Cleared here, the one place every
+        # job passes through.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
 
@@ -391,7 +395,13 @@ def _shutdown_locked(graceful: bool = True) -> None:
 
 
 def _insert_device_ordinal(filename: str, device: int) -> str:
-    """Mirror of TuningContext::SetFilename(filename, insert_device_ordinal=true)."""
+    """Mirror of TuningContext::SetFilename(filename, insert_device_ordinal=true).
+
+    Copied, not delegated: the C++ takes the ordinal from current_device(), so
+    letting it derive the name would mean switching the parent to the job's
+    device here and creating a context on it inside the lock -- the work the
+    worker exists to keep out of the parent.
+    """
     if not filename:
         # SetFilename returns early on an empty name, which is how an empty
         # PYTORCH_TUNABLEOP_FILENAME turns persistence off. Appending an
@@ -564,9 +574,11 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         with _worker_lock:
             # Under the lock: two threads must not pin different filenames.
             filename = _resolve_and_pin_filename_locked(device)
-            if not filename and "no-file" not in _env_warned:
-                _env_warned.add("no-file")
-                log.warning("No TunableOp results file; nothing is persisted.")
+            if not filename:
+                _warn_if_env_blocks(
+                    _NO_FILE_ENV,
+                    "has no results file, so nothing is recorded or reused",
+                )
             stamped = _StampedJob(job, device, filename, settings)
             worker = _get_worker_locked((device, filename))
             try:
@@ -612,71 +624,188 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     return Outcome(float(value), "ok")
 
 
-# Per-process record of laddered GEMMs: (kernel name, traced input/output meta
-# signatures, worker scope). A transformer with N identical layers would
-# otherwise run the whole ladder N times, and again on every recompile;
-# TunableOp turns repeat signatures into lookups, but each submission still
-# pickles a job, materializes full-size tensors in the worker and runs the
-# benchmark loop. Cleared with the other inductor caches (fresh_cache).
+# Tuned ladder BUCKETS, keyed per bucket so a run that stops part-way leaves
+# the rest for the next one. Without it a model with N identical layers
+# resubmits every bucket N times. Cleared with fresh_cache.
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
+        # Buckets that faulted, and how often: a rung that hangs never
+        # reaches `seen`, so without this every layer retries it.
+        self.failed: dict[Any, int] = {}
 
     def cache_clear(self) -> None:
         self.seen.clear()
+        self.failed.clear()
 
 
-try:
-    from torch._inductor.utils import clear_on_fresh_cache
+_pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 
-    _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
-except Exception:
-    _pretuned_gemms = _PretunedGemms()
+# Attempts a faulting bucket gets per process. One retry covers a transient
+# fault; more lets a reproducible hang charge the budget once per layer.
+_TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
 
-# ExternKernelChoice names (winner.choice.name) the ladder covers. Matched by
-# string so a double import of the kernel modules cannot break the match.
-# _int_mm / sparse semi-structured variants are not hipBLASLt-tunable.
-# bias_addmm is excluded: it is only chosen for broadcast (stride-0) bias
-# (kernel/mm.py), which the density guard below rejects -- and correctly so,
-# since rebuilding its metas densely would tune a layout runtime never asks
-# for.
+# Least budget worth giving a bucket. Below this a timeout says more about the
+# deadline than the rung, and it would kill the worker and charge a fault.
+_TUNABLEOP_MIN_BUCKET_BUDGET = 60.0
+
+# ExternKernelChoice names the ladder covers. bias_addmm rewrites its own bias
+# (inp[0]) first, so the rebuilt meta is not what aten gets; addmm_dtype is
+# ROCm-only, hard-erroring on the CUDA cublasLt path (cuda/Blas.cpp).
 _TUNABLEOP_GEMM_CHOICES = frozenset(
-    OrderedSet(
-        [
-            "mm",
-            "mm_dtype",
-            "addmm",
-            "addmm_dtype",
-            "bmm",
-            "bmm_dtype",
-            "baddbmm",
-            "_scaled_mm",
-            "_scaled_mm_v2",
-        ]
-    )
+    [
+        "mm",
+        "mm_dtype",
+        "addmm",
+        "bmm",
+        "bmm_dtype",
+        "baddbmm",
+        "_scaled_mm",
+        "_scaled_mm_v2",
+        *(["addmm_dtype"] if torch.version.hip is not None else []),
+    ]
 )
 
 # Smallest dim worth its own tuning job. Applied to the dim, not to the symbol:
 # for an expression dim the smallest symbol values already yield substantial GEMMs.
 _TUNABLEOP_MIN_DYN_DIM = 8
 
-# Largest single operand the ladder will materialize, in bytes. The dim ceiling
-# bounds the dynamic dim, not the problem size: a bmm with dynamic batch at dim
-# 16384 and K = N = 4096 fp16 is 512 GiB per operand. Largest-first order would
-# submit those first, and each fault can cost a cold worker restart.
+# Cap on a bucket's total footprint: every operand plus the output, allocated
+# at once. The dim ceiling bounds the dynamic dim, not the problem size -- a
+# bmm with batch 16384 and K = N = 4096 fp16 is 512 GiB in one operand.
 _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 
-# Ceiling on the SYMBOL, not the dim. A declared range reports what a symbol MAY
-# take, not what it does: every symbol here reports [2, 2**31-1], so the ladder ran
-# to the old dim ceiling of 65536 for every GEMM -- 64x the traced hint on one model
-# and 4096x on another. Capping in symbol space also leaves an expression dim like
-# 200*s free to reach the size it is actually served at, which a dim-space ceiling
-# truncated: one GEMM served a dim of 294912 while its ladder stopped at 49152.
-# Expression dims are bounded instead by the served-dim ceiling below.
+# Ceiling on the SYMBOL, not the dim: a declared range says what a symbol MAY
+# take (every one here reports [2, 2**31-1]), so without a cap the ladder runs
+# orders of magnitude past the hint. In symbol space an expression dim like
+# 200*s can still reach its served size; the dim ceiling below bounds those.
 _TUNABLEOP_MAX_DYN_SYM = 16384
 
 
-def maybe_range_pretune(winner) -> None:
+def _has(expr: Any, s: sympy.Symbol) -> bool:
+    return s in getattr(expr, "free_symbols", ())
+
+
+def _as_buffer(node: Any) -> Any:
+    """A Layout wrapped so it answers get_size/get_stride like a Buffer.
+
+    Same wrapping TensorMeta.from_irnodes does; a bare Layout has neither.
+    """
+    return ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
+
+
+def _meta_sig(m: Any) -> Any:
+    """A rebuilt meta as a hashable key: dtype, sizes, strides."""
+    return (str(m.dtype), tuple(m.sizes), tuple(m.strides))
+
+
+def _declared(expr: Any) -> tuple[int | None, int | None]:
+    """(lower, upper) from ShapeEnv, each None when unbounded or symbolic.
+
+    This range is the ladder's domain. It ignores guards and runtime asserts so
+    it can be looser than the true bound, which is the safe direction:
+    under-covering means a runtime miss.
+    """
+    try:
+        vr = V.graph.sizevars.shape_env.bound_sympy(expr)
+    except (AttributeError, TypeError, ValueError, KeyError):
+        # No shape env, or an expression bound_sympy cannot evaluate. Unbacked
+        # symbols do have a range here, through var_to_range.
+        return None, None
+    lo = hi = None
+    try:
+        if vr.lower != -int_oo and vr.lower != -sympy.oo:
+            lo = int(vr.lower)
+    except (TypeError, ValueError):  # symbolic bound
+        pass
+    try:
+        if vr.upper != int_oo and vr.upper != sympy.oo:
+            hi = int(vr.upper)
+    except (TypeError, ValueError):  # symbolic bound
+        pass
+    return lo, hi
+
+
+def _eval_at(expr: Any, sym_val: int, s: sympy.Symbol) -> int:
+    """Value of a size expression with the dynamic symbol set to sym_val."""
+    if isinstance(expr, sympy.Expr) and expr.free_symbols:
+        return int(V.graph.sizevars.optimization_hint(expr.subs(s, sym_val)))
+    return int(expr)
+
+
+def _is_densely_packed(node: Any) -> bool:
+    """Traced strides are the dense strides for the traced sizes.
+
+    _meta_at recomputes strides densely, so a padded operand would be tuned at
+    the wrong leading dimension -- [s, 256] strided [300, 1] becomes [256, 1].
+    TunableOp keys on ld, so such an entry can never match the runtime call,
+    and the nearest matcher will not borrow across a padded ld either.
+    """
+    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
+
+    sizevars = V.graph.sizevars
+    n = _as_buffer(node)
+    real_strides = [
+        int(x)
+        for x in sizevars.optimization_hints(get_strides_with_layout_constraints(n))
+    ]
+    real_sizes = [int(x) for x in sizevars.optimization_hints(n.get_size())]
+    order = ir.get_stride_order(real_strides)
+    dense = [int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)]
+    # A size-1 dim's stride is arbitrary: [1, 1] and [N, 1] describe the same
+    # layout for [1, N]. Comparing those positions rejects valid operands --
+    # notably rowwise _scaled_mm scales, where scale_b is w_scale.t().
+    return all(
+        rs == ds for rs, ds, sz in zip(real_strides, dense, real_sizes) if sz != 1
+    )
+
+
+def _meta_at(node: Any, sym_val: int, s: sympy.Symbol) -> TensorMeta:
+    """The node's TensorMeta with the dynamic symbol set to sym_val.
+
+    Substitutes into the SIZE expressions only, then recomputes dense strides: a
+    stride expression is not a size-product formula in the symbol, and a
+    bare-symbol batch stride would collapse to the bucket value instead of
+    value * inner_dims. The stride ORDER comes from the traced real-size
+    strides, since small-bucket strides can reorder dims and silently turn a
+    plain GEMM into a transposed one.
+    """
+    from torch._inductor.autotune_process import TensorMeta as _TensorMeta
+    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
+
+    n = _as_buffer(node)
+    sizes = [_eval_at(sz, sym_val, s) for sz in n.get_size()]
+    traced = V.graph.sizevars.optimization_hints(get_strides_with_layout_constraints(n))
+    if any(st == 0 for st in traced):
+        # A broadcast operand -- only the exempt bias reaches here, the density
+        # guard rejects the rest. Its stride-0 dims tie, so the inferred order
+        # is arbitrary; fall back to natural contiguous.
+        strides = [int(x) for x in ir.FlexibleLayout.contiguous_strides(sizes)]
+    else:
+        order = ir.get_stride_order(traced)
+        strides = [int(x) for x in ir.FlexibleLayout.stride_ordered(sizes, order)]
+    return _TensorMeta(
+        device=n.get_device(),
+        dtype=n.get_dtype(),
+        sizes=sizes,
+        strides=strides,
+        offset=0,
+        name=n.get_name(),
+    )
+
+
+def _meta_bytes(m: Any) -> float:
+    # inf, not 0: a size we cannot compute must fail the cap, not pass it.
+    try:
+        numel = 1
+        for d in m.sizes:
+            numel *= int(d)
+        return numel * m.dtype.itemsize
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return float("inf")
+
+
+def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     """Tune a dynamic-shape GEMM at a range of sizes of its dynamic dim.
 
     TunableOp keys a solution on an exact shape signature, so tuning only the
@@ -689,26 +818,29 @@ def maybe_range_pretune(winner) -> None:
     entries are always recorded concrete -- the mask is deliberately not carried
     into the jobs.
     """
-    import torch._inductor.select_algorithm as sa
-
     if not is_tune_mode():
         return
-    if not config.cuda.aten_tunableop_ladder:
-        # Traced shape only; the normal autotune path still tunes each aten
-        # candidate at the shape it was traced at.
+    if not config.cuda.autotune_tunableop_ladder:
+        # No ladder entries, but the traced shape is still covered: autotune
+        # routes this GEMM's aten candidate through the worker (see
+        # ExternKernelCaller.benchmark), which tunes it at the traced shape.
         return
-    if not isinstance(winner, sa.ExternKernelCaller):
+    # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
+    # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
+    # worker would spend the whole per-GEMM budget on and record nothing for.
+    if winner.layout.device.type != "cuda":
         return
-    # Match on the underlying ExternKernelChoice name. ExternKernelCaller
-    # always sets self.choice (and its own name from it). Compared by string
-    # so a double import of the kernel modules cannot break the match. Covers
-    # the _dtype out-variants and _scaled_mm_v2, which the old
-    # op-name allowlist missed; _int_mm / sparse variants are not
-    # hipBLASLt-tunable.
     choice_name = winner.choice.name
     if not is_tunableop_gemm(choice_name):
         return
-    if getattr(winner, "bmreq", None) is None:
+    if winner.bmreq is None:
+        return
+    # The hooks fire while lowering, before finalize() decides layouts: a still
+    # flexible operand would be tuned at placeholder strides, and TunableOp keys
+    # on ld. A recorded constraint is not this case -- _meta_at reads the strides
+    # through it. #201769 defers the ladder past finalize() instead.
+    layouts = [_as_buffer(n).maybe_get_layout() for n in winner.input_nodes]
+    if any(lay is None or isinstance(lay, ir.FlexibleLayout) for lay in layouts):
         return
 
     # Require exactly one free symbol across the operands (one dynamic dim).
@@ -719,6 +851,11 @@ def maybe_range_pretune(winner) -> None:
     if len(symbols) != 1:
         return
     s = next(iter(symbols))
+    # optimization_hint() invents config.unbacked_symint_fallback for an
+    # unbacked symbol rather than raising, and the ladder treats the hint as
+    # the served size. Honour an explicit hint if the user set one.
+    if not V.graph.sizevars.all_unbacked_explicitly_hinted(s):
+        return
 
     # Never bucket the reduction dim K: a solution is only valid for the exact K
     # it was tuned at. This also rejects attention-style ops where one symbol
@@ -727,8 +864,6 @@ def maybe_range_pretune(winner) -> None:
     try:
         # Bias-first ops take [bias, mat1, mat2]; every other GEMM choice takes
         # mat1/mat2 first (scaled variants trail scale/bias tensors after).
-        # Resolved from the choice, not the caller name, so _dtype / v2 / bias
-        # variants route correctly.
         bias_first = choice_name in ("addmm", "addmm_dtype", "baddbmm")
         a, b = (nodes[1], nodes[2]) if bias_first else (nodes[0], nodes[1])
         a_sz = a.get_size()
@@ -738,112 +873,33 @@ def maybe_range_pretune(winner) -> None:
     if len(a_sz) < 2 or len(b_sz) < 2:
         return
 
-    def _has(expr: Any) -> bool:
-        return s in getattr(expr, "free_symbols", ())
-
     dims: OrderedSet[str] = OrderedSet()
     dyn_expr: Any = None  # size expression of the single dynamic dim
-    if _has(a_sz[-2]):  # A is [..., M, K]
+    if _has(a_sz[-2], s):  # A is [..., M, K]
         dims.add("M")
         dyn_expr = a_sz[-2]
-    if _has(b_sz[-1]):  # B is [..., K, N]
+    if _has(b_sz[-1], s):  # B is [..., K, N]
         dims.add("N")
         dyn_expr = b_sz[-1]
-    if _has(a_sz[-1]) or _has(b_sz[-2]):  # contraction dim K
+    if _has(a_sz[-1], s) or _has(b_sz[-2], s):  # contraction dim K
         dims.add("K")
     for sz in list(a_sz[:-2]) + list(b_sz[:-2]):  # leading batch dims (bmm)
-        if _has(sz):
+        if _has(sz, s):
             dims.add("B")
             dyn_expr = sz
-    # Exactly one axis. dyn_expr holds whichever axis was seen last, and the
-    # ceiling below is computed from it alone, so a symbol spanning two axes
-    # caps one and lets the other run away: with M = 1000*s and N = s, an
-    # N-derived ceiling of 16384 permits M = 16,384,000 and an MxN output to
-    # match. Such buckets also differ from each other in two dims, which is
-    # precisely what the nearest matcher refuses to borrow across, so there is
-    # nothing to gain by tuning them.
+    # Exactly one axis: the ceiling comes from dyn_expr alone, so a symbol
+    # spanning two caps one and lets the other run away (M=1000*s with N=s
+    # reaches 16,384,000), and two differing dims never borrow anyway.
     if "K" in dims or len(dims) != 1 or dyn_expr is None:
         return
 
-    # The ladder walks the SYMBOL, not the dim: for a dim like 200*s, stepping the
-    # dim through powers of two would tune sizes it can never take. The domain is
-    # the symbol's declared ShapeEnv range, which ignores guards and runtime
-    # asserts and so can be looser than the true bound -- the safe direction,
-    # since under-covering means a runtime miss.
-    sizevars = V.graph.sizevars
-
-    # Skip repeat GEMMs: identical layers in one model (and recompiles) share
-    # traced metas, so the first ladder already recorded every bucket. Keyed on
-    # the SYMBOLIC sizes and strides (not hints: mm([s,256],[256,512]) and
-    # mm([512,256],[256,s]) hint identically at 512 but ladder different dims,
-    # as do s and 200*s), the dtypes, and the (device, resolved filename) the
-    # worker is keyed on -- a second compile targeting another device or file
-    # must not skip. Strides included: mm(A,B) and mm(A,B_colmajor) are both
-    # dense with different TunableOp signatures (NN vs NT).
-    def _node_sig(n: Any) -> Any:
-        try:
-            dtype = n.get_dtype() if hasattr(n, "get_dtype") else n.dtype
-            size = n.get_size() if hasattr(n, "get_size") else n.size
-            stride = n.get_stride() if hasattr(n, "get_stride") else None
-            if stride is None:
-                try:
-                    from torch._inductor.select_algorithm import (
-                        get_strides_with_layout_constraints,
-                    )
-
-                    stride = sizevars.optimization_hints(
-                        get_strides_with_layout_constraints(n)
-                    )
-                except Exception:
-                    stride = ()
-            return (
-                str(dtype),
-                tuple(str(x) for x in size),
-                tuple(str(x) for x in stride),
-            )
-        except Exception:
-            return None
-
+    # The ladder walks the SYMBOL, not the dim: for a dim like 200*s, stepping
+    # the dim through powers of two would tune sizes it can never take.
     try:
-        sigs = [_node_sig(n) for n in winner.input_nodes] + [_node_sig(winner.layout)]
-        try:
-            scope = (torch.cuda.current_device(), resolve_filename(0))
-        except Exception:
-            scope = (None, "")
-        memo_key: Any = (
-            (winner.name, tuple(sigs), scope)
-            if all(x is not None for x in sigs)
-            else None
-        )
-    except Exception:
-        memo_key = None
-    if memo_key is not None:
-        if memo_key in _pretuned_gemms.seen:
-            return
-        _pretuned_gemms.seen.add(memo_key)
-
-    def _declared(expr: Any) -> tuple[int | None, int | None]:
-        """(lower, upper) from ShapeEnv, each None when unbounded or symbolic."""
-        try:
-            vr = sizevars.shape_env.bound_sympy(expr)
-        except Exception:  # no range for this expression
-            return None, None
-        lo = hi = None
-        try:
-            if vr.lower != -int_oo and vr.lower != -sympy.oo:
-                lo = int(vr.lower)
-        except (TypeError, ValueError):  # symbolic bound
-            pass
-        try:
-            if vr.upper != int_oo and vr.upper != sympy.oo:
-                hi = int(vr.upper)
-        except (TypeError, ValueError):  # symbolic bound
-            pass
-        return lo, hi
-
-    try:
-        sym_hint = sizevars.optimization_hint(s)
-    except Exception:
+        sym_hint = V.graph.sizevars.optimization_hint(s)
+    except (AttributeError, TypeError, ValueError, KeyError):
+        # No hint at all. Unbacked symbols do not land here -- they are turned
+        # away above, since optimization_hint() invents a fallback for them.
         return
     sym_lo, sym_hi = _declared(s)
     # A declared bound narrower than the cap wins. The cap is raised to the
@@ -853,12 +909,6 @@ def maybe_range_pretune(winner) -> None:
     sym_hi = sym_ceiling if sym_hi is None else min(sym_hi, sym_ceiling)
     if sym_hi < 2:
         return
-
-    def _eval_at(expr: Any, sym_val: int) -> int:
-        """Value of a size expression with the dynamic symbol set to sym_val."""
-        if isinstance(expr, sympy.Expr) and expr.free_symbols:
-            return int(sizevars.optimization_hint(expr.subs(s, sym_val)))
-        return int(expr)
 
     # The "too small to tune" threshold applies in DIM space, not symbol space:
     # for a dim like 200*s, s=2 is already a dim of 400, so starting the walk at
@@ -870,13 +920,12 @@ def maybe_range_pretune(winner) -> None:
         OrderedSet([sym_start, sym_hint, sym_hi])
         | OrderedSet([1 << k for k in range(1, 64) if sym_start < (1 << k) < sym_hi])
     )
-    # Ceiling in DIM space, since the symbol cap cannot see a multiplier: with
-    # the symbol alone bounded at 16384, 96*s reached 1572864. Anchored to the
-    # served dim so it can never truncate below what the model actually runs --
-    # a flat 16384 would have cut a GEMM served at 294912 down to 12288.
+    # Ceiling in DIM space: the symbol cap cannot see a multiplier, so 96*s
+    # clears it by two orders of magnitude. Floored at the served dim so it
+    # can never truncate below the size the model runs.
     try:
-        served_dim = _eval_at(dyn_expr, sym_hint)
-    except Exception:  # unevaluatable at the hint
+        served_dim = _eval_at(dyn_expr, sym_hint, s)
+    except (AttributeError, TypeError, ValueError):  # unevaluatable at the hint
         served_dim = 0
     dim_ceiling = max(_TUNABLEOP_MAX_DYN_SYM, served_dim)
 
@@ -884,19 +933,26 @@ def maybe_range_pretune(winner) -> None:
     dim_vals: list[int] = []
     for sym_val in sym_vals:
         try:
-            dim_val = _eval_at(dyn_expr, sym_val)
-        except Exception:  # unevaluatable at this value
+            dim_val = _eval_at(dyn_expr, sym_val, s)
+        except (AttributeError, TypeError, ValueError):  # unevaluatable here
             continue
-        if not (_TUNABLEOP_MIN_DYN_DIM <= dim_val <= dim_ceiling):
+        # The served shape is a rung whatever its size: it is the one size
+        # runtime is known to ask for, so the minimum does not apply to it.
+        if dim_val > dim_ceiling or (
+            dim_val < _TUNABLEOP_MIN_DYN_DIM and dim_val != served_dim
+        ):
             continue
         if dim_val in dim_vals:
             continue
         buckets.append(sym_val)
         dim_vals.append(dim_val)
-    # Largest first: the budget below is shared across the ladder and spent in
-    # order, so ascending order dropped the sizes nearest the shape actually
-    # served while keeping 8, 16, 32.
-    order = sorted(range(len(buckets)), key=lambda i: -dim_vals[i])
+    # Served dim first, then largest first. The shared budget is spent in this
+    # order, so whatever sorts last is dropped. Keyed on the dim, not the
+    # symbol: a non-injective expression lets a smaller symbol claim the served
+    # dim during dedup, and then no bucket equals sym_hint.
+    order = sorted(
+        range(len(buckets)), key=lambda i: (dim_vals[i] != served_dim, -dim_vals[i])
+    )
     buckets = [buckets[i] for i in order]
     dim_vals = [dim_vals[i] for i in order]
     log.info(
@@ -915,37 +971,14 @@ def maybe_range_pretune(winner) -> None:
     if not buckets:
         return
 
-    # Copy the winner's serializable bmreq and rebuild its tensor metas per
-    # bucket, reusing Inductor's meta machinery rather than rebuilding the GEMM.
-    from torch._inductor.autotune_process import TensorMeta
-    from torch._inductor.select_algorithm import get_strides_with_layout_constraints
-
-    def _as_buffer(node: Any) -> Any:
-        return (
-            ir.Buffer(name="fake", layout=node) if isinstance(node, ir.Layout) else node
-        )
-
-    def _is_densely_packed(node: Any) -> bool:
-        """Traced strides are the dense strides for the traced sizes.
-
-        _meta_at recomputes strides densely, so a padded or broadcast operand
-        would be tuned at the wrong leading dimension -- [s, 256] strided
-        [300, 1] becomes [256, 1]. TunableOp keys on ld, so such an entry can
-        never match the runtime call, and the nearest matcher will not borrow
-        across a padded ld either. Tuning it is pure waste; skip instead.
-        """
-        n = _as_buffer(node)
-        real_strides = [
-            int(x)
-            for x in sizevars.optimization_hints(get_strides_with_layout_constraints(n))
-        ]
-        real_sizes = [int(x) for x in sizevars.optimization_hints(n.get_size())]
-        order = ir.get_stride_order(real_strides)
-        dense = [int(x) for x in ir.FlexibleLayout.stride_ordered(real_sizes, order)]
-        return real_strides == dense
-
     try:
         operands = [*winner.input_nodes, winner.layout]
+        if bias_first:
+            # The bias is exempt: no Signature() carries it (GemmCommon.h keys
+            # trans/M/N/K/ld and batch), and mm_args expands a broadcast bias,
+            # so requiring density here would reject almost every addmm and
+            # baddbmm. _meta_at rebuilds it dense.
+            operands = operands[1:]
         if not all(_is_densely_packed(n) for n in operands):
             log.info(
                 "TunableOp range pre-tune: skipping %s, an operand is not "
@@ -953,7 +986,9 @@ def maybe_range_pretune(winner) -> None:
                 winner.name,
             )
             return
-    except Exception as e:  # cannot prove density, do not guess
+    except (AttributeError, IndexError, TypeError) as e:
+        # Raised by get_size/get_stride on a node shape we did not expect; a
+        # layout we cannot read is one we must not guess at.
         log.info(
             "TunableOp range pre-tune: skipping %s, layout check failed: %s",
             winner.name,
@@ -961,81 +996,45 @@ def maybe_range_pretune(winner) -> None:
         )
         return
 
-    def _meta_at(node: Any, sym_val: int) -> TensorMeta:
-        n = _as_buffer(node)
-        # Substitute into the SIZE expressions only, then recompute dense strides:
-        # a stride expression is not a size-product formula in the symbol, and a
-        # bare-symbol batch stride would collapse to the bucket value instead of
-        # value * inner_dims. The stride ORDER must come from the traced real-size
-        # strides, since small-bucket strides can reorder dims and silently turn a
-        # plain GEMM into a transposed one.
-        sizes = [_eval_at(sz, sym_val) for sz in n.get_size()]
-        order = ir.get_stride_order(
-            sizevars.optimization_hints(get_strides_with_layout_constraints(n))
-        )
-        strides = [int(x) for x in ir.FlexibleLayout.stride_ordered(sizes, order)]
-        return TensorMeta(
-            device=n.get_device(),
-            dtype=n.get_dtype(),
-            sizes=sizes,
-            strides=strides,
-            offset=0,
-            name=n.get_name(),
-        )
-
+    # Copy the winner's serializable bmreq and rebuild its tensor metas per
+    # bucket, reusing Inductor's meta machinery rather than rebuilding the GEMM.
     bmreqs: list[Any] = []
     try:
         for v in buckets:
             sized_bmreq: Any = copy.copy(winner.bmreq)
-            sized_bmreq.input_tensor_meta = [_meta_at(n, v) for n in winner.input_nodes]
-            sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v)
-            # TunableOp cannot tune under CUDA-graph capture. copy.copy keeps
-            # both flags: benchmark_with_cudagraphs (set per-choice) and
-            # config_cudagraph_benchmarking (snapshotted True on ROCm under
-            # max-autotune), and benchmark_run_fn captures if either is set --
-            # every bucket would then silently record nothing.
-            sized_bmreq.benchmark_with_cudagraphs = False
-            sized_bmreq.config_cudagraph_benchmarking = False
+            sized_bmreq.input_tensor_meta = [
+                _meta_at(n, v, s) for n in winner.input_nodes
+            ]
+            sized_bmreq.output_tensor_meta = _meta_at(winner.layout, v, s)
             bmreqs.append(sized_bmreq)
-    except Exception as e:  # bmreq build must not fail the compile
+    except (AttributeError, TypeError, ValueError, IndexError, KeyError) as e:
+        # A meta we cannot rebuild must not fail the compile, but it is a defect
+        # rather than a shape we declined, so log the traceback to find it.
         log.warning(
             "TunableOp range pre-tune: failed to build bmreqs for %s: %s",
             winner.name,
             e,
+            exc_info=True,
         )
         return
 
-    if not bmreqs:
-        return
-
-    # Drop buckets no GPU could materialize. The dim ceiling bounds the dynamic
-    # dim, not the problem size: a bmm with dynamic batch at dim 16384 and
-    # K = N = 4096 fp16 is 512 GiB per operand, and largest-first order submits
-    # those first -- each fault can cost a cold worker restart.
-    def _meta_bytes(m: Any) -> int:
-        try:
-            numel = 1
-            for d in m.sizes:
-                numel *= int(d)
-            return numel * m.dtype.itemsize
-        except Exception:
-            return 0
-
+    # Drop buckets no GPU could materialize (see _TUNABLEOP_MAX_LADDER_BYTES).
     kept: list[Any] = []
     kept_dims: list[int] = []
     for bmreq, dim_val in zip(bmreqs, dim_vals):
-        try:
-            metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
-            biggest = max(_meta_bytes(m) for m in metas)
-        except Exception:
-            biggest = 0
-        if biggest > _TUNABLEOP_MAX_LADDER_BYTES:
-            log.warning(
-                "TunableOp range pre-tune for %s skipping dim %d: largest "
-                "operand is %.1f GiB, over the %.1f GiB cap.",
+        # Summed: the worker allocates every operand and the output at once.
+        metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
+        footprint = sum(_meta_bytes(m) for m in metas)
+        # The served rung is exempt: it is the shape the model runs, not one
+        # the ladder invented, so the memory is already committed to. It can
+        # still cost one OOM and worker restart if the GPU is near full.
+        if footprint > _TUNABLEOP_MAX_LADDER_BYTES and dim_val != served_dim:
+            log.info(
+                "TunableOp range pre-tune for %s skipping dim %d: operands "
+                "and output total %.1f GiB, over the %.1f GiB cap.",
                 winner.name,
                 dim_val,
-                biggest / 1024**3,
+                footprint / 1024**3,
                 _TUNABLEOP_MAX_LADDER_BYTES / 1024**3,
             )
             continue
@@ -1045,55 +1044,103 @@ def maybe_range_pretune(winner) -> None:
     if not bmreqs:
         return
 
+    # Keyed on the rebuilt metas, the worker scope, and the extern kwargs
+    # that reach the signature (_scaled_mm's use_fast_accum). The filename is
+    # resolved as submit() does; get_filename() reads "" until it is pinned.
+    with _worker_lock:
+        filename = _resolve_and_pin_filename_locked(winner.layout.device.index)
+    scope = ((winner.layout.device.type, winner.layout.device.index), filename)
+    kwargs_sig = tuple(sorted((k, repr(v)) for k, v in winner.kwargs.items()))
+    keys = [
+        (
+            winner.name,
+            scope,
+            kwargs_sig,
+            tuple(_meta_sig(m) for m in b.input_tensor_meta),
+            _meta_sig(b.output_tensor_meta),
+        )
+        for b in bmreqs
+    ]
+    fresh = [
+        i
+        for i, k in enumerate(keys)
+        if k not in _pretuned_gemms.seen
+        and _pretuned_gemms.failed.get(k, 0) < _TUNABLEOP_MAX_BUCKET_ATTEMPTS
+    ]
+    if not fresh:
+        return
+    bmreqs = [bmreqs[i] for i in fresh]
+    dim_vals = [dim_vals[i] for i in fresh]
+    keys = [keys[i] for i in fresh]
+
     # One job per bucket so a fault costs a single size, but one budget for the
     # whole GEMM so compile time does not scale with the bucket count.
-    deadline = time.monotonic() + config.cuda.aten_tunableop_timeout
+    deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        # The served rung is exempt, by dim rather than position: once it is
+        # memoed, position 0 is the largest rung, and exempting that hands the
+        # whole budget to the one likeliest to time out.
+        if remaining <= 0 or (
+            dim_vals[i] != served_dim and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET
+        ):
             log.warning(
-                "TunableOp range pre-tune for %s exhausted its %.0fs budget after "
-                "%d/%d sizes; skipping the rest.",
+                "TunableOp range pre-tune for %s stopped after %d/%d sizes with "
+                "%.0fs of its %.0fs budget left.",
                 winner.name,
-                config.cuda.aten_tunableop_timeout,
                 i,
                 len(bmreqs),
+                max(remaining, 0.0),
+                config.cuda.autotune_tunableop_timeout,
             )
             break
         bucket_start = time.monotonic()
-        # The whole remaining budget, deliberately. A per-bucket slot was tried
-        # and is worse: TuningProcess.get() kills the worker on timeout, and a
-        # slot below the cold-start cost of 15-40s makes the restart cold, time
-        # out, and be killed again -- a flat 5s produced 334 timeouts and 334
-        # kills where the shared budget produced 7. Letting the first bucket
-        # have the budget absorbs the cold start instead of fighting it.
+        # The whole remaining budget: a slot below the 15-40s cold-start cost
+        # would make the restart cold, time out and be killed again. The floor
+        # above keeps a truncated rung from being charged as a fault.
         outcome = submit(
             BenchmarkJob(bmreq, tuning=True, measure=False), timeout=remaining
         )
-        if config.cuda.aten_tunableop_pretune_debug:
-            # Per-bucket cost, which nothing else records: only failures are
-            # logged today, so the cost of the buckets that SUCCEED -- and
-            # whether it falls as the worker warms up -- is invisible. That
-            # curve is what a per-bucket budget has to be sized against. Info,
-            # not debug: the flag alone must suffice, without also raising the
-            # logger level.
-            log.info(
-                "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d "
-                "wall=%.2fs status=%s",
-                winner.name,
-                dim_vals[i],
-                i + 1,
-                len(bmreqs),
-                time.monotonic() - bucket_start,
-                outcome.status,
-            )
-        if outcome.status != "ok":
+        # The only record of what a bucket costs when it succeeds.
+        log.debug(
+            "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d wall=%.2fs status=%s",
+            winner.name,
+            dim_vals[i],
+            i + 1,
+            len(bmreqs),
+            time.monotonic() - bucket_start,
+            outcome.status,
+        )
+        if outcome.status == "ok":
+            _pretuned_gemms.seen.add(keys[i])
+        else:
             # Solutions found before the fault are already flushed to the
             # results file, and the worker restarts on the next submission.
-            log.warning(
+            # submit() has already warned once per fault kind, so this is debug.
+            _pretuned_gemms.failed[keys[i]] = _pretuned_gemms.failed.get(keys[i], 0) + 1
+            log.debug(
                 "TunableOp range pre-tune for %s hit %s on size %d/%d; continuing.",
                 winner.name,
                 outcome.status,
                 i + 1,
                 len(bmreqs),
             )
+
+
+def queue_range_pretune(winner: ExternKernelCaller) -> None:
+    """Hold an extern winner until the graph's layouts are decided.
+
+    The select_algorithm hooks fire while lowering, before finalize() runs, so
+    an operand that is still flexible would be read at placeholder strides.
+    """
+    if is_tune_mode() and config.cuda.autotune_tunableop_ladder:
+        V.graph.pending_tunableop_ladder.append(winner)
+
+
+def run_queued_pretunes(graph: Any) -> None:
+    """Ladder the graph's queued winners, now that layouts are final."""
+    pending, graph.pending_tunableop_ladder = graph.pending_tunableop_ladder, []
+    for winner in pending:
+        # An operand still flexible here means finalize() left it undecided;
+        # maybe_range_pretune turns that away rather than guess at its strides.
+        maybe_range_pretune(winner)
