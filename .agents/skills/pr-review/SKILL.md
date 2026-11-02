@@ -173,14 +173,14 @@ Before reviewing, build understanding of what the PR touches and why:
 
 Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
 
-Whatever the PR's size, spawn these reviewers in parallel, each over the full diff with the checklist's path, and each told to report every candidate problem with its `file:line` and evidence:
+Whatever the PR's size, unless a Time Budget convergence window is open (see "Time Budget"), spawn these reviewers in parallel, each over the full diff with the checklist's path, and each told to report every candidate problem with its `file:line` and evidence:
 
 - **Correctness:** logic, edge cases, error handling, concurrency, dtype, device and shape handling.
 - **Tests:** missing coverage, tests that cannot fail or do not check what they claim, flakiness.
 - **API and compatibility:** public names, backward compatibility, docstrings, error messages, documentation.
 - **Conventions:** existing utilities and idioms the PR should use, performance, and the `REVIEW.md` rules for its files.
 
-Review the diff yourself while they run. Their reports are candidates, not findings: Step 4 merges them and Step 5 checks them.
+A sub-agent does not see your system prompt, so give every reviewer, and every other sub-agent you spawn, where to find the diff and the checkout, and any rules your system prompt sets about untrusted pull request content, verbatim. Review the diff yourself while they run. Their reports are candidates, not findings: Step 4 merges them and Step 5 checks them.
 
 Review every changed file covered by a `REVIEW.md` with its rules applied, in a sub-agent where possible; split the work along `REVIEW.md` directories. Give each sub-agent the `REVIEW.md` paths covering its files; it reads them and applies them alongside the checklist, including any rules they relax.
 
@@ -202,7 +202,7 @@ Only then assign each survivor to exactly one section (see "One finding, one sec
 
 ### Step 5: Fact-Check
 
-Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. Spawn at least one agent, even for a small PR; rarely spawn more than 5.
+Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. Spawn at least one agent, even for a small PR, unless a convergence window is open (see "Time Budget"); rarely spawn more than 5.
 
 Spawn the agents in parallel. Each independently verifies its findings by re-reading the relevant code and surrounding context (give each agent the paths of any `REVIEW.md` covering its findings' files), and returns **valid**, **invalid**, or **needs rewording** for each. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
 
