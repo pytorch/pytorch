@@ -57,8 +57,10 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             # For ease of BC maintenance, keep this path for standard Tensor.
             # Eventually (tm), we should change the behavior for standard Tensor to match.
             # C++ fake tensors take the path below instead, giving the same
-            # marker form as a Python FakeTensor Parameter; _make_subclass also
-            # fails for them under fake_tensor_propagate_real_tensors.
+            # marker form as a Python FakeTensor Parameter. As with a Python
+            # FakeTensor, this holds for Parameter subclasses too, so the result
+            # is not an instance of cls. _make_subclass also fails for C++ fakes
+            # under fake_tensor_propagate_real_tensors.
             return torch.Tensor._make_subclass(cls, data, requires_grad)
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
