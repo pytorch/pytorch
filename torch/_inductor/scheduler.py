@@ -4599,6 +4599,43 @@ class FusedMixOrderReductions(FusedSchedulerNode):
                 self.node1, other.node1, (self.node2, other.node2)
             ) and self.sub_node_can_fuse(self.node2, other.node2, tuple())
 
+    def can_fuse_producer(self, producer: BaseSchedulerNode) -> bool:
+        """
+        A pointwise producer of the contiguous (row) half can be computed inside the
+        mix-order loop even when the other (column) half also reads its output: both
+        halves visit the same element in the same iteration, so there is no
+        reduction-to-reduction dependency. Fusing it avoids materializing e.g. the sum
+        of several matmul outputs that feeds a LayerNorm backward.
+        """
+        if (
+            producer.is_reduction()
+            or producer.is_template()
+            or producer.has_strict_reduction()
+            or isinstance(producer, FusedMixOrderReductions)
+        ):
+            return False
+        if producer.ancestors & self.get_operation_names():
+            return False
+        if not (producer.get_operation_names() & self.node1.ancestors):
+            return False
+        if not self.scheduler.can_fuse(
+            producer, self.node1, allow_mix_order_reduction=False
+        ):
+            return False
+        if not MixOrderReduction.is_contiguous_node(producer):
+            return False
+        max_reads = config.triton.mix_order_reduction_max_reads
+        if max_reads > 0:
+            produced = OrderedSet(buf.get_name() for buf in producer.get_outputs())
+            all_reads: OrderedSet[str] = OrderedSet()
+            for sn in itertools.chain(self.get_nodes(), producer.get_nodes()):
+                for dep in sn.read_writes.reads:
+                    if isinstance(dep, MemoryDep) and dep.name not in produced:
+                        all_reads.add(dep.name)
+            if len(all_reads) > max_reads:
+                return False
+        return True
+
     def fuse_with(self, other: BaseSchedulerNode):
         device = self.node1.get_device()
         backend = self.scheduler.get_backend(device)
@@ -10477,7 +10514,11 @@ class Scheduler:
                 return False
             return node1.can_fuse_with(node2)
         if isinstance(node2, FusedMixOrderReductions):
-            return False
+            if not config.triton.mix_order_reduction_fuse_producers:
+                return False
+            if self._fusion_blocked_by_placement(node1, node2):
+                return False
+            return node2.can_fuse_producer(node1)
 
         return self._can_fuse(
             node1,
@@ -13138,6 +13179,9 @@ class BaseScheduling:  # noqa: docstring_linter
             return node1.fuse_with(node2)
         elif isinstance(node1, FusedMixOrderReductions):
             return node1.fuse_with(node2)
+        elif isinstance(node2, FusedMixOrderReductions):
+            # pointwise producer absorbed into the contiguous half (can_fuse_producer)
+            return FusedMixOrderReductions(self.fuse(node1, node2.node1), node2.node2)
         elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
             node2, SchedulerNode
         ):

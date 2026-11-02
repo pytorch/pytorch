@@ -3310,10 +3310,16 @@ class SIMDScheduling(BaseScheduling):
     def codegen_mix_order_reduction(self, node):
         node1, node2 = node.node1, node.node2
 
-        # Make sure there are no producer/consumer relationship
-        if not (
-            not (node1.ancestors & node2.get_operation_names())
-            and not (node2.ancestors & node1.get_operation_names())
+        # Make sure there are no producer/consumer relationship between the two
+        # reductions. node2 may consume pointwise producers absorbed into node1
+        # (config.triton.mix_order_reduction_fuse_producers).
+        node1_ops = (
+            OrderedSet(n.get_name() for n in node1.get_nodes() if n.is_reduction())
+            if config.triton.mix_order_reduction_fuse_producers
+            else node1.get_operation_names()
+        )
+        if (node1.ancestors & node2.get_operation_names()) or (
+            node2.ancestors & node1_ops
         ):
             raise AssertionError("node1 and node2 must not be ancestors of each other")
 
