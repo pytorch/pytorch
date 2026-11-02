@@ -2665,6 +2665,12 @@ class SkipFunctionVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        if type(self.value) is types.BuiltinFunctionType:
+            # CPython's meth_hash combines the C function and receiver identities.
+            return hash(self.value), False
+        return super().hash_impl(tx)
+
     def get_source(self) -> Source | None:
         return self.source
 

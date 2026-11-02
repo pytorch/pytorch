@@ -2771,7 +2771,12 @@ class VariableBuilder:
                 owner = gc.get_referents(value)[0]
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
                 if not isinstance(dict_vt, (ConstDictVariable, FrozenDictVariable)):
-                    raise AssertionError(f"Expected a dictionary, got {dict_vt}")
+                    unimplemented(
+                        gb_type="Unsupported dictionary view owner",
+                        context=str(type(dict_vt)),
+                        explanation="Dynamo cannot access this dictionary view's owner storage.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 return DictKeysVariable(
                     dict_vt, source=self.source, is_ordered=type(value) is odict_keys
                 )

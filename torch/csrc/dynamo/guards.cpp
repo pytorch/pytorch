@@ -2111,20 +2111,25 @@ class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
     if (!PyODict_Check(value)) {
       return false;
     }
-    c10::SmallVector<PyObject*, 16> keys(_storage_order ? 0 : _order.size());
+    // Cloned roots share this leaf; scratch space must be per-thread, not
+    // per-leaf. Grow before taking the lock so allocation failure cannot bypass
+    // its end.
+    static thread_local std::vector<PyObject*> keys;
+    if (!_storage_order && keys.size() < _order.size()) {
+      keys.resize(_order.size());
+    }
     bool result;
     // CPython 3.14.1+ protects OrderedDict mutations with this lock.
     // Older free-threaded releases have upstream OrderedDict races.
     // No Python callbacks run while the lock is held.
     Py_BEGIN_CRITICAL_SECTION(value);
-    result = check_order(value, keys);
+    result = check_order(value, keys.data());
     Py_END_CRITICAL_SECTION();
     return result;
   }
 
  private:
-  bool check_order(PyObject* value, c10::SmallVectorImpl<PyObject*>& keys)
-      const {
+  bool check_order(PyObject* value, PyObject** keys) const {
     if (PyDict_GET_SIZE(value) != static_cast<Py_ssize_t>(_order.size())) {
       return false;
     }
@@ -2989,6 +2994,8 @@ class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
   void reset_state() final {
     (_is_hooks ? _state->hooks : _state->flags) = py::object();
   }
+
+  std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP> clone(RootGuardManager* root);
 
  private:
   std::shared_ptr<NNModuleHookMembership> _state;
@@ -3939,7 +3946,11 @@ class GuardManager {
       RootGuardManager* cloned_root,
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
-    for (const auto& guard : _leaf_guards) {
+    for (auto guard : _leaf_guards) {
+      if (auto membership =
+              std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(guard)) {
+        guard = membership->clone(cloned_root);
+      }
       cloned_mgr->_leaf_guards.emplace_back(guard);
       if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(guard)) {
         cloned_mgr->add_dict_tag_replay_guard(guard);
@@ -4737,6 +4748,8 @@ GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
  */
 
 class RootGuardManager : public GuardManager {
+  friend class NN_MODULE_HOOK_MEMBERSHIP;
+
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
@@ -4931,6 +4944,7 @@ class RootGuardManager : public GuardManager {
     cloned_root->_init_local_state = _init_local_state;
     cloned_root->_compile_on_one_rank = _compile_on_one_rank;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
+    cloned_root->_cloned_hook_memberships.clear();
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -5037,6 +5051,12 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
+  // Share role state only while constructing one cloned tree.
+  std::unordered_map<
+      const NNModuleHookMembership*,
+      std::shared_ptr<NNModuleHookMembership>>
+      _cloned_hook_memberships;
+
   // See set_compile_on_one_rank.
   bool _compile_on_one_rank = false;
 
@@ -5094,6 +5114,17 @@ class RootGuardManager : public GuardManager {
   std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
+
+std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP> NN_MODULE_HOOK_MEMBERSHIP::clone(
+    RootGuardManager* root) {
+  auto& state = root->_cloned_hook_memberships[_state.get()];
+  if (!state) {
+    state = std::make_shared<NNModuleHookMembership>();
+    state->expected = _state->expected;
+  }
+  return std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
+      root, state, _is_hooks, verbose_code_parts(), get_user_stack());
+}
 
 /*
  * Dicts are common in python code. Therefore, we handle guards for dicts
@@ -5300,7 +5331,7 @@ class DictGuardManager : public GuardManager {
     // Container identity is not covered by the inline type/length checks.
     TORCH_CHECK(
         dynamic_cast<ID_MATCH*>(leaf_guard.get()) != nullptr,
-        "DictGuardManager only supports identity leaf guards");
+        "DictGuardManager only supports ID_MATCH leaf guards");
     GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 

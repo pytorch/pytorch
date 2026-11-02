@@ -110,6 +110,7 @@ from .dicts import (
     pyfrozendict_check,
     pyfrozendict_checkexact,
 )
+from .hashable import guard_key_collisions
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
@@ -2595,7 +2596,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         storage.dict_update(tx, [seed], {}, container_name="frozendict")
         if pyanydict_checkexact(iterable) or pyanyset_checkexact(iterable):
             if isinstance(iterable, ConstDictVariable):
-                iterable.install_dict_keys_match_guard()
+                iterable.install_dict_order_guard(tx)
+            elif pyanyset_checkexact(iterable):
+                iterable.install_set_order_guard(tx)
+            guard_key_collisions(storage.items, iterable.items)
             for key in iterable.items:
                 storage.items[key] = value
         else:
@@ -3585,9 +3589,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pyanydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
-                args[0].install_dict_keys_match_guard()
-                if args[0].source:
-                    tx.output.guard_on_key_order.add(args[0].source)
+                args[0].install_dict_order_guard(tx)
+            elif pyanyset_checkexact(args[0]):
+                args[0].install_set_order_guard(tx)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
             result.items.update(dict.fromkeys(args[0].items.keys(), value))
