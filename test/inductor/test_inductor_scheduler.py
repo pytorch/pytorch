@@ -1308,9 +1308,11 @@ class TestScheduler(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
             resolver.resolve_load("buf0", sympy.Integer(0))
+        kernel.cse.contains_value.return_value = True
         resolver._values = {"buf0": [Mock(shape=("X", "GROUP"))]}
+        resolver._materialize = Mock(return_value=None)
         with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
-            resolver.check_sources((relation,))
+            resolver.materialize_sources((relation,))
 
     def test_sub_parent_resolver_uses_masked_load_ownership(self):
         d0 = sympy.Symbol("d0", integer=True)

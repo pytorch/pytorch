@@ -1038,7 +1038,6 @@ for _pointwise_name in (
     "isnan",
     "isinf",
     "signbit",
-    "to_dtype_bitcast",
 ):
     register_pointwise_op(_pointwise_name)
 
