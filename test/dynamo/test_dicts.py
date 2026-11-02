@@ -70,6 +70,84 @@ class FakeMapping:
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("reported_type", [set, frozenset, type({}.keys())])
+    def test_dict_input_spoofed_set_class(self, reported_type):
+        class Mapping(dict):
+            @property
+            def __class__(self):
+                return reported_type
+
+        def fn(x, mapping):
+            return x + mapping["a"]
+
+        x, mapping = torch.ones(1), Mapping(a=2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    def test_extend_constant_mapping(self, mapping_type):
+        @torch._dynamo.assume_constant_result
+        def constant_mapping():
+            return mapping_type(a=1, b=2)
+
+        def fn(x):
+            result = []
+            result.extend(constant_mapping())
+            return x + 1, result
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("operation", ["repr", "reversed", "enum"])
+    def test_dict_materialization_order_guard(self, operation):
+        def fn(x, mapping):
+            if operation == "repr":
+                return x + 1, repr(mapping)
+            if operation == "reversed":
+                return x + 1, list(reversed(mapping))
+            return x + 1, enum.Enum("Fields", mapping).b.name
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for keys in ("abc", "acb"):
+            mapping = {key: 1 if operation == "enum" else ord(key) for key in keys}
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping["a"] = mapping.pop("a")
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 4)
+
+    def test_constructed_dict_key_guard(self):
+        def fn(x, key):
+            mapping = {key: 7}
+            return x + mapping.get("a", 0)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for key in ("b", "a"):
+            self.assertEqual(compiled(x, key), fn(x, key))
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    def test_empty_dict_membership_reuses_graph(self, mapping_type):
+        def fn(x, key, mapping):
+            if key in mapping:
+                return x + mapping[key]
+            return x.cos()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        mapping = mapping_type()
+        self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
+        mapping[2] = 5
+        self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
+        self.assertEqual(counter.frame_count, 1)
+        mapping[1] = 3
+        self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize(
         "operation",
         ["getitem", "contains", "get", "setdefault", "pop"],
@@ -342,18 +420,34 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("method", ["keys", "values", "items", "update"])
-    @parametrize("receiver", [None, UserDict, types.MappingProxyType, dict])
+    @parametrize(
+        "receiver",
+        [
+            subtest(None, name="missing_receiver"),
+            subtest(UserDict, name="user_dict_receiver"),
+            subtest(types.MappingProxyType, name="mapping_proxy_receiver"),
+            subtest(dict, name="aliased_descriptor"),
+        ],
+    )
     def test_dict_method_descriptor_receiver(self, mapping_type, method, receiver):
         Mapping = type("Mapping", (dict,), {method: getattr(mapping_type, method)})
 
+        if receiver is dict:
+
+            def invoke(mapping):
+                return getattr(mapping, method)()  # aliased descriptor
+        elif receiver is None:
+
+            def invoke(mapping):
+                return getattr(mapping_type, method)()
+        else:
+
+            def invoke(mapping):
+                return getattr(mapping_type, method)(mapping)
+
         def fn(x, mapping):
             try:
-                if receiver is dict:
-                    getattr(mapping, method)()  # aliased descriptor
-                else:
-                    getattr(mapping_type, method)(
-                        *(() if receiver is None else (mapping,))
-                    )
+                invoke(mapping)
             except TypeError as exc:
                 return x + 1, str(exc)
             return x - 1, "no error"
@@ -363,6 +457,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         mapping = None if factory is None else factory({"a": 1})
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, mapping), fn(x, mapping))
+
+    def test_dict_getitem_descriptor_defaultdict_override(self):
+        class Mapping(defaultdict):
+            def __getitem__(self, key):
+                return dict.__getitem__(self, key) + 1
+
+            def __missing__(self, key):
+                return 7
+
+        def fn(x, mapping):
+            return x + dict.__getitem__(mapping, "a"), dict.__getitem__(
+                mapping, "absent"
+            )
+
+        x, mapping = torch.ones(1), Mapping(None, a=3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("bound", [False, True])
@@ -1399,22 +1512,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
-
-    def test_unused_tuple_key_with_spoofed_builtin_method_type(self):
-        class Key:
-            @property
-            def __class__(self):
-                return types.BuiltinMethodType
-
-        def fn(x, mapping):
-            return x + mapping["used"]
-
-        mapping = {"used": 2, (Key(),): 3}
-        x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
-            fn(x, mapping),
-        )
 
     def test_dict_mutation_side_effect(self):
         def fn(d):

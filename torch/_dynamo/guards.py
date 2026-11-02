@@ -1863,8 +1863,8 @@ class GuardBuilder(GuardBuilderBase):
         source_name = source.name
         if source_name == "":
             return False
-        value = self.get(source)
-        return id(value) in self.key_order_guarded_dict_ids
+        obj_id = id(self.get(source))
+        return obj_id in self.key_order_guarded_dict_ids
 
     def get_guard_manager_type(
         self,
@@ -1876,17 +1876,17 @@ class GuardBuilder(GuardBuilderBase):
         | None,
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
+        example_type: type[object] = type(example_value)
         if self.requires_key_order_guarding(source):
-            # Fix this if condition
-            if isinstance(example_value, dict_keys):
+            if issubclass(example_type, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-            elif isinstance(example_value, (set, frozenset)):
+            elif issubclass(example_type, (set, frozenset)):
                 # we don't need to guard on key order for set/frozenset
                 # but the if above will be true for these types as set is
                 # implemented using a dict in Dynamo
                 guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
-                if not isinstance(example_value, dict):
+                if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
@@ -3665,24 +3665,6 @@ class GuardBuilder(GuardBuilderBase):
     # Multi-source guard (two inputs aliasing) — not expressible as a
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
-    @skip_guard_check_spec
-    def BUILTIN_METHOD_RECEIVER_ALIAS(
-        self, guard: Guard, source_b: Source, expected_alias: bool
-    ) -> None:
-        if self.save_guards:
-            if name := get_local_source_name(source_b):
-                self.check_fn_manager.additional_used_local_vars.add(name)
-            if name := get_global_source_name(source_b):
-                self.check_fn_manager.additional_used_global_vars.add(name)
-        code = [
-            f"{self.arg_ref(guard)} is{'' if expected_alias else ' not'} "
-            f"{self.arg_ref(source_b.name)}"
-        ]
-        self._set_guard_export_info(guard, code)
-        self.add_python_lambda_leaf_guard_to_root(
-            code, get_verbose_code_parts(code, guard)
-        )
-
     @skip_guard_check_spec
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
