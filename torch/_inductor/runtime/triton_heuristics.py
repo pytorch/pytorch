@@ -2893,8 +2893,12 @@ class CachingAutotuner(KernelInterface):
             new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
             return new_launcher
         except (AttributeError, TypeError, KeyError, ValueError):
-            # Expected failures - silent fallback is OK.
-            # ValueError is raised when nArgs > MAX_ARGS in the C extension.
+            # Expected failures - silent fallback is OK. Both C extensions rely
+            # on ValueError staying in this list: it is what they raise for a
+            # launch configuration they cannot bind, which is nArgs > MAX_ARGS
+            # for _FastCudaLauncher, plus an unloaded kernel, non-positive
+            # num_warps, negative shared/scratch sizes, or a kernel argument
+            # count that disagrees with arg_tys for _FastXpuLauncher.
             return None
         except Exception:
             # Unexpected failures - log for debugging

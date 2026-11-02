@@ -246,6 +246,33 @@ class TestStaticTritonLauncherUnit(TestCase):
         self.assertIsNone(launcher.function)
         self.assertIsNone(launcher.module)
 
+    @staticmethod
+    def _make_autotuner_and_static_launcher(device_type, kernel_cls):
+        """A launcher and kernel that _build_fast_launcher accepts, on device_type."""
+        import types
+
+        kernel = object.__new__(kernel_cls)
+        kernel.function = 0xF00D
+        kernel.num_warps = 4
+        kernel.shared = 0
+        kernel.arg_tys = "O"
+        kernel.has_global_scratch = False
+        kernel.has_profile_scratch = False
+        kernel.launch_pdl = False
+
+        def _launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            _launcher_body.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type=device_type)
+        return autotuner, launcher, kernel
+
     @parametrize(
         "device_type,kernel_cls,launcher_attr",
         (
@@ -263,7 +290,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         so the kernel (and its loaded module) cannot be collected/unloaded while
         the fast launcher is still callable.
         """
-        import types
 
         class FakeFastLauncher:
             def __init__(self, func, num_warps, shared, arg_tys, n_scratch, pdl=False):
@@ -272,28 +298,9 @@ class TestStaticTritonLauncherUnit(TestCase):
         class OtherDeviceLauncher(FakeFastLauncher):
             pass
 
-        kernel = object.__new__(kernel_cls)
-        kernel.function = 0xF00D
-        kernel.num_warps = 4
-        kernel.shared = 0
-        kernel.arg_tys = "O"
-        kernel.has_global_scratch = False
-        kernel.has_profile_scratch = False
-        kernel.launch_pdl = False
-
-        launcher_globals = {"runner": kernel.run}
-
-        def _launcher_body(grid_0, grid_1, grid_2, stream, *args):
-            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
-
-        launcher = types.FunctionType(
-            _launcher_body.__code__, launcher_globals, "launcher"
+        autotuner, launcher, kernel = self._make_autotuner_and_static_launcher(
+            device_type, kernel_cls
         )
-        launcher._is_static = True
-
-        autotuner = object.__new__(CachingAutotuner)
-        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
-        autotuner.device_props = SimpleNamespace(type=device_type)
 
         # Both types are patched, so picking the wrong one fails loudly.
         patches = dict.fromkeys(
@@ -311,7 +318,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         self.assertNotIn(kernel.run, fast_launcher.__globals__.values())
 
         owner_ref = weakref.ref(kernel)
-        del kernel, launcher, launcher_globals, fast_runner
+        del kernel, launcher, fast_runner
         gc.collect()
         # Only fast_launcher._static_kernel_owner keeps the kernel alive now.
         self.assertIsNotNone(owner_ref())
@@ -319,6 +326,22 @@ class TestStaticTritonLauncherUnit(TestCase):
         del fast_launcher
         gc.collect()
         self.assertIsNone(owner_ref())
+
+    def test_build_fast_launcher_unsupported_device(self):
+        # Backends that register a static launcher of their own through
+        # register_statically_launched_kernel reach _build_fast_launcher too,
+        # and have no fast launcher to build.
+        autotuner, launcher, _ = self._make_autotuner_and_static_launcher(
+            "privateuseone", StaticallyLaunchedTritonKernel
+        )
+        patches = {
+            "_FastCudaLauncher": mock.MagicMock(),
+            "_FastXpuLauncher": mock.MagicMock(),
+        }
+        with mock.patch.multiple("torch._C", create=True, **patches):
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+        for fast_launcher_cls in patches.values():
+            fast_launcher_cls.assert_not_called()
 
     def test_resolve_load_device_cpu_stays_none(self):
         # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
@@ -1334,8 +1357,9 @@ class TestStaticTritonCompileResult(TestCase):
             self.assertEqual(result, torch.cat(((x * 4), y + 10)))
 
 
-class FastLauncherTestMixin(StaticLauncherTestMixin):
-    """Helpers for building a fast launcher around a freshly compiled kernel."""
+@requires_gpu_and_triton
+class TestFastLauncher(StaticLauncherTestMixin, TestCase):
+    """Tests for the _FastCudaLauncher / _FastXpuLauncher C extensions."""
 
     def _fast_launcher_cls(self):
         if GPU_TYPE == "xpu":
@@ -1372,11 +1396,6 @@ class FastLauncherTestMixin(StaticLauncherTestMixin):
 
         arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
         return self._make_launcher(simple_kernel[(1,)](arg0, 5))
-
-
-@requires_gpu_and_triton
-class TestFastLauncher(FastLauncherTestMixin, TestCase):
-    """Tests for the _FastCudaLauncher / _FastXpuLauncher C extensions."""
 
     def test_basic(self):
         @triton.jit
@@ -1608,13 +1627,8 @@ class TestFastLauncher(FastLauncherTestMixin, TestCase):
         fast_launcher(1, 1, 1, self._stream(), out, 5)
         self.assertEqual(out, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
 
-
-@requires_gpu_and_triton
-@unittest.skipUnless(GPU_TYPE == "xpu", "XPU only")
-class TestFastXpuLauncher(FastLauncherTestMixin, TestCase):
-    """_FastXpuLauncher behavior that has no CUDA counterpart."""
-
-    def test_static_shared_mem(self):
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_static_shared_mem(self):
         # A kernel that uses shared memory, but declares it in the binary rather
         # than taking a trailing local accessor argument, so the launcher must
         # not bind one. Triton does not currently emit XPU kernels that take
@@ -1639,14 +1653,16 @@ class TestFastXpuLauncher(FastLauncherTestMixin, TestCase):
         )
         self.assertEqual(out, expected)
 
-    def test_kernel_arg_count_mismatch(self):
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_fast_kernel_arg_count_mismatch(self):
         # The kernel's own argument count is checked once, when the fast
         # launcher is built, instead of on every launch.
         kernel = self._store_sum_launcher()
         with self.assertRaisesRegex(ValueError, "Kernel argument count mismatch"):
             self._make_fast_launcher(kernel, arg_tys=kernel.arg_tys + "i")
 
-    def test_rejects_invalid_launch_metadata(self):
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_rejects_invalid_launch_metadata(self):
         # Each row is valid for the kernel but for one value, so the message
         # shows this check rejected it, not the argument count check after it.
         # MAX_ARGS is covered by test_too_many_args_raises_value_error.
@@ -1664,13 +1680,15 @@ class TestFastXpuLauncher(FastLauncherTestMixin, TestCase):
             with self.assertRaisesRegex(ValueError, "num_warps must be positive"):
                 _FastXpuLauncher(kernel.function, num_warps, shared, arg_tys, n_scratch)
 
-    def test_rejects_unloaded_kernel(self):
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_rejects_unloaded_kernel(self):
         from torch._C import _FastXpuLauncher
 
         with self.assertRaisesRegex(ValueError, "loaded XPU kernel"):
             _FastXpuLauncher(object(), 1, 0, "O", 0)
 
-    def test_keeps_kernel_capsule_alive(self):
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_keeps_kernel_capsule_alive(self):
         # The capsule owns the sycl::kernel, and swapping a fast launcher into a
         # cached launcher drops every other reference to it, so the launcher
         # must hold one itself.
