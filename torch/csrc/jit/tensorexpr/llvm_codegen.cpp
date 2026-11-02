@@ -519,6 +519,12 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),
       bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
+#if LLVM_VERSION_MAJOR >= 24
+  // LLVM 24 uses IR-level contraction flags instead of AllowFPOpFusion.
+  llvm::FastMathFlags fast_math_flags;
+  fast_math_flags.setAllowContract(true);
+  irb_.setFastMathFlags(fast_math_flags);
+#endif
   if (!triple) {
     triple = LLVMTargetTriple();
   }
