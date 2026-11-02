@@ -18,7 +18,6 @@
 #endif
 
 #include <cstdint>
-#include <cstdlib> // PTQ_SABOTAGE
 #include <limits>
 #include <numeric>
 
@@ -54,13 +53,6 @@ struct FastAtomicAddBounds {
 
 inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
   constexpr int64_t kSingleRow = std::numeric_limits<int64_t>::max();
-  // PTQ_SABOTAGE_BEGIN (temporary mutation test, must be removed)
-  const char* ptq_sab_env = std::getenv("PTQ_SABOTAGE");
-  const int ptq_sab = ptq_sab_env ? std::atoi(ptq_sab_env) : 0;
-  if (ptq_sab == 2 && !self.is_non_overlapping_and_dense()) {
-    return {kSingleRow, self.numel()};
-  }
-  // PTQ_SABOTAGE_END
   if (self.is_non_overlapping_and_dense()) {
     return {kSingleRow, self.numel()};
   }
@@ -79,14 +71,6 @@ inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
   if (row_numel == 0 || row_stride < row_numel) {
     return {kSingleRow, 0};
   }
-  // PTQ_SABOTAGE_BEGIN
-  if (ptq_sab == 1) {
-    return {row_stride, row_stride};
-  }
-  if (ptq_sab == 3) {
-    return {row_stride, row_numel + 1};
-  }
-  // PTQ_SABOTAGE_END
   return {row_stride, row_numel};
 }
 
