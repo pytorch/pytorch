@@ -2329,6 +2329,12 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
+    # Which multiply-adds become FMAs can depend on the block size, so disable this
+    # for results that do not depend on the configs autotuning picks.
+    # emulate_precision_casts also disables it.
+    enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
+
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
@@ -3300,6 +3306,13 @@ class trace:
     # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
     provenance_tracking_to_timeline = (
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Emit a zero-length profiler event "inductor_provenance:<kernel>:<debug_handle>"
+    # before each Python wrapper kernel launch that has a provenance debug handle,
+    # so kernels in any profiler trace can be joined to the provenance artifacts.
+    provenance_profiler_markers = (
+        os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
     )
 
     # Maximum number of trace events to process in profiler timeline post-processing.
