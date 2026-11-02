@@ -2019,8 +2019,8 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu() || self.is_privateuseone(),
-              fname, " supports tensors on a CPU, CUDA, XPU or PrivateUse1 device only, got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu() || self.is_mps() || self.is_privateuseone(),
+              fname, " supports tensors on a CPU, CUDA, XPU, MPS or PrivateUse1 device only, got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());

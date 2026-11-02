@@ -176,7 +176,13 @@ Date:  February 1996
     z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
     num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
     dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
-    x = std::copysign(num, y) / dem;
+    x = num / dem;
+    // Two step of Newton-Raphson using erfc, to avoid cancellation in erf(x) - y.
+    x += (std::erfc(x) - (static_cast<T>(1.0) - y_abs)) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    x += (std::erfc(x) - (static_cast<T>(1.0) - y_abs)) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    if constexpr (std::is_same_v<T, double>)
+      x += (std::erfc(x) - (static_cast<T>(1.0) - y_abs)) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    return std::copysign(x, y);
   }
   /* Two steps of Newton-Raphson correction */
   x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
