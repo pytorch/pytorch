@@ -11,6 +11,7 @@ import torch.distributed as dist
 try:
     from .utils import (
         COMPLEX_DTYPES,
+        decomposed_op_db,
         Descriptor,
         force_test_op_db,
         implemented_op_db,
@@ -20,6 +21,7 @@ try:
 except ImportError:
     from utils import (
         COMPLEX_DTYPES,
+        decomposed_op_db,
         Descriptor,
         force_test_op_db,
         implemented_op_db,
@@ -103,6 +105,9 @@ SKIPS = {
     Descriptor(op=aten.isfinite, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.transpose, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.view_as_real, variant=Variant.Distributed): "No scalar support",
+    Descriptor(
+        op=aten.index_fill, variant=Variant.OpInterleaved
+    ): "prims.copy_strided not implemented",
 }
 
 EXTRA_KWARGS = {
@@ -155,6 +160,14 @@ class TestComplexTensor(TestCase):
     def test_consistency(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
 
+    @ops(
+        decomposed_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_decompositions(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.Op)
+
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
@@ -169,6 +182,14 @@ class TestComplexTensor(TestCase):
 
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error_interleaved(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.OpInterleaved)
+
+    @ops(
+        decomposed_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_decompositions_interleaved(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.OpInterleaved)
 
 
