@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -104,20 +105,37 @@ void testScatterAdd(bool fast_atomics) {
 
 // Everything fastAtomicAdd does beyond gpuAtomicAdd is Half/BFloat16 only: it
 // issues one (fast) 32-bit __half2/__nv_bfloat162 atomic covering the target
-// *and* an adjacent element, padding the neighbour's lane with +0. `numel`
+// *and* an adjacent element, padding the neighbour's lane with -0.0. `numel`
 // exists so it can decline to do that when the neighbour is outside the tensor.
 //
-// A +0 write is invisible when doing a value check BUT one observable trace
-// is the sign bit: IEEE 754 gives (-0.0) + (+0.0) == +0.0. So we seed memory
-// with -0.0 to make out of bound writes detectable.
+// Adding -0.0 leaves every non-NaN value unchanged, but quiets a signaling NaN.
+// So we seed memory with a signaling NaN to make paired writes detectable.
 constexpr uint16_t kNegZero = 0x8000; // -0.0 in both fp16 and bf16
 
-// A slot the vectorized path wrote to comes back as +0.0; one it skipped still
-// holds the -0.0 it was seeded with. Both read as 0.0 as a float, so the raw
-// bits are the only way to tell them apart.
+template <typename scalar_t>
+constexpr uint16_t kSignalingNaN =
+    std::is_same_v<scalar_t, torch::headeronly::Half> ? 0x7c01 : 0x7f81;
+
+// The tensor is buf[offset, offset + numel); targets start at -0.0 and every
+// other slot holds a signaling NaN.
+template <typename scalar_t>
+std::vector<scalar_t> seededBuffer(
+    int64_t buf_numel,
+    int64_t offset,
+    const std::vector<int64_t>& targets) {
+  std::vector<scalar_t> buf(buf_numel);
+  for (auto& v : buf) {
+    v.x = kSignalingNaN<scalar_t>;
+  }
+  for (auto i : targets) {
+    buf[offset + i].x = kNegZero;
+  }
+  return buf;
+}
+
 template <typename scalar_t>
 bool wasWritten(scalar_t v) {
-  return v.x != kNegZero;
+  return v.x != kSignalingNaN<scalar_t>;
 }
 
 template <typename scalar_t>
@@ -125,10 +143,7 @@ void testVectorizedBounds() {
   constexpr int64_t buf_numel = 34;
   constexpr int64_t numel = 32;
   constexpr int64_t offset = 1; // odd 16-bit alignment, e.g., in a view
-  std::vector<scalar_t> buf(buf_numel);
-  for (auto& v : buf) {
-    v.x = kNegZero;
-  }
+  const std::vector<int64_t> targets = {0, 5, 16, numel - 1};
 
   // The tensor is buf[1..32]. At this offset odd indices pair right and even
   // ones pair left, so index 0 could only pair left and index numel-1 only
@@ -137,17 +152,62 @@ void testVectorizedBounds() {
   // in each direction; they are the positive control proving a pair write is
   // detectable here at all.
   const auto out = scatterAdd<scalar_t>(
-      std::move(buf), {0, 5, 16, numel - 1}, numel, /*fast_atomics=*/true, offset);
+      seededBuffer<scalar_t>(buf_numel, offset, targets),
+      targets,
+      numel,
+      /*fast_atomics=*/true,
+      offset);
 
-  EXPECT_EQ(static_cast<float>(out[offset]), 1.0f);
-  EXPECT_EQ(static_cast<float>(out[offset + 5]), 1.0f);
-  EXPECT_EQ(static_cast<float>(out[offset + 16]), 1.0f);
-  EXPECT_EQ(static_cast<float>(out[offset + numel - 1]), 1.0f);
-
+  for (auto i : targets) {
+    EXPECT_EQ(static_cast<float>(out[offset + i]), 1.0f) << "index " << i;
+  }
   EXPECT_TRUE(wasWritten(out[offset + 6])) << "index 5 should pair right";
   EXPECT_TRUE(wasWritten(out[offset + 15])) << "index 16 should pair left";
   EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start of the tensor";
   EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
+
+  // numel = 0 declares that no neighbour may be touched.
+  const auto unpaired = scatterAdd<scalar_t>(
+      seededBuffer<scalar_t>(buf_numel, offset, {5, 16}),
+      {5, 16},
+      /*numel=*/int64_t{0},
+      /*fast_atomics=*/true,
+      offset);
+  EXPECT_EQ(static_cast<float>(unpaired[offset + 5]), 1.0f);
+  EXPECT_EQ(static_cast<float>(unpaired[offset + 16]), 1.0f);
+  EXPECT_FALSE(wasWritten(unpaired[offset + 6])) << "numel = 0 paired right";
+  EXPECT_FALSE(wasWritten(unpaired[offset + 15])) << "numel = 0 paired left";
+
+  // Same with an unsigned index type, where numel - 1 would wrap around.
+  const auto unpaired_unsigned = scatterAdd<scalar_t, uint32_t>(
+      seededBuffer<scalar_t>(buf_numel, offset, {5, 16}),
+      {5, 16},
+      /*numel=*/0U,
+      /*fast_atomics=*/true,
+      offset);
+  EXPECT_EQ(static_cast<float>(unpaired_unsigned[offset + 5]), 1.0f);
+  EXPECT_EQ(static_cast<float>(unpaired_unsigned[offset + 16]), 1.0f);
+  EXPECT_FALSE(wasWritten(unpaired_unsigned[offset + 6]))
+      << "unsigned numel = 0 paired right";
+  EXPECT_FALSE(wasWritten(unpaired_unsigned[offset + 15]))
+      << "unsigned numel = 0 paired left";
+}
+
+// A paired neighbour must keep its value, including the sign of -0.0.
+template <typename scalar_t>
+void testPairedNeighbourUnchanged() {
+  constexpr int64_t numel = 32;
+  constexpr int64_t offset = 1;
+  std::vector<scalar_t> buf(numel + 2);
+  for (auto& v : buf) {
+    v.x = kNegZero;
+  }
+  const auto out = scatterAdd<scalar_t>(
+      std::move(buf), {5, 16}, numel, /*fast_atomics=*/true, offset);
+  EXPECT_EQ(static_cast<float>(out[offset + 5]), 1.0f);
+  EXPECT_EQ(static_cast<float>(out[offset + 16]), 1.0f);
+  EXPECT_EQ(out[offset + 6].x, kNegZero) << "index 5's neighbour changed";
+  EXPECT_EQ(out[offset + 15].x, kNegZero) << "index 16's neighbour changed";
 }
 
 } // namespace
@@ -168,6 +228,12 @@ TEST(TestFastAtomicAdd, VectorizedBounds) {
   SKIP_IF_NO_CUDA();
   testVectorizedBounds<torch::headeronly::Half>();
   testVectorizedBounds<torch::headeronly::BFloat16>();
+}
+
+TEST(TestFastAtomicAdd, PairedNeighbourUnchanged) {
+  SKIP_IF_NO_CUDA();
+  testPairedNeighbourUnchanged<torch::headeronly::Half>();
+  testPairedNeighbourUnchanged<torch::headeronly::BFloat16>();
 }
 
 TEST(TestFastAtomicAdd, FastSpecializedAtomicAdd) {

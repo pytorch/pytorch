@@ -361,10 +361,14 @@ void put_kernel(TensorIterator& iter, const TensorBase& output, const bool accum
         "put_cuda_index", [&] {
            auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
-             index_t numel = output.numel();
+             // See Note [fastAtomicAdd bounds for strided tensors]
+             const auto bounds = fast_atomic_add_bounds(output);
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
-                 [numel, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
-                   fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated);
+                 [bounds, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
+                   const auto column = static_cast<index_t>(bounds.column(offset));
+                   fastSpecializedAtomicAdd(
+                       indexed_ptr + offset - column, column,
+                       static_cast<index_t>(bounds.row_numel), iterated);
                  });
            }
            else {

@@ -746,6 +746,105 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "op",
+        [
+            "scatter_add",
+            "scatter_reduce_sum",
+            "scatter_reduce_mean",
+            "scatter_scalar_add",
+            "index_add",
+            "index_add_many",
+            "index_reduce_mean",
+            "put_accumulate",
+        ],
+    )
+    def test_atomic_add_writes_only_target(self, device, dtype, op):
+        # Half-precision atomic adds can be packed with a neighbouring slot.
+        # Check that only the targeted elements change: slots of self start at
+        # -0.0, which an add of +0.0 would flip, and slots outside self hold a
+        # signaling NaN, which any add would quiet.
+        # See https://github.com/pytorch/pytorch/issues/202905
+        signaling_nan = 0x7C01 if dtype == torch.float16 else 0x7F81
+
+        def view_5x5(b):
+            return b[:25].view(5, 5)
+
+        def column_slice(b):
+            return b[:30].view(5, 6)[:, :5]
+
+        cases = [
+            (view_5x5, 1, 4),
+            (view_5x5, 0, 4),
+            (lambda b: view_5x5(b).t(), 1, 4),
+            (lambda b: b[1:26].view(5, 5), 1, 0),
+            (lambda b: b[:25], 0, 24),
+            (lambda b: b[1:26], 0, 0),
+            # Padded rows: interior columns may pair within their row only.
+            (column_slice, 1, 4),
+            (column_slice, 1, 2),
+            (column_slice, 0, 2),
+            (lambda b: column_slice(b).t(), 1, 2),
+            (lambda b: b[:30].view(5, 6)[:, 1:], 1, 0),
+            (lambda b: b[1:31].view(5, 6)[:, :5], 1, 3),
+            (lambda b: b[:35].view(5, 7)[:, :5], 1, 3),
+            (lambda b: b[:48].view(2, 4, 6)[:, :, :5], 2, 4),
+            (lambda b: b[:48].view(2, 4, 6)[:, :, :5], 1, 3),
+            # No element has an owned neighbour.
+            (lambda b: b[:10:2], 0, 1),
+            (lambda b: b[1:11:2], 0, 1),
+        ]
+
+        # Each op adds exactly 1 to the targeted slice of x.
+        def apply(x, dim, idx, src):
+            if op == "scatter_add":
+                x.scatter_add_(dim, idx, src)
+            elif op == "scatter_reduce_sum":
+                x.scatter_reduce_(dim, idx, src, "sum")
+            elif op == "scatter_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.scatter_reduce_(dim, idx, src * 2, "mean")
+            elif op == "scatter_scalar_add":
+                x.scatter_(dim, idx, 1.0, reduce="add")
+            elif op == "index_add":
+                x.index_add_(dim, idx.flatten()[:1], src)
+            elif op == "index_add_many":
+                # More than 16 indices selects the large-index kernel, and
+                # alpha != 1 avoids delegating to scatter_add_.
+                n = 32
+                many = idx.flatten()[:1].repeat(n)
+                x.index_add_(dim, many, torch.cat([src] * n, dim) / 16, alpha=0.5)
+            elif op == "index_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.index_reduce_(dim, idx.flatten()[:1], src * 2, "mean")
+            elif op == "put_accumulate":
+                flat_idx = torch.arange(x.numel(), device=device).view(x.shape)
+                x.put_(flat_idx.select(dim, idx.flatten()[0].item()), src, accumulate=True)
+
+        def make_base():
+            base = torch.full((64,), signaling_nan, device=device, dtype=torch.int16)
+            return base.view(dtype)
+
+        for make_self, dim, i in cases:
+            base = make_base()
+            x = make_self(base)
+            x.fill_(-0.0)
+            shape = list(x.shape)
+            shape[dim] = 1
+            idx = torch.full(shape, i, device=device)
+            src = torch.ones(shape, device=device, dtype=dtype)
+            apply(x, dim, idx, src)
+
+            expected = make_base()
+            make_self(expected).fill_(-0.0).select(dim, i).fill_(1)
+            self.assertEqual(
+                base.view(torch.int16),
+                expected.view(torch.int16),
+                msg=f"dim={dim}, index={i}, self strides {x.stride()}",
+            )
+
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
         for d in (0, 1):

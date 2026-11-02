@@ -1,5 +1,7 @@
 #pragma once
 #include <ATen/core/TensorAccessor.h>
+#include <ATen/core/TensorBase.h>
+#include <c10/util/irange.h>
 #include <torch/headeronly/cuda/Atomic.h>
 #include <torch/headeronly/cuda/KernelUtils.h>
 
@@ -15,10 +17,78 @@
 #include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
+#include <cstdint>
+#include <cstdlib> // PTQ_SABOTAGE
+#include <limits>
+#include <numeric>
+
 namespace at::native {
 
 using torch::headeronly::fastAtomicAdd;
 using torch::headeronly::fastSpecializedAtomicAdd;
+
+// Note [fastAtomicAdd bounds for strided tensors]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// fastAtomicAdd may pair a half/bfloat16 update with tensor[index +/- 1], so
+// its (tensor, index, numel) must describe memory that the destination owns.
+// Kernels that address a destination by element offset from its data pointer
+// get that from FastAtomicAddBounds, which views the destination as rows:
+// row r owns offsets [r * row_stride, r * row_stride + row_numel).
+//
+// - Non-overlapping and dense: a single row covering all of it.
+// - Rows of row_numel contiguous elements whose other strides are all
+//   multiples of row_stride >= row_numel, e.g. a column slice of a contiguous
+//   matrix: the row and column of an offset are its quotient and remainder,
+//   and only elements of the same row are paired.
+// - Anything else, e.g. x[::2]: row_numel is 0, which disables pairing.
+struct FastAtomicAddBounds {
+  int64_t row_stride;
+  int64_t row_numel;
+
+  // Column of the element at offset; pass (data + offset - column, column,
+  // row_numel) to fastAtomicAdd.
+  __device__ __forceinline__ int64_t column(int64_t offset) const {
+    return offset < row_stride ? offset : offset % row_stride;
+  }
+};
+
+inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
+  constexpr int64_t kSingleRow = std::numeric_limits<int64_t>::max();
+  // PTQ_SABOTAGE_BEGIN (temporary mutation test, must be removed)
+  const char* ptq_sab_env = std::getenv("PTQ_SABOTAGE");
+  const int ptq_sab = ptq_sab_env ? std::atoi(ptq_sab_env) : 0;
+  if (ptq_sab == 2 && !self.is_non_overlapping_and_dense()) {
+    return {kSingleRow, self.numel()};
+  }
+  // PTQ_SABOTAGE_END
+  if (self.is_non_overlapping_and_dense()) {
+    return {kSingleRow, self.numel()};
+  }
+  int64_t row_numel = 0;
+  int64_t row_stride = 0;
+  for (const auto d : c10::irange(self.dim())) {
+    if (self.size(d) == 1) {
+      continue;
+    }
+    if (self.stride(d) == 1 && row_numel == 0) {
+      row_numel = self.size(d);
+    } else {
+      row_stride = std::gcd(row_stride, self.stride(d));
+    }
+  }
+  if (row_numel == 0 || row_stride < row_numel) {
+    return {kSingleRow, 0};
+  }
+  // PTQ_SABOTAGE_BEGIN
+  if (ptq_sab == 1) {
+    return {row_stride, row_stride};
+  }
+  if (ptq_sab == 3) {
+    return {row_stride, row_numel + 1};
+  }
+  // PTQ_SABOTAGE_END
+  return {row_stride, row_numel};
+}
 
 // Scatter into a packed accessor without naming a bound.
 //
@@ -32,9 +102,11 @@ using torch::headeronly::fastSpecializedAtomicAdd;
 //
 // the distance to the last addressable element rather than the element count,
 // which is what at::native::storage_size_for computes on the host. The two
-// differ for a strided view, whose gaps are legal pairing partners: inside the
-// region, though belonging to whatever the view was taken from, and only ever
-// receiving a zero.
+// differ for a strided view, whose gaps are inside the region but belong to
+// whatever the view was taken from. Pairing adds -0.0 to them, which preserves
+// non-NaN values but is still a write the view does not own, so only use this
+// overload on tensors whose whole memory span is owned by the kernel, such as
+// freshly allocated gradients.
 template <
     typename scalar_t,
     size_t N,
@@ -189,7 +261,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     bool low_byte =
         (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
     bool canCombnUp = (bool)(__activemask() & (1 << (threadIdx.x + 1))) &&
-        (low_byte && index < (numel - 1)) &&
+        (low_byte && index + 1 < numel) &&
         (ill_oneUpDst.il - reinterpret_cast<int64_t>(dst) == sizeof(scalar_t));
     bool canCombnDn =
         (__builtin_amdgcn_mov_dpp(canCombnUp, 0x138, 0xf, 0xf, 0));
