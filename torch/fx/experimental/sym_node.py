@@ -1546,12 +1546,10 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         shape_env = self.shape_env
         cache = None
         cache_key = None
-        cache_version = None
         # mod picks Mod or PythonMod from value ranges, so it isn't memoized.
         if shape_env is not None and method != "mod":
             cache = shape_env._get_symop_cache()
-            cache_version = shape_env._symop_cache_version
-            cache_key = (method, self._expr, other._expr)
+            cache_key = (method, self.expr, other.expr)
             cached = cache.get(cache_key)
             if cached is not None:
                 out, pytype, optimized_summation = cached
@@ -1669,15 +1667,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )
-        # Computing out can itself change replacements: self.expr and
-        # other.expr call replace(), and _find may store a more resolved
-        # replacement. Don't cache a result built from replacements that
-        # have since changed.
-        if (
-            cache is not None
-            and shape_env is not None
-            and shape_env._replacements_version_counter == cache_version
-        ):
+        if cache is not None:
             cache[cache_key] = (out, pytype, optimized_summation)
         return result
 
