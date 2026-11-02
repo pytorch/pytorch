@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
 
-from ..utils import node_inline_, nodes_filter, nodes_first, sequential_split
+from ..utils import node_inline_, nodes_filter, sequential_split
 from .replace_with_hop_pass_util import (
+    _first_call_in_sub_mod,
     _replace_with_hop_helper,
     _replace_with_hop_pass_helper,
     _sequential_split_and_maybe_inline_subgraphs_helper,
@@ -54,11 +55,7 @@ def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
         if not isinstance(node.target, str):
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
-        # split_module reads submodules and pytree specs, such as the branches
-        # of a cond, with get_attr nodes before the first call of a region.
-        first_call = nodes_first(
-            subgm.graph.nodes, lambda node: node.op not in ("placeholder", "get_attr")
-        )
+        first_call = _first_call_in_sub_mod(subgm)
         if (
             first_call
             and first_call.op == "call_function"

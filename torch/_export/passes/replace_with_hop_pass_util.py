@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from ..utils import node_replace_, nodes_map
+from ..utils import node_replace_, nodes_first, nodes_map
 
 
 if TYPE_CHECKING:
@@ -16,6 +16,14 @@ if TYPE_CHECKING:
 
     from torch._ops import HigherOrderOperator
     from torch.export.graph_signature import ExportGraphSignature
+
+
+def _first_call_in_sub_mod(subgm: torch.fx.GraphModule) -> torch.fx.Node | None:
+    # split_module reads submodules and pytree specs, such as the branches of a
+    # cond, with get_attr nodes before the first call of a region.
+    return nodes_first(
+        list(subgm.graph.nodes), lambda node: node.op not in ("placeholder", "get_attr")
+    )
 
 
 def _replace_with_hop_helper(
