@@ -127,9 +127,9 @@ def _create_graph(
             _keep_input_mutations=aot_config.keep_inference_input_mutations,
         )
 
-    # Dynamo may emit unbalanced autocast_increment/decrement_nesting across
-    # graph breaks; restore nesting after make_fx so capture matches metadata
-    # collect (which also restores nesting and does not raise on it).
+    # Restore autocast nesting after make_fx (same cleanup as metadata collect).
+    # This returns the caller's nesting counter; it does not make unmanaged
+    # _enter/_exit_autocast across graph breaks correct at runtime.
     with (
         enable_python_dispatcher(),
         ctx,

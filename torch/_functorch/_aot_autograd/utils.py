@@ -8,8 +8,8 @@ import logging
 import operator
 import sys
 import warnings
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager, nullcontext
+from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from functools import partial, wraps
 from typing import Any, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
@@ -100,25 +100,6 @@ def normalize_as_list(x: object) -> list[object]:
     elif isinstance(x, list):
         return x
     return [x]
-
-
-def _get_autocast_dtypes() -> dict[str, torch.dtype]:
-    # Per-device autocast dtype. Enabled TLS is restored by ExcludeDispatchKeyGuard
-    # and is not snapshotted. Cache is forced off by disable_autocast_cache.
-    return {
-        device_type: torch.get_autocast_dtype(device_type)
-        for device_type in torch._C._autocast_supported_devices()
-    }
-
-
-@contextmanager
-def _preserve_autocast_dtypes() -> Iterator[dict[str, torch.dtype]]:
-    prior = _get_autocast_dtypes()
-    try:
-        yield prior
-    finally:
-        for device_type, dtype in prior.items():
-            torch.set_autocast_dtype(device_type, dtype)
 
 
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:

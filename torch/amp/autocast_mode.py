@@ -67,6 +67,24 @@ def _preserve_autocast_nesting() -> Iterator[None]:
         _set_autocast_nesting(prior)
 
 
+def _get_autocast_dtypes() -> dict[str, torch.dtype]:
+    # Per-device autocast dtype TLS for every _autocast_supported_devices() entry.
+    return {
+        device_type: torch.get_autocast_dtype(device_type)
+        for device_type in torch._C._autocast_supported_devices()
+    }
+
+
+@contextlib.contextmanager
+def _preserve_autocast_dtypes() -> Iterator[dict[str, torch.dtype]]:
+    prior = _get_autocast_dtypes()
+    try:
+        yield prior
+    finally:
+        for device_type, dtype in prior.items():
+            torch.set_autocast_dtype(device_type, dtype)
+
+
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
     def decorate_autocast(*args, **kwargs):

@@ -23,7 +23,11 @@ from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
-from torch.amp.autocast_mode import _preserve_autocast_nesting
+from torch.amp.autocast_mode import (
+    _get_autocast_dtypes,
+    _preserve_autocast_dtypes,
+    _preserve_autocast_nesting,
+)
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -62,13 +66,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import (
-    _get_autocast_dtypes,
-    _preserve_autocast_dtypes,
-    KNOWN_TYPES,
-    simple_wraps,
-    strict_zip,
-)
+from .utils import KNOWN_TYPES, simple_wraps, strict_zip
 
 
 if TYPE_CHECKING:
@@ -224,14 +222,15 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        # ExcludeDispatchKeyGuard restores autocast enabled TLS on exit, so enabled
-        # mutations are not checked. Autocast dtypes are independent TLS and are
-        # checked for every _autocast_supported_devices() entry. Nesting is restored
-        # (not raised on): Dynamo intentionally emits unbalanced increment/decrement
-        # across graph breaks, and graph capture restores nesting the same way in
-        # _create_graph. Cache is forced off by disable_autocast_cache and restored
-        # on exit. Note: an unbalanced _enter_autocast that also changes dtype still
-        # fails the dtype check (including across graph breaks).
+        # Autocast tracing-state contract for this metadata pass (and matching
+        # cleanup in _create_graph):
+        # - dtype: must balance across the traced region; mismatch raises. Prefer
+        #   `with torch.autocast(...)`.
+        # - enabled / cache / nesting: cleaned up after tracing only. Cleanup is
+        #   not runtime support across graph breaks (Dynamo may emit unbalanced
+        #   nesting; ExcludeDispatchKeyGuard restores enabled TLS; cache is
+        #   forced off by disable_autocast_cache). Unmanaged _enter/_exit_autocast
+        #   split by a graph break is unsupported under AOT backends.
         with (
             disable_above,
             _preserve_autocast_nesting(),
