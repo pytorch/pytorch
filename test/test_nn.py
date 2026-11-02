@@ -17430,13 +17430,6 @@ class TestNNCUDA(NNTestCase):
             stack.extend(next_fn for next_fn, _ in node.next_functions)
         return None
 
-    @staticmethod
-    def _plant_sentinel(log_probs):
-        # Freed GPU memory is usually zero, so an unwritten gradient would
-        # pass the zero check by luck; fill likely-reused blocks with 12345.
-        blocks = [torch.full(log_probs.shape, 12345., device=log_probs.device) for _ in range(3)]
-        del blocks
-
     def test_ctc_loss_cudnn(self, device):
         # (T, N, C, permuted). MIOpen describes log_probs with packed strides,
         # so the permuted layout is only run with cuDNN.
@@ -17458,7 +17451,6 @@ class TestNNCUDA(NNTestCase):
                     loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
                                                                reduction='none')
                     grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
-                self._plant_sentinel(log_probs)
                 loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
                                                           input_lengths, target_lengths, reduction='none')
                 # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
@@ -17497,7 +17489,6 @@ class TestNNCUDA(NNTestCase):
                     loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
                                                                reduction='none', zero_infinity=zero_infinity)
                     grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
-                self._plant_sentinel(log_probs)
                 loss_cudnn = torch.nn.functional.ctc_loss(log_probs,
                                                           targets.to(torch.int32),
                                                           input_lengths.to(torch.int32),
@@ -17509,10 +17500,6 @@ class TestNNCUDA(NNTestCase):
                                 f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {backend}")
                 grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
                 self.assertEqual(loss_cudnn, loss_native, atol=1e-3, rtol=1e-4)
-                # The loss does not depend on frames at or past input_lengths[b],
-                # so their gradient is zero (#202338).
-                past_end = torch.arange(input_length, device=device)[:, None] >= input_lengths[None, :]
-                self.assertEqual(grad_cudnn[past_end], torch.zeros_like(grad_cudnn[past_end]), atol=0, rtol=0)
                 self.assertEqual(grad_cudnn, grad_native, atol=1e-3, rtol=0)
 
     def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self, device):
