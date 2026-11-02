@@ -353,41 +353,38 @@ def register_simple(
     return register_complex(op, impl)
 
 
-def register_inductor(
-    op: OpType,
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
-    def impl(*a, out: torch.Tensor | None = None, **kw):
-        a, kw = tree_map(_as_interleaved, (a, kw))
-        ret = op(*a, **kw)
-        ret_flat, ret_spec = tree_flatten(ret)
-        if out is not None:
-            out_flat, out_spec = tree_flatten(out)
-            if ret_spec != out_spec:
-                raise ValueError("Invalid structure for `out`.")
+def _inductor_impl(op: OpOverload) -> Callable[..., Any]:
+    out_names = [arg.name for arg in op._schema.arguments if arg.is_out]
 
-            for o, r in zip(out_flat, ret_flat, strict=True):
-                if not isinstance(o, torch.Tensor):
-                    raise AssertionError("Cannot copy into non-Tensor.")
-                if not isinstance(r, torch.Tensor):
-                    raise AssertionError("Invalid return")
+    def impl(*args: Any, **kwargs: Any) -> Any:
+        outs = [kwargs[name] for name in out_names]
+        args, kwargs = tree_map(_as_interleaved, (args, kwargs))
+        ret = op(*args, **kwargs)
+        if not out_names:
+            return tree_map(_as_complex_tensor, ret)
 
-                o.copy_(r)
-
-            return out
-
-        ret_flat = [
-            _as_complex_tensor(r)
-            if isinstance(r, torch.Tensor) and r.dtype.is_complex
-            else r
-            for r in ret_flat
-        ]
-        return tree_unflatten(ret_flat, ret_spec)
+        # `ComplexTensor` destinations were replaced by interleaved temporaries above.
+        for out, name in zip(outs, out_names, strict=True):
+            if out is not (ret := kwargs[name]):
+                if out.shape != ret.shape:
+                    raise ValueError("Invalid output tensor shape.")
+                out.copy_(ret)
+        return outs[0] if len(outs) == 1 else tuple(outs)
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
     impl.__qualname__ = func_name
 
-    return register_complex(op, impl)
+    return impl
+
+
+def register_inductor(op: OpOverloadPacket) -> Callable[..., Any]:
+    """Run every overload of `op` on interleaved inputs, writing `out=` results back."""
+    impls = {
+        name: register_force_test(getattr(op, name), _inductor_impl(getattr(op, name)))
+        for name in op.overloads()
+    }
+    return impls["default"]
 
 
 def _as_complex_tensor(
