@@ -612,6 +612,18 @@ if(USE_CUDA)
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
   target_compile_definitions(caffe2_nvrtc PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
   if(MSVC)
+    # CUTLASS requires permissive template parsing with MSVC (NVIDIA/cutlass#3065).
+    set(GROUPED_MM_CUDA_SOURCES
+      ${TORCH_ROOT}/aten/src/ATen/native/cuda/GroupMM.cu
+      ${TORCH_ROOT}/aten/src/ATen/native/cuda/ScaledGroupMM.cu)
+    set_property(SOURCE ${GROUPED_MM_CUDA_SOURCES} APPEND PROPERTY
+      COMPILE_OPTIONS "-Xcompiler=/permissive")
+    # Check required for CTK 12.* builds
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
+      # Avoid over-aligned CUtensorMap parameters in CUDA-generated MSVC stubs.
+      set_property(SOURCE ${GROUPED_MM_CUDA_SOURCES} APPEND PROPERTY
+        COMPILE_OPTIONS "-Xcompiler=/Zc:__cplusplus-")
+    endif()
     # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
     set(DELAY_LOAD_FLAGS "-DELAYLOAD:nvcuda.dll;delayimp.lib")
   else()
