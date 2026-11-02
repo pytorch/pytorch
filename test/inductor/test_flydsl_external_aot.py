@@ -17,9 +17,12 @@ from torch._inductor.runtime.flydsl_cache import (
     is_capturing_flydsl_compiles,
 )
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestFlyDSLExternalAOT(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compile_capture_is_context_local(self):
         calls = []
 

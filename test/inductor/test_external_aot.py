@@ -20,9 +20,12 @@ from torch._inductor.codegen.external_aot import (
 )
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestExternalAOT(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _spec(self):
         return ExternalAOTBuildSpec(
             kind="test",
