@@ -843,7 +843,7 @@ struct ReduceOp {
           }
         }
       } else {
-#if defined(USE_ROCM) && ROCM_VERSION <= 71300
+#if !defined(USE_ROCM) || ROCM_VERSION <= 71300
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
         #define PRFCH 4
@@ -862,14 +862,9 @@ struct ReduceOp {
          }
         }
 #else
-#if defined(USE_ROCM)
         int input_offset = threadIdx.y;
         int step = blockDim.y;
         #pragma unroll
-#else
-        index_t input_offset = threadIdx.y;
-        index_t step = blockDim.y;
-#endif
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
