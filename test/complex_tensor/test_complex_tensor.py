@@ -11,6 +11,7 @@ import torch.distributed as dist
 try:
     from .utils import (
         COMPLEX_DTYPES,
+        decomposed_op_db,
         Descriptor,
         force_test_op_db,
         implemented_op_db,
@@ -20,6 +21,7 @@ try:
 except ImportError:
     from utils import (
         COMPLEX_DTYPES,
+        decomposed_op_db,
         Descriptor,
         force_test_op_db,
         implemented_op_db,
@@ -47,6 +49,12 @@ aten = torch.ops.aten
 SKIPS = {
     Descriptor(op=aten.empty_like, variant=None): "Non-deterministic output",
     Descriptor(op=aten.randn_like, variant=None): "Non-deterministic output",
+    Descriptor(
+        op=aten.linalg_polar, variant=None
+    ): "Non-deterministic output, 0+0i has random phase.",
+    Descriptor(
+        op=aten.linalg_matrix_sqrth, variant=None
+    ): "Non-deterministic output, |x| = 0 has multiple sqrt.",
     Descriptor(
         op=aten.any, variant=Variant.Distributed
     ): "does not have a sharding strategy registered",
@@ -143,6 +151,14 @@ class TestComplexTensor(TestCase):
     def test_consistency(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
 
+    @ops(
+        decomposed_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_decompositions(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.Op)
+
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
@@ -188,6 +204,57 @@ class TestComplexTensorGeneric(TestCase):
         xc = ComplexTensor.from_interleaved(c)
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
+
+    def test_as_strided_inplace_beyond_wrapper_storage(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.zeros(10)[:2], torch.zeros(10)[:2])
+        result = xc.as_strided_((10,), (1,))
+
+        self.assertIs(result, xc)
+        self.assertEqual(xc.shape, (10,))
+        self.assertEqual(xc.re.shape, (10,))
+        self.assertEqual(xc.im.shape, (10,))
+
+    def test_as_strided_inplace_error_leaves_components_untouched(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.zeros(10)[:2], torch.zeros(2))
+        with self.assertRaises(RuntimeError):
+            xc.as_strided_((10,), (1,))
+
+        self.assertEqual(xc.shape, (2,))
+        self.assertEqual(xc.re.shape, (2,))
+        self.assertEqual(xc.im.shape, (2,))
+
+    def test_out_overload_writes_destination(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        t = torch.randn(4, dtype=torch.complex64)
+        out = ComplexTensor.from_interleaved(torch.zeros(4, dtype=torch.complex64))
+        result = torch.fft.fft(ComplexTensor.from_interleaved(t), out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(out.as_interleaved(), torch.fft.fft(t))
+
+    def test_out_overload_writes_multiple_destinations(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, 3, dtype=torch.complex128)
+        lu = ComplexTensor.from_interleaved(torch.zeros(3, 3, dtype=torch.complex128))
+        pivots = torch.zeros(3, dtype=torch.int32)
+        info = torch.ones((), dtype=torch.int32)
+        result = torch.linalg.lu_factor_ex(
+            ComplexTensor.from_interleaved(a), out=(lu, pivots, info)
+        )
+
+        self.assertIs(result[0], lu)
+        self.assertIs(result[1], pivots)
+        self.assertIs(result[2], info)
+        expected = torch.linalg.lu_factor_ex(a)
+        self.assertEqual(lu.as_interleaved(), expected.LU)
+        self.assertEqual(pivots, expected.pivots)
+        self.assertEqual(info, expected.info)
 
 
 @unMarkDynamoStrictTest
