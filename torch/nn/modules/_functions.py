@@ -309,12 +309,22 @@ class CrossMapLRN2d(Function):
 
 
 class BackwardHookFunction(torch.autograd.Function):
+    generate_vmap_rule = True
+
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def forward(ctx, *args):
-        ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])
+    def forward(*args):
         return args
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        ctx.mark_non_differentiable(*[arg for arg in inputs if not arg.requires_grad])
 
     @staticmethod
     def backward(ctx, *args):
         return args
+
+    @staticmethod
+    def jvp(ctx, *args):
+        # The forward returns its inputs as views, so the tangents must be views too.
+        return tuple(arg.view_as(arg) if arg is not None else None for arg in args)
