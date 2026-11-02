@@ -102,6 +102,36 @@ class TestCppWrapper(InductorTestCase):
             [name for name in unused if f"{name}.reset();" not in code], []
         )
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires mkldnn")
+    @torch._dynamo.config.patch(allow_rnn=True)
+    @config.patch(cpp_wrapper=True, freezing=True)
+    def test_unused_mkldnn_rnn_outputs_freed(self):
+        # Each mkldnn_rnn_layer call also returns hy, cy and a dummy workspace,
+        # which are unused when only the LSTM output is returned.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(16, 32, num_layers=2)
+
+            def forward(self, x):
+                return self.lstm(x)[0]
+
+        model = Model().eval()
+        x = torch.randn(5, 3, 16)
+        with torch.no_grad():
+            actual, code = run_and_get_cpp_code(torch.compile(model), x)
+            self.assertEqual(actual, model(x))
+
+        calls = [line for line in code.splitlines() if "mkldnn_rnn_layer(" in line]
+        self.assertEqual(len(calls), 2)
+        unused = [
+            name for line in calls for name in re.findall(r"&(\w+)_handle", line)[1:]
+        ]
+        self.assertEqual(len(unused), 6)
+        self.assertEqual(
+            [name for name in unused if f"{name}.reset();" not in code], []
+        )
+
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):
     device = "cpu"

@@ -2460,10 +2460,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def make_free_by_names(self, names_to_del: list[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
 
-    def codegen_free_unused_outputs(self, node: ir.FallbackKernel) -> None:
-        # Every fallback path declares an RAII handle per tensor output, but the
-        # scheduler never schedules a free for outputs it eliminated as dead, so
-        # they would otherwise stay alive until the wrapper returns.
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # Every multi-output extern kernel path declares an RAII handle per
+        # tensor output, but the scheduler never schedules a free for outputs it
+        # eliminated as dead, so they would otherwise stay alive until the
+        # wrapper returns.
         unused = [
             out.get_name()
             for out in torch.utils._pytree.tree_leaves(node.outputs)
