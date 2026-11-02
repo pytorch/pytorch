@@ -7715,6 +7715,60 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 torch.compile(fn, backend="eager", fullgraph=True)(x, tmpdir)
             self.assertTrue(os.path.exists(tmpdir.name))
 
+    def test_weakref_finalize_constructor(self):
+        class Target:
+            pass
+
+        target = Target()
+        token = object()
+        calls = []
+
+        def callback(arg):
+            calls.append(arg)
+            return 7
+
+        def fn(x, target):
+            y = x + 1
+            finalizer = weakref.finalize(target, callback, token)
+            return y + 1, finalizer
+
+        x = torch.ones(2)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        finalizers = []
+        for _ in range(3):
+            result, finalizer = compiled(x, target)
+            self.addCleanup(finalizer.detach)
+            finalizers.append(finalizer)
+            self.assertEqual(result, x + 2)
+            self.assertIsInstance(finalizer, weakref.finalize)
+            self.assertTrue(finalizer.alive)
+            info = finalizer.peek()
+            self.assertIs(info[0], target)
+            self.assertIs(info[1], callback)
+            self.assertIs(info[2][0], token)
+            self.assertEqual(counter.frame_count, 2)
+            self.assertEqual(counter.op_count, 2)
+        self.assertEqual(len({id(finalizer) for finalizer in finalizers}), 3)
+        self.assertEqual(calls, [])
+
+        strict_target = Target()
+        with self.assertRaisesRegex(Unsupported, "uses the finalizer registry") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x, strict_target)
+        self.assertNotIn("dont_skip_tracing", str(cm.exception))
+        self.assertFalse(
+            any(
+                info.weakref() is strict_target and info.func is callback
+                for info in tuple(weakref.finalize._registry.values())
+            )
+        )
+        self.assertEqual(calls, [])
+        for finalizer in finalizers:
+            self.assertEqual(finalizer(), 7)
+            self.assertIsNone(finalizer())
+            self.assertFalse(finalizer.alive)
+        self.assertEqual(calls, [token] * 3)
+
     @parametrize(
         "operation", ["call", "detach", "peek", "alive", "atexit", "set_atexit", "repr"]
     )
