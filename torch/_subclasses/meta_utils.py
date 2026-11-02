@@ -310,10 +310,15 @@ class MetaTensorDescriber:
         # to the fake fallback, which rejects non-fake inputs. A C++ fake,
         # including one inside a non-fake wrapper, is described with Fake
         # enabled so its queries reach the fake fallback rather than backend
-        # kernels on a tensor without data. A Python fake mode only intercepts
-        # while it is on the mode stack, so this does not affect it.
+        # kernels on a tensor without data. A FunctionalTensorWrapper carries no
+        # Fake key, so it goes by the value it wraps, which describing it syncs.
+        # A Python fake mode only intercepts while it is on the mode stack, so
+        # this does not affect it.
+        inner = t
+        if torch._is_functional_tensor(t):
+            inner = torch._from_functional_tensor(t)
         with torch._C._SetExcludeDispatchKeyGuard(
-            torch._C.DispatchKey.Fake, not torch._C._is_fake_tensor(t)
+            torch._C.DispatchKey.Fake, not torch._C._is_fake_tensor(inner)
         ):
             return self._describe_tensor(t, recurse=recurse, trace=trace)
 
