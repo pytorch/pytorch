@@ -6460,6 +6460,21 @@ class PythonWrapperCodegen(CodeGen):
             subgraph, outer_inputs, outer_flattened_outputs
         )
 
+    def codegen_subgraph_buffer(self, node: ir.SubgraphBuffer) -> None:
+        class CodegenGraph:
+            def __init__(self, graph: GraphLowering):
+                self.graph = graph
+                self.name = graph.name
+
+        if not ir.is_node_sequence(node.inputs):
+            raise AssertionError("Expected is_node_sequence(node.inputs)")
+        outer_inputs = [t.codegen_reference() for t in node.inputs]
+        self.codegen_subgraph_with_flattened_outputs(
+            CodegenGraph(node.subgraph),
+            [*node.sym_inputs, *outer_inputs],
+            [node.get_name()],
+        )
+
     def codegen_subgraph(self, subgraph, outer_inputs, outer_buffer_name):
         # Codegen subgraph by recursively calling the codegen for the subgraph.
         # This lifts the subgraph as a function in the output code.
