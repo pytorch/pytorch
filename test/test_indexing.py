@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyNativeDeviceTypes,
     skipCUDAIf,
-    skipMPS,
     skipXLA,
     skipXPUIf,
     tol,
@@ -1130,7 +1129,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1202,7 +1201,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
@@ -1388,6 +1387,7 @@ class TestIndexingDevice(TestCase):
     @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfXPU(torch.half, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfMPS(torch.float, torch.half, torch.long, torch.bfloat16, torch.bool)
     def test_index_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         # test index
@@ -1802,7 +1802,7 @@ class TestIndexingDevice(TestCase):
             torch.take_along_dim(t, indices, dim=7)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -1964,6 +1964,19 @@ class TestIndexingDevice(TestCase):
                     ):
                         kwargs = {"atol": 0.02, "rtol": 0.1}
                     self.assertEqual(dest, expected, **kwargs)
+
+    @parametrize("include_self", [True, False])
+    @parametrize("reduce", ["amin", "amax"])
+    @dtypes(torch.half, torch.bfloat16, torch.float32)
+    def test_index_reduce_nan(self, device, dtype, reduce, include_self):
+        # Slot 0 has NaN in self, slot 1 gets NaN from src, slot 2 gets NaN then a finite value
+        nan = float("nan")
+        src = torch.tensor([1.0, nan, nan, 5.0], device=device, dtype=dtype)
+        idx = torch.tensor([0, 1, 2, 2], device=device)
+        dest = torch.tensor([nan, 1.0, 1.0], device=device, dtype=dtype)
+        dest.index_reduce_(0, idx, src, reduce, include_self=include_self)
+        expected = [nan if include_self else 1.0, nan, nan]
+        self.assertEqual(dest, torch.tensor(expected, dtype=dtype), equal_nan=True)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_copy(self, device, dtype):
@@ -2318,7 +2331,7 @@ class TestIndexingDevice(TestCase):
 
     @serialTest()
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     @toleranceOverride(
         {
             # Tolerances follow test_index_add_copy_fast_path: this shape does

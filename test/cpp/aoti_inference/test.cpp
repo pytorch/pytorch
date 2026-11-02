@@ -2,11 +2,13 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -1468,6 +1470,66 @@ void test_aoti_const_fold_separate_stream(
            "completed";
   }
 }
+
+// run() holds the container's mutex shared, including while it waits for the
+// GPU to finish with the only model instance, so the run() threads below keep
+// the mutex continuously held. swap_constant_buffer() needs it exclusively.
+void test_swap_constant_buffer_with_concurrent_runs() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "large_data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& model_so_path = data_loader.attr("model_so_path").toStringRef();
+  auto input_tensors = data_loader.attr("inputs").toTensorList().vec();
+  auto w_pre = data_loader.attr("w_pre").toTensor();
+  auto w_add = data_loader.attr("w_add").toTensor();
+  torch::inductor::TensorConstantMap real_map;
+  real_map.emplace("L__self___w_pre", &w_pre);
+  real_map.emplace("L__self___w_add", &w_add);
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path, /* num_models = */ 1);
+  runner->update_inactive_constant_buffer(real_map);
+
+  const auto device_index = input_tensors[0].device().index();
+  constexpr int num_threads = 4;
+  std::atomic<int> num_warmed_up{0};
+  std::atomic<bool> stop{false};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < num_threads; t++) {
+    threads.emplace_back([&]() {
+      // The model loads and launches kernels through the CUDA driver API,
+      // which needs a current context; a new thread has none until a runtime
+      // call such as cudaSetDevice makes the primary context current.
+      c10::cuda::set_device(device_index, /* force = */ true);
+      runner->run(input_tensors);
+      num_warmed_up.fetch_add(1);
+      while (!stop.load()) {
+        runner->run(input_tensors);
+      }
+    });
+  }
+  // Swap only once every thread has finished a run(), so that one-time setup
+  // is done and the threads are contending for the model.
+  while (num_warmed_up.load() < num_threads) {
+    std::this_thread::yield();
+  }
+
+  auto swapped =
+      std::async(std::launch::async, [&]() { runner->swap_constant_buffer(); });
+  const bool swapped_while_running =
+      swapped.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+  stop.store(true);
+  for (auto& t : threads) {
+    t.join();
+  }
+  swapped.get();
+  ASSERT_TRUE(swapped_while_running)
+      << "swap_constant_buffer() waited for run() calls to stop";
+}
 #endif // USE_CUDA || USE_ROCM
 
 // RECORD_USER_SCOPE callbacks are raw function pointers and cannot capture, so
@@ -1806,6 +1868,10 @@ TEST_F(AotInductorTest, ConstFoldSeparateStreamCuda) {
 
 TEST_F(AotInductorTest, ConstFoldSeparateStreamWithAffinityCuda) {
   test_aoti_const_fold_separate_stream(true, 100);
+}
+
+TEST_F(AotInductorTest, SwapConstantBufferWithConcurrentRunsCuda) {
+  test_swap_constant_buffer_with_concurrent_runs();
 }
 #endif // USE_CUDA || USE_ROCM
 
