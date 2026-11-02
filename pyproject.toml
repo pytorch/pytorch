@@ -538,8 +538,6 @@ extend-exclude = ["third_party", "test/cpython"]
 
 [tool.ruff.per-file-target-version]
 "**/py312_intrinsics.py" = "py312"
-# Run by lintrunner under `uv run --python 3.10`.
-"tools/linter/adapters/**" = "py310"
 
 [tool.ruff.format]
 docstring-code-format = true
