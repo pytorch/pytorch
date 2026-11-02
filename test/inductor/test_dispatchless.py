@@ -19,6 +19,7 @@ def apply_transform(fn, transform):
     if transform == "jvp":
         return lambda x: torch.func.jvp(fn, (x,), (torch.ones_like(x),))
     if transform == "gradgrad":
+
         def scalar(x):
             return fn(x).sum()
 
@@ -141,7 +142,6 @@ class DispatchlessTest(TestCase):
         result = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
         self.assertEqual(torch.autograd.grad(result, x), torch.autograd.grad(fn(x), x))
-
 
     @parametrize("requires_grad", [False, True])
     def test_values_gradients_and_decomposition(self, device, requires_grad):

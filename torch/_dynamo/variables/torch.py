@@ -181,7 +181,9 @@ class DispatchlessCustomOpVariable(VariableTracker):
     def call_obj_hasattr(self, tx, name):
         if self.source is not None:
             install_guard(
-                self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
             )
         return VariableTracker.build(tx, hasattr(self.value, name))
 
@@ -205,7 +207,10 @@ class DispatchlessCustomOpVariable(VariableTracker):
             is_graphable_type,
             to_graphable,
         )
-        from torch._library.dispatchless import flat_dispatchless_call
+        from torch._library.dispatchless import (
+            _call_with_tensor_checks,
+            flat_dispatchless_call,
+        )
 
         from .builder import SourcelessBuilder, wrap_fx_proxy
 
@@ -234,7 +239,9 @@ class DispatchlessCustomOpVariable(VariableTracker):
             raise AssertionError("Dispatchless tracing requires a fake tensor mode")
         with tx.fake_mode:
             fake_args, fake_kwargs = _pytree.tree_unflatten(fake_args, input_spec)
-            flat_outputs, output_spec = to_graphable(fn(*fake_args, **fake_kwargs))
+            flat_outputs, output_spec = to_graphable(
+                _call_with_tensor_checks(fn, fake_args, fake_kwargs)
+            )
 
         _, func_spec = func_to_graphable(fn)
         func_proxy = tx.output.register_static_attr_and_return_proxy(
