@@ -1441,6 +1441,17 @@ partitioned_scatter_force: bool = (
     os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
 )
 
+# Sorted segment-reduce lowering for index_put(accumulate=True) into a small table
+# (fx_passes/sorted_segment_scatter.py). Runs before partitioned scatter and rewrites
+# when the table has <= 64K static rows of width >= 64 and the source has at least
+# sorted_segment_scatter_min_index_size rows (by size hint).
+sorted_segment_scatter_enabled: bool = (
+    os.environ.get("TORCHINDUCTOR_SORTED_SEGMENT_SCATTER", "0") == "1"
+)
+sorted_segment_scatter_min_index_size: int = int(
+    os.environ.get("TORCHINDUCTOR_SORTED_SEGMENT_SCATTER_MIN_INDEX", "1000000")
+)
+
 
 class _collective:
     auto_select: bool = False
