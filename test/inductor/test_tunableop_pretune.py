@@ -565,6 +565,8 @@ class TestTunableOpPretune(TestCase):
                     "torch._inductor.tunableop.time",
                     SimpleNamespace(monotonic=_fake_monotonic),
                 ),
+                # A full budget really spent: coverage was cut, so warn.
+                self.assertLogs(tunableop.log, level="WARNING"),
             ):
                 tunableop.maybe_range_pretune(winner)
         # One bucket ran; the rest had too little budget to be anything but
