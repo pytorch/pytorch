@@ -447,7 +447,7 @@ void CuptiPMSamplingApi::stop() {
   CUPTI_CALL_THROW(cuptiPmSamplingStop(&params));
 }
 
-void CuptiPMSamplingApi::disable() {
+void CuptiPMSamplingApi::disable() noexcept {
   // When releasing resources, stop at the first failure to avoid
   // a partially torn-down configuration and preserve the remaining
   // state for a later disable() retry.

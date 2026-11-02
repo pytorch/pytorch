@@ -28,7 +28,6 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
-    IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     SM120OrLater,
     SM80OrLater,
@@ -2581,10 +2580,6 @@ class TestFlexFlash(InductorTestCase):
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM8X
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: IS_SM90,
-    )
     @torch._inductor.config.patch(max_autotune=True)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
@@ -3068,10 +3063,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     @xfailIfSM8X
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: IS_SM90,
-    )
     @requires_flash_aux_scalars
     def test_dynamic_multiple_scalar_closures_with_max_autotune(self):
         fn = self._dynamic_multiple_scalar_closures_fn()
