@@ -52,12 +52,6 @@ SKIPS = {
     Descriptor(op=aten.empty_strided, variant=None): "Non-deterministic output",
     Descriptor(op=aten.new_empty, variant=None): "Non-deterministic output",
     Descriptor(
-        op=aten.linalg_polar, variant=None
-    ): "Non-deterministic output, 0+0i has random phase.",
-    Descriptor(
-        op=aten.linalg_matrix_sqrth, variant=None
-    ): "Non-deterministic output, |x| = 0 has multiple sqrt.",
-    Descriptor(
         op=aten.any, variant=Variant.Distributed
     ): "does not have a sharding strategy registered",
     Descriptor(
@@ -260,6 +254,84 @@ class TestComplexTensorGeneric(TestCase):
 
         self.assertIs(result, out)
         self.assertEqual(out.as_interleaved(), torch.fft.fft(t))
+
+    def test_out_overload_resizes_nonempty_destination(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        t = torch.randn(4, dtype=torch.complex64)
+        for shape in [(2,), (2, 3)]:
+            with self.subTest(shape=shape):
+                out = ComplexTensor.from_interleaved(
+                    torch.randn(shape, dtype=torch.complex64)
+                )
+                result = torch.fft.fft(ComplexTensor.from_interleaved(t), out=out)
+
+                self.assertIs(result, out)
+                self.assertEqual(out.shape, (4,))
+                self.assertEqual(out.as_interleaved(), torch.fft.fft(t))
+
+    def test_copy(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        src = torch.randn(3, dtype=torch.complex64)
+        xsrc = ComplexTensor.from_interleaved(src)
+
+        result = aten.copy(ComplexTensor.from_interleaved(torch.zeros_like(src)), xsrc)
+        self.assertEqual(result.as_interleaved(), src)
+
+        with self.assertWarnsRegex(UserWarning, "discards the imaginary part"):
+            result = aten.copy(torch.zeros(3), xsrc)
+        self.assertEqual(result, src.real)
+
+    def test_index_put_matches_native(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        indices = (torch.tensor([0, 2]),)
+        dtypes = (torch.float32, torch.complex64)
+        for self_dtype in dtypes:
+            for values_dtype in dtypes:
+                if not (self_dtype.is_complex or values_dtype.is_complex):
+                    continue
+                for accumulate in (False, True):
+                    with self.subTest(
+                        self_dtype=self_dtype,
+                        values_dtype=values_dtype,
+                        accumulate=accumulate,
+                    ):
+                        t = torch.randn(4, dtype=self_dtype)
+                        v = torch.randn(2, dtype=values_dtype)
+                        xt, xv = (
+                            ComplexTensor.from_interleaved(a)
+                            if a.dtype.is_complex
+                            else a
+                            for a in (t, v)
+                        )
+                        if self_dtype != values_dtype:
+                            with self.assertRaisesRegex(RuntimeError, "dtypes match"):
+                                aten.index_put(t, indices, v, accumulate)
+                            with self.assertRaisesRegex(RuntimeError, "dtypes match"):
+                                aten.index_put(xt, indices, xv, accumulate)
+                            continue
+                        expected = aten.index_put(t, indices, v, accumulate)
+                        result = aten.index_put(xt, indices, xv, accumulate)
+                        self.assertEqual(result.as_interleaved(), expected)
+
+    def test_prims_rev_and_fft(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        prims = torch.ops.prims
+        t = torch.randn(4, 6, dtype=torch.complex128)
+        xt = ComplexTensor.from_interleaved(t)
+
+        self.assertEqual(prims.rev(xt, [1]).as_interleaved(), prims.rev(t, [1]))
+        self.assertEqual(
+            prims.fft_c2c(xt, dim=[1], forward=True).as_interleaved(),
+            prims.fft_c2c(t, dim=[1], forward=True),
+        )
+        self.assertEqual(
+            prims.fft_c2r(xt, dim=[1], last_dim_size=10),
+            prims.fft_c2r(t, dim=[1], last_dim_size=10),
+        )
 
     def test_out_overload_writes_multiple_destinations(self):
         from torch._subclasses.complex_tensor import ComplexTensor
