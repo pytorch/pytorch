@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_real_tensor
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_real_tensor,
+)
 from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -476,14 +480,17 @@ class TestDraftExport(TestCase):
                 )
         # Like other ops, the ones inside vmap keep no real tensors.
         predispatch = torch._functorch.predispatch
-        inside = False
+        inside, checked = False, 0
         for node in ep.graph.nodes:
             if node.target is predispatch._vmap_increment_nesting:
                 inside = True
             elif node.target is predispatch._vmap_decrement_nesting:
                 inside = False
             elif inside and isinstance(node.meta.get("val"), torch.Tensor):
-                self.assertIsNone(node.meta["val"].real_tensor, node.name)
+                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+                self.assertIsNone(maybe_get_real_tensor(node.meta["val"]), node.name)
+                checked += 1
+        self.assertGreater(checked, 0)
 
     def test_offsets(self):
         class M(torch.nn.Module):

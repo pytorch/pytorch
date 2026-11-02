@@ -1018,14 +1018,24 @@ class TestExport(TestCase):
         graph = torch.export.export(JvpInVmap(), inp).graph
         self._check_functorch_fake_views(graph, num_batched=2)
         # Passes must not remove, fold or run the vmap and jvp calls on their
-        # own, and some of them have no users.
+        # own, and the calls that enter and leave a level have no users.
         predispatch = torch._functorch.predispatch.__name__
         calls = [
             node
             for node in graph.nodes
             if getattr(node.target, "__module__", None) == predispatch
         ]
-        self.assertTrue(calls)
+        self.assertLessEqual(
+            {
+                "_vmap_increment_nesting",
+                "_vmap_decrement_nesting",
+                "_jvp_increment_nesting",
+                "_jvp_decrement_nesting",
+                "_enter_dual_level",
+                "_exit_dual_level",
+            },
+            {node.target.__name__ for node in calls},
+        )
         for node in calls:
             self.assertTrue(node.is_impure(), node.name)
         gm = export(JvpInVmap(), inp).module()
