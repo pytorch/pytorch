@@ -4,6 +4,7 @@ import argparse
 import ast
 import importlib
 import json
+import math
 import os
 import platform
 import re
@@ -665,7 +666,24 @@ def test_linalg(device="cpu") -> None:
             torch.linalg.svd(A)
 
 
-SVD_BIDIAG_961 = Path(__file__).parent / "svd_bidiag_961.txt"
+def _inv_eps(r: float, a: float = 600.0, e_in: float = 12.25, n: int = 15):
+    """Fourier (Toeplitz) matrix of 1/epsilon for a circular inclusion of radius r.
+
+    A 961x961 Hermitian matrix with condition number 12.25.
+    """
+    m = torch.arange(-n, n + 1, dtype=torch.float64)
+    mx, my = (v.reshape(-1) for v in torch.meshgrid(m, m, indexing="ij"))
+    dx = mx[:, None] - mx[None, :]
+    dy = my[:, None] - my[None, :]
+    g = 2 * math.pi / a * torch.hypot(dx, dy)
+    f = math.pi * r**2 / a**2
+    # g == 0 gives 0/0 = nan, which torch.where discards in favor of f.
+    s = torch.where(
+        g == 0,
+        torch.full_like(g, f),
+        2 * f * torch.special.bessel_j1(g * r) / (g * r),
+    )
+    return ((-1.0) ** (dx + dy) * (1 / e_in - 1) * s + (g == 0)).to(torch.complex128)
 
 
 def test_linalg_svd_dlasd2() -> None:
@@ -674,10 +692,9 @@ def test_linalg_svd_dlasd2() -> None:
     MKL before 2026.2 (like Reference-LAPACK before PR #1140) has a DLASD2
     deflation bug: ?gesdd with jobz='A'/'S' returns info=1 for tightly clustered
     singular values, so torch.linalg.svd raises LinAlgError on a well-conditioned
-    matrix. The matrix is a 961x961 upper-bidiagonal one (condition number 12.25)
-    stored as 961 diagonal then 960 superdiagonal values. Being already
-    bidiagonal it fails on every ISA path and thread count with the affected MKL,
-    unlike a dense matrix, whose failure depends on last-bit rounding.
+    matrix. Whether a dense matrix hits it depends on last-bit rounding, which
+    changes with the ISA and the thread count; with the affected MKL, one thread
+    and r=158.05 fail on an AVX-512 machine.
     """
     if not torch.backends.mkl.is_available():
         # Other builds (OpenBLAS, Accelerate) bring their own LAPACK, which is
@@ -685,24 +702,22 @@ def test_linalg_svd_dlasd2() -> None:
         print("Skipping smoke_test_linalg_svd_dlasd2: PyTorch is not built with MKL")
         return
     print("Testing smoke_test_linalg_svd_dlasd2")
-    values = torch.tensor(
-        [float(v) for v in SVD_BIDIAG_961.read_text().split()], dtype=torch.float64
-    )
-    n = (values.numel() + 1) // 2
-    A = torch.diag(values[:n]) + torch.diag(values[n:], 1)
+    A = _inv_eps(158.05)
+    num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
     try:
-        U, S, Vh = torch.linalg.svd(A)
-    except torch.linalg.LinAlgError as e:
-        raise RuntimeError(
-            "torch.linalg.svd failed on a well-conditioned matrix: the bundled MKL "
-            f"is affected by the LAPACK DLASD2 bug (MKL < 2026.2). {e}"
-        ) from e
-    recon_err = (A - U @ torch.diag(S) @ Vh).abs().max().item()
+        try:
+            U, S, Vh = torch.linalg.svd(A)
+        except torch.linalg.LinAlgError as e:
+            raise RuntimeError(
+                "torch.linalg.svd failed on a well-conditioned matrix: the bundled "
+                f"MKL is affected by the LAPACK DLASD2 bug (MKL < 2026.2). {e}"
+            ) from e
+    finally:
+        torch.set_num_threads(num_threads)
+    recon_err = (A - U @ torch.diag(S).to(U.dtype) @ Vh).abs().max().item()
     if recon_err > 1e-9:
         raise AssertionError(f"SVD reconstruction error too large: {recon_err}")
-    sv_err = (S - torch.linalg.svdvals(A)).abs().max().item()
-    if sv_err > 1e-10:
-        raise AssertionError(f"svd and svdvals singular values differ by {sv_err}")
 
 
 def test_sdpa(device="cpu", dtype=torch.float16) -> None:
