@@ -234,7 +234,7 @@ def _set_real_storage(
     base.real_storage = real_storage  # type: ignore[attr-defined]
 
 
-def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
+def _live_view_base(t: torch.Tensor, t_cdata: int | None = None) -> torch.Tensor | None:
     """Return ``t._base`` only when it is still a real alias of ``t``.
 
     ``Tensor.set_()`` rebinds a tensor to a new storage without clearing the
@@ -301,7 +301,9 @@ def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
         or base.is_mkldnn
     ):
         return base
-    if t.untyped_storage()._cdata == base.untyped_storage()._cdata:
+    if t_cdata is None:
+        t_cdata = t.untyped_storage()._cdata
+    if t_cdata == base.untyped_storage()._cdata:
         return base
     return None
 
@@ -309,27 +311,13 @@ def _live_view_base(t: torch.Tensor) -> torch.Tensor | None:
 def _plain_live_view_base(
     t: torch.Tensor, t_cdata: int | None = None
 ) -> torch.Tensor | None:
-    """``_live_view_base`` for inputs already known to be plain tensors.
+    """Apply the shared live-base rule with a saved storage identity.
 
-    ``AOTSyntheticBaseWrapper`` refuses to build a synthetic base for a tensor
-    subclass input, so every member of a synthetic-base group is a plain strided
-    tensor and none of the structural exemptions in ``_live_view_base`` can
-    fire on it. This is that rule with the dead branches removed, because the
-    wrapper runs it once per input on every call. ``t_cdata`` lets the wrapper
-    reuse the storage identity it saves for the group consistency check.
-
-    If that precondition ever stops holding, this stops being equivalent to
-    ``_live_view_base`` and the two must be reconciled. It is not a second rule;
-    it is the same rule under a stated precondition.
+    Synthetic-base inputs are plain tensors, but their ``_base`` objects need
+    not be. Keep the base-side structural exemptions in ``_live_view_base``
+    rather than duplicating an incomplete storage-only rule here.
     """
-    base = t._base
-    if base is None:
-        return None
-    if t_cdata is None:
-        t_cdata = t.untyped_storage()._cdata
-    if t_cdata == base.untyped_storage()._cdata:
-        return base
-    return None
+    return _live_view_base(t, t_cdata)
 
 
 # Don't use id() directly, because those can get reallocated over time.
