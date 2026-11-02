@@ -9920,6 +9920,25 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_bmm_out_dtype(self, input_dtype):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.bmm(x, y, out_dtype=torch.float32)
+
+        example_inputs = (
+            torch.randn(4, 64, 32, device=self.device, dtype=input_dtype),
+            torch.randn(4, 32, 64, device=self.device, dtype=input_dtype),
+        )
+        self.check_model(Model(), example_inputs)
+        self.code_check_count(
+            Model(), example_inputs, f"aoti_torch_{GPU_TYPE}_bmm_dtype_out(", 1
+        )
+
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
