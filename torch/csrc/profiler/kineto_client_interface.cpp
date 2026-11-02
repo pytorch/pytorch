@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/mtia/profiler/MTIAMemoryProfiler.h>
 #include <torch/csrc/profiler/kineto_client_interface.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 
 // Ondemand tracing is not supported on Apple or edge platform
 #if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)
@@ -91,7 +92,7 @@ void global_kineto_init() {
   if constexpr (kEnableGlobalObserver) {
     if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
       libkineto_init(
-          /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+          /*cpuOnly=*/!profiler::impl::kineto::isDevicePresent(),
           /*logOnError=*/true);
       libkineto::api().suppressLogMessages();
     }

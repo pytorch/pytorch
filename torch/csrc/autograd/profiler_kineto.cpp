@@ -650,9 +650,7 @@ void prepareProfiler(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(
-          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
-          c10::get_privateuse1_backend() != "privateuseone"),
+      /*cpuOnly=*/!torch::profiler::impl::kineto::isDevicePresent(),
       activities,
       config.experimental_config,
       config.trace_id,

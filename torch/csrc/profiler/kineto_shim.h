@@ -113,6 +113,11 @@ using ActivityFilter = std::unordered_map<
     torch::autograd::profiler::ActivityType,
     std::unordered_set<std::string>>;
 using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
+
+// Whether this process has a device that Kineto could trace. A PrivateUse1
+// backend counts once it has registered its own name.
+bool isDevicePresent();
+
 TORCH_API void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,

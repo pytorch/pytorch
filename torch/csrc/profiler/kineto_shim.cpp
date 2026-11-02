@@ -8,6 +8,8 @@
 #include <libkineto.h>
 #endif
 
+#include <ATen/Context.h>
+#include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
@@ -259,6 +261,11 @@ void ActivityTraceWrapper::save(const std::string& path) {
       false,
       "Saving a trace requires using torch.profiler with Kineto support (USE_KINETO=1)");
 #endif // USE_KINETO
+}
+
+bool isDevicePresent() {
+  return at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
+      c10::get_privateuse1_backend() != "privateuseone";
 }
 
 bool collectivesProfilerExists() {
