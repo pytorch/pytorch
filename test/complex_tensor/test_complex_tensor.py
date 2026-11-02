@@ -49,6 +49,8 @@ aten = torch.ops.aten
 SKIPS = {
     Descriptor(op=aten.empty_like, variant=None): "Non-deterministic output",
     Descriptor(op=aten.randn_like, variant=None): "Non-deterministic output",
+    Descriptor(op=aten.empty_strided, variant=None): "Non-deterministic output",
+    Descriptor(op=aten.new_empty, variant=None): "Non-deterministic output",
     Descriptor(
         op=aten.linalg_polar, variant=None
     ): "Non-deterministic output, 0+0i has random phase.",
