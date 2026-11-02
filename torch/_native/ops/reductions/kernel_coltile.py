@@ -108,15 +108,13 @@ def select_ordered_col_config(
     narrow = cc == (10, 0) and fields == 1 and out_dtypes == (dtype,)
     if field_bits != (32,) * fields or out_dtypes != (output,) * nouts and not narrow:
         return None
-    if full_tiles and rows is not None:
-        if rows == 65536 and columns == 1024 and fields != 2:
+    # Only routed split views (one field, B = 1, C >= 128) reach these rows.
+    if cc == (10, 0) and full_tiles and rows is not None:
+        if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
-        elif 32768 <= rows <= 131072 and 33 <= columns <= 257:
-            minimum = 0 if fields == 3 else 16
-            if dtype == torch.bfloat16 and partials >= 8:
-                minimum //= 2
+        elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
             width = WARP if partials >= 16 and columns == 257 else 16
-            cfg = OrderedColConfig(minimum, tile_columns=width, full_tiles=True)
+            cfg = OrderedColConfig(0, tile_columns=width, full_tiles=True)
         bf16_amax = dtype == torch.bfloat16 and trait_key == "amax"
         if bf16_amax and rows == 32768 and columns == 4096:
             cfg = cfg._replace(tile_columns=16)
@@ -200,6 +198,8 @@ def select_col_config(
         and alignment >= itemsize
     ):
         narrow = dtype in (torch.float16, torch.bfloat16)
+        # Index and Welford keys come from internal kernel callers; the core overrides
+        # route only sum, mean, prod, amax and amin.
         welford = nfields == 3 and welford_nouts(trait_key) == nouts
         index = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)
         one_field = (
@@ -719,9 +719,9 @@ def reduce_ordered_col(
         )
         if cfg is None and split:
             return None
-    op_kwargs = {}
+    workers, columns = _ORDERED_WORKER_WARPS, WARP
     if cfg is not None:
-        op_kwargs = {"worker_warps": cfg.worker_warps, "tile_columns": cfg.tile_columns}
+        workers, columns = cfg.worker_warps, cfg.tile_columns
         if full_tiles is None:
             full_tiles = cfg.full_tiles
     if split and full_tiles and plan.split[0] > 1 and plan.split[1] != plan.split[2]:
@@ -734,7 +734,8 @@ def reduce_ordered_col(
                 trait.nfields,
                 full_tiles=True,
                 partition_count=plan.split[0] - 1,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
             _OrderedColReduce(
                 trait,
@@ -744,7 +745,8 @@ def reduce_ordered_col(
                 trait.nfields,
                 partition_begin=plan.split[0] - 1,
                 partition_count=1,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
         )
     else:
@@ -756,7 +758,8 @@ def reduce_ordered_col(
                 C,
                 trait.nfields if split else nouts,
                 full_tiles=False if full_tiles is None else full_tiles,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
         )
     outs = [
