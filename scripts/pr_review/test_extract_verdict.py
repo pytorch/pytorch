@@ -34,13 +34,16 @@ from extract_verdict import (
     _is_repo_path,  # noqa: E402
     _XREF,
     analysis_view,
+    apply_stack_policy,
     build,
     check_charset,
     check_no_encoded_blob,
     downgrade,
     failure,
+    ghstack_position,
     is_neutral_prose,
     MAX_DROPPED_TRACKED,
+    MAX_FINDINGS,
     MAX_MESSAGE,
     MAX_PATH,
     MAX_SUMMARY,
@@ -51,6 +54,7 @@ from extract_verdict import (
     published_findings,
     Rejected,
     sanitize_findings,
+    STACK_POSITION_LIMIT,
     TRUNCATED,
 )
 
@@ -1462,6 +1466,164 @@ class TestBuildHoldsItsOutputToThePublishCheck(unittest.TestCase):
         result = build(ok_payload(), self.TOUCHED)
         self.assertEqual(published_findings(result), result["findings"])
         self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
+
+
+def stack_body(position: int, size: int, newline: str = "\n") -> str:
+    """A ghstack PR body for the PR `position` from the bottom of a `size` stack."""
+    lines = ["Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):"]
+    for pos in range(size, 0, -1):
+        marker = "__->__ " if pos == position else ""
+        lines.append(f"* {marker}#{1000 + pos}")
+    lines += ["", "Fix the thing."]
+    return newline.join(lines)
+
+
+class TestGhstackPosition(unittest.TestCase):
+    def test_a_plain_body_is_not_in_a_stack(self):
+        self.assertEqual(ghstack_position("Fix the thing.\n\n* #123 is related"), 0)
+        self.assertEqual(ghstack_position(""), 0)
+
+    def test_the_bottom_pr_is_position_one(self):
+        self.assertEqual(ghstack_position(stack_body(1, 12)), 1)
+
+    def test_position_counts_from_the_bottom(self):
+        self.assertEqual(ghstack_position(stack_body(10, 12)), 10)
+        self.assertEqual(ghstack_position(stack_body(12, 12)), 12)
+
+    def test_crlf_line_endings_are_read(self):
+        self.assertEqual(ghstack_position(stack_body(10, 12, "\r\n")), 10)
+
+
+class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
+    TOUCHED = {"src/app.py": {11, 12, 13, 14}, "README.md": {1, 2}}
+
+    def clean_result(self, **over):
+        payload = ok_payload(verdict="ready_for_human_review", findings=[])
+        payload.update(over)
+        return build(payload, self.TOUCHED)
+
+    def test_the_limit_matches_the_ai_policy(self):
+        # AI_POLICY.md: stacks must have fewer than 10 PRs.
+        self.assertEqual(STACK_POSITION_LIMIT, 10)
+
+    def test_below_the_limit_nothing_changes(self):
+        result = self.clean_result()
+        self.assertEqual(
+            apply_stack_policy(result, stack_body(9, 12), self.TOUCHED), result
+        )
+
+    def test_outside_a_stack_nothing_changes(self):
+        result = self.clean_result()
+        self.assertEqual(apply_stack_policy(result, "Fix.", self.TOUCHED), result)
+
+    def test_a_failed_review_is_left_alone(self):
+        result = failure("model_error", "boom")
+        self.assertEqual(
+            apply_stack_policy(result, stack_body(10, 12), self.TOUCHED), result
+        )
+
+    def test_at_the_limit_a_clean_verdict_becomes_changes_requested(self):
+        result = apply_stack_policy(
+            self.clean_result(), stack_body(10, 12), self.TOUCHED
+        )
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["verdict"], "changes_requested")
+
+    def test_the_summary_says_why_and_passes_the_publish_check(self):
+        result = apply_stack_policy(
+            self.clean_result(), stack_body(11, 12), self.TOUCHED
+        )
+        self.assertIn("number 11 from the bottom", result["summary"])
+        self.assertIn("AI_POLICY.md", result["summary"])
+        self.assertIn(ok_payload()["summary"], result["summary"])
+        self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
+
+    def test_a_full_length_model_summary_still_fits(self):
+        result = apply_stack_policy(
+            self.clean_result(summary="word " * 400), stack_body(10, 12), self.TOUCHED
+        )
+        self.assertIn("AI_POLICY.md", result["summary"])
+        self.assertLessEqual(len(result["summary"]), MAX_SUMMARY)
+        self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
+
+    def test_a_major_finding_anchors_to_the_first_touched_line(self):
+        # A major finding keeps the model's minor ones non-blocking: with no
+        # major, post_review makes every finding of an objection blocking.
+        minor = {"path": "src/app.py", "line": 12, "severity": "minor", "message": "Nit."}
+        result = apply_stack_policy(
+            self.clean_result(findings=[minor]), stack_body(10, 12), self.TOUCHED
+        )
+        policy = result["findings"][0]
+        self.assertEqual((policy["path"], policy["line"]), ("README.md", 1))
+        self.assertEqual(policy["severity"], "major")
+        self.assertIn("AI_POLICY.md", policy["message"])
+        self.assertEqual(result["findings"][1:], [minor])
+        self.assertEqual(published_findings(result), result["findings"])
+
+    def test_the_findings_cap_still_holds(self):
+        findings = [
+            {"path": "src/app.py", "line": 12, "severity": "minor", "message": f"Nit {i}."}
+            for i in range(MAX_FINDINGS)
+        ]
+        result = apply_stack_policy(
+            self.clean_result(findings=findings), stack_body(10, 12), self.TOUCHED
+        )
+        self.assertEqual(len(result["findings"]), MAX_FINDINGS)
+        self.assertEqual(result["findings"][0]["severity"], "major")
+
+    def test_with_no_touched_line_the_verdict_still_changes(self):
+        result = apply_stack_policy(self.clean_result(), stack_body(10, 12), {})
+        self.assertEqual(result["verdict"], "changes_requested")
+        self.assertEqual(result["findings"], [])
+
+
+class TestTheStackPolicyEndToEnd(unittest.TestCase):
+    def run_script(self, comments: str | None) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            so = tmp_path / "structured.json"
+            so.write_text(
+                json.dumps(ok_payload(verdict="ready_for_human_review", findings=[]))
+            )
+            diff = tmp_path / "diff.txt"
+            diff.write_text(DIFF)
+            out = tmp_path / "verdict.json"
+            pr_comments = tmp_path / "pr-comments.json"
+            if comments is not None:
+                pr_comments.write_text(comments)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--structured-output-file",
+                    str(so),
+                    "--diff-file",
+                    str(diff),
+                    "--pr-comments-file",
+                    str(pr_comments),
+                    "--out",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return json.loads(out.read_text())
+
+    def test_a_pr_high_in_a_stack_gets_changes_requested(self):
+        result = self.run_script(json.dumps({"body": stack_body(10, 12)}))
+        self.assertEqual(result["verdict"], "changes_requested")
+
+    def test_a_pr_low_in_a_stack_keeps_the_model_verdict(self):
+        result = self.run_script(json.dumps({"body": stack_body(3, 12)}))
+        self.assertEqual(result["verdict"], "ready_for_human_review")
+
+    def test_an_unreadable_comments_file_does_not_break_the_review(self):
+        for comments in (None, "{not json", "[]", json.dumps({"body": 7})):
+            with self.subTest(comments=comments):
+                result = self.run_script(comments)
+                self.assertEqual(result["status"], "succeeded")
+                self.assertEqual(result["verdict"], "ready_for_human_review")
 
 
 if __name__ == "__main__":

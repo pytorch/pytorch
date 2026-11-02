@@ -1034,6 +1034,7 @@ jobs:
             python3 trusted/scripts/pr_review/extract_verdict.py \
               --structured-output-file "$FINDINGS_FILE" \
               --diff-file /tmp/pr-diff.txt \
+              --pr-comments-file /tmp/pr-comments.json \
               --step-outcome "$CLAUDE_OUTCOME" \
               --out out/verdict.json
             if [ "$CLAUDE_OUTCOME" != "success" ]; then
