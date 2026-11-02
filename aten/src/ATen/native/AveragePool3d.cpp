@@ -73,8 +73,7 @@ TORCH_META_FUNC(avg_pool3d) (
     1, 1, 1,
     itime, iheight, iwidth,
     otime, oheight, owidth,
-    "avg_pool3d()",
-    /*check_input_size=*/ true);
+        "avg_pool3d()");
 
   /* resize output */
   if (input.ndimension() == 4) {
@@ -142,8 +141,7 @@ TORCH_META_FUNC(avg_pool3d_backward) (
     1, 1, 1,
     itime, iheight, iwidth,
     otime_for_shape_check, oheight_for_shape_check, owidth_for_shape_check,
-    "avg_pool3d_backward()", /*check_input_size=*/true);
-
+        "avg_pool3d_backward()");
   /* resize output */
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
