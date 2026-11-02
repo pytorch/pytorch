@@ -15,6 +15,7 @@ from torch._library.dispatchless import (
 )
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -30,6 +31,9 @@ class Payload:
 
 
 class DispatchlessTest(PytreeRegisteringTestCase):
+
+    hw_classification = HardwareClassification.GENERIC
+
     def trace_for_tensor_checks(self, fn, x, execution):
         if execution == "dynamo":
             return torch.compile(fn, backend="eager", fullgraph=True)(x)
@@ -79,7 +83,9 @@ class DispatchlessTest(PytreeRegisteringTestCase):
             return {"value": [y, y if alias == "duplicate_output" else y.view(-1)]}
 
         x = torch.randn(2, 3)
-        with self.assertRaisesRegex(RuntimeError, "must not alias inputs or other outputs"):
+        with self.assertRaisesRegex(
+            RuntimeError, "must not alias inputs or other outputs"
+        ):
             self.trace_for_tensor_checks(op, x, execution)
 
     @parametrize("execution", ["real", "fake", "symbolic", "pre_dispatch", "dynamo"])
@@ -163,7 +169,9 @@ class DispatchlessTest(PytreeRegisteringTestCase):
         def fn(unused):
             return op()
 
-        with self.assertRaisesRegex(RuntimeError, "must not alias inputs or other outputs"):
+        with self.assertRaisesRegex(
+            RuntimeError, "must not alias inputs or other outputs"
+        ):
             self.trace_for_tensor_checks(fn, torch.zeros(1), execution)
 
     @parametrize("pre_dispatch", [False, True])
@@ -222,7 +230,9 @@ class DispatchlessTest(PytreeRegisteringTestCase):
             return result
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            traced = pool.submit(make_fx(synchronized_call, pre_dispatch=pre_dispatch), x)
+            traced = pool.submit(
+                make_fx(synchronized_call, pre_dispatch=pre_dispatch), x
+            )
             eager = pool.submit(synchronized_call, x)
             gm, result = traced.result(), eager.result()
 
