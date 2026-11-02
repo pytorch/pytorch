@@ -4,6 +4,7 @@
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
+from torch._subclasses.fake_tensor import FakeTensorMode
 import numpy as np
 
 import os
@@ -57,6 +58,7 @@ import contextlib
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     TEST_WITH_SLOW,
+    set_warn_always_context,
 )
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
@@ -3064,6 +3066,123 @@ class TestLinalg(TestCase):
 
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
+
+    def _svd_driver_calls(self, A, driver):
+        return (
+            ("svd", partial(torch.linalg.svd, A, driver=driver)),
+            ("svd_out", partial(
+                torch.linalg.svd, A, driver=driver,
+                out=(A.new_empty(0), A.real.new_empty(0), A.new_empty(0)))),
+            ("svdvals", partial(torch.linalg.svdvals, A, driver=driver)),
+            ("svdvals_out", partial(
+                torch.linalg.svdvals, A, driver=driver, out=A.real.new_empty(0))),
+        )
+
+    def _assert_svd_driver_error(self, A, driver, msg):
+        for op, call in self._svd_driver_calls(A, driver):
+            with self.subTest(shape=A.shape, op=op):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    call()
+
+    def _call_without_rocm_driver_warning(self, call):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with set_warn_always_context(True):
+                result = call()
+        self.assertFalse([w.message for w in caught if "ignored on ROCm" in str(w.message)])
+        return result
+
+    @onlyNativeDeviceTypes
+    @parametrize("mode", ("real", "fake"))
+    @parametrize("op", ("svd", "svd_out", "svdvals", "svdvals_out"))
+    def test_svd_driver_validation(self, device, mode, op):
+        with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                A = torch.empty(shape, device=device)
+                for driver in ("invalid", ""):
+                    with self.subTest(shape=shape, driver=driver):
+                        with self.assertRaisesRegex(RuntimeError, "torch.linalg.svd: unknown svd driver"):
+                            dict(self._svd_driver_calls(A, driver))[op]()
+
+    @onlyCPU
+    @parametrize("mode", ("fake", "meta"))
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_meta(self, device, dtype, mode):
+        with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                A = torch.empty(shape, device="meta" if mode == "meta" else device, dtype=dtype)
+                if mode == "meta":
+                    # Meta ignores the device; test_svd_driver_validation covers the other modes.
+                    for driver in ("invalid", ""):
+                        with self.subTest(driver=driver):
+                            self._assert_svd_driver_error(A, driver, "torch.linalg.svd: unknown svd driver")
+                expected = [call() for _, call in self._svd_driver_calls(A, None)]
+                for driver in ("gesvd", "gesvdj", "gesvda"):
+                    for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                        with self.subTest(shape=shape, driver=driver, op=op):
+                            actual = call()
+                            actual = actual if isinstance(actual, tuple) else (actual,)
+                            result = result if isinstance(result, tuple) else (result,)
+                            for tensor, reference in zip(actual, result):
+                                self.assertEqual(tensor.shape, reference.shape)
+                                self.assertEqual(tensor.dtype, reference.dtype)
+                                self.assertEqual(tensor.stride(), reference.stride())
+
+    @onlyCPU
+    def test_svd_driver_cpu(self, device):
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for driver in ("gesvd", "gesvdj", "gesvda"):
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                self._assert_svd_driver_error(
+                    torch.empty(shape, device=device), driver, msg)
+
+    @onlyCUDA
+    @skipIfRocm
+    @skipCUDAIf(not torch.cuda.has_magma, "requires MAGMA")
+    @setLinalgBackendsToDefaultFinally
+    def test_svd_driver_magma(self, device):
+        torch.backends.cuda.preferred_linalg_library("magma")
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = torch.empty(shape, device=device)
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                self._assert_svd_driver_error(A, driver, msg)
+            self._assert_svd_driver_error(A, "invalid", "torch.linalg.svd: unknown svd driver")
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_default(self, device, dtype):
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            U, S, Vh = torch.linalg.svd(A)
+            k = min(shape[-2:])
+            self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A)
+            for op, call in self._svd_driver_calls(A, None):
+                actual = self._call_without_rocm_driver_warning(call)
+                self.assertEqual(actual, S if "svdvals" in op else (U, S, Vh))
+
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_ignored_on_rocm(self, device, dtype):
+        # These convergent controls check warnings and ignored selection, not fallback execution.
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            expected = [self._call_without_rocm_driver_warning(call)
+                        for _, call in self._svd_driver_calls(A, None)]
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                    with self.subTest(shape=shape, driver=driver, op=op):
+                        with self.assertWarnsOnceRegex(UserWarning, ".*driver.*ignored on ROCm"):
+                            actual = call()
+                        self.assertEqual(actual, result)
 
     @skipCPUIfNoLapack
     @skipCUDAIf(
@@ -11104,6 +11223,53 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @dtypes(torch.float)
+    def test_addmm_lt_follows_blas_backend_switch(self, device, dtype):
+        # The first addmm in a process ran under rocBLAS; switching to hipBLASLt afterwards must still route
+        # linear+bias through the Lt GemmAndBias path (#186873). Run in a fresh process so this addmm is the first.
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        script = textwrap.dedent(
+            f"""
+            import torch
+
+            x = torch.rand(4, 2, device={device!r}, dtype={dtype})
+            w = torch.rand(8, 2, device={device!r}, dtype={dtype})
+            bias = torch.rand(8, device={device!r}, dtype={dtype})
+            torch.backends.cuda.preferred_blas_library("cublas")
+            torch.nn.functional.linear(x, w, bias)
+
+            if torch.backends.cuda.preferred_blas_library("cublaslt") != torch._C._BlasBackend.Cublaslt:
+                raise AssertionError("switching to hipBLASLt did not take effect")
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.enable(True)
+            torch.nn.functional.linear(x, w, bias)
+            torch.cuda.tunable.enable(False)
+            for result in torch.cuda.tunable.get_results():
+                print(result[0])
+            """
+        )
+        # DISABLE_ADDMM_CUDA_LT overrides the preferred backend, and PYTORCH_TUNABLEOP_*
+        # override the tunable setters below (and can preload results), so keep them
+        # out of the child.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTORCH_TUNABLEOP_")}
+        env.pop("DISABLE_ADDMM_CUDA_LT", None)
+        # TunableOp writes its results file into the cwd at exit.
+        cmd = [sys.executable, "-c", script]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        op_sigs = result.stdout.split()
+        self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
+
     @dtypes(torch.float)
     def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
         # Regression test for https://github.com/ROCm/TheRock/issues/5553
@@ -12038,19 +12204,61 @@ class TestLinalgCudaOnly(TestCase):
     @skipCUDAIfNotRocm
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.float64])
     def test_ck_blas_library_mm(self, dtype):
         if dtype == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
             self.skipTest("bfloat16 case skipped on gfx90a")
         device = 'cuda'
         shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
         for M, K, N in shapes:
-            a = torch.randint(2, 5, (M, K), device=device, dtype=torch.float32).to(dtype)
-            b = torch.randint(2, 5, (K, N), device=device, dtype=torch.float32).to(dtype)
-            cpu_out = torch.mm(a.cpu(), b.cpu())
+            # Small integers keep every partial sum exact, even in float16.
+            a = torch.randint(-2, 3, (M, K), device=device, dtype=torch.float32).to(dtype)
+            b = torch.randint(-2, 3, (K, N), device=device, dtype=torch.float32).to(dtype)
+            cpu_out = torch.mm(a.cpu().double(), b.cpu().double()).to(dtype)
             with blas_library_context("ck"):
                 ck_out = torch.mm(a, b)
             self.assertEqual(ck_out, cpu_out)
+
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_ck_blas_library_addmm(self, dtype):
+        a = torch.randint(-2, 3, (256, 64), device="cuda").to(dtype)
+        b = torch.randint(-2, 3, (64, 512), device="cuda").to(dtype)
+        for bias_shape in [(256, 512), (512,)]:
+            bias = torch.randint(-2, 3, bias_shape, device="cuda").to(dtype)
+            for alpha, beta in [(1, 0), (2, 0), (1, 1), (2, 0.5)]:
+                expected = torch.addmm(bias.cpu().double(), a.cpu().double(), b.cpu().double(), alpha=alpha, beta=beta)
+                with blas_library_context("ck"):
+                    out = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
+                self.assertEqual(out, expected.to(dtype))
+
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_ck_blas_library_unsupported_falls_back(self, dtype):
+        def check(fn, *args, **kwargs):
+            expected = fn(*(t.cpu().double() for t in args), **kwargs).to(dtype)
+            with blas_library_context("ck"):
+                self.assertEqual(fn(*args, **kwargs), expected)
+
+        def make(*shape):
+            return torch.randint(-2, 3, shape, device="cuda").to(dtype)
+
+        # No CK GEMM instance accepts these shapes.
+        for m, n, k in [(77, 129, 63), (128, 128, 130)]:
+            check(torch.mm, make(m, k), make(k, n))
+            check(torch.mm, make(k, m).t(), make(n, k).t())
+        a, b, c = make(4, 128, 512), make(4, 96, 512).mT, make(4, 128, 96)
+        for a_, b_ in [(a, b), (a.contiguous(), b.contiguous()), (a.mT.contiguous().mT, b)]:
+            check(torch.bmm, a_, b_)
+            # Batch strides that are not the packed m * k and k * n.
+            check(torch.bmm, a_[:, :, :256], b_[:, :256])
+            check(torch.baddbmm, c, a_, b_, alpha=0.5, beta=2)
 
 
 _GROUPED_MM_CASES = [
