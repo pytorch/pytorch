@@ -21,7 +21,7 @@ following cases applies:
   tensor is freed, or can hold a reference until a point it controls. Record
   an event after the last side-stream use and make the creation stream wait on
   it before dropping the reference. Don't use `record_stream`. FSDP2 works
-  this way (see `docs/source/distributed.fsdp.fully_shard.md`).
+  this way (see `docs/source/distributed/fsdp.fully_shard.md`).
 - **Unavoidable under the current API:** the tensor goes to arbitrary user
   code, which frees it at an unknown time, and nothing we control runs in
   between where we could insert the sync. Here `record_stream` is the correct

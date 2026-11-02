@@ -6,15 +6,19 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import sys
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import post_review  # noqa: E402
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
@@ -29,6 +33,9 @@ from post_review import (  # noqa: E402
     run,
 )
 
+
+# Backfill writes pause between calls in production; not in tests.
+post_review.BACKFILL_PAUSE = 0
 
 SHA = "a" * 40
 # The URL linter checks every URL literal in the tree; these resolve nowhere.
@@ -76,13 +83,21 @@ class FakeGitHub(GitHub):
         labels=(),
         reviews=(),
         refuse_inline=False,
+        comments=None,
     ):
         super().__init__("token", "o/r")
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
-        self.review_comments = {r["id"]: [{"id": r["id"] * 10}] for r in self.reviews}
+        # One inline comment per review unless given: id = review id * 10.
+        self.comments = (
+            list(comments)
+            if comments is not None
+            else [comment(r["id"] * 10, r["id"]) for r in self.reviews]
+        )
         self.refuse_inline = refuse_inline
+        # Replies the REST listing never shows but the thread counts.
+        self.hidden_replies: dict[int, int] = {}
         self.calls: list[tuple] = []
 
     def request(self, method, path, body=None, idempotent=None):
@@ -97,11 +112,20 @@ class FakeGitHub(GitHub):
                 if r["id"] == rid:
                     r["state"] = "DISMISSED"
             return {}
-        if method == "GET" and re.match(
-            r"/repos/o/r/pulls/1/reviews/\d+/comments", path
-        ):
-            rid = int(path.split("/")[7])
-            return self.review_comments.get(rid, []) if page(path) == 1 else []
+        if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+            return [dict(c) for c in self.comments] if page(path) == 1 else []
+        if method == "DELETE" and path.startswith("/repos/o/r/pulls/comments/"):
+            cid = int(path.split("/")[-1])
+            if not any(c["id"] == cid for c in self.comments):
+                raise GitHubError(404, "Not Found")
+            self.comments = [c for c in self.comments if c["id"] != cid]
+            return None
+        if method == "PUT" and re.fullmatch(r"/repos/o/r/pulls/1/reviews/\d+", path):
+            rid = int(path.split("/")[-1])
+            for r in self.reviews:
+                if r["id"] == rid:
+                    r["body"] = body["body"]
+            return {}
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews"):
             return self.reviews if page(path) == 1 else []
         if method == "POST" and path == "/repos/o/r/pulls/1/reviews":
@@ -119,16 +143,30 @@ class FakeGitHub(GitHub):
                 }[body["event"]],
             }
             self.reviews.append(new)
-            return new
+            self.comments += [
+                {
+                    **comment(9990 + i, 999, line=c["line"], path=c["path"]),
+                    "body": c["body"],
+                }
+                for i, c in enumerate(body.get("comments") or [])
+            ]
+            return dict(new)  # a response, not the stored review
         if method == "POST" and path == "/graphql" and "reviewThreads" in body["query"]:
             nodes = [
                 {
                     "id": f"T{c['id']}",
                     "isResolved": False,
-                    "comments": {"nodes": [{"databaseId": c["id"]}]},
+                    "comments": {
+                        "totalCount": 1
+                        + self.hidden_replies.get(c["id"], 0)
+                        + sum(
+                            r.get("in_reply_to_id") == c["id"] for r in self.comments
+                        ),
+                        "nodes": [{"databaseId": c["id"]}],
+                    },
                 }
-                for cs in self.review_comments.values()
-                for c in cs
+                for c in self.comments
+                if not c.get("in_reply_to_id")
             ]
             return {
                 "data": {
@@ -189,6 +227,33 @@ def old_review(
         "state": state,
         "commit_id": commit,
     }
+
+
+def comment(cid, review, author=AUTHOR, line=None, reply_to=None, path="torch/x.py"):
+    return {
+        "id": cid,
+        "pull_request_review_id": review,
+        "user": {"login": author},
+        "body": "\U0001f534 Off by one." if reply_to is None else "No, it is right.",
+        "path": path,
+        "line": line,
+        "in_reply_to_id": reply_to,
+        "html_url": f"https://github.com/o/r/pull/1#discussion_r{cid}",  # @lint-ignore
+    }
+
+
+def deleted(gh):
+    """Comment ids this run deleted, in order."""
+    return [int(w[1].split("/")[-1]) for w in gh.writes("DELETE")]
+
+
+def folds(gh):
+    """Review ids whose body this run rewrote, in order."""
+    return [
+        int(w[1].split("/")[-1])
+        for w in gh.writes("PUT")
+        if re.fullmatch(r"/repos/o/r/pulls/1/reviews/\d+", w[1])
+    ]
 
 
 def minimized(gh):
@@ -490,7 +555,8 @@ class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
         self.assertEqual(go(gh, self.clean()), 0)
         self.assertEqual(dismissed(gh), ["5", "6"])
         for w in gh.writes("PUT"):
-            self.assertNotIn("http", w[2]["message"])
+            if w[1].endswith("/dismissals"):
+                self.assertNotIn("http", w[2]["message"])
 
     def test_a_request_that_cannot_be_dismissed_fails_the_step(self):
         class NeverDismiss(FakeGitHub):
@@ -622,31 +688,535 @@ class TestCleanupFailuresKeepTheNewReviewId(unittest.TestCase):
         self.assertEqual(old["state"], "DISMISSED")
 
 
-class TestNothingIsDeleted(unittest.TestCase):
-    def test_earlier_findings_are_resolved_never_deleted(self):
-        gh = FakeGitHub(reviews=[old_review(5), old_review(6)])
+class TestEarlierReviewsAreDecluttered(unittest.TestCase):
+    def test_unreplied_comments_are_deleted_and_replied_threads_resolved(self):
+        comments = [
+            comment(50, 5),
+            comment(60, 6),
+            comment(61, 7, author="tristan", reply_to=60),
+        ]
+        gh = FakeGitHub(reviews=[old_review(5), old_review(6)], comments=comments)
         go(gh)
-        self.assertEqual(gh.writes("DELETE"), [])
-        self.assertEqual(sorted(resolved(gh)), ["T50", "T60"])
+        self.assertEqual(deleted(gh), [50])
+        self.assertEqual(resolved(gh), ["T60"])
+        self.assertEqual(sorted(c["id"] for c in gh.comments), [60, 61, 9990])
+        self.assertEqual(minimized(gh), ["N6", "N5"])
 
-    def test_the_earlier_body_is_never_edited(self):
-        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+    def test_the_earlier_body_is_folded_once_with_no_link(self):
+        old = old_review(5, body=MARKER + "\n**Automated review** of c: x.\n\nOne bug.")
+        gh = FakeGitHub(reviews=[old])
         go(gh)
-        self.assertEqual(gh.writes("PUT"), [])
+        self.assertEqual(folds(gh), [5])
+        body = old["body"]
+        self.assertTrue(body.startswith(MARKER + "\n<details><summary>Outdated"))
+        self.assertIn("One bug.", body)
+        self.assertTrue(body.endswith("</details>"))
+        self.assertNotIn("http", body)
+        self.assertEqual(body.count(MARKER), 1)
         self.assertEqual(gh.writes("PATCH"), [])
+        # Already folded: a later run leaves the body alone.
+        old.pop("minimized")
+        gh2 = FakeGitHub(reviews=[old], comments=[])
+        go(gh2)
+        self.assertEqual(folds(gh2), [])
+
+    def test_a_standing_request_is_not_folded_or_emptied(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        go(gh, row(verdict="ready_for_human_review", findings=[]))
+        # Dismissed by the clean verdict first, then decluttered.
+        self.assertEqual(dismissed(gh), ["5"])
+        self.assertEqual(deleted(gh), [50])
+
+        class NeverDismiss(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NeverDismiss(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        go(gh, row(verdict="ready_for_human_review", findings=[]))
+        self.assertEqual((deleted(gh), folds(gh), minimized(gh)), ([], [], []))
+
+    def test_a_hidden_review_is_tidied_but_its_threads_are_left(self):
+        old = old_review(7)
+        old["minimized"] = True
+        comments = [comment(70, 7), comment(71, 7), comment(72, 9, reply_to=71)]
+        gh = FakeGitHub(reviews=[old], comments=comments)
+        go(gh)
+        self.assertEqual(deleted(gh), [70])
+        self.assertEqual(folds(gh), [7])
+        self.assertEqual(resolved(gh), [])
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_hidden_request_left_standing_is_not_emptied(self):
+        class NeverDismiss(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        old = old_review(5, state="CHANGES_REQUESTED")
+        old["minimized"] = True
+        gh = NeverDismiss(reviews=[old])
+        self.assertEqual(go(gh, row(verdict="ready_for_human_review", findings=[])), 1)
+        self.assertEqual((deleted(gh), folds(gh)), ([], []))
+
+    def test_a_reply_landing_after_the_first_listing_saves_the_comment(self):
+        class ReplyArrives(FakeGitHub):
+            listings = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    self.listings += 1
+                    if self.listings == 3:  # tidy's re-listing before deleting
+                        self.comments.append(comment(51, 8, author="h", reply_to=50))
+                return super().request(method, path, body)
+
+        gh = ReplyArrives(reviews=[old_review(5)])
+        go(gh)
+        self.assertEqual(deleted(gh), [])
+        self.assertEqual(resolved(gh), ["T50"])
+
+    def test_a_reply_seen_by_either_listing_saves_the_comment(self):
+        # The re-listing can lose a reply that shifted pages under a
+        # concurrent delete; the first listing saw it.
+        class ReplyVanishes(FakeGitHub):
+            listings = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    self.listings += 1
+                    if self.listings == 3:
+                        out = [c for c in self.comments if c["id"] != 51]
+                        self.calls.append((method, path, body))
+                        return [dict(c) for c in out]
+                return super().request(method, path, body)
+
+        comments = [comment(50, 5), comment(52, 5), comment(51, 8, "h", reply_to=50)]
+        gh = ReplyVanishes(reviews=[old_review(5)], comments=comments)
+        go(gh)
+        self.assertEqual(deleted(gh), [52])
+
+    def test_a_replacement_dismissed_meanwhile_spares_the_older_request(self):
+        # Run A posted request 999; run B's clean verdict dismissed 999 but not
+        # 5, which therefore still stands. A must not empty 5.
+        class Overlapped(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                out = super().request(method, path, body)
+                if method == "POST" and path == "/repos/o/r/pulls/1/reviews":
+                    self.reviews[-1]["state"] = "DISMISSED"
+                return out
+
+        gh = Overlapped(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        go(gh)
+        self.assertEqual((deleted(gh), folds(gh), minimized(gh)), ([], [], []))
+
+    def test_backfill_runs_after_the_clean_dismissal_and_is_bounded(self):
+        hidden = []
+        comments = []
+        for rid in range(1, 41):
+            r = old_review(rid)
+            r["minimized"] = True
+            hidden.append(r)
+            comments += [comment(rid * 100 + i, rid) for i in range(5)]
+        standing = old_review(41, state="CHANGES_REQUESTED")
+        gh = FakeGitHub(reviews=[*hidden, standing], comments=comments)
+        self.assertEqual(go(gh, row(verdict="ready_for_human_review", findings=[])), 0)
+        writes = gh.writes()
+        dismissal = next(
+            i for i, w in enumerate(writes) if w[1].endswith("/dismissals")
+        )
+        cleanup = [
+            i
+            for i, w in enumerate(writes)
+            if w[0] == "DELETE" or (w[0] == "PUT" and not w[1].endswith("/dismissals"))
+        ]
+        self.assertLess(dismissal, cleanup[0])
+        # 41 (no comments) is folded once dismissed; the backfill then spends
+        # exactly its write budget, not all 240 writes.
+        self.assertEqual(len(cleanup), 1 + post_review.MAX_BACKFILL)
+        # A later run picks up where this one stopped.
+        before = len(gh.comments)
+        go(gh, row(verdict="ready_for_human_review", findings=[]))
+        self.assertLess(len(gh.comments), before)
+
+    def test_a_reply_the_takedown_saw_protects_the_comment_in_backfill(self):
+        # Takedown keeps 50 for its reply; every later listing misses the reply.
+        class ReplyLost(FakeGitHub):
+            listings = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    self.listings += 1
+                    if self.listings > 2:
+                        self.calls.append((method, path, body))
+                        return [dict(c) for c in self.comments if c["id"] != 51]
+                return super().request(method, path, body)
+
+        comments = [comment(50, 5), comment(51, 8, "h", reply_to=50)]
+        gh = ReplyLost(reviews=[old_review(5)], comments=comments)
+        go(gh)
+        self.assertEqual(deleted(gh), [])
         self.assertEqual(minimized(gh), ["N5"])
 
-    def test_a_failed_resolve_leaves_the_review_visible_for_the_next_run(self):
+    def test_a_reply_seen_while_a_request_was_spared_still_protects_it(self):
+        # hide_earlier skips standing request 5 but lists the reply; the clean
+        # verdict dismisses 5, and every later listing misses the reply.
+        class ReplyLost(FakeGitHub):
+            listings = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    self.listings += 1
+                    if self.listings > 2:
+                        self.calls.append((method, path, body))
+                        return [dict(c) for c in self.comments if c["id"] != 51]
+                return super().request(method, path, body)
+
+        comments = [comment(50, 5), comment(51, 8, "h", reply_to=50)]
+        gh = ReplyLost(
+            reviews=[old_review(5, state="CHANGES_REQUESTED")], comments=comments
+        )
+        go(gh, row(verdict="ready_for_human_review", findings=[]))
+        self.assertEqual(dismissed(gh), ["5"])
+        self.assertEqual(deleted(gh), [])
+
+    def test_backfill_lists_the_comments_once(self):
+        hidden, comments = [], []
+        for rid in range(1, 6):
+            r = old_review(rid)
+            r["minimized"] = True
+            hidden.append(r)
+            comments += [comment(rid * 100 + i, rid) for i in range(3)]
+        gh = FakeGitHub(reviews=hidden, comments=comments)
+        go(gh, row(verdict="ready_for_human_review", findings=[]))
+        listings = [
+            c for c in gh.calls if c[0] == "GET" and "/pulls/1/comments" in c[1]
+        ]
+        # One for the whole backfill: none for discussion links with no
+        # findings, none per hidden review, none for an empty hide_earlier.
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(len(deleted(gh)), 15)
+
+    def test_a_reply_on_a_page_before_a_failed_page_is_remembered(self):
+        class SecondPageDown(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    if page(path) == 2:
+                        raise GitHubError(503, "unavailable")
+                    return [comment(1000 + i, 9) for i in range(99)] + [
+                        comment(51, 8, "h", reply_to=50)
+                    ]
+                return super().request(method, path, body)
+
+        gh = SecondPageDown()
+        with mock.patch("post_review._sleep"):
+            self.assertIsNone(post_review.pr_comments(gh, 1))
+        self.assertEqual(gh.replies_seen, {50})
+
+    def test_the_backfill_clock_stops_calls_and_retry_waits(self):
+        gh = GitHub("token", "o/r")
+        gh.deadline = 0.0  # long past
+        with mock.patch.object(gh, "_once") as once:
+            with self.assertRaises(GitHubError):
+                gh.request("GET", "/x")
+        once.assert_not_called()
+        gh.deadline = post_review.time.monotonic() + 5
+        throttled = GitHubError(429, "slow down", retry_after=60)
+        with mock.patch.object(gh, "_once", side_effect=throttled) as once:
+            with mock.patch("post_review._sleep") as sleep:
+                with self.assertRaises(GitHubError):
+                    gh.request("GET", "/x")
+        self.assertEqual(once.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_backfill_leaves_the_clock_unset_for_later_steps(self):
+        hidden = old_review(3)
+        hidden["minimized"] = True
+        gh = FakeGitHub(reviews=[hidden])
+        go(gh)
+        self.assertIsNone(gh.deadline)
+        self.assertEqual(deleted(gh), [30])
+
+    def test_a_hidden_request_is_emptied_once_a_newer_request_replaces_it(self):
+        old = old_review(5, state="CHANGES_REQUESTED")
+        old["minimized"] = True
+        gh = FakeGitHub(reviews=[old])
+        go(gh)  # changes_requested: posts REQUEST_CHANGES
+        self.assertEqual((deleted(gh), folds(gh)), ([50], [5]))
+
+    def test_a_hidden_request_survives_a_request_downgraded_to_a_comment(self):
+        class NoRequestChanges(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if body and body.get("event") == "REQUEST_CHANGES":
+                    raise GitHubError(422, "cannot request changes")
+                return super().request(method, path, body)
+
+        old = old_review(5, state="CHANGES_REQUESTED")
+        old["minimized"] = True
+        gh = NoRequestChanges(reviews=[old])
+        go(gh)
+        # The COMMENT leaves 5 standing, so the backfill must not empty it.
+        self.assertEqual((deleted(gh), folds(gh)), ([], []))
+
+    def test_a_thread_with_a_reply_the_listing_missed_is_kept(self):
+        # The REST listing never shows the reply (a page shifted under an
+        # overlapping run's delete); the thread's comment count still has it.
+        for hidden in (False, True):
+            old = old_review(5)
+            old["minimized"] = hidden
+            gh = FakeGitHub(reviews=[old], comments=[comment(50, 5), comment(52, 5)])
+            gh.hidden_replies = {50: 1}
+            go(gh)
+            self.assertEqual(deleted(gh), [52], f"hidden={hidden}")
+
+    def test_unreadable_threads_delete_nothing(self):
+        class NoThreads(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path == "/graphql" and "reviewThreads" in body["query"]:
+                    raise GitHubError(503, "unavailable")
+                return super().request(method, path, body)
+
+        gh = NoThreads(reviews=[old_review(5)])
+        with mock.patch("post_review._sleep"):
+            go(gh)
+        self.assertEqual(deleted(gh), [])
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_a_folded_body_is_defused_again(self):
+        old = old_review(5, body=MARKER + "\n@pytorchbot merge -f")
+        gh = FakeGitHub(reviews=[old])
+        go(gh)
+        self.assertNotIn("@pytorchbot", old["body"])
+        self.assertIn("@ pytorchbot", old["body"])
+
+    def test_a_retry_wait_past_the_clock_is_out_of_time(self):
+        gh = GitHub("token", "o/r")
+        gh.deadline = post_review.time.monotonic() + 5
+        throttled = GitHubError(429, "slow down", retry_after=60)
+        with mock.patch.object(gh, "_once", side_effect=throttled):
+            with self.assertRaises(post_review.OutOfTime):
+                gh.request("DELETE", "/x")
+
+    def test_backfill_writes_are_paced(self):
+        hidden = []
+        for rid in (1, 2):
+            r = old_review(rid)
+            r["minimized"] = True
+            hidden.append(r)
+        gh = FakeGitHub(reviews=hidden)
+        with mock.patch.object(post_review, "BACKFILL_PAUSE", 1.0):
+            with mock.patch("post_review._sleep") as sleep:
+                go(gh)
+        writes = len(folds(gh)) + len(deleted(gh))
+        self.assertEqual(writes, 4)
+        self.assertEqual(
+            [c.args for c in sleep.call_args_list], [(1.0,)] * (writes - 1)
+        )
+
+    def test_a_discussed_finding_survives_a_refused_inline_post(self):
+        root = comment(50, 5, line=4)
+        findings = [
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "A."},
+            {"path": "torch/y.py", "line": 3, "severity": "major", "message": "B."},
+        ]
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[root, comment(51, 8, "t", reply_to=50)],
+            refuse_inline=True,
+        )
+        go(gh, row(findings=findings))
+        body = gh.posted()[-1]["body"]
+        self.assertIn("A.", body)
+        self.assertIn("B.", body)
+        self.assertEqual(body.count("discussion_r50"), 1)
+        self.assertNotIn("attached to the code below", body)
+
+    def test_a_comment_someone_reacted_to_is_kept(self):
+        reacted = {**comment(50, 5), "reactions": {"total_count": 1}}
+        gh = FakeGitHub(reviews=[old_review(5)], comments=[reacted, comment(52, 5)])
+        go(gh)
+        self.assertEqual(deleted(gh), [52])
+
+    def test_the_backfill_stops_when_its_clock_runs_out(self):
+        hidden, comments = [], []
+        for rid in (1, 2, 3):
+            r = old_review(rid)
+            r["minimized"] = True
+            hidden.append(r)
+            comments += [comment(rid * 100 + i, rid) for i in range(3)]
+
+        class ClockRunsOut(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method != "GET" and len(self.writes("DELETE")) == 3:
+                    self.deadline = 0.0  # the first hidden review is done
+                if self.deadline is not None and self.deadline <= 0.0:
+                    raise post_review.OutOfTime()
+                return super().request(method, path, body)
+
+        gh = ClockRunsOut(reviews=hidden, comments=comments)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            go(gh)
+        self.assertEqual(deleted(gh), [300, 301, 302])
+        self.assertEqual(folds(gh), [3])
+        self.assertNotIn("could not delete", out.getvalue())
+        self.assertNotIn("could not fold", out.getvalue())
+        self.assertIn("stopped tidying earlier reviews", out.getvalue())
+        self.assertIsNone(gh.deadline)
+
+    def test_graphql_retry_waits_honour_the_clock(self):
+        gh = GitHub("token", "o/r")
+        gh.deadline = post_review.time.monotonic() + 0.5
+        with mock.patch.object(gh, "request", return_value={"errors": [{}]}):
+            with mock.patch("post_review._sleep") as sleep:
+                with self.assertRaises(post_review.OutOfTime):
+                    gh.graphql("query", {})
+        sleep.assert_not_called()
+
+    def test_failed_backfill_deletes_still_spend_the_budget(self):
+        class NoDelete(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "DELETE":
+                    self.calls.append((method, path, body))
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        hidden, comments = [], []
+        for rid in (1, 2, 3):
+            r = old_review(rid, body=post_review.folded(old_review(rid)))
+            r["minimized"] = True
+            hidden.append(r)
+            comments += [comment(rid * 100 + i, rid) for i in range(40)]
+        gh = NoDelete(reviews=hidden, comments=comments)
+        go(gh)
+        self.assertLessEqual(len(gh.writes("DELETE")), post_review.MAX_BACKFILL)
+
+    def test_a_comment_already_deleted_by_an_overlapping_run_is_fine(self):
+        class Raced(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "DELETE":
+                    self.comments = []
+                return super().request(method, path, body)
+
+        gh = Raced(reviews=[old_review(5)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            go(gh)
+        self.assertNotIn("could not delete", out.getvalue())
+        self.assertNotIn("still open", out.getvalue())
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_a_refused_delete_keeps_the_comment_and_still_hides(self):
+        class NoDelete(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "DELETE":
+                    self.calls.append((method, path, body))
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NoDelete(reviews=[old_review(5)])
+        go(gh)
+        self.assertEqual([c["id"] for c in gh.comments], [50, 9990])
+        self.assertEqual(resolved(gh), ["T50"])
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_a_refused_resolve_still_hides_the_review(self):
+        # What pytorch/pytorch's GITHUB_TOKEN gets back: FORBIDDEN inside a 200.
         class NoResolve(FakeGitHub):
             def request(self, method, path, body=None, idempotent=None):
                 if path == "/graphql" and "resolveReviewThread" in body["query"]:
-                    raise GitHubError(500, "down")
+                    self.calls.append((method, path, body))
+                    return {"errors": [{"type": "FORBIDDEN"}]}
                 return super().request(method, path, body)
 
-        gh = NoResolve(reviews=[old_review(5)])
+        replied = [comment(50, 5), comment(51, 8, author="h", reply_to=50)]
+        gh = NoResolve(reviews=[old_review(5)], comments=replied)
+        with mock.patch("post_review._sleep"):
+            self.assertEqual(go(gh), 0)
+        self.assertEqual(resolved(gh), ["T50"] * 3)
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_a_failed_comment_listing_still_folds_and_hides_the_review(self):
+        class NoComments(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    raise GitHubError(503, "unavailable")
+                return super().request(method, path, body)
+
+        gh = NoComments(reviews=[old_review(5)])
         with mock.patch("post_review._sleep"):
             go(gh)
-        self.assertEqual(minimized(gh), [])
+        self.assertEqual((deleted(gh), resolved(gh)), ([], []))
+        self.assertEqual(folds(gh), [5])
+        self.assertEqual(minimized(gh), ["N5"])
+
+
+class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
+    def discussed(self, line=4, path="torch/x.py", author=AUTHOR):
+        root = comment(50, 5, author=author, line=line, path=path)
+        return [root, comment(51, 8, author="tristan", reply_to=50)]
+
+    def test_it_goes_in_the_body_with_a_link_to_the_discussion(self):
+        gh = FakeGitHub(reviews=[old_review(5)], comments=self.discussed())
+        go(gh)
+        body = gh.posted()[0]
+        self.assertNotIn("comments", body)
+        self.assertIn(f"{BLOB}/torch/x.py#L3\n\n\U0001f534 Off by one.\n", body["body"])
+        self.assertIn(
+            "An earlier comment near this line has replies: "
+            "https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
+            body["body"],
+        )
+        self.assertNotIn("attached to the code below", body["body"])
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
+        # The discussion stays.
+        self.assertEqual(deleted(gh), [])
+
+    def test_other_findings_stay_inline_and_are_counted(self):
+        findings = [
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "A."},
+            {"path": "torch/y.py", "line": 3, "severity": "major", "message": "B."},
+        ]
+        gh = FakeGitHub(reviews=[old_review(5)], comments=self.discussed())
+        go(gh, row(findings=findings))
+        body = gh.posted()[0]
+        self.assertEqual([c["path"] for c in body["comments"]], ["torch/y.py"])
+        self.assertIn("1 blocking finding is attached", body["body"])
+        self.assertIn("An earlier comment near this line has replies:", body["body"])
+
+    def test_only_a_replied_nearby_current_comment_of_ours_counts(self):
+        cases = {
+            "far": self.discussed(line=10),
+            "other file": self.discussed(path="torch/y.py"),
+            "outdated": self.discussed(line=None),
+            "a human's": [
+                comment(50, 8, author="someone", line=3),
+                comment(51, 9, author="t", reply_to=50),
+            ],
+            "another workflow's": [
+                comment(50, 6, line=3),
+                comment(51, 8, author="t", reply_to=50),
+            ],
+            "unreplied": [comment(50, 5, line=3)],
+        }
+        for name, comments in cases.items():
+            other = old_review(6, body="another workflow")
+            gh = FakeGitHub(reviews=[old_review(5), other], comments=comments)
+            go(gh)
+            self.assertIn("comments", gh.posted()[0], name)
+
+    def test_a_failed_listing_posts_inline_as_before(self):
+        class NoComments(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
+                    raise GitHubError(503, "unavailable")
+                return super().request(method, path, body)
+
+        gh = NoComments(comments=self.discussed())
+        with mock.patch("post_review._sleep"):
+            go(gh)
+        self.assertIn("comments", gh.posted()[0])
 
 
 class TestRetries(unittest.TestCase):
@@ -721,14 +1291,21 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
     def test_earlier_review_is_hidden_after_the_new_one_posts(self):
         gh = FakeGitHub(reviews=[old_review(5)])
         go(gh)
-        writes = gh.writes()
-        self.assertEqual(writes[0][:2], ("POST", "/repos/o/r/pulls/1/reviews"))
-        self.assertEqual([w[:2] for w in writes[1:]], [("POST", "/graphql")] * 4)
-        queries = [w[2]["query"] for w in writes[1:]]
-        self.assertIn("isMinimized", queries[0])
-        self.assertIn("reviewThreads", queries[1])
-        self.assertEqual(resolved(gh), ["T50"])
-        self.assertIn("minimizeComment", queries[3])
+
+        def step(w):
+            if w[1].endswith("/pulls/1/reviews"):
+                return "post"
+            if w[0] in ("PUT", "DELETE"):
+                return {"PUT": "fold", "DELETE": "delete"}[w[0]]
+            return "minimize" if "minimizeComment" in w[2]["query"] else "read"
+
+        steps = [step(w) for w in gh.writes()]
+        # Reads: hidden state, thread sizes before deleting, then the
+        # backfill's hidden-state and thread-size reads.
+        self.assertEqual(
+            steps,
+            ["post", "read", "fold", "read", "delete", "minimize", "read", "read"],
+        )
         self.assertEqual(minimized(gh), ["N5"])
 
     def test_a_newer_change_request_does_not_dismiss_the_older_one(self):
@@ -761,26 +1338,19 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
             [w for w in gh.writes() if w[1] != "/repos/o/r/pulls/1/reviews"], []
         )
 
-    def test_a_hidden_review_is_left_alone(self):
-        # Its threads were resolved when it was hidden; one reopened since
-        # stays open.
-        old = old_review(7)
-        old["minimized"] = True
-        gh = FakeGitHub(reviews=[old])
-        go(gh)
-        self.assertEqual(resolved(gh), [])
-        self.assertEqual(minimized(gh), [])
-
     def test_one_failed_takedown_does_not_stop_the_others(self):
         class Flaky(FakeGitHub):
             def request(self, method, path, body=None, idempotent=None):
-                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews/8/"):
+                minimize = path == "/graphql" and "minimizeComment" in body["query"]
+                if minimize and body["variables"]["id"] == "N8":
                     raise GitHubError(503, "unavailable")
                 return super().request(method, path, body)
 
         gh = Flaky(reviews=[old_review(5), old_review(8)])
-        go(gh)
-        self.assertIn("T50", resolved(gh))
+        with mock.patch("post_review._sleep"):
+            go(gh)
+        self.assertEqual(deleted(gh), [80, 50])
+        self.assertIn("N5", minimized(gh))
 
     def test_a_head_that_moves_while_posting_retracts_this_review(self):
         class Moves(FakeGitHub):
@@ -796,8 +1366,13 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
         # A newer run may already have finished with a clean verdict, so this
         # stale change request is withdrawn too, and nothing older is touched.
         self.assertEqual(dismissed(gh), ["999"])
-        (put,) = gh.writes("PUT")
+        (put,) = [w for w in gh.writes("PUT") if w[1].endswith("/dismissals")]
         self.assertNotIn("http", put[2]["message"])
+        # Only this review's own comment goes; nothing older is touched.
+        self.assertEqual(deleted(gh), [9990])
+        self.assertEqual(folds(gh), [999])
+        self.assertIn("withdrawn: the PR changed", gh.reviews[-1]["body"])
+        self.assertNotIn("newer one replaces", gh.reviews[-1]["body"])
 
     def test_a_retraction_that_cannot_dismiss_leaves_the_review_visible(self):
         class MovesNoDismiss(FakeGitHub):
@@ -818,8 +1393,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
         old["unreadable"] = True
         gh = FakeGitHub(reviews=[old])
         go(gh)
-        self.assertEqual(resolved(gh), [])
-        self.assertEqual(minimized(gh), [])
+        self.assertEqual((deleted(gh), folds(gh), minimized(gh)), ([], [], []))
 
     def test_pagination_reaches_the_second_page(self):
         reviews = [old_review(i, author="someone") for i in range(1, 101)]
@@ -834,7 +1408,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
         gh = Paged(reviews=[old_review(101)])
         go(gh)
-        self.assertEqual(resolved(gh), ["T1010"])
+        self.assertEqual(deleted(gh), [1010])
 
     def test_a_failed_post_leaves_the_earlier_review_alone(self):
         class Down(FakeGitHub):
@@ -907,6 +1481,190 @@ class TestBotCommandsAreDefused(unittest.TestCase):
         for body in gh.posted():
             for text in [body["body"]] + [c["body"] for c in body.get("comments", [])]:
                 self.assertNotRegex(text, r"(?i)@pytorch(merge)?bot", text)
+
+
+ORIGINAL = (
+    MARKER
+    + "\n**Automated review** of cccccccccccc: changes requested before human review."
+    + "\n\nOne bug.\n\n<details>\n<summary>x</summary>\n\nminor\n</details>"
+    + "\n\n<sub>f</sub>"
+)
+
+
+def mark(gh, run_id):
+    post_review.mark_pending(gh, 1, SHA, AUTHOR, run_id, "no automated review")
+
+
+def marked_body(gh):
+    return [r for r in gh.reviews if r["id"] == 5][0]["body"]
+
+
+class TestAReviewInProgressIsMarked(unittest.TestCase):
+    def test_the_newest_visible_review_is_collapsed_under_a_status_line(self):
+        old = old_review(4, body=ORIGINAL)
+        hidden = {**old_review(6, body=ORIGINAL), "minimized": True}
+        gh = FakeGitHub(reviews=[old, old_review(5, body=ORIGINAL), hidden])
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [5])
+        body = marked_body(gh)
+        lines = body.split("\n")
+        self.assertEqual(lines[0], MARKER)
+        self.assertEqual(post_review.pending_run(body), "77")
+        self.assertIn("Automated review in progress** for aaaaaaaaaaaa", lines[2])
+        self.assertIn("/o/r/actions/runs/77", lines[2])
+        self.assertTrue(lines[4].startswith("<details><summary>Previous automated"))
+        self.assertTrue(body.endswith("\n</details>"))
+        self.assertEqual(post_review.unwrapped(body), ORIGINAL)
+
+    def test_nothing_is_marked_when_the_head_moved_or_the_review_is_folded(self):
+        gh = FakeGitHub(head="b" * 40, reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        self.assertEqual(gh.writes(), [])
+        folded = old_review(5, body=post_review.folded(old_review(5, body=ORIGINAL)))
+        gh = FakeGitHub(reviews=[folded])
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [])
+
+    def test_a_newer_run_takes_over_the_mark_without_nesting(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        mark(gh, "77")
+        mark(gh, "88")
+        self.assertEqual(folds(gh), [5, 5])
+        body = marked_body(gh)
+        self.assertEqual(post_review.pending_run(body), "88")
+        self.assertEqual(body.count("in progress"), 1)
+        self.assertEqual(post_review.unwrapped(body), ORIGINAL)
+        # The older run ends without a review: the newer mark stays.
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+
+    def test_an_older_run_never_takes_over_a_newer_runs_mark(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "88")
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [5])
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+
+    def test_an_opted_out_pr_is_not_marked(self):
+        gh = FakeGitHub(
+            labels=["No Automated Review"], reviews=[old_review(5, body=ORIGINAL)]
+        )
+        with redirect_stdout(io.StringIO()):
+            mark(gh, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_a_run_that_posts_nothing_puts_the_body_back(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        go(gh, row(status="model_error"))
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(marked_body(gh), ORIGINAL)
+        self.assertEqual(gh.posted(), [])
+
+    def test_a_replaced_review_is_folded_from_its_original_body(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        go(gh)
+        body = marked_body(gh)
+        self.assertTrue(body.startswith(MARKER + "\n<details><summary>Outdated"))
+        self.assertNotIn("in progress", body)
+        self.assertIsNone(post_review.pending_run(body))
+        self.assertIn("One bug.", body)
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_request_left_standing_after_a_clean_verdict_is_put_back(self):
+        old = old_review(5, body=ORIGINAL, state="CHANGES_REQUESTED")
+        gh = FakeGitHub(reviews=[old])
+        mark(gh, "77")
+        real = gh.request
+
+        def refuse_dismissal(method, path, body=None, idempotent=None):
+            if path.endswith("/dismissals"):
+                raise GitHubError(403, "no")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_dismissal
+        with redirect_stdout(io.StringIO()):
+            go(gh, row(verdict="ready_for_human_review", findings=[]))
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(marked_body(gh), ORIGINAL)
+
+    def test_only_this_workflows_reviews_are_put_back(self):
+        theirs = old_review(5, author="someone", body=ORIGINAL)
+        theirs["body"] = post_review.pending(theirs, "77", SHA, "o/r")
+        gh = FakeGitHub(reviews=[theirs])
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_the_marked_body_is_defused(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=MARKER + "\n@pytorchbot merge")])
+        mark(gh, "77")
+        self.assertNotIn("@pytorchbot", marked_body(gh))
+
+    def test_a_body_not_in_our_shape_is_left_as_it_is(self):
+        body = MARKER + "\n<!-- hardened-pr-review-pending run=77 -->\nedited"
+        self.assertEqual(post_review.unwrapped(body), body)
+        gh = FakeGitHub(reviews=[old_review(5, body=body)])
+        with redirect_stdout(io.StringIO()):
+            post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_crlf_line_endings_still_read_back(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        crlf = marked_body(gh).replace("\n", "\r\n")
+        self.assertEqual(post_review.pending_run(crlf), "77")
+        self.assertEqual(post_review.unwrapped(crlf), ORIGINAL)
+
+
+class TestPendingModesReadTheirInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "RUN_ID": "77",
+        "OPT_OUT_LABEL": "skip me",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", flag]),
+            mock.patch.object(post_review, "mark_pending") as mark_,
+            mock.patch.object(post_review, "restore_pending") as restore,
+            redirect_stdout(io.StringIO()) as out,
+        ):
+            rc = post_review.main()
+        return rc, mark_, restore, out.getvalue()
+
+    def test_each_mode_passes_its_inputs(self):
+        rc, mark_, restore, _ = self.main("--mark-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        mark_.assert_called_once()
+        self.assertEqual(mark_.call_args.args[1:], (1, SHA, AUTHOR, "77", "skip me"))
+        restore.assert_not_called()
+        rc, mark_, restore, _ = self.main("--restore-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        restore.assert_called_once()
+        self.assertEqual(restore.call_args.args[1:], (1, AUTHOR, "77"))
+        mark_.assert_not_called()
+
+    def test_a_missing_or_bad_run_id_warns_and_does_nothing(self):
+        missing = {k: v for k, v in self.ENV.items() if k != "RUN_ID"}
+        for flag in ("--mark-pending", "--restore-pending"):
+            for env in (missing, {**self.ENV, "RUN_ID": "77; rm"}):
+                with self.subTest(flag=flag, run_id=env.get("RUN_ID")):
+                    rc, mark_, restore, out = self.main(flag, env)
+                    self.assertEqual(rc, 0)
+                    mark_.assert_not_called()
+                    restore.assert_not_called()
+                    self.assertIn("::warning::automated review not", out)
 
 
 class TestWorkflowWiring(unittest.TestCase):

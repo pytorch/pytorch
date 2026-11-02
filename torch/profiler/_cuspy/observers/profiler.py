@@ -43,6 +43,8 @@ from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from torch.distributed._hooks.collective_annotations import CollectiveMetadata
+
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
     # (pid, opaque 32-bit thread id, system thread id) for trace lane naming.
@@ -471,12 +473,41 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
         self._record_calling_thread()
         with self._lock:
             self._open_start = self._boundary_clock_ns()
+        # Tag c10d collectives' kernels for the window only: warmup collectives would
+        # pay for annotations the window drops.
+        if self.available and torch.distributed.is_available():
+            from torch.distributed._hooks.collective_annotations import (
+                register_collective_annotation_hooks,
+            )
+
+            register_collective_annotation_hooks(
+                self, self._push_collective_kernel_metadata, self.pop_annotation
+            )
+
+    def _push_collective_kernel_metadata(self, metadata: CollectiveMetadata) -> None:
+        """Attach a collective's ``record_param_comms`` fields to the kernels it
+        launches. Cuspy doesn't see ``record_param_comms``, so c10d calls this from a
+        pre-hook (see ``register_collective_annotation_hooks`` in
+        ``torch.distributed._hooks.collective_annotations``) and
+        :meth:`pop_annotation` from the post-hook, while the window is open.
+
+        Pushes a new external correlation id and attaches ``metadata`` to it, so the
+        fields land on every kernel this thread launches until the pop.
+        """
+        self._cuspy.push_external_correlation_id()
+        self._cuspy.add_collective_metadata(**metadata)
 
     def close_window(self) -> int | None:
         """End the open window and queue it for deferred export; snapshots its annotations +
         thread map now. Pair with :meth:`set_export` for the paths. Returns the window id."""
         if not self.available:
             return None
+        if torch.distributed.is_available():
+            from torch.distributed._hooks.collective_annotations import (
+                unregister_collective_annotation_hooks,
+            )
+
+            unregister_collective_annotation_hooks(self)
         with self._lock:
             start = self._open_start if self._open_start is not None else 0
             self._open_start = None
@@ -509,10 +540,9 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Cuspy traces are always gzipped (chrome JSON or .pftrace alike); the writer
-            # keys gzip + format off the suffix.
+            # Default to gzip unless a compression suffix was requested.
             out = os.fspath(output_path)
-            w["out"] = out if out.endswith(".gz") else out + ".gz"
+            w["out"] = out if out.endswith((".gz", ".zst")) else out + ".gz"
         self._maybe_write(window_id)
 
     def join(self, *, force: bool = True, timeout_s: float = 30.0) -> None:

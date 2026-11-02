@@ -121,7 +121,7 @@ from .exc import (
     UserErrorType,
 )
 from .hooks import Hooks
-from .mutation_guard import install_generation_tagging_init
+from .mutation_guard import GenerationTracker, install_generation_tagging_init
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
@@ -131,7 +131,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
@@ -280,6 +280,25 @@ class _RecompileRefusedError(RuntimeError):
     """Raised by a ``_RefuseRecompileCallback`` instead of compiling."""
 
 
+def _warn_eager_fallback_miss(code: types.CodeType) -> None:
+    # Once per frame: every miss of it runs the frame eagerly, including call
+    # shapes the capture never ran, so a serving process can tell it lost
+    # compiled code. Only the frame itself: under an installed artifact its
+    # callees still dispatch to their own variants, and refuse a miss.
+    torch._logging._internal.warning_once(
+        log,
+        "precompile: no captured variant of %s (%s:%s) matches this call; running "
+        "this frame eagerly, as the capture did after Dynamo gave up on it. To "
+        "serve such calls compiled, recapture with a call that covers them, or fix "
+        "what made Dynamo give up on the frame (TORCH_LOGS=graph_breaks during "
+        "capture). This miss is not a recompile, so TORCH_LOGS=recompiles does "
+        "not report it; this warning is logged once per frame",
+        code.co_name,
+        code.co_filename,
+        code.co_firstlineno,
+    )
+
+
 class _FailOnRecompileCallback:
     """Serves cached entries but raises instead of compiling.
 
@@ -298,10 +317,22 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
+        # First: every miss of an eager-fallback frame lands here, so it skips
+        # the checks below, none of which apply to a frame Dynamo compiled.
+        if (served := self._serve_miss(frame)) is not None:
+            return served
         if trace_rules.check(frame.f_code):
             return ConvertFrameReturn()
         if not convert_frame.has_tensor_in_frame(frame):
             return ConvertFrameReturn()
+
+        # convert_frame would skip a disable(recursive=False) frame rather than
+        # compile it, so a cache miss there is not a recompile. The eval-frame
+        # hook calls this method directly, so its caller is the missed frame's.
+        if (
+            disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
+        ) is not None:
+            return disabled
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -337,17 +368,43 @@ class _FailOnRecompileCallback:
                 message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
         raise self._error(message)
 
+    def _serve_miss(self, frame: DynamoFrameType) -> ConvertFrameReturn | None:
+        # A hook rather than an overridable __call__: an override would shift the
+        # sys._getframe(1) in __call__ off the missed frame's caller.
+        return None
+
 
 class _RefuseRecompileCallback(_FailOnRecompileCallback):
     """A ``_FailOnRecompileCallback`` bound once into a context's callback (an
     installed precompile artifact); ``_callback_from_stance`` keeps it under
-    every stance that would compile.
+    every stance that would compile. A miss of a frame in ``eager_codes`` (one
+    Dynamo gave up on during capture) runs that call eagerly instead of
+    raising.
     """
 
     _message_prefix = (
         "Detected recompile of a frame whose callable refuses to recompile. "
     )
     _error = _RecompileRefusedError
+
+    def __init__(
+        self, callback: DynamoCallback, eager_codes: Sequence[types.CodeType] = ()
+    ) -> None:
+        super().__init__(callback)
+        # The frames Dynamo gave up on during capture, keyed by id since code
+        # objects compare by value.
+        self._eager_codes: Mapping[int, types.CodeType] = {
+            id(code): code for code in eager_codes
+        }
+
+    def _serve_miss(self, frame: DynamoFrameType) -> ConvertFrameReturn | None:
+        if id(frame.f_code) not in self._eager_codes:
+            return None
+        _warn_eager_fallback_miss(frame.f_code)
+        return ConvertFrameReturn(
+            apply_to_code=False,
+            skip_reason="Dynamo gave up on this frame during capture",
+        )
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
@@ -557,6 +614,11 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
+
+    def __bool__(self) -> bool:
+        # Proxy the bool call to the original module
+        # pyrefly: ignore [unsafe-overlap]
+        return bool(self._orig_mod)
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
@@ -1448,8 +1510,10 @@ class OptimizeContext(_TorchDynamoContext):
         isolate_recompiles: bool = False,
         dynamic_shapes: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
     ) -> None:
+        install_generation_tagging_init()
+
         def on_enter() -> None:
-            install_generation_tagging_init()
+            GenerationTracker.generation += 1
 
         super().__init__(
             callback=callback,
@@ -1513,7 +1577,7 @@ class RunOnlyContext(_TorchDynamoContext):
     def __init__(self) -> None:
         # cudagraph trees relies on generation increment
         def on_enter() -> None:
-            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+            GenerationTracker.generation += 1
 
         super().__init__(callback=False, on_enter=on_enter)
 
