@@ -121,6 +121,7 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
+    periodic,
     recover_orig_fp32_precision,
     serialTest,
     skipIfNoLapack,
@@ -259,6 +260,18 @@ test_int_dtypes = [
 
 if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
     test_dtypes.append(torch.bfloat16)
+
+# test_dtypes is shared with the GPU classes, so it leaves out bfloat16 unless
+# the GPU supports it. Without HAS_GPU (CUDA/XPU/MTIA with Triton), still give
+# the C++-backend CPU classes bfloat16 test_dtypeview cases, marked @periodic so
+# CI runs them only in periodic jobs (and Sandcastle never does).
+dtypeview_dtype_pairs = list(itertools.product(test_dtypes, repeat=2))
+if torch.bfloat16 not in test_dtypes and not HAS_GPU:
+    dtypeview_dtype_pairs += [
+        subtest(pair, decorators=[periodic])
+        for pair in itertools.product([*test_dtypes, torch.bfloat16], repeat=2)
+        if torch.bfloat16 in pair
+    ]
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
@@ -17871,16 +17884,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @parametrize(
-        "dtype_x, dtype_y",
-        list(itertools.product(test_dtypes, test_dtypes)),
-    )
+    @parametrize("dtype_x, dtype_y", dtypeview_dtype_pairs)
     def test_dtypeview(self, dtype_x, dtype_y):
         if TEST_WITH_ASAN:
             return
 
         if is_triton_cpu_backend(self.device):
             raise unittest.SkipTest("Compile time crash in Triton CPU CI")
+
+        # The periodic bfloat16 cases (see dtypeview_dtype_pairs) only target the
+        # C++ CPU backend, not the Halide/Pallas classes that copy this template.
+        if (
+            torch.bfloat16 in (dtype_x, dtype_y)
+            and torch.bfloat16 not in test_dtypes
+            and not is_cpp_backend(self.device)
+        ):
+            raise unittest.SkipTest(
+                "CPU bfloat16 dtypeview only runs on the C++ backend"
+            )
 
         # https://github.com/pytorch/pytorch/issues/126338
         def fn(x, y, x_dtype, x2):
@@ -17889,8 +17910,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x2 = x2.view(x_dtype) + 1
             return x @ y, x2 @ x
 
-        # @ operation needs arguments to be the same dtype
-        for view_dtype in test_dtypes:
+        # @ operation needs arguments to be the same dtype. Also view as the input
+        # dtypes, which can be outside test_dtypes (see dtypeview_dtype_pairs).
+        for view_dtype in dict.fromkeys([*test_dtypes, dtype_x, dtype_y]):
             try:
                 x = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_x)
                 y = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_y)
