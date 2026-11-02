@@ -3575,6 +3575,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
+        # Distinct loads emitted inside the current reduction loop body.
+        self.num_loop_loads = 0
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
@@ -5500,6 +5502,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_after_load(load_buffer, result_var)
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
+        elif self.inside_reduction and load_buffer is not self.body:
+            self.num_loop_loads += 1
         if not isinstance(result_var, TritonCSEVariable):
             raise AssertionError(f"expected TritonCSEVariable, got {type(result_var)}")
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
@@ -7501,8 +7505,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         num_stages = ", num_stages = 2"
                     else:
                         num_stages = ""
+                    unroll = (
+                        self._reduction_loop_unroll_hint(tree)
+                        if level == len(loop_trees) - 1
+                        else ""
+                    )
                     self.body.writeline(
-                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
+                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}{unroll}):"
                     )
                 with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)
@@ -7581,6 +7590,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.indexing_code.clear()
         self.loads.clear()
         self.compute.clear()
+        self.num_loop_loads = 0
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
@@ -7744,6 +7754,50 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             import torch
             """
         ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
+
+    def _reduction_loop_unroll_hint(self, tree: IterationRangesRoot) -> str:
+        """
+        Unroll hint for the innermost reduction loop. When the block does not
+        divide a static reduction size, Triton cannot prove the loop's bounds
+        mask is always true, the compiled loop stays rolled, and a small tile
+        then leaves each thread with a single load in flight. The condition is a constexpr, so configs whose block divides
+        the size keep LLVM's own unrolling, large tiles, which already issue
+        several loads per thread, are left alone, and loops with fewer than
+        `factor` full blocks are not unrolled. Loops that issue more than
+        reduction_loop_unroll_max_loads loads per iteration get no hint,
+        because unrolling them raises register pressure more than it helps.
+        """
+        factor = config.triton.reduction_loop_unroll_factor
+        # Cooperative reductions are excluded for correctness, not speed: their
+        # loop runs from rsplit_start to rsplit_end, which can be empty with
+        # rsplit_start > rsplit_end, and Triton's unrolled tl.range then still
+        # runs iterations. Triton < 3.3 rejects loop_unroll_factor=None.
+        if (
+            factor <= 1
+            or self.cooperative_reduction
+            or torch.version.hip
+            or V.graph.get_current_device_or_throw().type != "cuda"
+            or get_triton_version() < (3, 3)
+            or self.num_loop_loads > config.triton.reduction_loop_unroll_max_loads
+        ):
+            return ""
+        numel = V.graph.sizevars.simplify(tree.numel)
+        if not isinstance(numel, (sympy.Integer, int)):
+            return ""
+        numel = int(numel)
+        # Every power-of-two block that fits divides a power-of-two size, so
+        # the condition could never hold; keep the header unchanged instead.
+        if numel & (numel - 1) == 0:
+            return ""
+        block = tree.block_size_str()
+        tile = " * ".join(
+            t.block_size_str() for t in self.range_trees if t.tensor_dim is not None
+        )
+        # Triton 3.3 accepts only two operands per boolean operator.
+        return (
+            f", loop_unroll_factor={factor} if ({numel} % {block}"
+            f" and {numel} >= {factor} * {block}) and {tile} <= 1024 else None"
+        )
 
     def _get_heuristic(self):
         if self.fixed_config:
