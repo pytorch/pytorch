@@ -140,8 +140,7 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
         )
         stack.enter_context(mock.patch("torch._inductor.tunableop.BenchmarkJob", _Job))
         # The winners carry a cuda layout so they reach the ladder, but
-        # _cuda_tunableop_get_filename exists only in a CUDA build: patched so
-        # these stay runnable on CPU-only shards.
+        # _cuda_tunableop_get_filename needs a CUDA build: patched for CPU shards.
         stack.enter_context(
             mock.patch(
                 "torch._inductor.tunableop._resolve_and_pin_filename_locked",
@@ -316,8 +315,7 @@ class TestTunableOpPretune(TestCase):
             [_buffer("mat1", [1000 * s, k], [k, 1]), _buffer("mat2", [k, s], [s, 1])],
             [1000 * s, s],
         )
-        # _contiguous_strides would yield [1, 1] here (both dims symbolic),
-        # which the density guard rejects -- masking the guard under test.
+        # _contiguous_strides would yield [1, 1] here, masking the guard.
         shared.layout = ir.FixedLayout(DEVICE, DTYPE, [1000 * s, s], [s, 1])
         self.assertEqual(_run(shared, sym=s), [])
         self.assertTrue(_run(self._mm_winner("mm", s), sym=s))
@@ -365,10 +363,9 @@ class TestTunableOpPretune(TestCase):
 
     @parametrize("case", ("output_stride", "stride_order", "dynamic_axis"))
     def test_memo_distinguishes_layout(self, case):
-        # Each variant has a different TunableOp signature from the plain mm
-        # it follows, so it must ladder rather than hit that one's memo entry.
-        # Output strides are explicit: _contiguous_strides cannot build a
-        # symbolic-N output.
+        # Each variant has a different TunableOp signature from the plain mm it
+        # follows, so it must ladder rather than hit that memo entry. Output
+        # strides are explicit: _contiguous_strides cannot build symbolic N.
         s = sympy.Symbol(f"s_memo_{case}", positive=True, integer=True)
         mat1 = _buffer("mat1", [s, 256], [256, 1])
         variants = {
@@ -556,9 +553,8 @@ class TestTunableOpPretune(TestCase):
             return mock.Mock(status="ok", time=1.0)
 
         def _fake_monotonic():
-            # 0 until the first submission, then a sliver short of the deadline:
-            # too little for a fair trial, so the loop must stop rather than
-            # charge it.
+            # 0 until the first submission, then a sliver short of the
+            # deadline: too little for a fair trial, so the loop must stop.
             budget = config.cuda.autotune_tunableop_timeout
             return 0.0 if not timeouts else budget - 1
 
@@ -834,6 +830,32 @@ class TestTunableOpPretune(TestCase):
                 "mm", choices, winner.input_nodes, winner.layout
             )
         hook.assert_called_once_with(chosen)
+
+    def test_benchmark_subgraph_compiles_with_tuning_off(self):
+        # A subgraph candidate's benchmark compile forces ATEN, so every inner
+        # GEMM arrives as a single choice and would reach the hook -- spending
+        # that GEMM's whole budget for a candidate that may lose. decompose-K's
+        # inner torch.bmm(..., out_dtype=float32) is one, laddered over the
+        # outer M. A winner is re-lowered from output_node(), so nothing is
+        # lost by turning it off here.
+        from torch._inductor.codegen import subgraph as _sg
+
+        modes = []
+        caller = mock.Mock(spec=_sg.SubgraphChoiceCaller)
+        caller.name = "decompose_k_mm_4_split_aten"
+        caller.sym_inputs = []
+        caller.example_inputs = []
+        caller.benchmark_inputs = []
+        caller.gm = mock.Mock()
+        caller.config_patches = {}
+        with mock.patch("torch._inductor.graph.GraphLowering") as graph_lowering:
+            graph_lowering.return_value.compile_to_module.side_effect = (
+                lambda: modes.append(config.cuda.autotune_tunableop_mode)
+            )
+            with V.set_graph_handler(mock.Mock()):
+                with config.patch({"cuda.autotune_tunableop_mode": "tune"}):
+                    _sg.SubgraphChoiceCaller._compile_for_benchmarking(caller)
+        self.assertEqual(modes, ["off"], "a benchmark compile must not tune")
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
