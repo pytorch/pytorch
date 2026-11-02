@@ -234,6 +234,16 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
+    # Like mul_cfg_kernel, but the host code caches a layout on cfg as it compiles.
+    @cute.jit
+    def mul_caching_cfg_kernel(
+        mX: cute.Tensor, mOut: cute.Tensor, n: cutlass.Int32, cfg, stream: cuda.CUstream
+    ):
+        cfg.layout = cute.make_layout((128,))
+        _mul_const_k(mX, mOut, n, cfg.alpha).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
     # A regular dataclass (mutable, so unhashable) as the default of a Constexpr
     # param: out = x * cfg.alpha.
     @dataclasses.dataclass
@@ -308,6 +318,23 @@ if HAS_CUTEDSL:
             n: cutlass.Int32,
             stream: cuda.CUstream,
         ):
+            _mul_const_k(mX, mOut, n, self.alpha).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+    # A kernel object whose __call__ sets attributes on it, as CUTLASS kernel objects
+    # do (self.a_dtype = mA.element_type, self.tiled_mma = ...): out = x * alpha.
+    class CachingMulKernel(MulKernel):
+        @cute.jit
+        def __call__(
+            self,
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+        ):
+            self.dtype = mX.element_type
+            self.layout = cute.make_layout((128,))
             _mul_const_k(mX, mOut, n, self.alpha).launch(
                 grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
             )
@@ -655,6 +682,39 @@ class CuteDSLHOPTests(TestCase):
         with self.assertRaisesRegex(TypeError, r"type Cfg refers to itself"):
             launch_cutedsl_kernel(mul_cfg_kernel, args)
 
+    def test_constants_holding_tensors_are_refused(self):
+        # Keyed by identity, a tensor inside a constant would stay alive with its
+        # side-table entry and its compile, and it would reach the DSL without
+        # from_dlpack: constant_key refuses one as a constant or in a list, tuple,
+        # dict, dataclass field or plain-object attribute, naming where, in the side
+        # table and the eager launch alike.
+        import types
+
+        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+
+        @dataclasses.dataclass
+        class Cfg:
+            alpha: float
+            weight: object = None
+
+        t = _rand(4)
+        msg = "^a constant kernel argument holds a tensor{}: pass each tensor as its "
+        msg += "own argument$"
+        for value, where in (
+            ([t], r" at \[0\]"),
+            ((1.0, {"w": t}), r" at \[1\]\['w'\]"),
+            ({t: 1.0}, r" at \.keys\(\)\[0\]"),
+            (Cfg(2.0, weight=t), r" at \.weight"),
+            (types.SimpleNamespace(w=t), r" at \.w"),
+            (t, ""),
+        ):
+            with self.assertRaisesRegex(TypeError, msg.format(where)):
+                cutedsl_kernel_side_table.add_constant_args({"cfg": value})
+        x = _rand(1000)
+        args = {"mX": x, "mOut": torch.empty_like(x), "n": 1000, "cfg": Cfg(2.0, t)}
+        with self.assertRaisesRegex(TypeError, msg.format(r" at \.weight")):
+            launch_cutedsl_kernel(mul_cfg_kernel, args)
+
     def test_launch_checks_argument_names(self):
         # The eager launch binds every parameter but the stream by name: missing ones
         # without a default, a name that is not a parameter (here a typo of the
@@ -789,6 +849,36 @@ class CuteDSLHOPTests(TestCase):
             self.assertNotEqual(launch(cfg=cfg), cidx)
             launch(cfg=cfg, unused=None)
             self.assertEqual(compile_spy.call_count, 2)
+
+    def test_launch_compiles_copies_of_the_constants(self):
+        # The host code that a compile runs can change a constant (here it caches a
+        # layout on cfg). The compile gets copies, so the side table's snapshot and
+        # the caller's object keep the contents they were keyed by, and later
+        # launches through either reuse the compile.
+        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        x, cfg = _rand(1000), Cfg(3.0)
+        kidx = _add_kernel_to_table(mul_caching_cfg_kernel, ["mOut"])
+        cidx = cutedsl_kernel_side_table.add_constant_args({"cfg": cfg})
+        with _counting_compiles() as compile_spy:
+            for _ in range(2):
+                out = torch.empty_like(x)
+                cutedsl_kernel_wrapper_mutation(
+                    kernel_idx=kidx,
+                    constant_args_idx=cidx,
+                    kwargs={"mX": x, "mOut": out, "n": 1000},
+                )
+                self.assertEqual(out, x * 3.0)
+                args = {"mX": x, "mOut": torch.empty_like(x), "n": 1000, "cfg": cfg}
+                launch_cutedsl_kernel(mul_caching_cfg_kernel, args)
+                self.assertEqual(args["mOut"], x * 3.0)
+            self.assertEqual(compile_spy.call_count, 1)
+        snapshot = cutedsl_kernel_side_table.get_constant_args(cidx)["cfg"]
+        self.assertEqual((vars(snapshot), vars(cfg)), ({"alpha": 3.0},) * 2)
 
     def test_cutedsl_hop_unhashable_default_of_a_constexpr_param(self):
         # A default the call leaves out is keyed like a passed constant, so a regular
@@ -1240,8 +1330,6 @@ def forward(self, x_1, y_1):
         def overlapping_columns(x, y):
             # Rows 1 to 3 of column 2 are in both: each row of out starts inside a
             # row of the other, though not inside the first one.
-            # TODO(zoranzhao): refused only with the fix in
-            # https://github.com/pytorch/pytorch/pull/202848 (see _may_overlap).
             base = x.view(10, 100)
             out = base[1:5, 2:5]
             cutedsl_kernel_wrapper_mutation(
@@ -1373,6 +1461,42 @@ def forward(self, x_1, y_1):
             x = torch.empty(100, device=DEVICE)
             self.assertTrue(_may_overlap(x[:u], x[u:]))
 
+    def test_overlap_check_rechecks_2d_rows(self):
+        # TODO(zoranzhao): remove with _rows_disjoint once
+        # https://github.com/pytorch/pytorch/pull/202848 lands. Without that fix,
+        # compute_overlapping_tensors answers "disjoint" for base[:4, :3] and
+        # base[1:5, 2:5]: with that answer forced, _may_overlap still finds them
+        # overlapping, while an empty view, views whose ranges do not meet and the
+        # q, k and v columns of a fused buffer stay disjoint, under symbolic sizes
+        # too.
+        from unittest import mock
+
+        from torch._higher_order_ops.cutedsl_kernel_wrap import _may_overlap
+
+        results = []
+
+        def f(base):
+            n, d = base.shape
+            qkv = base.new_empty(n, 3 * d)
+            q, k, v = (qkv.narrow(1, i * d, d) for i in range(3))
+            pairs = [
+                (base[:4, :3], base[1:5, 2:5]),
+                (base[:4, :3], base[1:3, 0:0]),
+                (base[:2, :5], base[2:4, :5]),
+                (q, k),
+                (k, v),
+                (q, v),
+            ]
+            results.extend(_may_overlap(a, b) for a, b in pairs)
+            return base
+
+        with mock.patch.object(
+            torch._C._dynamo.guards, "compute_overlapping_tensors", return_value=set()
+        ):
+            f(_rand(10, 25))
+            make_fx(f, tracing_mode="symbolic")(_rand(10, 25))
+        self.assertEqual(results, ([True] + [False] * 5) * 2)
+
     @parametrize("case", ["e8m0", "complex", "meta", "sparse", "fp8"])
     def test_cutedsl_hop_functional_decomposed_before_type_fallback(self, case):
         # Mirrors test_triton_kernel_functional_decomposition_before_type_fallback: the
@@ -1496,6 +1620,18 @@ def forward(self, x_1, y_1):
         # torch._dynamo.reset() resets Triton's table, not this one.
         torch._dynamo.reset()
         self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
+
+    def test_cutedsl_layout_constraint_ignores_triton_config(self):
+        # Inductor keeps the traced strides of a CuTeDSL kernel's tensors, whatever
+        # Triton's layout config says.
+        from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
+        from torch._inductor import config
+
+        info = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
+        for layout in ("needs_fixed_stride_order", "flexible_layout"):
+            with config.patch(triton_kernel_default_layout_constraint=layout):
+                constraint = info.get_layout_constraint()
+            self.assertEqual(constraint, "needs_fixed_stride_order")
 
 
 def _is_tensor_node(v):
@@ -1974,14 +2110,28 @@ class CuteDSLWrapTests(TestCase):
                     wrap_cutedsl(add_kernel, mutates_args=bad)
 
     def test_wrap_cutedsl_error_not_cute_jit(self):
+        from torch._library.cutedsl import is_cutedsl_jit_function
+
         def plain(mX, mY, mOut, n, stream: cuda.CUstream):
             pass
+
+        @functools.wraps(add_kernel)
+        def logged(*args, **kwargs):
+            return add_kernel(*args, **kwargs)
 
         with self.assertRaisesRegex(RuntimeError, r"(?i)cute\.jit"):
             wrap_cutedsl(plain, mutates_args=["mOut"])
         # A @cute.kernel device function is not a host function either.
         with self.assertRaisesRegex(RuntimeError, r"(?i)cute\.jit"):
             wrap_cutedsl(_add_k, mutates_args=["gOut"])
+        # Nor is a functools.wraps wrapper of one (a decorator, or
+        # torch.compiler.disable), although it copies the host function's _dsl_cls.
+        self.assertTrue(is_cutedsl_jit_function(add_kernel))
+        for fn in (logged, torch.compiler.disable(add_kernel)):
+            self.assertIn("_dsl_cls", vars(fn))
+            self.assertFalse(is_cutedsl_jit_function(fn))
+        with self.assertRaisesRegex(RuntimeError, r"(?i)cute\.jit"):
+            wrap_cutedsl(logged, mutates_args=["mOut"])
 
     def test_wrap_cutedsl_error_bound_method(self):
         # A bound @cute.jit method, or a kernel object standing for its bound
@@ -1993,7 +2143,9 @@ class CuteDSLWrapTests(TestCase):
         error = (
             r"does not support bound methods or kernel objects \(got "
             r"MulKernel\.__call__\): instead, wrap a @cute\.jit function that takes "
-            r"the object as a cutlass\.Constexpr"
+            r"the object as a cutlass\.Constexpr parameter and calls the method on "
+            r"it, and pass the object to that wrapper, which keys a kernel object by "
+            r"its attributes: equal objects share one compile"
         )
         for host_fn in (kernel.__call__, kernel):
             with self.subTest(host_fn=type(host_fn).__name__):
@@ -2012,6 +2164,112 @@ class CuteDSLWrapTests(TestCase):
         x = _rand(1000)
         self.assertEqual(f(x), 3 * x)
         self.assertEqual(make_fx(f)(x)(x), 3 * x)
+
+    def test_wrap_cutedsl_kernel_object_keyed_by_attributes(self):
+        # A kernel object given to a host function that calls it is keyed by its
+        # attributes (see _object_state), in the eager compile cache and the side
+        # table alike: equal objects, such as one built for each call, share one
+        # compile and one side-table entry, which holds a snapshot, and an object
+        # mutated between calls is compiled again. Any other callable object is keyed
+        # by its identity.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, kernel):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        with _counting_compiles() as compile_spy:
+            self.assertEqual(f(x, MulKernel(3.0)), 3 * x)
+            self.assertEqual(f(x, MulKernel(3.0)), 3 * x)
+            with set_wrap_triton_enabled(False):
+                self.assertEqual(f(x, MulKernel(3.0)), 3 * x)
+            self.assertEqual(compile_spy.call_count, 1)
+            kernel = MulKernel(3.0)
+            f(x, kernel)
+            kernel.alpha = 0.5
+            self.assertEqual(f(x, kernel), 0.5 * x)
+            self.assertEqual(compile_spy.call_count, 2)
+
+        kernels = [MulKernel(4.0), MulKernel(4.0)]
+        gms = [make_fx(functools.partial(f, kernel=k))(x) for k in kernels]
+        nodes = [_hop_nodes(gm, cutedsl_kernel_wrapper_mutation)[0] for gm in gms]
+        idx = nodes[0].kwargs["constant_args_idx"]
+        self.assertEqual(nodes[1].kwargs["constant_args_idx"], idx)
+        stored = cutedsl_kernel_side_table.get_constant_args(idx)["kernel"]
+        self.assertIs(type(stored), MulKernel)
+        self.assertFalse(any(stored is k for k in kernels))
+        kernels[0].alpha = 1.0
+        self.assertEqual(stored.alpha, 4.0)
+        self.assertEqual([gm(x) for gm in gms], [4 * x, 4 * x])
+
+        class Functor:
+            def __call__(self):
+                pass
+
+        table = cutedsl_kernel_side_table
+        self.assertNotEqual(
+            table.add_constant_args({"c": Functor()}),
+            table.add_constant_args({"c": Functor()}),
+        )
+
+    def test_wrap_cutedsl_kernel_object_that_sets_attributes(self):
+        # The compile runs a kernel object's __call__, which may set attributes on it
+        # (here a cute layout, which does not hash): launch_cutedsl_kernel compiles
+        # with a copy, so neither the caller's object nor the side table's snapshot
+        # changes, and both keep matching the key of the kernel compiled for them.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, kernel):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        kernel, fast_kernel = CachingMulKernel(3.0), CachingMulKernel(2.0)
+        with _counting_compiles() as compile_spy:
+            for k in (kernel, kernel, CachingMulKernel(3.0)):
+                self.assertEqual(f(x, k), 3 * x)
+            gm = make_fx(functools.partial(f, kernel=CachingMulKernel(3.0)))(x)
+            self.assertEqual(gm(x), 3 * x)
+            self.assertEqual(gm(x), 3 * x)
+            with set_wrap_triton_enabled(False):
+                self.assertEqual(f(x, fast_kernel), 2 * x)
+                self.assertEqual(f(x, fast_kernel), 2 * x)
+        self.assertEqual(compile_spy.call_count, 2)
+        self.assertEqual(vars(fast_kernel), {"alpha": 2.0})
+
+    def test_wrap_cutedsl_error_in_kernel_object(self):
+        # A kernel object is a container like a plain object (see _object_state): one
+        # holding a tensor, a reference cycle (a logging.Logger) or an unhashable
+        # value is refused, under make_fx and eagerly.
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, extra):
+            kernel = MulKernel(3.0)
+            kernel.extra = extra
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        cases = (
+            (x, RuntimeError, "'kernel' holds a tensor inside a container"),
+            (logging.getLogger(__name__), RuntimeError, "contains a reference cycle"),
+            ({1, 2}, TypeError, "type set is unhashable"),
+        )
+        for extra, error_type, error in cases:
+            fn = functools.partial(f, extra=extra)
+            with self.subTest(extra=type(extra).__name__):
+                with self.assertRaisesRegex(error_type, error):
+                    make_fx(fn, tracing_mode="fake")(x)
+                with self.assertRaisesRegex(error_type, error):
+                    fn(x)
 
     def test_wrap_cutedsl_error_unwrapped_host_fn(self):
         # inspect.unwrap(host_fn) is the user's undecorated function. Whether it
