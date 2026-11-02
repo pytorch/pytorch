@@ -1392,15 +1392,12 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
 
-if acc:
-    instantiate_device_type_tests(
-        TestFunctionalDifferentialsWithCompile,
-        globals(),
-        only_for=acc.type,
-        allow_xpu=True,
-    )
-else:
-    del TestFunctionalDifferentialsWithCompile
+instantiate_device_type_tests(
+    TestFunctionalDifferentialsWithCompile,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
