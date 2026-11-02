@@ -605,6 +605,7 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
             )
         return pg
 
+    # DO NOT MERGE: no-op touch to make CI run this file, see #195960.
     def test_collective_hang(self):
         pg = self._create_wrapper_pg(timeout=2.0)
         self._test_collective_hang(pg)
