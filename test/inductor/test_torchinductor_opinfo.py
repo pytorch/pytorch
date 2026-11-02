@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_ARM64,
     IS_CI,
     IS_LINUX,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MI200_ARCH,
+    OPINFO_SAMPLE_INPUT_INDEX,
     parametrize,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -1274,6 +1276,109 @@ def collection_decorator(fn):
     return inner
 
 
+def _inductor_pooling_samples(op_name, samples):
+    pool_dims = {"nn.functional.max_pool2d": 2, "nn.functional.max_pool3d": 3}
+    dim = pool_dims.get(op_name)
+    if ALL_SAMPLES or OPINFO_SAMPLE_INPUT_INDEX is not None or dim is None:
+        yield from samples
+        return
+
+    for sample in samples:
+        x = sample.input
+        # Singleton channels-last inputs have a distinct backward reshape path.
+        if x.ndim == dim + 2 and x.shape[0] == 1:
+            if dim != 2 or not x.is_contiguous(memory_format=torch.channels_last):
+                continue
+        yield sample
+
+
+class TestInductorPoolingSamples(TestCase):
+    @parametrize("op_name", ("nn.functional.max_pool2d", "nn.functional.max_pool3d"))
+    @patch(__name__ + ".OPINFO_SAMPLE_INPUT_INDEX", None)
+    @patch("torch.testing._internal.opinfo.core.OPINFO_SAMPLE_INPUT_INDEX", None)
+    def test_pooling_sample_coverage(self, op_name):
+        op = next(op for op in op_db if op.name == op_name)
+        samples = list(op.sample_inputs("cpu", f32, requires_grad=True))
+        with patch(__name__ + ".ALL_SAMPLES", False):
+            selected = list(_inductor_pooling_samples(op_name, iter(samples)))
+
+        dim = 2 if op_name.endswith("2d") else 3
+        memory_format = torch.channels_last if dim == 2 else torch.channels_last_3d
+
+        def coverage(sample):
+            x = sample.input
+            channels_last = x.ndim == dim + 2 and x.is_contiguous(
+                memory_format=memory_format
+            )
+            return (
+                tuple(x.shape[-(dim + 1) :]),
+                x.ndim,
+                channels_last,
+                dim == 2 and channels_last and x.shape[0] == 1,
+                tuple(sorted(sample.kwargs.items())),
+            )
+
+        self.assertEqual(
+            {coverage(s) for s in selected}, {coverage(s) for s in samples}
+        )
+        self.assertEqual(len(selected), len({coverage(s) for s in selected}))
+        self.assertLess(len(selected), len(samples))
+        self.assertTrue(all(s.input.requires_grad for s in selected))
+        expected = [
+            s
+            for s in samples
+            if s.input.ndim != dim + 2
+            or s.input.shape[0] != 1
+            or (dim == 2 and s.input.is_contiguous(memory_format=memory_format))
+        ]
+        self.assertEqual([id(s) for s in selected], [id(s) for s in expected])
+        if dim == 2:
+            singleton_cl = [
+                s
+                for s in samples
+                if s.input.ndim == 4
+                and s.input.shape[0] == 1
+                and s.input.is_contiguous(memory_format=memory_format)
+            ]
+            self.assertTrue(singleton_cl)
+            self.assertTrue({id(s) for s in singleton_cl} <= {id(s) for s in selected})
+        with patch(__name__ + ".ALL_SAMPLES", True):
+            self.assertEqual(
+                list(_inductor_pooling_samples(op_name, iter(samples))), samples
+            )
+
+    @parametrize("op_name", ("nn.functional.max_pool2d", "nn.functional.max_pool3d"))
+    @patch(__name__ + ".ALL_SAMPLES", False)
+    @patch(__name__ + ".OPINFO_SAMPLE_INPUT_INDEX", 0)
+    @patch("torch.testing._internal.opinfo.core.OPINFO_SAMPLE_INPUT_INDEX", 0)
+    def test_explicit_sample_index(self, op_name):
+        op = next(op for op in op_db if op.name == op_name)
+        samples = list(op.sample_inputs("cpu", f32, requires_grad=True))
+        selected = list(_inductor_pooling_samples(op_name, iter(samples)))
+        self.assertEqual(len(selected), 1)
+        self.assertIs(selected[0], samples[0])
+        self.assertEqual(selected[0].input.shape[0], 1)
+        self.assertTrue(selected[0].input.is_contiguous())
+        outputs = [op.get_op()(s.input, *s.args, **s.kwargs) for s in selected]
+        self.assertEqual(len(outputs), 1)
+        with patch(__name__ + ".OPINFO_SAMPLE_INPUT_INDEX", None):
+            self.assertEqual(
+                list(_inductor_pooling_samples(op_name, iter(samples))), []
+            )
+
+    def test_other_ops_unchanged(self):
+        from torch.testing._internal.common_methods_invocations import SampleInput
+
+        samples = [SampleInput(torch.ones(2)), SampleInput(torch.ones(2))]
+        with patch(__name__ + ".ALL_SAMPLES", False):
+            self.assertEqual(
+                list(_inductor_pooling_samples("add", iter(samples))), samples
+            )
+
+
+instantiate_parametrized_tests(TestInductorPoolingSamples)
+
+
 def _inductor_extra_samples(op_name, device, dtype, requires_grad):
     """Extra sample inputs for inductor-specific coverage.
 
@@ -1569,6 +1674,8 @@ class TestInductorOpInfo(TestCase):
                 samples = [samples[0]]
             else:
                 samples = [next(samples)]
+        else:
+            samples = _inductor_pooling_samples(op_name, samples)
 
         class HasRngOp(TorchDispatchMode):
             def __init__(self) -> None:
