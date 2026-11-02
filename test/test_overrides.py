@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     TestCase,
     run_tests,
+    TEST_CUDA,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     skipIfTorchDynamo,
@@ -48,7 +49,7 @@ from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
 
-if torch.version.cuda and not torch.cuda.is_available():
+if torch.version.cuda and not TEST_CUDA:
     print(
         "Skipping due to failing when cuda build runs on non cuda machine, "
         + "see https://github.com/pytorch/pytorch/pull/150059 for example"
