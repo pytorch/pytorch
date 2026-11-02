@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
 
+import importlib.util
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +28,34 @@ from torch.testing._internal.inductor_pointwise_coverage import (
 
 class TestPointwiseCoverage(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_strict_suite_has_no_duplicate_test_ids(self):
+        spec = importlib.util.spec_from_file_location(
+            f"{__name__}.strict_numerics_collection",
+            Path(__file__).with_name("test_strict_numerics.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"PYTORCH_POINTWISE_COVERAGE_DIR": directory}),
+        ):
+            sys.modules[spec.name] = module
+            try:
+                spec.loader.exec_module(module)
+                suite = unittest.defaultTestLoader.loadTestsFromModule(module)
+            finally:
+                del sys.modules[spec.name]
+
+        def test_ids(tests):
+            for test in tests:
+                if isinstance(test, unittest.TestSuite):
+                    yield from test_ids(test)
+                else:
+                    yield test.id()
+
+        ids = list(test_ids(suite))
+        self.assertTrue(ids)
+        self.assertEqual(len(ids), len(set(ids)))
 
     @parametrize(
         "outcome",

@@ -46,9 +46,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_pointwise_coverage import (
     coverage_case,
     CoverageRecord,
-    record_class_fixtures,
     record_result,
     write_event,
+    write_manifest,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.opinfo.core import (
@@ -3395,28 +3395,18 @@ class PointwiseStrictNumericsTest(TestCase):
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
 
 if directory := os.getenv("PYTORCH_POINTWISE_COVERAGE_DIR"):
-    device_class = globals().get("PointwiseStrictNumericsTestCUDA")
-    cases = []
-    if device_class is not None:
-        record_class_fixtures(device_class, directory)
-        for method in unittest.defaultTestLoader.getTestCaseNames(device_class):
-            if case := coverage_case(method):
-                cases.append(case)
-    write_event(
+    write_manifest(
         directory,
+        globals().get("PointwiseStrictNumericsTestCUDA"),
         {
-            "kind": "manifest",
-            "configuration": {
-                "all_samples": ALL_SAMPLES,
-                "torch_version": torch.__version__,
-                "cuda_version": torch.version.cuda,
-                "gpu_capability": torch.cuda.get_device_capability()
-                if torch.cuda.is_available()
-                else None,
-                "strict_config": POINTWISE_STRICT_CFG,
-                "selected_opinfo_ids": [_op_id(op) for op in POINTWISE_OPS],
-            },
-            "cases": cases,
+            "all_samples": ALL_SAMPLES,
+            "torch_version": torch.__version__,
+            "cuda_version": torch.version.cuda,
+            "gpu_capability": torch.cuda.get_device_capability()
+            if torch.cuda.is_available()
+            else None,
+            "strict_config": POINTWISE_STRICT_CFG,
+            "selected_opinfo_ids": [_op_id(op) for op in POINTWISE_OPS],
         },
     )
 
