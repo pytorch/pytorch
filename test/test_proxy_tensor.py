@@ -53,9 +53,7 @@ if torch._dynamo.config.use_cpp_fake_tensor:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
-            FakeTensorConverter(), shape_env
-        )
+        mode = CppFakeTensorMode(FakeTensorConverter(), shape_env)
         mode.set_allow_fallback_kernels(allow_fallback_kernels)
         mode.allow_non_fake_inputs = allow_non_fake_inputs
         return mode

@@ -3027,7 +3027,25 @@ Call this whenever a new thread is created in order to propagate values from
       .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_)
       .def_readwrite(
           "allow_unsafe_data_ptr_access",
-          &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
+          &c10::FakeTensorMode::allow_unsafe_data_ptr_access_)
+      .def_readwrite("epoch", &c10::FakeTensorMode::epoch_)
+      .def_property_readonly(
+          "fake_tensor_converter",
+          [](const c10::FakeTensorMode& mode) -> py::object {
+            if (!mode.fake_tensor_converter_) {
+              return py::none();
+            }
+            return py::reinterpret_borrow<py::object>(
+                mode.fake_tensor_converter_->ptr(getPyInterpreter()));
+          })
+      .def_property_readonly(
+          "shape_env", [](const c10::FakeTensorMode& mode) -> py::object {
+            if (!mode.shape_env_) {
+              return py::none();
+            }
+            return py::reinterpret_borrow<py::object>(
+                mode.shape_env_->ptr(getPyInterpreter()));
+          });
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
   py_module.def(

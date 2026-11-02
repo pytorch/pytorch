@@ -265,6 +265,10 @@ struct C10_API FakeTensorMode {
   // applies it to each fake's storage.
   bool allow_unsafe_data_ptr_access_ = true;
 
+  // Same as Python's FakeTensorMode.epoch. Kept here rather than on the Python
+  // wrapper, so a rebuilt wrapper sees it.
+  uint64_t epoch_ = 0;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,

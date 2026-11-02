@@ -22,12 +22,11 @@ namespace torch::fake_tensor {
 //
 // getCppFakeTensorModePyObj returns the wrapper while it is alive. Otherwise it
 // builds a new CppFakeTensorMode around the same C++ mode, with the classmethod
-// CppFakeTensorMode._from_cpp_mode(cpp_mode, converter, shape_env), which must
-// wrap the given mode rather than build one through _CppFakeTensorMode's
-// constructor. It caches a weakref to that wrapper, so lookups return the same
-// object only while that wrapper remains alive. The returned py::object keeps
-// the wrapper alive while a callback runs; afterwards it can be collected and
-// rebuilt again.
+// CppFakeTensorMode._from_cpp_mode(cpp_mode), which must wrap the given mode
+// rather than build one through _CppFakeTensorMode's constructor. It caches a
+// weakref to that wrapper, so lookups return the same object only while that
+// wrapper remains alive. The returned py::object keeps the wrapper alive while
+// a callback runs; afterwards it can be collected and rebuilt again.
 //
 // A rebuilt wrapper is equivalent for fake dispatch because everything
 // dispatch reads is owned by the C++ mode: the ShapeEnv, the fake tensor
@@ -53,22 +52,9 @@ py::object getCppFakeTensorModePyObj(
   }
   // The wrapper is gone or was never made; see
   // Note [C++ FakeTensorMode Python wrapper lifetime].
-  auto converter = mode->fake_tensor_converter_
-      ? py::reinterpret_borrow<py::object>(
-            mode->fake_tensor_converter_->ptr(getPyInterpreter()))
-      : py::none();
-  auto shape_env = mode->shape_env_
-      ? py::reinterpret_borrow<py::object>(
-            mode->shape_env_->ptr(getPyInterpreter()))
-      : py::none();
-  py::object fake_tensor = py::module::import("torch._subclasses.fake_tensor");
-  TORCH_CHECK(
-      py::hasattr(fake_tensor, "CppFakeTensorMode"),
-      "The Python wrapper of this C++ FakeTensorMode was garbage collected, "
-      "and rebuilding it requires torch._subclasses.fake_tensor.CppFakeTensorMode");
-  py::object cls = fake_tensor.attr("CppFakeTensorMode");
-  py::object wrapper =
-      cls.attr("_from_cpp_mode")(py::cast(mode), converter, shape_env);
+  py::object wrapper = py::module::import("torch._subclasses.fake_tensor")
+                           .attr("CppFakeTensorMode")
+                           .attr("_from_cpp_mode")(py::cast(mode));
   // SafePyObject owns the weakref with interpreter-safe lifetime management,
   // and the shared_ptr owns the SafePyObject.
   PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);

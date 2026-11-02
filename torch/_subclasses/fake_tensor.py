@@ -387,7 +387,7 @@ def maybe_get_item_memo(x: object) -> _ItemMemo | None:
         return x.item_memo
     if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
         return None
-    fake_mode = maybe_get_fake_mode(x)
+    fake_mode = torch._C._maybe_get_fake_mode(x)
     if fake_mode is None or (record := torch._C._get_fake_item_memo(x)) is None:
         return None
     memo, epoch = record
@@ -401,7 +401,7 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
+        fake_mode = torch._C._maybe_get_fake_mode(x)
         if fake_mode is not None:
             torch._C._set_fake_item_memo(x, memo, fake_mode.epoch)
 
@@ -431,7 +431,7 @@ def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
     if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
         return None
     _check_sym_memo_name(name)
-    fake_mode = maybe_get_fake_mode(x)
+    fake_mode = torch._C._maybe_get_fake_mode(x)
     if fake_mode is None:
         return None
     return torch._C._get_fake_sym_memo(x, name, fake_mode.epoch)
@@ -442,7 +442,7 @@ def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
         setattr(x, name, value)
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         _check_sym_memo_name(name)
-        fake_mode = maybe_get_fake_mode(x)
+        fake_mode = torch._C._maybe_get_fake_mode(x)
         if fake_mode is None:
             return
         torch._C._set_fake_sym_memo(x, name, value, fake_mode.epoch)
@@ -692,6 +692,46 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
     dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
     return fake_out
+
+
+class CppFakeTensorMode:
+    # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
+    # which the Python parts of fake dispatch run against. The mode's state
+    # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
+    # equivalent. See Note [C++ FakeTensorMode Python wrapper lifetime] in
+    # torch/csrc/FakeTensorMode.cpp.
+    def __init__(
+        self,
+        fake_tensor_converter: FakeTensorConverter,
+        shape_env: ShapeEnv | None = None,
+    ) -> None:
+        self._cpp_mode = torch._C._CppFakeTensorMode(
+            fake_tensor_converter, shape_env, self
+        )
+
+    @classmethod
+    def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:
+        # Rebuilds a collected wrapper around the same C++ mode, for
+        # getCppFakeTensorModePyObj.
+        self = cls.__new__(cls)
+        self._cpp_mode = cpp_mode
+        return self
+
+    @property
+    def fake_tensor_converter(self) -> FakeTensorConverter:
+        return self._cpp_mode.fake_tensor_converter
+
+    @property
+    def shape_env(self) -> ShapeEnv | None:
+        return self._cpp_mode.shape_env
+
+    @property
+    def epoch(self) -> int:
+        return self._cpp_mode.epoch
+
+    @epoch.setter
+    def epoch(self, value: int) -> None:
+        self._cpp_mode.epoch = value
 
 
 @functools.cache

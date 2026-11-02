@@ -127,7 +127,7 @@ if CPP_FAKETENSOR:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+        mode = CppFakeTensorMode(
             FakeTensorConverter(
                 copy_data=torch._functorch.config.fake_tensor_propagate_real_tensors
             ),
@@ -5657,6 +5657,55 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(maybe_get_fake_dispatch_keys(fake))
         torch._C._set_fake_dispatch_keys(meta_fake, None)
         self.assertIsNone(maybe_get_fake_dispatch_keys(meta_fake))
+
+    def test_cpp_fake_tensor_mode(self):
+        from torch._subclasses.fake_tensor import (
+            CppFakeTensorMode,
+            maybe_get_item_memo,
+            maybe_get_sym_memo,
+            maybe_set_item_memo,
+            maybe_set_sym_memo,
+        )
+
+        converter = FakeTensorConverter()
+        shape_env = ShapeEnv()
+        mode = CppFakeTensorMode(converter, shape_env)
+        self.assertIs(mode.fake_tensor_converter, converter)
+        self.assertIs(mode.shape_env, shape_env)
+        self.assertEqual(mode.epoch, 0)
+        meta = torch.empty((), device="meta")
+        cpu = torch.device("cpu")
+        fake = torch._C._from_meta_and_device(meta, cpu, mode._cpp_mode)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
+
+        # The memo helpers reach a C++ fake through its mode's epoch
+        memo = shape_env.create_unbacked_symint()
+        maybe_set_item_memo(fake, memo)
+        maybe_set_sym_memo(fake, "nonzero_memo", memo)
+        self.assertIs(maybe_get_item_memo(fake), memo)
+        self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, memo.node)
+        mode.epoch += 1
+        self.assertIsNone(maybe_get_item_memo(fake))
+        self.assertIsNone(maybe_get_sym_memo(fake, "nonzero_memo"))
+        # Like SymNumberMemoDescriptor, a backed SymFloat outlives an epoch change
+        source = LocalSource("x")
+        sym = shape_env.create_unspecified_symbol(2.5, source, DimDynamic.DYNAMIC)
+        backed = shape_env.create_symfloatnode(sym, hint=2.5, source=source)
+        maybe_set_item_memo(fake, backed)
+        mode.epoch += 1
+        self.assertIs(maybe_get_item_memo(fake), backed)
+
+        # A collected wrapper is rebuilt around the same C++ mode and state
+        ref = weakref.ref(mode)
+        del mode
+        gc.collect()
+        self.assertIsNone(ref())
+        rebuilt = torch._C._maybe_get_fake_mode(fake)
+        self.assertIsInstance(rebuilt, CppFakeTensorMode)
+        self.assertIs(rebuilt.fake_tensor_converter, converter)
+        self.assertIs(rebuilt.shape_env, shape_env)
+        self.assertEqual(rebuilt.epoch, 2)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
 
 
 if __name__ == "__main__":
