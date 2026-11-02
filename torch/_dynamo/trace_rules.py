@@ -3983,6 +3983,14 @@ def _collect_weakref_finalize_registry_codes() -> tuple[types.CodeType, ...]:
 _WEAKREF_FINALIZE_REGISTRY_CODES = _collect_weakref_finalize_registry_codes()
 
 
+def is_weakref_finalize_registry_code(code: types.CodeType | None) -> bool:
+    return (
+        code is not None
+        and code.co_filename == _WEAKREF_FINALIZE_REGISTRY_CODES[0].co_filename
+        and any(code is entry for entry in _WEAKREF_FINALIZE_REGISTRY_CODES)
+    )
+
+
 def check_verbose(
     obj: object, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
@@ -4056,11 +4064,7 @@ def check_verbose(
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
-    if (
-        fi.code is not None
-        and fi.code.co_filename == _WEAKREF_FINALIZE_REGISTRY_CODES[0].co_filename
-        and any(fi.code is code for code in _WEAKREF_FINALIZE_REGISTRY_CODES)
-    ):
+    if is_weakref_finalize_registry_code(fi.code):
         return SkipResult(True, "weakref.finalize uses the finalizer registry")
 
     # Consult the central trace rules defined in torch._dynamo.trace_rules.
