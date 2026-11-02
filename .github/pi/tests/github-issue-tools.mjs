@@ -103,12 +103,12 @@ test("filters source, replay, PR and foreign identities independently of the que
   const call = session({
     search: { [query(terms)]: { items: [
       issue(42), issue(77), issue(1, { pull_request: {} }),
-      issue(2, { url: "https://api.github.com/repos/other/repo/issues/2" }),
-      issue(3, { repository_url: "https://api.github.com/repos/other/repo" }),
-      issue(4, { html_url: "https://github.com/other/repo/issues/4" }),
-      issue(5, { url: "https://api.github.com/repos/pytorch/pytorch/issues/6" }),
+      issue(2, { url: "https://api.github.com/repos/other/repo/issues/2" }), // @lint-ignore
+      issue(3, { repository_url: "https://api.github.com/repos/other/repo" }), // @lint-ignore
+      issue(4, { html_url: "https://github.com/other/repo/issues/4" }), // @lint-ignore
+      issue(5, { url: "https://api.github.com/repos/pytorch/pytorch/issues/6" }), // @lint-ignore
       issue(-1), issue("10"),
-      issue(7, { url: "https://api.github.com/repos/PyTorch/PyTorch/issues/7" }),
+      issue(7, { url: "https://api.github.com/repos/PyTorch/PyTorch/issues/7" }), // @lint-ignore
     ] } }, reads: {},
   });
   assert.deepEqual((await call("search_issues", { query: terms })).map(row => row.number), [7]);

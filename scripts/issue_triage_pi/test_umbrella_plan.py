@@ -640,7 +640,10 @@ class UmbrellaPlanTest(unittest.TestCase):
         for endpoint, extra in (
             ("source", {"state": "closed"}),
             ("source", {"pull_request": {}}),
-            ("source", {"html_url": "https://github.com/other/repo/issues/1"}),
+            (
+                "source",
+                {"html_url": "https://github.com/other/repo/issues/1"},  # @lint-ignore
+            ),
             ("target", {"state": "closed"}),
             ("target", {"pull_request": {}}),
             ("target", {"number": TARGET + 1}),
