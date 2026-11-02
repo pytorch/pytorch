@@ -1722,12 +1722,16 @@ def compiled_fsdp_test(compile_compute_on_module: type | None = None):
 
                 # fully_shard is imported as a global
                 # through `from ... import fully_shard`
-                func.__globals__[original_fully_shard.__name__] = fully_shard_patch
-                func(*args, **kwargs)
-                # other threads use patched func before this thread restores
-                torch.distributed.barrier()
-                func.__globals__[original_fully_shard.__name__] = original_fully_shard
-                torch._inductor.config.compile_threads = original_compile_threads
+                try:
+                    func.__globals__[original_fully_shard.__name__] = fully_shard_patch
+                    func(*args, **kwargs)
+                    # other threads use patched func before this thread restores
+                    torch.distributed.barrier()
+                finally:
+                    func.__globals__[original_fully_shard.__name__] = (
+                        original_fully_shard
+                    )
+                    torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper
 
