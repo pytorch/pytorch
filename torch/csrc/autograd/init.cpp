@@ -1642,7 +1642,9 @@ static PyObject* get_dispatch_stack_at(
 // A C++ FakeTensorMode lives in FakeTensorModeTLS rather than the FAKE infra
 // mode slot, but set/get/unset_dispatch_mode treat it as the FAKE mode (through
 // its Python CppFakeTensorMode wrapper) whenever no Python FakeTensorMode is
-// set, so callers can enter, suspend and restore either kind the same way.
+// set, so callers that enter, suspend and restore the fake mode through these
+// calls handle either kind the same way. The mode stack APIs
+// (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it.
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));

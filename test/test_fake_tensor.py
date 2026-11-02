@@ -99,7 +99,11 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    BaseTorchDispatchMode,
+    TorchDispatchMode,
+)
 
 
 aten = torch.ops.aten
@@ -5467,14 +5471,21 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     def test_from_meta_and_device(self):
         mode, wrapper = self._make_mode()
-        fake = torch._C._from_meta_and_device(
-            torch.empty(2, 3, device="meta"), torch.device("cpu"), mode
-        )
+        # A plain meta tensor gets a new detached fake on device, as in Python,
+        # and is itself left unchanged
+        meta = torch.empty(2, 3, device="meta", requires_grad=True) * 2
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        self.assertIsNot(fake, meta)
         self.assertTrue(torch._C._is_fake_tensor(fake))
         self.assertEqual(fake.device, torch.device("cpu"))
         self.assertEqual(fake.shape, (2, 3))
+        self.assertTrue(fake.requires_grad)
+        self.assertTrue(fake.is_leaf)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
         self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        self.assertFalse(torch._C._is_fake_tensor(meta))
+        self.assertTrue(meta.is_meta)
+        self.assertIsNotNone(meta.grad_fn)
 
         # A fake of the same mode that reads as meta gets a new detached fake
         # on device, unseen by dispatch modes, and keeps its own device and
@@ -5519,7 +5530,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
             torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
 
-        # allow_meta is checked before the input is modified
+        # allow_meta is enforced
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             strict_mode, _strict_wrapper = self._make_mode()
         meta = torch.empty(2, device="meta")
@@ -5575,6 +5586,32 @@ class TestCppFakeTensorModeBindings(TestCase):
         finally:
             torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
+
+    def test_suspend_for_real_tensors(self):
+        _, wrapper = self._make_mode()
+        torch._C._set_dispatch_mode(wrapper)
+        try:
+            with unset_fake_temporarily() as old:
+                self.assertIs(old, wrapper)
+                self.assertEqual(self._installed(), (None, False))
+                self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
+            self.assertEqual(self._installed(), (wrapper, True))
+            # Python modes on the stack are suspended and restored with it
+            with BaseTorchDispatchMode() as py_mode:
+                with torch.utils._python_dispatch._disable_current_modes():
+                    self.assertEqual(self._installed(), (None, False))
+                    self.assertEqual(torch._C._len_torch_dispatch_stack(), 0)
+                    self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
+                self.assertEqual(self._installed(), (wrapper, True))
+                self.assertIs(_get_current_dispatch_mode(), py_mode)
+                # A failed C++ mode restore still restores the Python modes
+                _, other_wrapper = self._make_mode()
+                with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                    with torch.utils._python_dispatch._disable_current_modes():
+                        torch._C._set_dispatch_mode(other_wrapper)
+                self.assertIs(_get_current_dispatch_mode(), py_mode)
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
 
 if __name__ == "__main__":
