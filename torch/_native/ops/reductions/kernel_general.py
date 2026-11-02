@@ -342,18 +342,19 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
     )
 
 
-# B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16, argmax, var_mean;
-# R 20-9000, B * C 32-524288; bitwise equal): ordered columns win 1.1-11x once B * C
-# fills the GPU, but one 32-output block per tile leaves SMs idle below that
-# (0.16-0.6x), and wider traits need more outputs. Short rows (measured at R = 20, a
-# multirow plan) tie for one and two fields and run Welford at 0.5x, while R = 128
-# wins, so the cutoff sits between them. Only 2- and 4-byte floats route, so routed views
-# never reach multirow plans. Single-field rows replay statically, so each new (R, C)
-# compiles in 0.35 s at R = 2048 up to 4.3 s at R = 24576 (fp32/bf16, C = 2048; the
-# indexed tree takes 0.3-0.75 s).
+# B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16/fp16, argmax and
+# var_mean fp32/fp16; R 20-20000, B * C 32-524288; bitwise equal): ordered columns win
+# 1.1-11x once B * C fills the GPU, but one 32-output block per tile leaves SMs idle
+# below that (0.16-0.6x), and wider traits need more outputs. The route starts at the
+# shortest measured win, R = 128 (reduce_ordered_col declines the multirow plans of rows
+# up to 64 anyway). Rows compile per (R, C): single-field rows
+# replay every lane statically, taking 0.35 s at R = 2048, 1.5 s at R = 8192 and 4.3 s at
+# R = 24576 (fp32/bf16, C = 2048), and multi-field rows 1.3 s at R = 8192 and 2.5-3.1 s
+# at R = 8193-16384 (fp32), against 0.3-0.75 s for the indexed tree. reduce_ordered_col
+# declines replays past tile.MAX_UNROLL leaves (looped R > 8192).
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
-_ORDERED_COL_MIN_R = 65
+_ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MIN_OUTPUTS = {1: 2048, 2: 16384, 3: 32768}
 
 
