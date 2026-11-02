@@ -31,9 +31,10 @@ kernel void grouped_mm_few_rows(
     uint3 tgid [[threadgroup_position_in_grid]],
     uint simd_group [[simdgroup_index_in_threadgroup]],
     uint simd_lane [[thread_index_in_simdgroup]]) {
+  constant MatmulParams<idx_t>& mm = params.mm;
   const uint32_t row = tgid.y;
   const uint32_t col = tgid.x * kGroupedMMFewRowsSimdgroups + simd_group;
-  if (col >= params.n) {
+  if (col >= mm.n) {
     return;
   }
   uint32_t group = 0;
@@ -52,13 +53,13 @@ kernel void grouped_mm_few_rows(
   if (group == params.groups) {
     return;
   }
-  mat_a += row * params.a_stride_m;
-  mat_b += group * params.batch_stride + col * params.b_stride_n;
+  mat_a += row * mm.a_stride_m;
+  mat_b += group * params.batch_stride + col * mm.b_stride_n;
   float4 accum = 0;
   constexpr auto chunk = kGroupedMMFewRowsLaneChunk;
-  for (idx_t base = simd_lane * chunk; base < params.k;
+  for (idx_t base = simd_lane * chunk; base < mm.k;
        base += simdgroup_size * chunk) {
-    const idx_t end = min(base + chunk, static_cast<idx_t>(params.k));
+    const idx_t end = min(base + chunk, static_cast<idx_t>(mm.k));
     idx_t k = base;
     for (; k + 4 <= end; k += 4) {
       const float4 a =
@@ -73,7 +74,7 @@ kernel void grouped_mm_few_rows(
   }
   const float value = simd_sum(dot(accum, float4(1)));
   if (simd_lane == 0) {
-    output[row * params.out_stride_m + col * params.out_stride_n] = T(value);
+    output[row * mm.out_stride_m + col * mm.out_stride_n] = T(value);
   }
 }
 
@@ -171,17 +172,18 @@ inline bool grouped_mm_tile(
     uint32_t tid,
     threadgroup uint32_t* tile_info,
     thread MatmulTile<T>& tile) {
+  constant MatmulParams<idx_t>& mm = params.mm;
   uint32_t group = tgid.z;
   uint32_t row_start = static_cast<uint32_t>(tgid.y) * BM;
   uint32_t col_start = static_cast<uint32_t>(tgid.x) * BN;
-  tile.rows = min(static_cast<uint32_t>(BM), params.m - row_start);
-  tile.cols = min(static_cast<uint32_t>(BN), params.n - col_start);
-  tile.k = params.k;
+  tile.rows = min(static_cast<uint32_t>(BM), mm.m - row_start);
+  tile.cols = min(static_cast<uint32_t>(BN), mm.n - col_start);
+  tile.k = mm.k;
   if IF_CONSTEXPR (MODE == GroupedMMMode::rows) {
     if (!grouped_mm_group_tile_broadcast<BM>(
             offsets,
             params.groups,
-            params.m,
+            mm.m,
             tgid.y,
             tid,
             tile_info,
@@ -195,7 +197,7 @@ inline bool grouped_mm_tile(
     if (!grouped_mm_group_tile_broadcast<BN>(
             offsets,
             params.groups,
-            params.n,
+            mm.n,
             tgid.x,
             tid,
             tile_info,
@@ -206,19 +208,18 @@ inline bool grouped_mm_tile(
     }
     mat_a += static_cast<idx_t>(group) * params.batch_stride;
   } else {
-    const uint32_t k_end = grouped_mm_offset(offsets[group], params.k);
-    const uint32_t k_begin =
-        min(group == 0 ? 0u : grouped_mm_offset(offsets[group - 1], params.k),
-            k_end);
-    mat_a += static_cast<idx_t>(k_begin) * params.a_stride_k;
-    mat_b += static_cast<idx_t>(k_begin) * params.b_stride_k;
+    const uint32_t k_end = grouped_mm_offset(offsets[group], mm.k);
+    const uint32_t k_begin = min(
+        group == 0 ? 0u : grouped_mm_offset(offsets[group - 1], mm.k), k_end);
+    mat_a += static_cast<idx_t>(k_begin) * mm.a_stride_k;
+    mat_b += static_cast<idx_t>(k_begin) * mm.b_stride_k;
     output += static_cast<idx_t>(group) * params.batch_stride;
     tile.k = k_end - k_begin;
   }
-  tile.a = mat_a + static_cast<idx_t>(row_start) * params.a_stride_m;
-  tile.b = mat_b + static_cast<idx_t>(col_start) * params.b_stride_n;
-  tile.out = output + static_cast<idx_t>(row_start) * params.out_stride_m +
-      static_cast<idx_t>(col_start) * params.out_stride_n;
+  tile.a = mat_a + static_cast<idx_t>(row_start) * mm.a_stride_m;
+  tile.b = mat_b + static_cast<idx_t>(col_start) * mm.b_stride_n;
+  tile.out = output + static_cast<idx_t>(row_start) * mm.out_stride_m +
+      static_cast<idx_t>(col_start) * mm.out_stride_n;
   return true;
 }
 
@@ -251,7 +252,8 @@ kernel void grouped_mm(
           tile)) {
     return;
   }
-  matmul_tile_gemm<T, BM>(tile, params, a_tile, b_tile, simd_group, simd_lane);
+  matmul_tile_gemm<T, BM>(
+      tile, params.mm, a_tile, b_tile, simd_group, simd_lane);
 }
 
 #if C10_METAL_HAS_MPP
@@ -284,7 +286,7 @@ kernel void grouped_mm_mpp(
           mat_a, mat_b, offsets, output, params, tgid, tid, tile_info, tile)) {
     return;
   }
-  matmul_mpp_gemm<T, BM, BN, TA, TB>(tile, params);
+  matmul_mpp_gemm<T, BM, BN, TA, TB>(tile, params.mm);
 }
 
 #define INSTANTIATE_GROUPED_MM_MPP_MODE(DTYPE, BM, BN, TA, TB, LAYOUT, MODE) \
