@@ -133,36 +133,16 @@ def is_enabled() -> bool:
 
 
 def is_tunableop_gemm(choice_name: str) -> bool:
-    """Whether an extern choice is a GEMM TunableOp tunes.
+    """Whether an extern choice may be routed to the TunableOp worker.
 
-    Single source of truth shared by the ladder (maybe_range_pretune) and the
-    worker routing (ExternKernelCaller.benchmark): routing an op the ladder
-    never tunes would benchmark it in the worker for no coverage, and in tune
-    mode any GEMM an unrelated kernel calls internally would pollute the
-    results file. Matched by choice name string so a double import of the
-    kernel modules cannot break the match.
+    Routing is the wider of the two sets: it exists to contain a hipBLASLt
+    abort or hang in the worker rather than the compile, which is worth doing
+    for every GEMM TunableOp can tune. The ladder set is narrower -- see
+    _TUNABLEOP_LADDER_CHOICES -- because rebuilding metas is not safe for all
+    of them. Matched by choice name string so a double import of the kernel
+    modules cannot break the match.
     """
-    return choice_name in _TUNABLEOP_GEMM_CHOICES
-
-
-# ExternKernelChoice names the ladder and worker routing cover. _int_mm /
-# sparse semi-structured variants are not hipBLASLt-tunable.
-_TUNABLEOP_GEMM_CHOICES = frozenset(
-    OrderedSet(
-        [
-            "mm",
-            "mm_dtype",
-            "addmm",
-            "addmm_dtype",
-            "bmm",
-            "bmm_dtype",
-            "baddbmm",
-            "bias_addmm",
-            "_scaled_mm",
-            "_scaled_mm_v2",
-        ]
-    )
-)
+    return choice_name in _TUNABLEOP_ROUTING_CHOICES
 
 
 class BenchmarkJob:
@@ -226,15 +206,15 @@ class BenchmarkJob:
             if measured is None:
                 raise RuntimeError("TunableOp tune-only warm-up failed")
             return measured
-        # Nearest match is deliberately left on after a successful warm: if the
-        # warm call recorded nothing, turning it off would measure the default
-        # instead of the borrowed solution. After a FAILED warm, nothing was
-        # cached, so turn it off -- otherwise the timed call runs the
-        # validation inside the measurement, folding exactly the
-        # compile-time-only cost this split exists to exclude.
+        # Neither flag reaches the measured call: tuning would re-run FindFastest
+        # and nearest match the donor search, both compile-time-only costs this
+        # split exists to keep out of the timing. Turning borrowing off cannot
+        # change which kernel is measured -- a borrow that happened was recorded,
+        # so this call is an exact hit, and with no donor the warm ran the
+        # default too. IsNearestMatchEnabled() rules out borrowed-but-unrecorded.
         torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable._nearest_match_enable(False)
         if not warm_ok:
-            torch.cuda.tunable._nearest_match_enable(False)
             log.warning(
                 "TunableOp warm-up failed and no borrow was validated; "
                 "measuring the default kernel instead"
@@ -258,8 +238,7 @@ class BenchmarkJob:
         for name, value in settings.items():
             getattr(tunable, name)(value)
         # TunableOp cannot tune under CUDA-graph capture, and benchmark_run_fn
-        # captures if either flag is set. Cleared here, the one place every
-        # job passes through.
+        # captures if either flag is set. Cleared where every job passes.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
 
@@ -625,8 +604,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
 
 
 # Tuned ladder BUCKETS, keyed per bucket so a run that stops part-way leaves
-# the rest for the next one. Without it a model with N identical layers
-# resubmits every bucket N times. Cleared with fresh_cache.
+# the rest for the next one, instead of N layers resubmitting every bucket.
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
@@ -652,7 +630,7 @@ _TUNABLEOP_MIN_BUCKET_BUDGET = 60.0
 # ExternKernelChoice names the ladder covers. bias_addmm rewrites its own bias
 # (inp[0]) first, so the rebuilt meta is not what aten gets; addmm_dtype is
 # ROCm-only, hard-erroring on the CUDA cublasLt path (cuda/Blas.cpp).
-_TUNABLEOP_GEMM_CHOICES = frozenset(
+_TUNABLEOP_LADDER_CHOICES = frozenset(
     [
         "mm",
         "mm_dtype",
@@ -665,6 +643,12 @@ _TUNABLEOP_GEMM_CHOICES = frozenset(
         *(["addmm_dtype"] if torch.version.hip is not None else []),
     ]
 )
+
+# Routing adds bias_addmm: the ladder cannot rebuild its meta, but running it
+# in the worker still keeps a hipBLASLt fault out of the compile. addmm_dtype
+# stays excluded off ROCm for the same reason it is above -- routing it would
+# run it with TunableOp enabled, which is what hard-errors there.
+_TUNABLEOP_ROUTING_CHOICES = _TUNABLEOP_LADDER_CHOICES | frozenset(["bias_addmm"])
 
 # Smallest dim worth its own tuning job. Applied to the dim, not to the symbol:
 # for an expression dim the smallest symbol values already yield substantial GEMMs.
@@ -776,9 +760,8 @@ def _meta_at(node: Any, sym_val: int, s: sympy.Symbol) -> TensorMeta:
     sizes = [_eval_at(sz, sym_val, s) for sz in n.get_size()]
     traced = V.graph.sizevars.optimization_hints(get_strides_with_layout_constraints(n))
     if any(st == 0 for st in traced):
-        # A broadcast operand -- only the exempt bias reaches here, the density
-        # guard rejects the rest. Its stride-0 dims tie, so the inferred order
-        # is arbitrary; fall back to natural contiguous.
+        # A broadcast operand (only the exempt bias reaches here): its stride-0
+        # dims tie, so the inferred order is arbitrary -- use natural contiguous.
         strides = [int(x) for x in ir.FlexibleLayout.contiguous_strides(sizes)]
     else:
         order = ir.get_stride_order(traced)
@@ -830,7 +813,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if winner.layout.device.type != "cuda":
         return
     choice_name = winner.choice.name
-    if not is_tunableop_gemm(choice_name):
+    if choice_name not in _TUNABLEOP_LADDER_CHOICES:
         return
     if winner.bmreq is None:
         return
