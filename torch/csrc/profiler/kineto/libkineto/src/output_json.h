@@ -100,7 +100,10 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
 
  private:
   // Keeps the first failure, with the current errno, so later failures
-  // caused by it do not hide the root cause.
+  // caused by it do not hide the root cause. Records instead of throwing:
+  // on-demand traces finalize on Kineto's profiler thread, where an exception
+  // would terminate the process. ActivityTrace::save turns a recorded error
+  // into an exception.
   void recordWriteError(std::string_view action, std::string_view path);
 
   // Create a flow event (arrow)

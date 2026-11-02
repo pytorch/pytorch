@@ -74,7 +74,10 @@ class ActivityLogger {
       int64_t endTime) = 0;
 
   // Why the trace could not be written, or nullopt if it was. Checked after
-  // finalizeTrace. The default suits loggers that cannot fail to write.
+  // finalizeTrace. Loggers report write failures here instead of throwing:
+  // on-demand traces finalize on Kineto's profiler thread, where an exception
+  // would terminate the process. ActivityTrace::save turns a reported error
+  // into an exception. The default suits loggers that cannot fail to write.
   virtual std::optional<std::string> writeError() const {
     return std::nullopt;
   }
