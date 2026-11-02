@@ -6,6 +6,7 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <c10/util/irange.h>
 #include <unordered_set>
 #include <vector>
 
@@ -536,7 +537,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
-    for (int dev = 0; dev < device_count; dev++) {
+    for (const auto dev : c10::irange(device_count)) {
       if (devs_initialized_flags[dev]) {
         CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
 
