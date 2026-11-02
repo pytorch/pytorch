@@ -349,7 +349,11 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # fills the GPU, but one 32-output block per tile leaves SMs idle below that
 # (0.16-0.6x), and wider traits need more outputs. Short rows (measured at R = 20, a
 # multirow plan) tie for one and two fields and run Welford at 0.5x, while R = 128
-# wins, so the cutoff sits between them.
+# wins, so the cutoff sits between them. Only 2- and 4-byte floats route, so routed views
+# never reach multirow plans. Single-field rows replay statically, so each new (R, C)
+# compiles in 0.35 s at R = 2048 up to 4.3 s at R = 24576 (fp32/bf16, C = 2048; the
+# indexed tree takes 0.3-0.75 s).
+_ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 65
 _ORDERED_COL_MIN_OUTPUTS = {1: 2048, 2: 16384, 3: 32768}
@@ -361,7 +365,8 @@ def _ordered_col_route_ok(
     """Whether the ordered column kernel beats the indexed tree on this view."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(nfields, 3)]
-    return cc in _ORDERED_COL_CCS and R >= _ORDERED_COL_MIN_R and B * C >= min_outputs
+    ok = R >= _ORDERED_COL_MIN_R and B * C >= min_outputs
+    return cc in _ORDERED_COL_CCS and view.dtype in _ORDERED_COL_DTYPES and ok
 
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
