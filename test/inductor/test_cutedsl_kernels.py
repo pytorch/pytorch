@@ -47,8 +47,8 @@ from torch._inductor.utils import run_and_get_code
 from torch._library.cutedsl import wrap_cutedsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal import inductor_utils
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -313,7 +313,36 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
-    # A Constexpr tuple read on the host: out = x * scales[0].
+    # A kernel object whose @cute.jit __call__ is its host code, as in the CUTLASS
+    # examples, and a host function that takes one as a Constexpr and calls it:
+    # out = x * alpha.
+    class MulKernel:
+        def __init__(self, alpha):
+            self.alpha = alpha
+
+        @cute.jit
+        def __call__(
+            self,
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+        ):
+            _mul_const_k(mX, mOut, n, self.alpha).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+    @cute.jit
+    def call_mul_kernel(
+        kernel: cutlass.Constexpr,
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        kernel(mX, mOut, n, stream)
+
+    # A Constexpr container read on the host: out = x * scales[0].
     @cute.jit
     def scale_by_first_kernel(
         mX: cute.Tensor,
@@ -556,6 +585,8 @@ def _add_kwargs(x, y, out, n=None):
 
 @requires_cutedsl
 class CuteDSLToyKernelTests(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_toy_kernels_plain_cutedsl(self):
         # The toy kernels themselves, through plain CuTeDSL (no PT2): if this fails
         # the environment is broken, not the PT2 integration.
@@ -576,6 +607,8 @@ class CuteDSLToyKernelTests(TestCase):
 @requires_cutedsl
 class CuteDSLHOPTests(TestCase):
     """Direct use of the HOPs, the side table and the eager launch."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_side_table_dedupes_constant_args(self):
         # The table is never reset and every eager launch through the HOP adds its
@@ -1317,6 +1350,8 @@ def forward(self, x_1, y_1):
         def overlapping_columns(x, y):
             # Rows 1 to 3 of column 2 are in both: each row of out starts inside a
             # row of the other, though not inside the first one.
+            # TODO(zoranzhao): refused only with the fix in
+            # https://github.com/pytorch/pytorch/pull/202848 (see _may_overlap).
             base = x.view(10, 100)
             out = base[1:5, 2:5]
             cutedsl_kernel_wrapper_mutation(
@@ -1592,6 +1627,8 @@ def _scalar_args(node):
 class CuteDSLWrapTests(TestCase):
     """wrap_cutedsl: eager launches, make_fx / non-strict export capture, errors."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def test_wrap_cutedsl_mutates_args_iterator(self):
         # A one-shot iterable is read once, not consumed by its validation.
         for names in ((n for n in ["mOut"]), iter(["mOut"]), map(str, ["mOut"])):
@@ -1599,22 +1636,40 @@ class CuteDSLWrapTests(TestCase):
             self.assertEqual(w.mutates_args, ("mOut",))
 
     def test_wrap_cutedsl_make_fx_nested_symint_specialized(self):
-        # A SymInt inside a Constexpr tuple is specialized like a bare one, so the
-        # side table only holds concrete values.
+        # A SymInt inside a Constexpr container is specialized like a bare one, so the
+        # side table only holds concrete values. Containers are the ones the side
+        # table walks (see constant_contents), subclasses of tuple (such as
+        # torch.Size), list and dict included.
+        class Scales(list):
+            pass
+
+        class ScaleMap(dict):
+            pass
+
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
 
-        def f(x):
+        def f(x, make_scales):
             out = torch.empty_like(x)
-            w(x, out, x.numel(), (x.shape[0] // 250,))
+            w(x, out, x.numel(), make_scales(x.shape[0] // 250))
             return out
 
         x = _rand(1000)
-        gm = make_fx(f, tracing_mode="symbolic")(x)
-        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
-        scales = _scalar_args(node)["scales"]
-        self.assertEqual(scales, (4,))
-        self.assertIs(type(scales[0]), int)
-        self.assertEqual(gm(x), 4 * x)
+        cases = (
+            (lambda s: (s,), (4,)),
+            (lambda s: torch.Size([s]), torch.Size([4])),
+            (lambda s: Scales([s]), Scales([4])),
+            (lambda s: ScaleMap({0: s}), ScaleMap({0: 4})),
+        )
+        for make_scales, expected in cases:
+            fn = functools.partial(f, make_scales=make_scales)
+            with self.subTest(container=type(expected).__name__):
+                gm = make_fx(fn, tracing_mode="symbolic")(x)
+                (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+                scales = _scalar_args(node)["scales"]
+                self.assertIs(type(scales), type(expected))
+                self.assertEqual(scales, expected)
+                self.assertIs(type(scales[0]), int)
+                self.assertEqual(gm(x), 4 * x)
 
     def test_wrap_cutedsl_make_fx_symint_in_object_specialized(self):
         # The side table keys a dataclass instance or plain object by its contents
@@ -1651,11 +1706,33 @@ class CuteDSLWrapTests(TestCase):
         self.assertEqual(gm(x), (4 * x, 2 * x))
 
     def test_wrap_cutedsl_error_tensor_in_container(self):
-        # Only top-level tensors become graph arguments.
+        # Only top-level tensors become graph arguments; one inside a container would
+        # be a trace-time constant. Containers are the ones the side table walks (see
+        # constant_contents): subclasses of list too, and dicts, keys included.
+        class Scales(list):
+            pass
+
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x, make_scales):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), make_scales(x))
+            return out
+
         x = _rand(1000)
-        with self.assertRaisesRegex(RuntimeError, "inside a container"):
-            w(x, torch.empty_like(x), 1000, (x,))
+        error = "'scales' holds a tensor inside a container"
+        cases = {
+            "tuple": lambda x: (x,),
+            "list subclass": lambda x: Scales([x]),
+            "dict key": lambda x: {x: 1},
+        }
+        for case, make_scales in cases.items():
+            fn = functools.partial(f, make_scales=make_scales)
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    make_fx(fn, tracing_mode="fake")(x)
+                with self.assertRaisesRegex(RuntimeError, error):
+                    fn(x)
 
     def test_wrap_cutedsl_error_tensor_in_object(self):
         # A dataclass instance or plain object is a container too: a tensor inside
@@ -1697,10 +1774,10 @@ class CuteDSLWrapTests(TestCase):
 
     def test_wrap_cutedsl_error_cyclic_constant(self):
         # A constant that refers to itself (a config object with a back-pointer, one
-        # holding a logging.Logger, whose manager leads back to it, or a list holding
-        # itself) is refused instead of walked until a RecursionError: under make_fx,
-        # before a SymInt in it is specialized in a copy, and eagerly, also on the
-        # fast path.
+        # that is a key of a dict it holds, one holding a logging.Logger, whose
+        # manager leads back to it, or a list holding itself) is refused instead of
+        # walked until a RecursionError: under make_fx, before a SymInt in it is
+        # specialized in a copy, and eagerly, also on the fast path.
         from torch._library.triton import set_wrap_triton_enabled
 
         class Parent:
@@ -1711,6 +1788,11 @@ class CuteDSLWrapTests(TestCase):
             def __init__(self, alpha):
                 self.alpha = alpha
                 self.parent = Parent(self)
+
+        class KeyCfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.lookup = {self: 1}
 
         class LoggingCfg:
             def __init__(self, alpha):
@@ -1732,6 +1814,7 @@ class CuteDSLWrapTests(TestCase):
         x = _rand(1000)
         cases = (
             (Cfg, "Cfg -> Parent -> Cfg"),
+            (KeyCfg, "KeyCfg -> dict -> KeyCfg"),
             (LoggingCfg, ""),
             (self_list, "list -> list"),
         )
@@ -2010,6 +2093,36 @@ class CuteDSLWrapTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"(?i)cute\.jit"):
             wrap_cutedsl(_add_k, mutates_args=["gOut"])
 
+    def test_wrap_cutedsl_error_bound_method(self):
+        # A bound @cute.jit method, or a kernel object standing for its bound
+        # __call__ as in cute.compile, is refused with an error that names the method
+        # and a workaround, which works: a host function that takes the object as a
+        # Constexpr and calls it. An object whose __call__ is not @cute.jit is not
+        # a kernel object.
+        kernel = MulKernel(3.0)
+        error = (
+            r"does not support bound methods or kernel objects \(got "
+            r"MulKernel\.__call__\): instead, wrap a @cute\.jit function that takes "
+            r"the object as a cutlass\.Constexpr"
+        )
+        for host_fn in (kernel.__call__, kernel):
+            with self.subTest(host_fn=type(host_fn).__name__):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    wrap_cutedsl(host_fn, mutates_args=["mOut"])
+        with self.assertRaisesRegex(RuntimeError, r"only works on host functions"):
+            wrap_cutedsl(add_w, mutates_args=["mOut"])
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        self.assertEqual(f(x), 3 * x)
+        self.assertEqual(make_fx(f)(x)(x), 3 * x)
+
     def test_wrap_cutedsl_error_unwrapped_host_fn(self):
         # inspect.unwrap(host_fn) is the user's undecorated function. Whether it
         # still carries _dsl_cls depends on whether it was compiled before (the DSL
@@ -2269,6 +2382,8 @@ class CuteDSLDynamoTests(TestCase):
     cutlass.torch.current_stream()); recompiles follow the arg classes and the
     contents of object constants."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def test_bad_wrap_cutedsl_calls_graph_break(self):
         # A call that eager refuses too (of a wrapper or a @cute.kernel function, which
         # are not @cute.jit functions, or with missing or extra arguments) graph-breaks
@@ -2518,7 +2633,7 @@ class CuteDSLDynamoTests(TestCase):
         # Dynamo guards an attribute only under an exact str name; eager also takes
         # a str subclass, so the call graph-breaks and runs eagerly.
         class Name(str):
-            pass
+            __slots__ = ()
 
         class Cfg:
             def __init__(self, alpha):
@@ -2966,6 +3081,45 @@ class CuteDSLDynamoTests(TestCase):
         cf = torch.compile(live_across_graph_break, backend="eager")
         self.assertEqual(cf(x, y), x + y)
 
+    def test_raw_call_of_functions_read_without_a_source(self):
+        # A raw call is captured when Dynamo reads the @cute.jit function,
+        # from_dlpack and current_stream without a source, here as staticmethods of
+        # a module made in the region; a @cute.jit function read that way and passed
+        # as a constant argument is passed as itself.
+        @cute.jit
+        def jit_cfg():
+            pass
+
+        jit_cfg.alpha = 4.0
+
+        class M(torch.nn.Module):
+            kernel = staticmethod(add_kernel)
+            to_cute = staticmethod(from_dlpack)
+            stream = staticmethod(cutlass_torch.current_stream)
+            cfg = staticmethod(jit_cfg)
+
+            def forward(self, x, y):
+                out, scaled = torch.empty_like(x), torch.empty_like(x)
+                mx, n = self.to_cute(x), x.numel()
+                self.kernel(mx, self.to_cute(y), self.to_cute(out), n, self.stream())
+                cfg_scale_kernel(mx, self.to_cute(scaled), n, self.cfg, self.stream())
+                return out, scaled
+
+        def f(x, y):
+            return M()(x, y)
+
+        x, y = _rand(1000), _rand(1000)
+        backend = EagerAndRecordGraphs()
+        cf = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(cf(x, y), (x + y, 4 * x))
+        (gm,) = backend.graphs
+        add_node, scale_node = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        record = cutedsl_kernel_side_table.get_kernel(add_node.kwargs["kernel_idx"])
+        self.assertEqual(record, CuteDSLKernel(add_kernel, "unknown"))
+        constant_args_idx = scale_node.kwargs["constant_args_idx"]
+        constant_args = cutedsl_kernel_side_table.get_constant_args(constant_args_idx)
+        self.assertIs(constant_args["cfg"], jit_cfg)
+
     def test_dynamo_graph_has_one_hop_node(self):
         backend = EagerAndRecordGraphs()
 
@@ -3210,8 +3364,8 @@ class CuteDSLDynamoTests(TestCase):
 
     def test_raw_call_from_dlpack_options(self):
         # assumed_align is a hint PT2 replaces with the alignment it compiles for (each
-        # pointer's own, at most 16 bytes); an option that changes the compiled kernel
-        # graph-breaks.
+        # pointer's own, at most 16 bytes), and has to be a constant; an option that
+        # changes the compiled kernel graph-breaks.
         def f(x, y):
             out = torch.empty_like(x)
             add_kernel(
@@ -3234,11 +3388,28 @@ class CuteDSLDynamoTests(TestCase):
             )
             return out
 
+        def h(x, y, align):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x, assumed_align=align),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
         x, y = _rand(1000), _rand(1000)
         cf = torch.compile(f, backend="aot_eager", fullgraph=True)
         self.assertEqual(cf(x, y), x + y)
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "use_32bit_stride"):
             torch.compile(g, backend="eager", fullgraph=True)(x, y)
+        # A dynamic int, so a symbolic value in the region.
+        ch = torch.compile(h, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "assumed_align must be a constant"
+        ):
+            ch(x, y, 16)
 
     def test_raw_call_stream_made_outside_graph_breaks(self):
         # Only cutlass.torch.current_stream() called in the region can be the stream:
@@ -3514,7 +3685,8 @@ class CuteDSLDynamoTests(TestCase):
         x, y = _rand(1000), _rand(1000)
         self.assertEqual(f(x, y), x + y)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "'mX' and 'mOut' are the same tensor"
+            torch._dynamo.exc.Unsupported,
+            "'mX' and 'mOut' are the same tensor .* a raw call counts every tensor",
         ):
             torch.compile(f, backend="eager", fullgraph=True)(x, y)
         self.assertEqual(torch.compile(f, backend="aot_eager")(x, y), x + y)
@@ -3538,8 +3710,8 @@ class CuteDSLDynamoTests(TestCase):
 
         x, y = _rand(1000), _rand(1000)
         for f, pattern in (
-            (in_place, "'mX' and 'mOut' are the same tensor"),
-            (same_outputs, "'mSum' and 'mDiff' are the same tensor"),
+            (in_place, r"'mX' and 'mOut' .* written \(mutates_args='unknown'\)"),
+            (same_outputs, r"'mSum' and 'mDiff' .* written \(mutates_args=\('mSum',"),
         ):
             with self.subTest(f=f.__name__):
                 expected = f(x, y)
@@ -3707,7 +3879,7 @@ def forward(self, x, y):
         self.assertEqual(gm(x, y), x + y)
         self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
 
-    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("backend", ["aot_eager"])
     def test_kernel_output_in_autograd_graph(self, backend):
         # The launch has no derivative: its output enters the autograd graph as a
         # constant, exactly as in eager.
@@ -3723,12 +3895,6 @@ def forward(self, x, y):
         torch.compile(f, backend=backend, fullgraph=True)(x, y).backward()
         self.assertEqual(x.grad, eager_grad)
         self.assertEqual(eager_grad, (x + y).detach())
-
-
-# Inductor generates Triton for the code around the user kernel.
-requires_triton = unittest.skipUnless(
-    inductor_utils.HAS_CUDA_AND_TRITON, "requires Triton"
-)
 
 
 def _strip_comments(code):
@@ -3806,11 +3972,13 @@ def _run_as_script(path, code):
             return runpy.run_path(path, run_name="__main__")
 
 
-@requires_triton
+@requires_cuda_and_triton
 @requires_cutedsl
 class CuteDSLInductorTests(TestCase):
     """Inductor: the HOP lowers to ir.UserDefinedCuteDSLKernel, launched from the
     Python wrapper as `<launcher>.run(<args>, stream=raw_streamN)`."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_cutedsl_kernel_symbolic_bool_scalar(self):
         # A symbolic bool for an unannotated param is a runtime scalar, evaluated at
@@ -3906,26 +4074,42 @@ class CuteDSLInductorTests(TestCase):
         ):
             torch.compile(f, fullgraph=True)(x, y)
 
-    def test_cutedsl_kernel_wrapper_codegen_signatures(self):
-        # Every wrapper implements the two codegen hooks with the same parameters,
-        # each of which some wrapper uses (see the Python wrapper's docstrings).
-        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
-        from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
-        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-        from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
+    def test_cutedsl_kernel_wrapper_codegen(self):
+        # The Python wrapper comments each launcher with its host function, the
+        # arguments run() takes (tensors and runtime scalars, in signature order) and
+        # the constants it binds, by name and type. A launch passes only those
+        # arguments, a Numeric value as a Python float, and then the stream.
+        half = cutlass.Float32(0.5)
 
-        def params(fn):
-            return list(inspect.signature(fn).parameters)
+        def f(x, y):
+            a, s, d = torch.empty_like(x), torch.empty_like(x), torch.empty_like(x)
+            mul_const_w(x, a, x.numel(), 3)
+            add_sub_w(x, y, s, d, x.numel(), scale=half)
+            return a, s, d
 
-        for cls in PythonWrapperCodegen, CppWrapperCpu, CppWrapperGpu, WrapperFxCodegen:
-            self.assertEqual(
-                params(cls.define_user_defined_cutedsl_kernel),
-                ["self", "kernel", "constant_args", "runtime_args"],
-            )
-            self.assertEqual(
-                params(cls.generate_user_defined_cutedsl_kernel_call),
-                ["self", "kernel_name", "kernel", "runtime_args", "device"],
-            )
+        x, y = _rand(1000), _rand(1000)
+        (a, s, d), (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual((a, s, d), (3 * x, (x + y) * 0.5, (x - y) * 0.5))
+        ((mul, mul_args),) = _cutedsl_launches(code, "mul_const_kernel")
+        ((add_sub, add_sub_args),) = _cutedsl_launches(code, "add_sub_kernel")
+        host = f"CuTeDSL host function {__name__}"
+        loaded = "bound when this module is loaded"
+        self.assertIn(
+            f"\n# {mul}: {host}.mul_const_kernel, run(*['mX', 'mOut', 'n'], "
+            f"stream) with constants {{alpha: int}}, {loaded}\n",
+            code,
+        )
+        self.assertIn(
+            f"\n# {add_sub}: {host}.add_sub_kernel, run(*['mX', 'mY', 'mSum', "
+            f"'mDiff', 'n', 'scale'], stream) with constants {{}}, {loaded}\n",
+            code,
+        )
+        tensor, buf = r"arg\d+_\d+", r"buf\d+"
+        self.assertRegex(mul_args, rf"^{tensor}, {buf}, 1000, stream=\w+$")
+        self.assertRegex(
+            add_sub_args,
+            rf"^{tensor}, {tensor}, {buf}, {buf}, 1000, 0\.5, stream=\w+$",
+        )
 
     def test_cutedsl_kernel_toy_raw_call(self):
         # The toy through Inductor: one launch of the captured raw call, from the
@@ -4012,31 +4196,30 @@ class CuteDSLInductorTests(TestCase):
         stream_read = "raw_stream = get_raw_stream(0)"
         FileCheck().check("with stream1:").check(stream_read).check(name).run(code)
 
-    def test_cutedsl_kernel_stream_picked_as_for_inductor_kernels(self):
-        # The launch and Inductor's own kernel calls get their stream from one helper,
-        # so a change to user-stream or compile-on-one-rank handling reaches both.
-        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-
-        name = "_get_kernel_call_stream_name"
-        pick = getattr(PythonWrapperCodegen, name)
-        picked = []
-
-        def spy(self, *args):
-            picked.append(pick(self, *args))
-            return picked[-1]
-
+    @parametrize("compile_on_one_rank", [False, True])
+    def test_cutedsl_kernel_stream_picked_as_for_inductor_kernels(
+        self, compile_on_one_rank
+    ):
+        # The launch reads its stream as the Inductor kernel after it does, also
+        # under compile-on-one-rank, where both read the stream of the device current
+        # at runtime, so that the wrapper is the same on every rank.
         def f(x, y):
             out = torch.empty_like(x)
             add_w(x, y, out, x.numel())
             return out.relu()
 
         x, y = _rand(1000), _rand(1000)
-        with mock.patch.object(PythonWrapperCodegen, name, spy):
+        with torch.compiler.config.patch(compile_on_one_rank=compile_on_one_rank):
             res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
         self.assertEqual(res, (x + y).relu())
-        ((_, args),) = _cutedsl_launches(code, "add_kernel")
-        self.assertEqual(len(picked), 2, code)  # the launch and the relu kernel
-        self.assertIn(args.rsplit("stream=", 1)[1], picked)
+        # A launch's stream read (the line before it) and stream argument.
+        launch = r"(?m)^ *(\w+ = get_raw_stream\(\w+\))\n *{}\.run\(.*stream=(\w+)\)$"
+        code = _strip_comments(code)
+        (cutedsl,) = re.findall(launch.format(r"cutedsl_add_kernel_\d+"), code)
+        (relu,) = re.findall(launch.format(r"triton_\w*relu\w*"), code)
+        self.assertEqual(cutedsl, relu)
+        if compile_on_one_rank:
+            self.assertNotIn("get_raw_stream(0)", code)
 
     def test_cutedsl_kernel_raw_call_user_stream(self):
         # The stream read and the raw call inside torch.cuda.stream(side): the kernel
@@ -4244,6 +4427,23 @@ class CuteDSLInductorTests(TestCase):
         self.assertEqual(z2, z**2)
         z2.sum().backward()
         self.assertEqual(z.grad, 2 * z)
+
+    def test_cutedsl_kernel_output_in_autograd_graph(self):
+        # As CuteDSLDynamoTests.test_kernel_output_in_autograd_graph with Inductor:
+        # the launch has no derivative, so its output enters the autograd graph as a
+        # constant, exactly as in eager.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x.detach(), y.detach(), out, x.numel())
+            return (out * x).sum()
+
+        x, y = _rand(1000, requires_grad=True), _rand(1000)
+        f(x, y).backward()
+        eager_grad = x.grad.clone()
+        x.grad = None
+        torch.compile(f, fullgraph=True)(x, y).backward()
+        self.assertEqual(x.grad, eager_grad)
+        self.assertEqual(eager_grad, (x + y).detach())
 
     def test_cutedsl_kernel_dependencies(self):
         # Mirrors test_triton_kernel_dependancies: kernel -> kernel -> aten op.
