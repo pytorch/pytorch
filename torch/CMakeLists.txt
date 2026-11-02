@@ -485,8 +485,8 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
   # by torch/distributed/_token_switch.py so libtorch_cuda never references
   # ncclEp*. USE_SYSTEM_NCCL_EP selects how the extension uses libnccl_ep:
-  #  - OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked here, with JIT
-  #    header paths baked into EP by its build; no external EP package needed.
+  #  - OFF: link libnccl_ep.a through __caffe2_nccl_ep. The EP build supplies
+  #    its JIT header paths; no external EP package is needed.
   #  - ON: nccl-extensions provides libnccl_ep.so and JIT headers at runtime.
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
@@ -495,9 +495,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL USE_NCCL)
     target_compile_definitions(_nccl_ep PRIVATE
       USE_SYSTEM_NCCL_EP=$<BOOL:${USE_SYSTEM_NCCL_EP}>)
-    # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
-    # NCCL communicator registry, getNcclDataType, CUDA stream, embedded NCCL;
-    # __caffe2_nccl_ep: public headers and, for embedded EP, the static library.
+    # torch_python: pybind and Tensor/ProcessGroup casters.
+    # torch_cuda: NCCL communicator helpers and CUDA streams.
+    # __caffe2_nccl_ep: EP headers and the static library for embedded builds.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     target_include_directories(_nccl_ep BEFORE PRIVATE

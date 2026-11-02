@@ -1229,10 +1229,9 @@ if(USE_NCCL)
 endif()
 
 # ---[ NCCL EP
-# Defines the __caffe2_nccl_ep interface target (headers and optional static EP).
-# NOT added to Caffe2_CUDA_DEPENDENCY_LIBS: the EP code lives in its own optional
-# extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
-# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl-extensions.
+# __caffe2_nccl_ep supplies EP headers and the optional static library.
+# Only torch._nccl_ep links this target; keep it out of Caffe2_CUDA_DEPENDENCY_LIBS
+# so importing torch does not require the external nccl-extensions package.
 if(USE_NCCL_EP)
   message(STATUS "USE_NCCL_EP is ON")
   include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)

@@ -100,8 +100,7 @@ if(NOT __NCCL_EP_INCLUDED)
     BUILD_BYPRODUCTS "${__NCCL_EP_OUTPUT_DIR}/lib/libnccl_ep.a"
     BUILD_ALWAYS TRUE
     INSTALL_COMMAND ""
-    # In the static path NCCL (Makefile) must finish first; in the system path
-    # NCCL is already present so there is no in-tree dependency.
+    # Wait for nccl_external only when core NCCL is built from source.
     DEPENDS ${__NCCL_EP_DEPENDS}
   )
 

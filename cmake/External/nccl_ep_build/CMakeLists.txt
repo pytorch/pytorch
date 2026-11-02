@@ -16,14 +16,10 @@ list(GET __cuda_ver_parts 1 CUDA_MINOR)
 
 add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep)
 
-# Core NCCL symbols resolve through torch_cuda, including for system NCCL.
-foreach(prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-  get_target_property(libs nccl_ep_static ${prop})
-  list(REMOVE_ITEM libs -lnccl)
-  set_property(TARGET nccl_ep_static PROPERTY ${prop} "${libs}")
-endforeach()
-set_target_properties(nccl_ep_static PROPERTIES
-  LINK_DIRECTORIES "" INTERFACE_LINK_DIRECTORIES "")
+# The static EP target's CUDA device link does not need a separate libnccl.so.
+get_target_property(libs nccl_ep_static LINK_LIBRARIES)
+list(REMOVE_ITEM libs -lnccl)
+set_property(TARGET nccl_ep_static PROPERTY LINK_LIBRARIES "${libs}")
 
 # Keep matching core and EP headers together for the JIT include path and cache
 # fingerprint. Copy only core headers, excluding stale EP headers in NCCL_HOME.

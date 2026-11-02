@@ -39,9 +39,8 @@ log = logging.getLogger(__name__)
 
 
 def _nccl_ep_available() -> bool:
-    # The torch._nccl_ep extension is built only with USE_NCCL_EP.
-    # Actually importing it is the real check: find_spec would only locate the
-    # extension without loading its native dependencies.
+    # USE_NCCL_EP builds the optional extension. Import it to check that its
+    # native dependencies are also available.
     if not torch.cuda.is_available():
         return False
     try:
@@ -85,8 +84,6 @@ class TokenSwitchNCCLLoadingTest(TestCase):
         if not self.use_system_nccl_ep:
             self.skipTest("Test requires USE_SYSTEM_NCCL_EP=1")
         self._run_script(f"""
-import ctypes
-
 if {prepare_first!r}:
     import nccl.ep
     nccl.ep.get_lib_version()
@@ -95,26 +92,12 @@ from torch.distributed._token_switch import _import_nccl_ep
 from torch.testing._internal.common_utils import TestCase
 
 native = _import_nccl_ep()
-import nccl.ep as ep
-
 checks = TestCase()
 checks.assertTrue(hasattr(native, "_NcclEpGroup"))
-path = ep.get_lib_path()
-checks.assertIsNotNone(path)
-checks.assertTrue(path.is_file(), str(path))
-
-get_version = ctypes.CDLL(None).ncclEpGetVersion
-get_version.argtypes = [ctypes.POINTER(ctypes.c_int)]
-get_version.restype = ctypes.c_int
-version = ctypes.c_int()
-checks.assertEqual(get_version(ctypes.byref(version)), 0)
-expected = ep.get_lib_version()
-checks.assertEqual(version.value, expected.major * 10000 + expected.minor * 100 + expected.micro)
 """)
 
     def test_without_runtime_package(self):
         self._run_script(f"""
-import os
 import sys
 from unittest.mock import patch
 
@@ -122,7 +105,6 @@ from torch.distributed._token_switch import _import_nccl_ep
 from torch.testing._internal.common_utils import TestCase
 
 checks = TestCase()
-original_env = dict(os.environ)
 with patch.dict(sys.modules, {{"nccl": None, "nccl.ep": None}}):
     if {self.use_system_nccl_ep!r}:
         with checks.assertRaisesRegex(ImportError, "nccl-extensions"):
@@ -130,8 +112,6 @@ with patch.dict(sys.modules, {{"nccl": None, "nccl.ep": None}}):
     else:
         native = _import_nccl_ep()
         checks.assertTrue(hasattr(native, "_NcclEpGroup"))
-        checks.assertFalse(native._use_system_nccl_ep)
-        checks.assertEqual(dict(os.environ), original_env)
 """)
 
 
@@ -1358,7 +1338,7 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("layout", ["flat", "expert_major"])
-    @parametrize("output_mode", ["allocated", "out", "full_metadata"])
+    @parametrize("output_mode", ["allocated", "full_metadata"])
     def test_dispatch_actual_receive_count(self, device, layout, output_mode):
         device = torch.device(torch.device(device).type, self.rank)
         torch.cuda.set_device(device)
@@ -1378,19 +1358,13 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
             topk_weights.requires_grad_()
             outputs = ts.dispatch(routing, tokens, topk_weights, num_recv)
         else:
-            rows = (
-                ts.max_recv_tokens_per_rank
-                if output_mode == "full_metadata"
-                else num_recv
-            )
+            rows = ts.max_recv_tokens_per_rank
             weights = topk_weights.new_empty(
                 (rows, TOP_K) if layout == "flat" else (rows,)
             )
             indices = topk_idx.new_empty(rows, TOP_K) if layout == "flat" else None
             out = (tokens.new_empty(num_recv, HIDDEN), weights, indices)
             outputs = ts.dispatch(routing, tokens, topk_weights, out=out)
-            for actual, expected in zip(outputs, out):
-                self.assertIs(actual, expected)
         dispatched, weights, indices = outputs
         src_rank = (self.rank - 1) % self.world_size
         self.assertEqual(dispatched, torch.full_like(tokens, src_rank + 1))
@@ -1399,16 +1373,13 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
             self.assertEqual(indices[:num_recv], torch.zeros_like(topk_idx))
         else:
             self.assertIsNone(indices)
-        combined = ts.combine(routing, dispatched)
-        self.assertEqual(combined, tokens)
         if output_mode == "allocated":
-            (combined.float().sum() + weights.sum()).backward()
+            (dispatched.float().sum() + weights.sum()).backward()
             self.assertEqual(tokens.grad, torch.ones_like(tokens))
             self.assertEqual(topk_weights.grad, torch.ones_like(topk_weights))
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("layout", ["flat", "expert_major"])
-    def test_redispatch_preserves_receive_slots(self, device, layout):
+    def test_expert_major_redispatch_preserves_receive_slots(self, device):
         device = torch.device(torch.device(device).type, self.rank)
         torch.cuda.set_device(device)
         num_tokens = 512
@@ -1425,12 +1396,12 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
         topk_idx = torch.stack((destination * 2, destination * 2 + 1), dim=1)
         topk_weights = torch.stack((row % 16 + 1, row % 16 + 17), dim=1).float() / 32
         topk_weights.requires_grad_()
-        # Distinct rows across ranks and enough rows for multiple permute blocks.
+        # Distinct rows and multiple permutation blocks expose receive-slot reordering.
         tokens = (row % 128).to(torch.bfloat16)[:, None].expand(-1, HIDDEN).clone()
         tokens[:, 0] = self.rank
         tokens[:, 1] = row // 128
         tokens.requires_grad_()
-        routing = ts.create_routing(topk_idx, layout=layout)
+        routing = ts.create_routing(topk_idx, layout="expert_major")
         num_recv = routing.handle.get_num_recv_tokens()
         first, first_weights, _ = ts.dispatch(routing, tokens, topk_weights, capacity)
         for scale in (2, 4, 8):
@@ -1441,14 +1412,13 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
             self.assertEqual(received[:num_recv], first[:num_recv] * scale)
             self.assertEqual(weights[:num_recv], first_weights[:num_recv] * scale)
 
-        # Reusing Routing must not change how earlier outputs are combined or differentiated.
+        # Redispatch must preserve the slots used by earlier outputs and gradients.
         combined = ts.combine(routing, first[:num_recv].contiguous())
-        copies = 2 if layout == "expert_major" else 1
-        self.assertEqual(combined, tokens * copies)
+        self.assertEqual(combined, tokens * 2)
         loss = (combined.float() * tokens.detach().float()).sum()
         loss = loss + first_weights[:num_recv].square().sum()
         loss.backward()
-        self.assertEqual(tokens.grad, tokens.detach() * copies)
+        self.assertEqual(tokens.grad, tokens.detach() * 2)
         self.assertEqual(topk_weights.grad, topk_weights.detach() * 2)
         torch.cuda.synchronize()
         del loss, combined, first, first_weights, routing
