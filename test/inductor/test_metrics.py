@@ -4,8 +4,13 @@ from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
-from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.utils._triton import has_triton
 
 
 example_kernel = """
@@ -53,7 +58,9 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
 """.replace("GPU_TYPE", GPU_TYPE)
 
 
-class TestMetrics(TestCase):
+class TestMetricsGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_parse_proper_kernel_fn_code(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
         if not proper_kernel_fn_code.startswith("def "):
@@ -76,16 +83,20 @@ class TestMetrics(TestCase):
             "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
         )
 
+
+class TestMetrics(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("partitioned_scatter_enabled", False)
-    def test_atomic_add(self):
+    def test_atomic_add(self, device):
         @torch.compile
         def f(lhs, index, rhs):
             return lhs.index_put_([index], rhs, accumulate=True)
 
-        lhs = torch.randn(1024, device=GPU_TYPE)
-        index = torch.randint(0, 1024, [32], device=GPU_TYPE, dtype=torch.int32)
-        rhs = torch.randn(32, device=GPU_TYPE)
+        lhs = torch.randn(1024, device=device)
+        index = torch.randint(0, 1024, [32], device=device, dtype=torch.int32)
+        rhs = torch.randn(32, device=device)
 
         kernel_list = []
         with collect_defined_kernels(kernel_list):
@@ -95,15 +106,15 @@ class TestMetrics(TestCase):
         kernel_code = kernel_list[0]
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
-    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE, inductor=True)
+    @largeTensorTest(25e7 * 2 * 4, inductor=True)
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
-    def test_kernel_args_num_gb(self):
+    def test_kernel_args_num_gb(self, device):
         @torch.compile
         def f(x):
             return x + 1
 
-        x = torch.randn(int(25e7), device=GPU_TYPE)
+        x = torch.randn(int(25e7), device=device)
         kernel_list = []
         with collect_defined_kernels(kernel_list):
             f(x)
@@ -115,6 +126,9 @@ class TestMetrics(TestCase):
         )
 
 
+instantiate_device_type_tests(TestMetrics, globals(), except_for="cpu", allow_xpu=True)
+
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    if has_triton():
         run_tests()
