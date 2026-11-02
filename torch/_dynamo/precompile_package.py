@@ -1379,6 +1379,7 @@ def _object_identity(value: object) -> str:
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
         "BOOL_MATCH",
+        "BUILTIN_METHOD_RECEIVER_ALIAS",
         "CONSTANT_MATCH",
         "CONSTANT_SUBCLASS_MATCH",
         "COUNT_ITERATOR_MATCH",

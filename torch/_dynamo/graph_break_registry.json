@@ -4281,6 +4281,26 @@
       ]
     }
   ],
+  "GB2418": [
+    {
+      "Gb_type": "Builtin method keys with custom equality and local receivers",
+      "Context": "builtin method key hashing",
+      "Explanation": "Custom key equality can observe runtime method hash collisions, but a locally created receiver has no guardable identity.",
+      "Hints": [
+        "Keep these dictionary or set operations outside the compiled region."
+      ]
+    }
+  ],
+  "GB9745": [
+    {
+      "Gb_type": "Unguardable builtin method key receiver",
+      "Context": "source.name",
+      "Explanation": "Builtin method keys require guards on receiver aliasing.",
+      "Hints": [
+        "Keep these dictionary or set operations outside the compiled region."
+      ]
+    }
+  ],
   "GB0240": [
     {
       "Gb_type": "Shape mismatch with out= list of tensor variants",
@@ -5962,6 +5982,16 @@
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3320": [
+    {
+      "Gb_type": "Builtin method keys with custom metaclass equality",
+      "Context": "builtin method key hashing",
+      "Explanation": "Dynamo cannot trace custom metaclass equality against builtin method keys.",
+      "Hints": [
+        "Keep these dictionary or set operations outside the compiled region."
       ]
     }
   ],

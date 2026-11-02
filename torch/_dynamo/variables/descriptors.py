@@ -587,6 +587,27 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
+    def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        obj = self.obj.realize()
+        tracker = tx.output.builtin_method_keys
+        tracker.activate(tx)
+        if obj.source is not None:
+            receiver = tracker.add_receiver(tx, obj.source)
+            method = self.descriptor
+            if hasattr(method, "__get__"):
+                method = _bind_builtin_method(method, receiver)
+            return hash(method), True
+        obj_type = obj.python_type()
+        if any(obj_type is kind for kind in (list, dict, set)) and self.value is None:
+            tracker.add_receiver(tx, None)
+            # Internal bucket only: method equality still distinguishes C
+            # functions. User-visible hash() retains its escape restrictions.
+            return id(obj), True
+        # A constant receiver may alias a sourced receiver, but has no source
+        # for a relational guard. Preserve identity specialization in that case.
+        tracker.add_custom_key()
+        return self.hash_impl(tx)
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a

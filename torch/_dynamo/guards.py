@@ -950,6 +950,14 @@ def uninteresting_files() -> set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
+def _receiver_alias_pattern(receivers: tuple[object, ...]) -> tuple[int, ...]:
+    positions: dict[int, int] = {}
+    return tuple(
+        positions.setdefault(id(receiver), index)
+        for index, receiver in enumerate(receivers)
+    )
+
+
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
@@ -958,6 +966,7 @@ def _get_closure_vars() -> dict[str, object]:
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
             "___check_type_id": check_type_id,
+            "___receiver_alias_pattern": _receiver_alias_pattern,
             "___check_obj_id": check_obj_id,
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
@@ -3660,6 +3669,23 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @skip_guard_check_spec
+    def BUILTIN_METHOD_RECEIVER_ALIAS(
+        self, guard: Guard, sources: tuple[Source, ...], aliases: tuple[int, ...]
+    ) -> None:
+        if self.save_guards:
+            for source in sources:
+                if name := get_local_source_name(source):
+                    self.check_fn_manager.additional_used_local_vars.add(name)
+                if name := get_global_source_name(source):
+                    self.check_fn_manager.additional_used_global_vars.add(name)
+        refs = ", ".join(self.arg_ref(source.name) for source in sources)
+        code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code, get_verbose_code_parts(code, guard)
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a

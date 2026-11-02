@@ -1513,6 +1513,22 @@ class DictTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    def test_unused_tuple_key_with_spoofed_builtin_method_type(self):
+        class Key:
+            @property
+            def __class__(self):
+                return types.BuiltinMethodType
+
+        def fn(x, mapping):
+            return x + mapping["used"]
+
+        mapping = {"used": 2, (Key(),): 3}
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
     def test_dict_mutation_side_effect(self):
         def fn(d):
             d["c"] = d["a"] + d.pop("b")
