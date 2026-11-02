@@ -23,6 +23,12 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
             self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
         // functional version that torch.compiles better and works with dynamic shapes
+        if (num_classes <= 0) {
+            TORCH_CHECK(self.sym_numel() != 0,
+                        "Can not infer total number of classes from empty tensor.");
+            TORCH_CHECK(num_classes == -1,
+                        "Class values must be smaller than num_classes.");
+        }
         if (num_classes == -1) {
           num_classes = self.max().item().toLong() + 1;
         }
