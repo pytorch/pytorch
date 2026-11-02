@@ -21,11 +21,15 @@ import logging
 import os
 from typing import Protocol
 
+from torch._vendor.packaging.version import InvalidVersion, Version
+
 
 _CUDNN_MODULE_PATH = "cudnn.torch"
 _INSTALL_FN = "install_sdpa_overrides"
-# The first nvidia-cudnn-frontend release with install_sdpa_overrides().
-_MIN_FRONTEND_VERSION = "1.32"
+# The first nvidia-cudnn-frontend release whose varlen overrides honor the
+# backend varlen_attn selected. install_sdpa_overrides() dates from 1.32, so
+# its presence alone does not tell the two apart.
+_MIN_FRONTEND_VERSION = "1.33"
 ENV_VAR = "TORCH_CUDNN_SDPA_USE_PYTHON"
 
 logger = logging.getLogger(__name__)
@@ -51,18 +55,27 @@ def is_enabled() -> bool:
     return _ACTIVE_HANDLE is not None
 
 
+def _check_frontend_version(module_path: str) -> None:
+    package = importlib.import_module(module_path.partition(".")[0])
+    found = getattr(package, "__version__", None)
+    try:
+        ok = Version(found).release >= Version(_MIN_FRONTEND_VERSION).release
+    except (InvalidVersion, TypeError):
+        ok = False
+    if not ok:
+        raise RuntimeError(
+            f"nvidia-cudnn-frontend>={_MIN_FRONTEND_VERSION} is required; "
+            f"'{module_path}' comes from version {found}"
+        )
+
+
 def enable(module_path: str = _CUDNN_MODULE_PATH) -> None:
     global _ACTIVE_HANDLE
     if _ACTIVE_HANDLE is not None:
         return
     provider = importlib.import_module(module_path)
-    install = getattr(provider, _INSTALL_FN, None)
-    if install is None:
-        raise RuntimeError(
-            f"'{module_path}' has no {_INSTALL_FN}(); "
-            f"nvidia-cudnn-frontend>={_MIN_FRONTEND_VERSION} is required"
-        )
-    handle = install()
+    _check_frontend_version(module_path)
+    handle = getattr(provider, _INSTALL_FN)()
     if not callable(getattr(handle, "remove", None)):
         raise TypeError(
             f"{module_path}.{_INSTALL_FN}() returned {handle!r}, "
