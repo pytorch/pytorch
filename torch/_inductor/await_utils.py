@@ -1,8 +1,7 @@
 import asyncio
-import sys
 import weakref
 from asyncio import AbstractEventLoop, Future
-from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterator
+from collections.abc import Awaitable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
 from typing import Any, Protocol, TypeVar
@@ -13,20 +12,18 @@ from torch.utils._ordered_set import OrderedSet
 T = TypeVar("T")
 TCoro = Generator[Any, None, T]
 
-if sys.version_info >= (3, 11):
 
-    class TaskFactory(Protocol):
-        def __call__(
-            self,
-            __loop: AbstractEventLoop,
-            __factory: Coroutine[None, None, object] | Generator[None, None, object],
-            __context: Context | None = None,
-            /,
-        ) -> asyncio.futures.Future[object]: ...
+class TaskFactory(Protocol):
+    def __call__(
+        self,
+        __loop: AbstractEventLoop,
+        __factory: Coroutine[None, None, object] | Generator[None, None, object],
+        __context: Context | None = None,
+        /,
+    ) -> asyncio.futures.Future[object]: ...
 
-    TaskFactoryType = TaskFactory
-else:
-    TaskFactoryType = Callable[[AbstractEventLoop, Generator[TCoro, None, T]], Future]  # type: ignore[valid-type]
+
+TaskFactoryType = TaskFactory  # type: ignore[valid-type]
 
 
 def await_sync(awaitable: Awaitable[T]) -> T:
@@ -149,21 +146,14 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
     ) -> asyncio.Future:  # type: ignore[valid-type, type-arg]
         task_factory = task_factories[0]
         if task_factory is None:
-            if sys.version_info >= (3, 11):
-                # pyrefly: ignore [bad-argument-type]
-                task = asyncio.Task(coro, loop=loop, context=context)
-            else:
-                task = asyncio.Task(coro, loop=loop)
+            task = asyncio.Task(coro, loop=loop, context=context)
             # pyre-ignore[16]: `Task` has no attribute `_source_traceback`.
             if task._source_traceback:  # type: ignore[attr-defined]
                 del task._source_traceback[  # type: ignore[attr-defined]
                     -1
                 ]  # pragma: no cover  # type: ignore[attr-defined]
         else:
-            if sys.version_info >= (3, 11):
-                task = task_factory(loop, coro, context=context)  # type: ignore[arg-type, call-arg, assignment]
-            else:
-                task = task_factory(loop, coro)  # type: ignore[arg-type]
+            task = task_factory(loop, coro, context=context)  # type: ignore[arg-type]
         #  `Union[Task[Any], Future[Any]]`.
         tasks.add(task)
         return task

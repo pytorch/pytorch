@@ -5,18 +5,14 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+
+# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
+import tomllib
 from pathlib import Path
 from tempfile import gettempdir, mktemp
 
 import click
 import spin
-
-
-# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 
 CWD = Path(__file__).absolute().parent.parent
