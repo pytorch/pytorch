@@ -117,6 +117,24 @@ for simple_op in SIMPLE_OPS_LIST:
     globals()[_get_func_name(simple_op)] = register_simple(simple_op)
 
 
+def _set_wrapper_metadata(self: ComplexTensor, like: torch.Tensor) -> None:
+    # Autograd returns `self` for in-place ops, so its sizes/strides must match `like`'s.
+    # The wrapper's storage is synthetic, so use the meta `set_`, which grows it as needed.
+    python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+    with (
+        torch._C._ExcludeDispatchKeyGuard(python_key),
+        torch._C._PreserveDispatchKeyGuard(),
+    ):
+        torch._C._set_meta_in_tls_dispatch_include(True)
+        aten.set_.source_Storage_storage_offset(
+            self,
+            self.untyped_storage(),
+            like.storage_offset(),
+            like.shape,
+            like.stride(),
+        )
+
+
 def register_inplace_view(op: OpType) -> Callable[..., Any]:
     """Register an in-place view op, which must also update the wrapper's own metadata."""
 
@@ -126,17 +144,7 @@ def register_inplace_view(op: OpType) -> Callable[..., Any]:
         op(aten.alias(self.im), *args, **kwargs)
         op(self.re, *args, **kwargs)
         op(self.im, *args, **kwargs)
-        # Autograd returns `self` for in-place ops, so its sizes/strides must match `re`'s.
-        # The wrapper's storage is synthetic, so use the meta `set_`, which grows it as needed.
-        python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
-        with (
-            torch._C._ExcludeDispatchKeyGuard(python_key),
-            torch._C._PreserveDispatchKeyGuard(),
-        ):
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            aten.set_.source_Storage_storage_offset(
-                self, self.untyped_storage(), re.storage_offset(), re.shape, re.stride()
-            )
+        _set_wrapper_metadata(self, re)
         return self
 
     func_name = _get_func_name(op)
@@ -158,6 +166,23 @@ for inplace_view_op in INPLACE_VIEW_OPS:
     globals()[_get_func_name(inplace_view_op)] = register_inplace_view(inplace_view_op)
 
 del inplace_view_op
+
+
+@register_complex(aten.resize_)
+def resize__impl(
+    self: ComplexTensor,
+    size: list[int],
+    memory_format: torch.memory_format | None = None,
+) -> ComplexTensor:
+    # E.g. `from_interleaved` of an empty tensor leaves both components viewing one
+    # storage, so they would overlap once resized.
+    if self._re.untyped_storage()._cdata == self._im.untyped_storage()._cdata:
+        aten.set_.source_Tensor(self._im, self._im.clone())
+    re = aten.resize_(self._re, size, memory_format=memory_format)
+    aten.resize_(self._im, size, memory_format=memory_format)
+    _set_wrapper_metadata(self, re)
+    return self
+
 
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [

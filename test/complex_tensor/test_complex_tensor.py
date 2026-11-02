@@ -237,6 +237,28 @@ class TestComplexTensorGeneric(TestCase):
         self.assertIs(result, out)
         self.assertEqual(out.as_interleaved(), torch.fft.fft(t))
 
+    def test_resize_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.randn(2), torch.randn(2))
+        result = xc.resize_(3, 4)
+
+        self.assertIs(result, xc)
+        self.assertEqual(xc.shape, (3, 4))
+        self.assertEqual(xc.stride(), (4, 1))
+        self.assertEqual(xc.re.shape, (3, 4))
+        self.assertEqual(xc.im.shape, (3, 4))
+
+    def test_out_overload_resizes_destination(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        t = torch.randn(4, dtype=torch.complex64)
+        out = ComplexTensor.from_interleaved(torch.empty(0, dtype=torch.complex64))
+        result = torch.fft.fft(ComplexTensor.from_interleaved(t), out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(out.as_interleaved(), torch.fft.fft(t))
+
     def test_out_overload_writes_multiple_destinations(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 
