@@ -8,12 +8,140 @@ from torch._inductor import metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._library.dispatchless import dispatchless_custom_op, flat_dispatchless_call
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
 
 
+def apply_transform(fn, transform):
+    if transform == "vmap":
+        return torch.vmap(fn)
+    if transform == "jvp":
+        return lambda x: torch.func.jvp(fn, (x,), (torch.ones_like(x),))
+    if transform == "gradgrad":
+        def scalar(x):
+            return fn(x).sum()
+
+        def grad_sum(x):
+            return torch.func.grad(scalar)(x).sum()
+
+        return torch.func.grad(grad_sum)
+    raise AssertionError(f"Unknown transform: {transform}")
+
+
 class DispatchlessTest(TestCase):
+
     hw_classification = HardwareClassification.GENERIC
+
+    def test_make_fx_autograd(self, device):
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin() * x
+
+        def fn(x):
+            (grad,) = torch.autograd.grad(op(x).sum(), x, create_graph=True)
+            (gradgrad,) = torch.autograd.grad(grad.sum(), x)
+            return grad, gradgrad
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        gm = make_fx(fn)(x)
+        value = torch.randn_like(x, requires_grad=True)
+        expected_grad = value.sin() + value * value.cos()
+        expected_gradgrad = 2 * value.cos() - value * value.sin()
+        self.assertEqual(gm(value), (expected_grad, expected_gradgrad))
+
+    @parametrize("execution", ["eager", "make_fx", "aot_eager", "inductor"])
+    @parametrize("transform", ["vmap", "jvp", "gradgrad"])
+    def test_transforms(self, device, execution, transform):
+        def body(x):
+            return x.sin() * x
+
+        op = dispatchless_custom_op(body)
+
+        fn = apply_transform(op, transform)
+        plain = apply_transform(body, transform)
+        x = torch.randn(3, 4, device=device)
+        if execution == "make_fx":
+            actual = make_fx(fn)(x)
+        elif execution == "eager":
+            actual = fn
+        else:
+            actual = torch.compile(fn, backend=execution, fullgraph=True)
+        for value in (x, x + 1):
+            self.assertEqual(actual(value), plain(value))
+
+    @parametrize("execution", ["eager", "make_fx", "compile_eager"])
+    def test_functionalize(self, device, execution):
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin() * x
+
+        def fn(x):
+            return op(x)
+
+        if execution == "compile_eager":
+            fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = torch.func.functionalize(fn)
+        x = torch.randn(3, 4, device=device)
+        if execution == "make_fx":
+            actual = make_fx(actual)(x)
+        for value in (x, x + 1):
+            self.assertEqual(actual(value), value.sin() * value)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_compiled_functionalize_limitation(self, device, backend):
+        def body(x):
+            return x.sin() * x
+
+        x = torch.randn(3, 4, device=device)
+        for fn in (body, dispatchless_custom_op(body)):
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                torch.func.functionalize(fn), backend=backend, fullgraph=True
+            )
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "_func_increment_nesting"
+            ):
+                compiled(x)
+
+    @parametrize("execution", ["eager", "make_fx", "aot_eager", "inductor"])
+    def test_autocast(self, device, execution):
+        @dispatchless_custom_op
+        def op(x, y):
+            return x @ y
+
+        device_type = torch.device(device).type
+
+        def fn(x, y):
+            with torch.autocast(device_type, dtype=torch.bfloat16):
+                return op(x, y).sin()
+
+        x, y = (torch.randn(8, 8, device=device) for _ in range(2))
+        if execution == "make_fx":
+            actual = make_fx(fn)(x, y)
+        elif execution == "eager":
+            actual = fn
+        else:
+            actual = torch.compile(fn, backend=execution, fullgraph=True)
+        with torch.autocast(device_type, dtype=torch.bfloat16):
+            expected = (x @ y).sin()
+        result = actual(x, y)
+        self.assertEqual(result.dtype, torch.bfloat16)
+        self.assertEqual(result, expected)
+
+    def test_aot_eager_gradients(self, device):
+        @dispatchless_custom_op
+        def op(x):
+            return {"value": x.sin() * x}
+
+        def fn(x):
+            return op(x)["value"].sum()
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        result = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(torch.autograd.grad(result, x), torch.autograd.grad(fn(x), x))
+
 
     @parametrize("requires_grad", [False, True])
     def test_values_gradients_and_decomposition(self, device, requires_grad):
