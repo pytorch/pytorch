@@ -26,44 +26,24 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Rnn_metallib.h>
 #endif
 
-template <typename F>
-void lstm_layer(const Tensor& weight, const Tensor& result, MTLComputePipelineState_t pso, const F& encode) {
-  if (result.numel() == 0) {
+template <typename... Args>
+void lstm_cell(MTLComputePipelineState_t pso, const Tensor& cell, const Args&... args) {
+  if (cell.numel() == 0) {
     return;
   }
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto cached = LookUpOrCreateCachedKernel<MPSCachedKernel>("lstm_mm_" + scalarToMetalTypeString(weight), [&]() {
-        return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:stream->device() sourceCount:2] autorelease];
-      });
-      auto kernel = cached->template kernel<MPSNDArrayMatrixMultiplication>();
-      auto w = getMPSNDArray(weight, weight.sizes(), weight.strides());
-      auto out = getMPSNDArray(result, result.sizes());
-      stream->endKernelCoalescing();
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pso, "lstm_layer", {result}, stream);
-      encode(encoder, [&](const Tensor& input) {
-        auto in = getMPSNDArray(input, input.sizes());
-        [kernel encodeToCommandEncoder:encoder
-                         commandBuffer:stream->commandBuffer()
-                          sourceArrays:@[ in, w ]
-                      destinationArray:out];
-      });
+      getMPSProfiler().beginProfileKernel(pso, "lstm_cell", {cell}, stream);
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, args..., static_cast<uint32_t>(cell.size(-1)));
+      mtl_dispatch1DJob(encoder, pso, cell.numel());
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
 }
 
-template <typename... Args>
-void lstm_cell(MTLComputeCommandEncoder_t encoder,
-               MTLComputePipelineState_t pso,
-               const Tensor& cell,
-               const Args&... args) {
-  [encoder setComputePipelineState:pso];
-  mtl_setArgs(encoder, args..., static_cast<uint32_t>(cell.size(-1)));
-  mtl_dispatch1DJob(encoder, pso, cell.numel());
-}
 } // namespace
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input,
@@ -102,12 +82,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
           has_biases ? params[param + 2].add(params[param + 3]).contiguous() : at::zeros({4 * hidden}, input.options());
       const auto recurrent_weight = params[param + 1].contiguous().t();
       auto recurrent_gates = at::empty({batch, 4 * hidden}, input.options());
-      lstm_layer(recurrent_weight, recurrent_gates, pso, [&](auto encoder, auto&& matmul) {
-        for (const auto step : c10::irange(seq_len)) {
-          matmul(h[step]);
-          lstm_cell(encoder, pso, c[step], z[step], recurrent_gates, c[step], c[step + 1], h[step + 1], bias);
-        }
-      });
+      for (const auto step : c10::irange(seq_len)) {
+        at::mm_out(recurrent_gates, h[step], recurrent_weight);
+        lstm_cell(pso, c[step], z[step], recurrent_gates, c[step], c[step + 1], h[step + 1], bias);
+      }
       hy[index].copy_(h[seq_len]);
       cy[index].copy_(c[seq_len]);
       auto output = h.narrow(0, 1, seq_len);
@@ -168,12 +146,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
       auto dh = grad_h[index], dc = grad_c[index];
       auto dg = at::empty(z.sizes(), input.options());
       const auto recurrent_weight = params[param + 1].contiguous();
-      lstm_layer(recurrent_weight, dh, pso, [&](auto encoder, auto&& matmul) {
-        for (int64_t step = seq_len - 1; step >= 0; --step) {
-          lstm_cell(encoder, pso, dc, z[step], c[step], c[step + 1], dy[step], dh, dc, dg[step]);
-          matmul(dg[step]);
-        }
-      });
+      for (int64_t step = seq_len - 1; step >= 0; --step) {
+        lstm_cell(pso, dc, z[step], c[step], c[step + 1], dy[step], dh, dc, dg[step]);
+        at::mm_out(dh, dg[step], recurrent_weight);
+      }
       auto dg_flat = dg.view({seq_len * batch, 4 * hidden});
       grad_params[param + 1] = dg_flat.t().mm(h.narrow(0, 0, seq_len).reshape({seq_len * batch, hidden}));
       if (direction) {
