@@ -6,8 +6,6 @@
 #define HIPSPARSE_VERSION ((hipsparseVersionMajor*100000) + (hipsparseVersionMinor*100) + hipsparseVersionPatch)
 #endif
 
-#include <optional>
-
 
 // cuSparse Generic API spsv function was added in CUDA 11.3.0
 // hipSparse supports SpSV as well
@@ -29,24 +27,18 @@
 namespace at::cuda::sparse {
 
 // See Note [Enabling Deterministic Operations]
-// Returns the cusparseSpMM algorithm that gives bit-wise reproducible results
-// for a CSR matrix A, or nullopt when cuSPARSE has none for this call.
-// cuSPARSE documents deterministic SpMM results only for
-// CUSPARSE_SPMM_CSR_ALG3 and CUSPARSE_SPMM_COO_ALG2 (and BSR_ALG1), and only
-// for opA == CUSPARSE_OPERATION_NON_TRANSPOSE. CSR_ALG3 keeps A in CSR
-// format, but it does not support batched matrices,
-// opB == CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE or complex half values, and
-// it is not deterministic before cuSPARSE 12.7 (CUDA 13.1; known issue in the
-// CUDA 13.0 release notes, fixed as CUSPARSE-2612). When COO_ALG2 is returned
-// the caller has to describe A in COO format.
-inline std::optional<cusparseSpMMAlg_t> deterministic_spmm_alg(
+// cuSPARSE documents bit-wise reproducible cusparseSpMM results only for
+// CUSPARSE_SPMM_CSR_ALG3, CUSPARSE_SPMM_COO_ALG2 and CUSPARSE_SPMM_BSR_ALG1,
+// with opA == CUSPARSE_OPERATION_NON_TRANSPOSE. CSR_ALG3 does not support
+// batched matrices, opB == CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE or complex
+// half values, and it is only deterministic from cuSPARSE 12.7 (CUDA 13.1,
+// CUSPARSE-2612). COO_ALG2 needs A described in COO format.
+inline cusparseSpMMAlg_t deterministic_spmm_alg(
     cusparseOperation_t opA,
     cusparseOperation_t opB,
     cudaDataType value_type,
     bool batched) {
-  if (opA != CUSPARSE_OPERATION_NON_TRANSPOSE) {
-    return std::nullopt;
-  }
+  TORCH_INTERNAL_ASSERT(opA == CUSPARSE_OPERATION_NON_TRANSPOSE);
 #if CUSPARSE_VERSION >= 12700
   if (!batched && opB != CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE &&
       value_type != CUDA_C_16F && value_type != CUDA_C_16BF) {

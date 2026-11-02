@@ -1302,6 +1302,24 @@ class TestTorchDeviceType(TestCase):
             lambda: torch.mv(csr, vec),
             'addmv_out_sparse_compressed_cuda',
             should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmm(dense, coo, dense),
+            'addmm_out_sparse_dense_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmm(dense, csr, dense),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmv(vec, csr, vec),
+            'addmv_out_sparse_compressed_cuda',
+            should_alert)
+        csr_batched = torch.sparse_csr_tensor(
+            csr.crow_indices(), csr.col_indices(), csr.values(), (2, 4, 4), check_invariants=False)
+        self.check_nondeterministic_alert(
+            lambda: torch.bmm(csr_batched, dense.expand(2, 4, 3).contiguous()),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
 
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
