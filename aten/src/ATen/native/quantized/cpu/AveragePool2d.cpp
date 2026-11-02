@@ -49,7 +49,7 @@ void avg_pool2d_out_frame(
     std::optional<int64_t> divisor_override) {
   Tensor input_contig = input.contiguous();
   auto input_data = input_contig.const_data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
+  auto output_data = output.mutable_data_ptr<scalar_t>();
   const auto scale_factor = input.q_scale() / output.q_scale();
   const auto input_zero_point = input.q_zero_point();
   const auto output_zero_point = output.q_zero_point();
@@ -331,7 +331,7 @@ Tensor qnnpack_avg_pool2d(
           inW,
           reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
-          (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
+          reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()) /* output data */,
           outC,
           nullptr /* thread pool */);
   CAFFE_ENFORCE(

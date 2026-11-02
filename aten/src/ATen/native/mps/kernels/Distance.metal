@@ -8,10 +8,10 @@ using namespace metal;
 // `grad / cdist^(p-1)` per (b, i, j) into `s_reducer`, shared across c-threads.
 template <typename T, int P_KIND, uint TG_C>
 kernel void cdist_backward(
-    constant T* x1 [[buffer(0)]],
-    constant T* x2 [[buffer(1)]],
-    constant T* grad [[buffer(2)]],
-    constant float* cdist [[buffer(3)]],
+    device const T* x1 [[buffer(0)]],
+    device const T* x2 [[buffer(1)]],
+    device const T* grad [[buffer(2)]],
+    device const float* cdist [[buffer(3)]],
     device T* out [[buffer(4)]],
     constant CdistBwdParams& params [[buffer(5)]],
     uint3 tid [[thread_position_in_grid]],
@@ -104,10 +104,10 @@ kernel void cdist_backward(
 #define REGISTER_CDIST_BACKWARD(T, P_KIND, TG_C)                        \
   template [[host_name("cdist_backward_" #T "_p" #P_KIND "_tg" #TG_C)]] \
   kernel void cdist_backward<T, P_KIND, TG_C>(                          \
-      constant T * x1 [[buffer(0)]],                                    \
-      constant T * x2 [[buffer(1)]],                                    \
-      constant T * grad [[buffer(2)]],                                  \
-      constant float* cdist [[buffer(3)]],                              \
+      device const T* x1 [[buffer(0)]],                                 \
+      device const T* x2 [[buffer(1)]],                                 \
+      device const T* grad [[buffer(2)]],                               \
+      device const float* cdist [[buffer(3)]],                          \
       device T* out [[buffer(4)]],                                      \
       constant CdistBwdParams& params [[buffer(5)]],                    \
       uint3 tid [[thread_position_in_grid]],                            \

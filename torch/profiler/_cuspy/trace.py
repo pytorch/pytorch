@@ -12,6 +12,7 @@ from typing import Any, cast
 import numpy as np
 
 import torch
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 # orjson serializes ~3-8x faster than stdlib json on large traces and emits bytes; not a
@@ -2487,11 +2488,7 @@ def merge_trace_window_into_chrome_trace(
         payload = _orjson.dumps(data)
     else:
         payload = json.dumps(data, separators=(",", ":")).encode()
-    # Encode once and write the whole buffer, gzipped when the path ends .gz (compresslevel=1
-    # favors throughput over size).
-    if output_path.endswith(".gz"):
-        with gzip.open(output_path, "wb", compresslevel=1) as f:
-            f.write(payload)
-    else:
-        with open(output_path, "wb") as f:
-            f.write(payload)
+    # Compression level 1 favors throughput over file size.
+    trace_file_opener = _get_trace_file_opener(output_path, compresslevel=1)
+    with trace_file_opener(output_path, "wb") as f:
+        f.write(payload)

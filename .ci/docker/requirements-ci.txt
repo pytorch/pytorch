@@ -10,9 +10,14 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-build==1.3.0
+build==1.5.0
 #Description: A simple, correct Python build frontend.
-#Pinned versions: 1.3.0
+#Pinned versions: 1.5.0
+#test that import:
+
+certifi==2026.10.23
+#Description: Mozilla CA bundle; pinned past the eMudhra CA key compromise
+#Pinned versions: 2026.10.23
 #test that import:
 
 click
@@ -31,7 +36,7 @@ coremltools==8.3 ; python_version == "3.12"
 #Pinned versions:
 #test that import:
 
-dill==0.3.7
+dill==0.3.7 ; python_version < "3.15"
 #Description: dill extends pickle with serializing and de-serializing for most built-ins
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
@@ -79,6 +84,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x" and p
 # dynamic libraries that are not discoverable by our build scripts.
 mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+# Cap mkl-static's OpenMP dependency to avoid pulling in incompatible UR (#201218).
+intel-openmp<2026.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
@@ -119,7 +126,6 @@ ninja==1.13.0
 #Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x" and platform_machine != "riscv64"
 numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and platform_machine != "riscv64"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
@@ -129,6 +135,9 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and pla
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
 #Pinned versions: 1.26.4
+#The riscv64 cross image (.ci/docker/ubuntu-cross-riscv/Dockerfile) pins the
+#Python 3.12 version by hand, because it installs into a cross environment
+#instead of from this file; bump both together.
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -138,10 +147,10 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and pla
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.23.2; python_version == "3.10"
 numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
-numpy==2.3.4; python_version >= "3.14"
+numpy==2.3.4; python_version == "3.14"
+numpy==2.4.6; python_version >= "3.15"
 
 pandas==2.0.3; python_version < "3.12"
 pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
@@ -171,7 +180,7 @@ optree==0.17.0 ; python_version >= "3.14"
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==12.3.0
+pillow==13.0.0
 #Description:  Python Imaging Library fork
 #Pinned versions: 11.0.0
 #test that import:
@@ -264,7 +273,8 @@ scikit-image==0.26.0 ; python_version >= "3.13" or platform_machine == "s390x"
 
 scipy==1.10.1 ; python_version <= "3.11"
 scipy==1.14.1 ; python_version > "3.11" and python_version < "3.14"
-scipy==1.16.2 ; python_version >= "3.14"
+scipy==1.16.2 ; python_version == "3.14"
+scipy==1.18.1 ; python_version >= "3.15"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -278,8 +288,7 @@ scipy==1.16.2 ; python_version >= "3.14"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions==4.12.2 ; python_version < "3.14"
-typing-extensions==4.15.0 ; python_version >= "3.14"
+typing-extensions==4.15.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -344,7 +353,7 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #test that import:
 
 lxml==5.3.0 ; python_version < "3.14"
-lxml==6.1.0 ; python_version >= "3.14"
+lxml==6.1.3 ; python_version >= "3.14"
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0
@@ -354,7 +363,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.21.0
+onnx==1.23.2
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
@@ -384,7 +393,7 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pip==26.1.2
+pip==26.2.2
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
@@ -412,7 +421,14 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
+fsspec==2026.9.0
+#Description: torch runtime dependency. Pinned here so the Linux images ship it
+# and the torch wheel install at test time finds it already satisfied, instead of
+# downloading the newest release on every run.
+#Pinned versions: 2026.9.0
+#test that import: distributed/checkpoint/test_fsspec.py
+
+cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin" and python_version < "3.15"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
 
@@ -425,7 +441,7 @@ setuptools-git-versioning==2.1.0
 # below, not by PyTorch itself; PyTorch uses scikit-build-core. Keep both
 # pinned independently.
 scikit-build==0.18.1
-scikit-build-core==1.0.0
+scikit-build-core==1.1.1
 pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI
@@ -434,7 +450,7 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.14.3
+aiohttp==3.14.4
 #Description: required for torch.distributed.debug
 
 spin==0.17

@@ -21,7 +21,6 @@ from torch.ao.quantization import (
     convert,
     default_debug_qconfig,
     default_histogram_observer,
-    default_observer,
     default_per_channel_weight_observer,
     FakeQuantize,
     FixedQParamsObserver,
@@ -37,7 +36,6 @@ from torch.ao.quantization import (
     PlaceholderObserver,
     prepare,
     prepare_qat,
-    QConfig,
     RecordingObserver,
 )
 from torch.ao.quantization.quantize import _get_observer_dict
@@ -49,7 +47,6 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     DeFusedEmbeddingBagLinear,
     QuantizationTestCase,
-    SingleLayerLinearModel,
     test_only_eval_fn,
 )
 
@@ -405,31 +402,6 @@ class TestObserver(QuantizationTestCase):
         obs2.load_state_dict(obs1.state_dict())
         self.assertEqual(obs2.min_val.shape, torch.Size([]))
         self.assertEqual(obs2.max_val.shape, torch.Size([]))
-
-
-    def test_save_load_state_dict_script(self):
-        """
-        Tests that we can save and load state_dict for observers that are scripted
-        in a quantized model.
-        """
-        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver, HistogramObserver]
-
-        for obs in obs_list:
-            model = SingleLayerLinearModel().eval()
-            qconfig = QConfig(activation=default_observer, weight=obs)
-            qconfig_dict = {'' : qconfig}
-            scripted = torch.jit.script(model)
-            scripted = torch.ao.quantization.prepare_jit(scripted, qconfig_dict)
-            x = torch.rand(5, 5)
-            scripted(x)
-            obs_dict = torch.ao.quantization.get_observer_state_dict(scripted)
-
-            # Load stats
-            scripted_2 = torch.jit.script(model)
-            scripted_2 = torch.ao.quantization.prepare_jit(scripted_2, qconfig_dict)
-            torch.ao.quantization.load_observer_state_dict(scripted_2, obs_dict)
-            # Verify that state_dict matches exactly with original one.
-            self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")

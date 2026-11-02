@@ -437,6 +437,8 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
           if (ptr_top_mask[c*out_stride_c] == index_shift) {
             ptr_bottom_diff[c] =
               static_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c*out_stride_c]);
+          } else {
+            ptr_bottom_diff[c] = scalar_t(0);
           }
           cached_index += blockDim.x;
         }
@@ -677,8 +679,6 @@ const Tensor& gradInput) {
   const int64_t out_stride_w = gradOutput.stride(-1);
 
   const Tensor indices = indices_.contiguous(memory_format);
-
-  gradInput.zero_();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "max_pool2d_with_indices_out_cuda_frame",

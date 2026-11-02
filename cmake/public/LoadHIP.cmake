@@ -152,27 +152,21 @@ if(WIN32)
     endif()
   endforeach()
 
-  # Reinstate GNU-equivalent optimization flags. The generated HIP compile
-  # rule's <FLAGS> includes CMAKE_HIP_FLAGS but, on this code path, does
-  # not include CMAKE_HIP_FLAGS_<CONFIG> (verified via build.ninja), so
-  # appending to the per-config variables is dead code. Inject the per-config
-  # flags into CMAKE_HIP_FLAGS instead, gated on CMAKE_BUILD_TYPE for
-  # single-config generators (Ninja, Makefiles). Without this, clang++
-  # falls back to -O0 and HIP kernels are unoptimized (~99% conv2d FP16
-  # perf regression on gfx1150; TheRock#5157, #183853).
-  if(NOT CMAKE_CONFIGURATION_TYPES)
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" _hip_cfg)
-    if(_hip_cfg STREQUAL "DEBUG")
-      string(APPEND CMAKE_HIP_FLAGS " -O0 -g")
-    elseif(_hip_cfg STREQUAL "RELWITHDEBINFO")
-      string(APPEND CMAKE_HIP_FLAGS " -O2 -DNDEBUG -g")
-    elseif(_hip_cfg STREQUAL "MINSIZEREL")
-      string(APPEND CMAKE_HIP_FLAGS " -Os -DNDEBUG")
-    else()  # Release or unset
-      string(APPEND CMAKE_HIP_FLAGS " -O3 -DNDEBUG")
+  # With C/CXX on clang-cl, CMake gives HIP no GNU per-config defaults: none
+  # before 4.3, and only the MSVC ones stripped above from 4.3 on. Without
+  # an -O flag clang++ compiles HIP kernels at -O0 (#183853). Supply the
+  # defaults CMake uses for GNU-frontend compilers, unless the configuration
+  # already sets an optimization level.
+  set(_hip_cfg_flags_DEBUG "-O0 -g")
+  set(_hip_cfg_flags_RELEASE "-O3 -DNDEBUG")
+  set(_hip_cfg_flags_MINSIZEREL "-Os -DNDEBUG")
+  set(_hip_cfg_flags_RELWITHDEBINFO "-O2 -g -DNDEBUG")
+  foreach(_cfg DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+    if(NOT CMAKE_HIP_FLAGS_${_cfg} MATCHES "(^| )-O")
+      string(STRIP "${_hip_cfg_flags_${_cfg}} ${CMAKE_HIP_FLAGS_${_cfg}}" CMAKE_HIP_FLAGS_${_cfg})
     endif()
-    unset(_hip_cfg)
-  endif()
+    unset(_hip_cfg_flags_${_cfg})
+  endforeach()
 endif()
 
 if(WIN32)
@@ -363,9 +357,11 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    # hipFile and amd_smi are Linux-only dependencies and ship with
+    # ROCm 7.14 and later, where they are required.
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
       find_package_and_print_version(hipfile REQUIRED)
+      find_package_and_print_version(amd_smi REQUIRED)
     endif()
   endif()
 
