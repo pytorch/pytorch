@@ -2028,6 +2028,12 @@ def get_triton_kernel_name(hop_kwargs: Mapping[str, Any]) -> str:
         raise AssertionError("Unknown triton kernel type")
 
 
+def get_triton_layout_constraint() -> str:
+    from torch._inductor import config
+
+    return config.triton_kernel_default_layout_constraint
+
+
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
@@ -2936,7 +2942,7 @@ register_user_kernel_hop(
             hop_kwargs["tma_descriptor_metadata"],
         ),
         get_kernel_name=get_triton_kernel_name,
-        functional_dense=triton_kernel_wrapper_functional_dense,
+        get_layout_constraint=get_triton_layout_constraint,
         reinplace_trigger=ReInplaceTrigger.TRITON_OPS,
         serializable=True,
     )

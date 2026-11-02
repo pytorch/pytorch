@@ -1975,13 +1975,16 @@ def decompose_user_kernel_wrapper_functional(graph):
         def _(match: Match, *args, user_kernel_hop=user_kernel_hop, **kwargs):
             hop_node = match.nodes[0]
             flat_args, spec = pytree.tree_flatten((args, kwargs))
+            # The impl that eager runs: clones plus the mutation HOP.
+            py_kernels = user_kernel_hop.functional.py_kernels
+            dense = py_kernels[torch._C.DispatchKey.CompositeExplicitAutograd]
 
             # NB: we combine (args, kwargs) into flat args for replacing.
             # This is replace_by_example uses make_fx which does not support
             # tracing a function with kwargs.
             def decomp(*flat_args):
                 args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return (user_kernel_hop.functional_dense(*args, **kwargs),)
+                return (dense(*args, **kwargs),)
 
             # pyrefly: ignore [bad-argument-type]
             replacement_nodes = match.replace_by_example(

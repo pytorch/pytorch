@@ -72,7 +72,11 @@ def _object_state(value: object) -> dict[str, object] | None:
     Limitation: any other object with __slots__ attributes, or a callable one (a
     functor), is keyed as itself, by identity unless its class defines equality and
     hashing: mutating it between launches reuses the kernel compiled for its old
-    contents, and a new object with the same contents is compiled again."""
+    contents, and a new object with the same contents is compiled again. Such an
+    object also stays in memory, with anything it holds, a tensor included
+    (constant_key does not look inside it): a side-table entry holds it for the life
+    of the process (see KernelSideTable), and the eager compile cache as long as the
+    host function lives (see cutedsl_user_kernel.py)."""
     cls = type(value)
     if (getattr(cls, "__module__", "") or "").startswith("cutlass"):
         return None
@@ -94,8 +98,9 @@ def constant_key(value: object) -> object:
     they are interchangeable: lists, tuples, dicts and objects (see _object_state)
     by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
     same), a cutlass Numeric by its type and Python value, other values by their own
-    equality. Any other unhashable value, and a value that contains itself, are
-    refused."""
+    equality. Any other unhashable value, a value that contains itself, and a tensor,
+    as the value or in a list, tuple, dict, dataclass field or plain-object attribute
+    of it, are refused."""
     return _ContentWalk().key(value)
 
 
@@ -139,6 +144,15 @@ class _ContentWalk:
         return results
 
     def key(self, value: object) -> object:
+        if isinstance(value, Tensor):
+            # Keyed by identity, a tensor would stay alive with its key, and it would
+            # reach the DSL without from_dlpack.
+            where = "".join(f.format(k) for f, k in self.path.values())
+            raise TypeError(
+                "a constant kernel argument holds a tensor"
+                + (f" at {where}" if where else "")
+                + ": pass each tensor as its own argument"
+            )
         if isinstance(value, (tuple, list)):
             items = self.visit(value, enumerate(value), "[{!r}]", self.key)
             return (type(value), tuple(items))
@@ -207,7 +221,11 @@ class KernelSideTable(Generic[KernelT]):
         self.lock = threading.Lock()
         # With dedupe_constant_args, equal constant args (see constant_key) share one
         # index, so a table that is never reset does not grow with every eager launch,
-        # and each entry is a snapshot of the args it was added with.
+        # and each entry is a snapshot of the args it was added with. A constant keyed
+        # by identity (see _object_state) still adds an entry per object, which such a
+        # table keeps, with the object, for the life of the process: each capture adds
+        # its constants, and captured graphs hold their indexes, so entries cannot be
+        # evicted.
         self._constant_args_index: dict[object, int] | None = (
             {} if dedupe_constant_args else None
         )
@@ -527,8 +545,10 @@ class UserKernelHOPInfo:
       may write in place.
     - Any other argument is the DSL's own; the passes only hand it on.
 
-    Despite its name, config.triton_kernel_default_layout_constraint sets the layout
-    constraint that Inductor applies to every registered DSL's mutation HOP.
+    The functional HOP's CompositeExplicitAutograd py_impl, which eager runs, must
+    call the mutation HOP once, on clones of the tensors named in
+    ``tensors_to_clone`` (functional_hop_dense does this). The post-grad
+    decomposition traces that impl, so a pair without one cannot be registered.
 
     The FX graph cache keys user kernels by source for Triton only
     (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
@@ -549,9 +569,11 @@ class UserKernelHOPInfo:
     get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
     # HOP kwargs -> kernel name, for logs and the reinplacing counters.
     get_kernel_name: Callable[[Mapping[str, Any]], str]
-    # The functional HOP's dense impl: the post-grad decomposition traces it into
-    # clones plus the mutation HOP.
-    functional_dense: Callable[..., dict[str, Any]]
+    # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
+    # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
+    # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
+    # one of this DSL's mutation HOP nodes.
+    get_layout_constraint: Callable[[], str]
     # Counts this DSL's reinplacing decisions.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
@@ -568,8 +590,11 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
     for hop in hops:
         if not isinstance(hop, UserKernelWrapperHOP):
             raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
-        if _user_kernel_hops.get(hop, info) is not info:
-            raise AssertionError(f"{hop} is already registered as a user-kernel HOP")
+        owner = _user_kernel_hops.get(hop, info)
+        if owner is not info:
+            raise RuntimeError(f"{hop} is already registered by the {owner.dsl} DSL")
+    if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+        raise TypeError(f"{info.functional} has no CompositeExplicitAutograd py_impl")
     for hop in hops:
         _user_kernel_hops[hop] = info
 
