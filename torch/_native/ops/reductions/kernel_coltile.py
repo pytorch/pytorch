@@ -82,7 +82,12 @@ def select_col_config(
 
 
 class PartialColumns:
-    """Combine partition-major states while coalescing adjacent column loads."""
+    """Combine partition-major states while coalescing adjacent column loads.
+
+    TileReduce's combine mode folds each output's partitions serially in one thread. This
+    kernel strides thread groups over partitions and merges them in shared memory, a second
+    schedule that would otherwise add smem and branching to TileReduce's shared body.
+    """
 
     def __init__(self, trait, tile_columns, nouts):
         # The tuned widths; each tiles the 128-thread block exactly.
