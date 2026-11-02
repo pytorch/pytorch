@@ -4962,11 +4962,28 @@ class TestPrecompileDynamoCapture(TestCase):
         )
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_inlined_breaking_helper_is_served_standalone(self):
+        # NGB resumes the inlined helper without making it an unreachable frame.
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            y2 = cap(self.model, self.x2)
+            y3 = cap(self.model, self.x3)
+            summary = cap.summary()
+        self.assertEqual(y2, fn(self.model, self.x2))
+        self.assertEqual(y3, fn(self.model, self.x3))
+        self.assertTrue(summary.complete, str(summary))
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "standalone"', f.read())
+        calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
+        self._serve_in_fresh_process(calls + calls[:1])
+
+    @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_frame_the_entry_cannot_reach_is_served_installed(self, backend):
-        # The graph break inside breaking_helper compiles it as a frame of its
-        # own, entered by an ordinary call rather than by a continuation name.
+        # With NGB off, breaking_helper compiles as its own unreachable frame,
+        # entered by an ordinary call rather than by a continuation name.
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend=backend) as cap:
             y2 = cap(self.model, self.x2)
