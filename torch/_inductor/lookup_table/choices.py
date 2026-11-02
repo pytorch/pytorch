@@ -226,7 +226,7 @@ class LookupTableChoices(InductorChoices):
         """
         lookup_table = self._get_lookup_table()
         if not lookup_table:
-            log.debug("Lookup table: no table configured or no CUDA/XPU device")
+            log.debug("Lookup table: no table configured or no accelerator available")
             return {}
 
         # Try both key variants: device-specific first, then device-agnostic
