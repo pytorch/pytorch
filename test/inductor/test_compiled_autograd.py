@@ -3228,6 +3228,37 @@ main()
         """
         self.run_as_subprocess(script)
 
+    @parametrize("aliased", [False, True])
+    def test_callback_method_descriptor(self, aliased):
+        called = []
+
+        def callback_final():
+            called.append("called")
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                if aliased:
+                    queue_callback = (
+                        torch.autograd.Variable._execution_engine.queue_callback
+                    )
+                    queue_callback(callback_final)
+                else:
+                    torch.autograd.Variable._execution_engine.queue_callback(
+                        callback_final
+                    )
+                return grad * 3
+
+        x = torch.ones(3, requires_grad=True)
+        with compiled_autograd._enable(make_compiler_fn(backend="eager")):
+            MyFunc.apply(x).sum().backward()
+        self.assertEqual(x.grad, torch.full_like(x, 3))
+        self.assertEqual(called, ["called"])
+
     def test_callback_graph_break_throws_error(self):
         called = [0]
 

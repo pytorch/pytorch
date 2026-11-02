@@ -477,6 +477,10 @@ def is_reuse_eligible(
     go stale from mutations.
     """
     if not has_reuse_hash_fn:
+        if tracing_info.has_builtin_method_keys:
+            # Stamp-out does not replay remapped receiver-alias guards. Trace
+            # each region to retain its runtime identity constraints.
+            return False
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(
                 traceback.format_list(tracing_info.side_effect_stack)

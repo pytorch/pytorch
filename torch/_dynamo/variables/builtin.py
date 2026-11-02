@@ -90,6 +90,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    check_setattr_args,
     GetSet,
     Member,
     Method,
@@ -525,7 +526,9 @@ class BaseBuiltinVariable(VariableTracker):
                 )
                 items[ConstantVariable.create(key)] = value_vt
             return variables.MappingProxyVariable(variables.ConstDictVariable(items))
-        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+        if isinstance(
+            attr, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
             from .builder import VariableBuilder
@@ -533,6 +536,10 @@ class BaseBuiltinVariable(VariableTracker):
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
                 owner = VariableTracker.build(tx, attr.__objclass__)
+            if isinstance(attr, types.WrapperDescriptorType):
+                return VariableBuilder.create_internal_wrapper_descriptor(
+                    attr, owner=owner, source=source
+                )
             return VariableBuilder.create_internal_method_descriptor(
                 attr, owner=owner, source=source
             )
@@ -1953,14 +1960,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
-            if len(args) != 3:
-                raise AssertionError(
-                    f"object.__setattr__ expects 3 args, got {len(args)}"
+            if not args:
+                raise_type_error(
+                    tx, "descriptor '__setattr__' of 'object' object needs an argument"
                 )
-            if len(kwargs) != 0:
-                raise AssertionError(
-                    f"object.__setattr__ expects no kwargs, got {len(kwargs)}"
-                )
+            check_setattr_args(tx, args[1:], kwargs)
             obj, name_var, val = args
             obj = obj.realize()
             if (
@@ -2628,6 +2632,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_order_guard(tx)
         if isinstance(
             args[0],
             (
@@ -3583,7 +3589,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
+            obj = args[0].realize()
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
