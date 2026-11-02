@@ -603,15 +603,25 @@ void GenericActivityProfiler::toggleCollectionDynamic(const bool enable) {
   //   - BEFORE we enable
   //
   // Both to prevent the synchronization event from showing up in traces.
+  //
+  // A trace that did not allow GPU tracing must not arm it here either; its
+  // stop would never disarm it.
+  const bool traceGpu = shouldTraceGpu();
   if (!enable) {
     for (auto& session : sessions_) {
       session->toggleCollectionDynamic(enable);
     }
-    disableGpuTracing();
+    if (traceGpu) {
+      disableGpuTracing();
+    }
   }
-  synchronizeGpuDevice();
+  if (traceGpu) {
+    synchronizeGpuDevice();
+  }
   if (enable) {
-    enableGpuTracing();
+    if (traceGpu) {
+      enableGpuTracing();
+    }
     for (auto& session : sessions_) {
       session->toggleCollectionDynamic(enable);
     }

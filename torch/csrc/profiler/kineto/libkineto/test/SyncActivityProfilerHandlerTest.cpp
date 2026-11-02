@@ -44,6 +44,7 @@ class GpuHookCounter : public GenericActivityProfiler {
   int enableCalls{0};
   int disableCalls{0};
   int processCalls{0};
+  int syncCalls{0};
 
  protected:
   void enableGpuTracing() override {
@@ -54,6 +55,9 @@ class GpuHookCounter : public GenericActivityProfiler {
   }
   void processGpuActivities(ActivityLogger& /*logger*/) override {
     ++processCalls;
+  }
+  void synchronizeGpuDevice() override {
+    ++syncCalls;
   }
 };
 
@@ -86,4 +90,33 @@ TEST(SyncActivityProfilerHandler, GpuTracingFollowsEachTraceConfig) {
   EXPECT_EQ(profiler.enableCalls, 1);
   EXPECT_EQ(profiler.disableCalls, 1);
   EXPECT_EQ(profiler.processCalls, 1);
+}
+
+TEST(SyncActivityProfilerHandler, DynamicToggleFollowsTraceConfig) {
+  GpuHookCounter profiler;
+  SyncActivityProfilerHandler handler(profiler);
+
+  auto runToggledTrace = [&](const std::string& configStr) {
+    Config cfg;
+    EXPECT_TRUE(cfg.parse(configStr));
+    cfg.validate(system_clock::now());
+    handler.prepareTrace(cfg);
+    handler.startTrace();
+    handler.toggleCollectionDynamic(false);
+    handler.toggleCollectionDynamic(true);
+    handler.stopTrace();
+  };
+
+  // Toggling a trace that opts out never reaches the GPU hooks.
+  runToggledTrace("GPU_TRACING_ENABLED=false");
+  EXPECT_EQ(profiler.enableCalls, 0);
+  EXPECT_EQ(profiler.disableCalls, 0);
+  EXPECT_EQ(profiler.syncCalls, 0);
+
+  // A GPU trace still toggles. Configure and the toggle each enable, and the
+  // toggle and stop each disable.
+  runToggledTrace("");
+  EXPECT_EQ(profiler.enableCalls, 2);
+  EXPECT_EQ(profiler.disableCalls, 2);
+  EXPECT_EQ(profiler.syncCalls, 2);
 }
