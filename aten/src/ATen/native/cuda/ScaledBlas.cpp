@@ -502,6 +502,11 @@ _scaled_gemm(
       swizzle_choice_a,
       swizzle_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
+  if (swizzle_choice_a == SwizzleType::SWIZZLE_MNxK4 || swizzle_choice_b == SwizzleType::SWIZZLE_MNxK4) {
+    TORCH_CHECK_VALUE(
+        args.transa == 't' && args.transb == 'n',
+        "packed MNxK4 scaling requires row-major mat_a and column-major mat_b");
+  }
 #ifdef USE_ROCM
   // hipBLASLt only has solutions for every layout permutation with tensorwise scaling;
   // row-wise and block-wise bind their scale vectors to the operand orientation and are
@@ -1005,12 +1010,6 @@ Tensor& _scaled_mnk4(
   TORCH_CHECK_VALUE(
       out.scalar_type() == kBFloat16 || out.scalar_type() == kHalf || out.scalar_type() == kFloat,
       "packed MNxK4 output dtype must be BFloat16, Float16, or Float32, got ", out.scalar_type());
-  TORCH_CHECK_VALUE(
-      scaled_blas::is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
-      "mat_a and mat_b must be float8_e4m3fn or float8_e5m2 tensors, with at least one float8_e4m3fn input, got: ",
-      mat_a.scalar_type(),
-      " and ",
-      mat_b.scalar_type());
   const auto packed_k = scaling_type == ScalingType::BlockWise1x32 ? 128 : 512;
   // Min block size 16, M/N padded to 4, K padded to 128 for 1x32 mode or 512 for 1x128 mode
   const auto expected_a_elems = 16 * ceil_div<int64_t>(mat_a.size(0), 4) * ceil_div<int64_t>(mat_a.size(1), packed_k);
