@@ -23,14 +23,19 @@ if TYPE_CHECKING:
     from torch._higher_order_ops.cutedsl_kernel_wrap import CuteDSLHostFnInfo
 
 
-# host function -> {argument signature -> compiled function}
+# host function -> {argument signature -> compiled function}. Nothing is evicted: a
+# compile's CUDA library is unloaded once it is freed, while a CUDA graph that
+# captured a launch of it still runs its kernel. A constant keyed by identity (see
+# _object_state in user_kernel_hop.py) made for each launch therefore compiles each
+# time and stays in memory, with its compile, as long as the host function does.
 _compiled: weakref.WeakKeyDictionary[
     Callable[..., Any], dict[tuple[Any, ...], Any]
 ] = weakref.WeakKeyDictionary()
 
 # host function -> {(runtime argument names, constants' key) -> launcher}: the
 # launchers eager launches reuse. They hold their host functions, so this keeps them
-# alive, as the side table does for every host function wrap_cutedsl wraps.
+# alive, as the side table does for every host function wrap_cutedsl wraps. Like
+# _compiled, it evicts nothing.
 _eager_launchers: dict[
     Callable[..., Any], dict[tuple[Any, ...], "CuteDSLKernelLauncher"]
 ] = {}
@@ -234,6 +239,7 @@ class CuteDSLKernelLauncher:
         ``values`` and ``stream`` if it is missing."""
         import cutlass.cute as cute
 
+        from torch._higher_order_ops.user_kernel_hop import _snapshot
         from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 
         capability = torch.cuda.get_device_capability(device)
@@ -244,9 +250,14 @@ class CuteDSLKernelLauncher:
             with CUTEDSL_COMPILE_LOCK:
                 compiled = per_fn.get(shared_key)
                 if compiled is None:
+                    # The host code that the compile runs can change a constant
+                    # (cache a layout on a kernel object, say), so it compiles
+                    # copies: the bound constants, in generated code the side
+                    # table's own snapshots, keep the contents they were keyed by.
+                    fixed = {k: _snapshot(v) for k, v in self._fixed_args.items()}
                     compile_args = dict(zip(self.arg_names, values))
                     compile_args[self._stream_param] = stream
-                    compiled = cute.compile(self.fn, **self._fixed_args, **compile_args)
+                    compiled = cute.compile(self.fn, **fixed, **compile_args)
                     per_fn[shared_key] = compiled
         self._compiled[key] = compiled
         return compiled

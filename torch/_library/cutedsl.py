@@ -12,7 +12,9 @@ if TYPE_CHECKING:
 
 def _jit_executor_name(fn: Callable[..., Any]) -> str | None:
     # @cute.jit and @cute.kernel wrappers close over the name of the DSL entry point
-    # they call: "_func" for host functions, "_kernel_helper" for device kernels.
+    # they call: "_func" for host functions, "_kernel_helper" for device kernels. A
+    # functools.wraps wrapper of one (a decorator, torch.compiler.disable) copies its
+    # _dsl_cls but closes over no such name.
     for name, cell in zip(fn.__code__.co_freevars, fn.__closure__ or ()):
         if name == "executor_name":
             try:
@@ -33,7 +35,7 @@ def is_cutedsl_jit_function(obj: object) -> bool:
         from cutlass.cutlass_dsl.cutlass import CuTeDSL
     except ImportError:
         return False
-    return issubclass(dsl_cls, CuTeDSL) and _jit_executor_name(obj) != "_kernel_helper"
+    return issubclass(dsl_cls, CuTeDSL) and _jit_executor_name(obj) == "_func"
 
 
 def is_traceable_cutedsl_wrapper(obj: object) -> bool:
@@ -82,6 +84,13 @@ def wrap_cutedsl(
     cannot see a raw call of a host function. Dynamo (``torch.compile``, strict
     ``torch.export``) captures a call of the wrapper as well as a raw call written as
     for eager, with ``from_dlpack(t)`` tensors and ``cutlass.torch.current_stream()``.
+
+    A bound ``@cute.jit`` method or a kernel object (one whose class's ``__call__``
+    is ``@cute.jit``) cannot be wrapped: wrap a ``@cute.jit`` function that takes
+    the object as a ``cutlass.Constexpr`` parameter and calls the method on it, and
+    pass the object to that wrapper. Like a dataclass instance or a plain object, a
+    kernel object is keyed by its attributes: equal objects, such as one built for
+    each call, share one compile, and one mutated between calls is compiled again.
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
     of the returned wrapper do not pass it, because the kernel is launched on the
@@ -147,7 +156,9 @@ def wrap_cutedsl(
             "wrap_cutedsl does not support bound methods or kernel objects (got "
             f"{bound.__qualname__}): instead, wrap a @cute.jit function that takes "
             "the object as a cutlass.Constexpr parameter and calls the method on it, "
-            "and pass the object to that wrapper"
+            "and pass the object to that wrapper, which keys a kernel object by its "
+            "attributes: equal objects share one compile, and one mutated between "
+            "calls is compiled again"
         )
     if not is_cutedsl_jit_function(host_fn):
         raise RuntimeError(

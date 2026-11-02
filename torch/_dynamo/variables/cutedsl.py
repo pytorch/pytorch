@@ -22,7 +22,7 @@ import inspect
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
-from typing_extensions import Never
+from typing_extensions import Never, TypeIs
 
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
@@ -54,6 +54,18 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._guards import Source
 
+    from .dicts import ConstDictVariable
+
+
+def _is_dict(val: VariableTracker) -> "TypeIs[ConstDictVariable]":
+    """Whether ``val`` is a dict or an OrderedDict (not of another subclass), whose
+    items leaves and specialize_nested walk like those of a tuple or list, and so
+    does constant_object for one made in the region, which has no object to guard
+    on."""
+    from .dicts import ConstDictVariable, OrderedDictVariable
+
+    return type(val) in (ConstDictVariable, OrderedDictVariable)
+
 
 class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
@@ -84,26 +96,33 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         from .lists import BaseListVariable
 
         # bind_args walks each argument here first, so specialize_nested and
-        # constant_object only see lists that do not hold themselves.
+        # constant_object only see lists and dicts that do not hold themselves.
         def walk(
-            val: VariableTracker, path: str, lists: dict[int, str]
+            val: VariableTracker, path: str, containers: dict[int, str]
         ) -> list[VariableTracker]:
             realized = val.realize()
-            if not isinstance(realized, BaseListVariable):
+            if isinstance(realized, BaseListVariable):
+                steps = [(f"[{i}]", item) for i, item in enumerate(realized.items)]
+            elif _is_dict(realized):
+                keys = [k.vt for k in realized.items]
+                steps = [(f".keys()[{i}]", k) for i, k in enumerate(keys)]
+                values = realized.items.values()
+                steps += [(f".values()[{i}]", v) for i, v in enumerate(values)]
+            else:
                 # An object constant's contents are checked on the real object, in
                 # guard_contents.
                 return [val]
-            if id(realized) in lists:
+            if id(realized) in containers:
                 self.raise_unsupported(
                     "a constant kernel argument of type "
                     f"{realized.python_type_name()} refers to itself through "
-                    f"{path[len(lists[id(realized)]) :]}"
+                    f"{path[len(containers[id(realized)]) :]}"
                 )
-            lists = {**lists, id(realized): path}
+            containers = {**containers, id(realized): path}
             return [
                 leaf
-                for i, item in enumerate(realized.items)
-                for leaf in walk(item, f"{path}[{i}]", lists)
+                for step, item in steps
+                for leaf in walk(item, path + step, containers)
             ]
 
         return walk(val, "", {})
@@ -112,17 +131,43 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         self, variable: "CuteDSLKernelVariable", val: VariableTracker
     ) -> VariableTracker:
         from .lists import BaseListVariable
+        from .user_defined import UserDefinedObjectVariable
 
         val = val.realize()
         if isinstance(val, BaseListVariable):
+            items = [self.specialize_nested(variable, item) for item in val.items]
+            if isinstance(val, UserDefinedObjectVariable):
+                # A namedtuple or a list subclass, whose variable clone() cannot copy.
+                return type(val)(val.value, items=items, source=val.source)
+            return val.clone(items=items)
+        if _is_dict(val):
             return val.clone(
-                items=[self.specialize_nested(variable, item) for item in val.items]
+                items={
+                    k: self.specialize_nested(variable, v) for k, v in val.items.items()
+                }
             )
         return variable.specialize_symbolic(val)
 
-    def cute_tensor_arg(self, val: VariableTracker) -> VariableTracker | None:
+    def cute_tensor_arg(
+        self, name: str, key: str, val: VariableTracker
+    ) -> VariableTracker | None:
         val = val.realize()
-        return val.tensor if isinstance(val, CuteDSLTensorVariable) else None
+        if not isinstance(val, CuteDSLTensorVariable):
+            return None
+
+        def exprs(layout: tuple[object, ...]) -> list[object]:
+            # Each symbolic value as its expression under the guards so far, so
+            # that comparing two layouts adds no guards.
+            return [v.node.expr if isinstance(v, torch.SymInt) else v for v in layout]
+
+        if exprs(_layout(val.tensor)) != exprs(val.layout):
+            self.raise_unsupported(
+                f"{name}(): the tensor passed to from_dlpack for {key!r} changed its "
+                "size, stride or storage offset in place after from_dlpack (with an "
+                "in-place view op such as t_() or unsqueeze_()); call from_dlpack "
+                "after the change"
+            )
+        return val.tensor
 
     def is_current_stream(
         self, val: VariableTracker, tx: "InstructionTranslatorBase"
@@ -164,26 +209,42 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         val: VariableTracker,
         tx: "InstructionTranslatorBase",
     ) -> Any:
-        """The value of a constant argument: a Python constant; an object from
-        outside the region (a config object, a cutlass Numeric value, a function or
-        class), passed as itself, which the side table snapshots, and guarded so
-        that the graph only runs for an equal object (see guard_contents); or a
-        tuple or list of these."""
+        """The value of a constant argument, which the side table snapshots: a
+        Python literal; a value from outside the region, guarded so that the graph
+        only runs for an equal one (see guard_contents), which is passed as itself
+        (a config object, a kernel object, a cutlass Numeric value, a function or
+        class) or as the copy Dynamo rebuilds from its variable (a dict); a tuple or
+        list, or a dict or OrderedDict made in the region, of these; or another
+        Python constant made in the region (a namedtuple, a frozenset, a
+        functools.partial), with each value from outside the region in it guarded
+        in the same way."""
+        from .constant import ConstantVariable
         from .lists import BaseListVariable
+
+        def constant(item: VariableTracker) -> Any:
+            return self.constant_object(variable, key, item, tx)
+
+        def guard_sourced(item: VariableTracker) -> None:
+            if item.source is not None:
+                constant(item)
 
         val = val.realize()
         if isinstance(val, BaseListVariable) and val.python_type() in (tuple, list):
-            return val.python_type()(
-                self.constant_object(variable, key, item, tx) for item in val.items
-            )
+            return val.python_type()(constant(item) for item in val.items)
+        if _is_dict(val) and val.source is None:
+            items = {constant(k.vt): constant(v) for k, v in val.items.items()}
+            return val.python_type()(items)
         if val.is_python_constant():
             value = val.as_python_constant()
-            # A function or class from outside the region is passed as itself and
-            # guarded on its identity below: Dynamo's own guard on a function checks
-            # only its code, which another function made by the same def shares.
-            if val.source is None or not (
-                inspect.isfunction(value) or inspect.isclass(value)
-            ):
+            if ConstantVariable.is_base_literal(value):
+                return value
+            # Any other constant is guarded on what the side table keys it by,
+            # below or, for one made in the region, through each value from outside
+            # the region in it. Dynamo's own guards can miss part of it: a dict's
+            # keys and their order, or a function's identity (they check its code,
+            # which another function made by the same def shares).
+            if val.source is None:
+                VariableTracker.visit(guard_sourced, val)
                 return value
         name = cutedsl_kernel_name(variable.kernel)
         obj = val.get_real_python_backed_value()
@@ -224,9 +285,10 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         snapshots it by (see constant_key): a list, tuple or dict on its type and
         length or keys, an object (see _object_state) on its type and, for a plain
         object, its attribute names, then each item, dict key or attribute in turn;
-        a Python constant on its value; anything else (a function, a class, a
-        cutlass value) on its identity. A change made to the object between calls
-        then recompiles, as eager recompiles the kernel for it, instead of launching
+        a Python literal, a frozenset, a range or a slice on its value (constant_key
+        keys these by equality); anything else (a function, a class, a cutlass
+        value) on its identity. A change made to the object between calls then
+        recompiles, as eager recompiles the kernel for it, instead of launching
         with the old snapshot.
 
         Graph-breaks on what the snapshot cannot stand for: a value that the region
@@ -265,6 +327,8 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             )
         if ConstantVariable.is_base_literal(value):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+        elif isinstance(value, (frozenset, range, slice)):
+            install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
         elif isinstance(value, (tuple, list)):
             install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             for i, item in enumerate(value):
@@ -474,6 +538,13 @@ def _current_stream(
     return state.cur_stream_stack[-1], state.cur_stream_id()
 
 
+def _layout(tensor: VariableTracker) -> tuple[object, ...]:
+    """The size, stride and storage offset of ``tensor``, as it is at this point of
+    the trace."""
+    fake = tensor.as_proxy().node.meta["example_value"]
+    return (*fake.size(), *fake.stride(), fake.storage_offset())
+
+
 class CuteDSLFromDlpackVariable(VariableTracker):
     """``cutlass.cute.runtime.from_dlpack``, whose result stands for its tensor in a
     raw call. ``assumed_align`` is accepted and dropped: the launch compiles the
@@ -537,21 +608,28 @@ class CuteDSLFromDlpackVariable(VariableTracker):
                     f"from_dlpack(): {key}= is not supported; PT2 makes the cute "
                     "tensor itself, accepting only assumed_align"
                 )
-        return CuteDSLTensorVariable(tensor, align)
+        return CuteDSLTensorVariable(tensor, align, _layout(tensor))
 
 
 class CuteDSLTensorVariable(VariableTracker):
     """``from_dlpack(tensor)`` made in the compiled region: stands for ``tensor`` in a
-    raw call, whose launcher makes the cute tensor. It cannot be read in the region:
-    an attribute or method of it (its element type, shape, ...) graph-breaks, and the
-    real cute tensor is made at the break, as wherever the value leaves the graph."""
+    raw call, whose launcher makes the cute tensor, with the ``layout`` (see _layout)
+    it had at from_dlpack: a call after an in-place view op changed it graph-breaks.
+    It cannot be read in the region: an attribute or method of it (its element type,
+    shape, ...) graph-breaks, and the real cute tensor is made at the break, as
+    wherever the value leaves the graph."""
 
     def __init__(
-        self, tensor: VariableTracker, assumed_align: int | None, **kwargs: Any
+        self,
+        tensor: VariableTracker,
+        assumed_align: int | None,
+        layout: tuple[object, ...],
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.tensor = tensor
         self.assumed_align = assumed_align
+        self.layout = layout
 
     def python_type(self) -> type:
         # Already imported: it defines from_dlpack, which made this value.

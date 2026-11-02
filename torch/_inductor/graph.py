@@ -2101,14 +2101,12 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and is_user_kernel_mutation_hop(n.target)
-                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+                and (info := get_user_kernel_hop_info(n.target)) is not None
+                and n.target is info.mutation
+                and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
-                debug("user_defined_triton_kernel_layout_constraints")
-                if (
-                    config.triton_kernel_default_layout_constraint
-                    == "needs_fixed_stride_order"
-                ):
+                debug("user_defined_kernel_layout_constraints")
+                if constraint == "needs_fixed_stride_order":
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
@@ -2129,7 +2127,8 @@ class GraphLowering(torch.fx.Interpreter):
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
-                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                        f"Unknown layout constraint for {info.dsl} user kernels: "
+                        f"{constraint}"
                     )
             else:
                 debug("")
@@ -3238,17 +3237,23 @@ class GraphLowering(torch.fx.Interpreter):
                 },
                 payload_fn=lambda: wrapper_code.value,
             )
+        # Each becomes a global of the module, so a name in two would lose a value.
+        attrs: dict[str, Any] = {}
+        for named in (
+            self.constants,
+            self.torchbind_constants,
+            self.opaque_value_type_classes,
+            self.wrapper_code.user_defined_cutedsl_launchers,
+        ):
+            if clash := attrs.keys() & named.keys():
+                raise AssertionError(f"module attributes bound twice: {sorted(clash)}")
+            attrs.update(named)
         with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,
                 linemap=linemap,  # type: ignore[arg-type]
-                attrs={
-                    **self.constants,
-                    **self.torchbind_constants,
-                    **self.opaque_value_type_classes,
-                    **self.wrapper_code.user_defined_cutedsl_launchers,
-                },
+                attrs=attrs,
                 kernel_sources=self.wrapper_code.kernel_sources,
             )
         self.cache_key = key
