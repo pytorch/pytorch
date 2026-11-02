@@ -59,7 +59,7 @@ def select_col_config(
     npar: int | None = None,
     vec: int | None = None,
 ) -> ColConfig:
-    """Select stage-one column geometry; explicit launch arguments override it.
+    """Select column geometry and partial layout; explicit launch arguments override the geometry.
 
     Whether a view reaches the column kernel at all is `kernel_general._col_route_ok`'s call.
     """
@@ -83,13 +83,8 @@ def select_col_config(
 class PartialColumns:
     """Combine partition-major states while coalescing adjacent column loads."""
 
-    def __init__(self, trait, columns, partitions, rows, tile_columns, nouts):
-        if tile_columns not in (8, 16, 32):
-            raise ValueError(f"combine columns must be 8, 16 or 32, got {tile_columns}")
+    def __init__(self, trait, tile_columns, nouts):
         self.trait = trait
-        self.columns = columns
-        self.partitions = partitions
-        self.rows = rows
         self.tile_columns = tile_columns
         self.threads = 128
         self.groups = self.threads // tile_columns
@@ -97,37 +92,41 @@ class PartialColumns:
 
     @property
     def cache_sig(self):
-        return (
-            self.columns,
-            self.partitions,
-            self.rows,
-            self.tile_columns,
-            self.nouts,
-        )
+        return (self.tile_columns, self.nouts)
 
     @cute.jit
-    def __call__(self, ins: list, outs: list, stream):
-        self.kernel(ins, outs).launch(
-            grid=[-(-self.columns // self.tile_columns), 1, 1],
+    def __call__(
+        self,
+        ins: list,
+        outs: list,
+        columns: Int32,
+        rows: Int32,
+        partitions: Int32,
+        stream,
+    ):
+        self.kernel(ins, outs, columns, rows, partitions).launch(
+            grid=[cute.ceil_div(columns, self.tile_columns), 1, 1],
             block=[self.threads, 1, 1],
             stream=stream,
         )
 
     @cute.kernel
-    def kernel(self, ins: list, outs: list):
+    def kernel(
+        self, ins: list, outs: list, columns: Int32, rows: Int32, partitions: Int32
+    ):
         tx, _, _ = cute.arch.thread_idx()
         bx, _, _ = cute.arch.block_idx()
         lane = Int32(tx) % Int32(self.tile_columns)
         group = Int32(tx) // Int32(self.tile_columns)
         col = Int32(bx) * Int32(self.tile_columns) + lane
-        safe_col = col if col < Int32(self.columns) else Int32(0)
+        safe_col = col if col < columns else Int32(0)
         trait = self.trait
         combine, fdtypes = trait.combine, trait.fdtypes
         nf = const_expr(trait.nfields)
         identity = trait.init()
         acc = identity
-        for p in cutlass.range(group, self.partitions, self.groups):
-            offset = Int64(p) * Int64(self.columns) + Int64(safe_col)
+        for p in cutlass.range(group, partitions, self.groups):
+            offset = Int64(p) * Int64(columns) + Int64(safe_col)
             acc = combine(acc, tuple(fdtypes[f](ins[f][offset]) for f in range(nf)))
         smem = cutlass.utils.SmemAllocator()
         partials = [
@@ -147,8 +146,8 @@ class PartialColumns:
                     acc, tuple(fdtypes[f](partials[f][offset]) for f in range(nf))
                 )
         # Keep the Python trait out of runtime branch state.
-        result = trait.project(acc, trait.acc(self.rows))
-        if (group == Int32(0)) & (col < Int32(self.columns)):
+        result = trait.project(acc, trait.acc(rows))
+        if (group == Int32(0)) & (col < columns):
             if const_expr(self.nouts == 1):
                 outs[0][col] = outs[0].element_type(result)
             else:
@@ -171,6 +170,8 @@ def reduce_col_tile(
     vec: int | None = None,
 ) -> torch.Tensor:
     """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
+    if x.dim() != 2:
+        raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -193,6 +194,8 @@ def reduce_col_tile_2out(
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 0 of contiguous 2D x to two outputs per column, like reduce_col_tile."""
+    if x.dim() != 2:
+        raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -216,6 +219,8 @@ def reduce_batched_col_tile(
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 1 of contiguous 3D x to nouts (B, C) outputs."""
+    if x.dim() != 3:
+        raise AssertionError(f"want 3D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
         trait, trait_key, x, out_dtypes, nouts, threads_per_block, npar, vec
     )
@@ -280,7 +285,14 @@ def _reduce_col_tile(
     q, nrows = Int32(-(-R // npar)), Int32(R)
 
     single = npar == 1
+    if cfg.partial_layout not in ("partition", "column"):
+        raise ValueError(f"unknown partial layout {cfg.partial_layout!r}")
     pc = cfg.partial_layout == "partition"
+    width = cfg.combine_columns
+    if width not in (0, 8, 16, 32):
+        raise ValueError(f"combine_columns must be 0, 8, 16 or 32, got {width}")
+    if width and not pc:
+        raise ValueError("combine_columns reads partition-major partials")
     op = tile.TileReduce(
         trait,
         torch2cute[kernel_x.dtype],
@@ -364,20 +376,16 @@ def _reduce_col_tile(
     if single:
         return tuple(outs)
 
-    if cfg.combine_columns:
-        op2 = PartialColumns(trait, total, npar, R, cfg.combine_columns, nouts)
+    if width:
+        op2 = PartialColumns(trait, width, nouts)
         pdt = tuple(pp.dtype for pp in parts)
         key2 = (
-            (
-                "coltile2t",
-                trait_key,
-                tuple(out_dtypes[:nouts]),
-                pdt,
-                str(x.device),
-            )
-            + op2.cache_sig
-            + (("col_config", cfg),)
-        )
+            "coltile2t",
+            trait_key,
+            tuple(out_dtypes[:nouts]),
+            pdt,
+            str(x.device),
+        ) + op2.cache_sig
         build2 = lambda: _compile(  # noqa: E731
             op2,
             [
@@ -388,14 +396,18 @@ def _reduce_col_tile(
                 _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
                 for out in kernel_outs
             ],
+            Int32(total),
+            nrows,
+            Int32(npar),
             _stream(),
         )
+        ins = [_L.read_only(pp) for pp in parts]
         cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
-            [_L.read_only(pp) for pp in parts], kernel_outs, _stream()
+            ins, kernel_outs, Int32(total), nrows, Int32(npar), _stream()
         )
         return tuple(outs)
 
-    # Fold npar partials and project with true R; use threads per column only when C fills the GPU.
+    # Fold npar partials and project with true R; partition-major partials use threads per column.
     if not pc:
         s2 = ReduceBlock(
             trait,
