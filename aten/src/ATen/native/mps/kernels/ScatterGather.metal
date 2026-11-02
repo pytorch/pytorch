@@ -253,22 +253,20 @@ kernel void scatter_reduce_dense(
 
 // Strided atomic scatter. Generic for non-contiguous output/src/index.
 template <typename T, typename index_t, ScatterReduceOp Op>
-kernel void scatter_reduce_strided(
-    device T* output [[buffer(0)]],
-    device const T* src [[buffer(1)]],
-    device const index_t* index [[buffer(2)]],
-    constant long* index_sizes [[buffer(3)]],
-    constant long* output_strides [[buffer(4)]],
-    constant long* src_strides [[buffer(5)]],
-    constant long* index_strides [[buffer(6)]],
-    constant uint3& ndim_dim [[buffer(7)]],
-    constant long& dim_size [[buffer(8)]],
-    constant long& tid_offset [[buffer(9)]],
-    device ErrorMessages* error_buf [[buffer(10)]],
-    uint thread_index [[thread_position_in_grid]]) {
+inline bool scatter_reduce_strided_impl(
+    device T* output,
+    device const T* src,
+    device const index_t* index,
+    constant long* index_sizes,
+    constant long* output_strides,
+    constant long* src_strides,
+    constant long* index_strides,
+    constant uint3& ndim_dim,
+    constant long& dim_size,
+    device ErrorMessages* error_buf,
+    long tid) {
   const uint ndim = ndim_dim.x;
   const uint dim = ndim_dim.y;
-  const long tid = long(thread_index) + tid_offset;
 
   ::metal::array<long, max_ndim> pos;
   pos_from_thread_index<long>(tid, &pos[0], index_sizes, ndim);
@@ -284,13 +282,69 @@ kernel void scatter_reduce_strided(
         long(dim),
         " with size ",
         dim_size);
-    return;
+    return false;
   }
 
   const long src_offs = offset_from_coord<long>(&pos[0], src_strides, ndim);
   pos[dim] = idx;
   const long out_offs = offset_from_coord<long>(&pos[0], output_strides, ndim);
   ScatterAtomicApply<T, Op>::apply(output, out_offs, src[src_offs]);
+  return true;
+}
+
+template <typename T, typename index_t, ScatterReduceOp Op, bool serial>
+kernel void scatter_reduce_strided(
+    device T* output [[buffer(0)]],
+    device const T* src [[buffer(1)]],
+    device const index_t* index [[buffer(2)]],
+    constant long* index_sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* src_strides [[buffer(5)]],
+    constant long* index_strides [[buffer(6)]],
+    constant uint3& ndim_dim [[buffer(7)]],
+    constant long& dim_size [[buffer(8)]],
+    constant long& tid_offset [[buffer(9)]],
+    device ErrorMessages* error_buf [[buffer(10)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long tid = long(thread_index) + tid_offset;
+  if IF_CONSTEXPR (!serial) {
+    scatter_reduce_strided_impl<T, index_t, Op>(
+        output,
+        src,
+        index,
+        index_sizes,
+        output_strides,
+        src_strides,
+        index_strides,
+        ndim_dim,
+        dim_size,
+        error_buf,
+        tid);
+    return;
+  }
+  const uint dim = ndim_dim.y;
+  long inner_size = 1;
+  for (uint i = 0; i < dim; i++) {
+    inner_size *= index_sizes[i];
+  }
+  const long tid_base =
+      (tid / inner_size) * (inner_size * index_sizes[dim]) + (tid % inner_size);
+  for (long dim_pos = 0; dim_pos < index_sizes[dim]; dim_pos++) {
+    if (!scatter_reduce_strided_impl<T, index_t, Op>(
+            output,
+            src,
+            index,
+            index_sizes,
+            output_strides,
+            src_strides,
+            index_strides,
+            ndim_dim,
+            dim_size,
+            error_buf,
+            tid_base + dim_pos * inner_size)) {
+      return;
+    }
+  }
 }
 
 // gather: for each coord in `index` (= output) shape, read input at
@@ -371,6 +425,24 @@ kernel void gather_strided(
   output[out_offs] = input[input_offs];
 }
 
+#define REGISTER_SCATTER_REDUCE_STRIDED(DTYPE, IDXTYPE, OP, OP_ENUM, SERIAL) \
+  template[                                                                  \
+      [host_name("scatter_" #OP "_strided_" #DTYPE                           \
+                 "_" #IDXTYPE C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void \
+  scatter_reduce_strided<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM, SERIAL>(  \
+      device DTYPE * output [[buffer(0)]],                                   \
+      device const DTYPE* src [[buffer(1)]],                                 \
+      device const IDXTYPE* index [[buffer(2)]],                             \
+      constant long* index_sizes [[buffer(3)]],                              \
+      constant long* output_strides [[buffer(4)]],                           \
+      constant long* src_strides [[buffer(5)]],                              \
+      constant long* index_strides [[buffer(6)]],                            \
+      constant uint3& ndim_dim [[buffer(7)]],                                \
+      constant long& dim_size [[buffer(8)]],                                 \
+      constant long& tid_offset [[buffer(9)]],                               \
+      device ErrorMessages* error_buf [[buffer(10)]],                        \
+      uint thread_index [[thread_position_in_grid]])
+
 #define REGISTER_SCATTER_REDUCE_VARIANT(DTYPE, IDXTYPE, OP, OP_ENUM)          \
   template                                                                    \
       [[host_name("scatter_" #OP "_dense_" #DTYPE "_" #IDXTYPE)]] kernel void \
@@ -384,21 +456,7 @@ kernel void gather_strided(
           constant long& tid_offset [[buffer(6)]],                            \
           device ErrorMessages* error_buf [[buffer(7)]],                      \
           uint thread_index [[thread_position_in_grid]]);                     \
-  template [[host_name("scatter_" #OP "_strided_" #DTYPE                      \
-                       "_" #IDXTYPE)]] kernel void                            \
-  scatter_reduce_strided<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM>(           \
-      device DTYPE * output [[buffer(0)]],                                    \
-      device const DTYPE* src [[buffer(1)]],                                  \
-      device const IDXTYPE* index [[buffer(2)]],                              \
-      constant long* index_sizes [[buffer(3)]],                               \
-      constant long* output_strides [[buffer(4)]],                            \
-      constant long* src_strides [[buffer(5)]],                               \
-      constant long* index_strides [[buffer(6)]],                             \
-      constant uint3& ndim_dim [[buffer(7)]],                                 \
-      constant long& dim_size [[buffer(8)]],                                  \
-      constant long& tid_offset [[buffer(9)]],                                \
-      device ErrorMessages* error_buf [[buffer(10)]],                         \
-      uint thread_index [[thread_position_in_grid]])
+  REGISTER_SCATTER_REDUCE_STRIDED(DTYPE, IDXTYPE, OP, OP_ENUM, false)
 
 #define REGISTER_SCATTER_SET_OP(DTYPE, IDXTYPE)                                \
   template [[host_name("scatter_set_" #DTYPE "_" #IDXTYPE)]] kernel void       \
@@ -529,6 +587,10 @@ REGISTER_SCATTER_OPS_SET_ADD(long);
 REGISTER_SCATTER_AMIN_AMAX_DTYPE(long);
 REGISTER_SCATTER_OPS_SET_ADD(float2);
 REGISTER_SCATTER_OPS_SET_ADD(half2);
+
+REGISTER_SCATTER_REDUCE_STRIDED(float, long, add, Add, true);
+REGISTER_SCATTER_REDUCE_STRIDED(float, long, prod, Prod, true);
+REGISTER_SCATTER_REDUCE_STRIDED(float2, long, add, Add, true);
 
 REGISTER_GATHER_DTYPE(float8_e4m3fn);
 REGISTER_SCATTER_SET_DTYPE(float8_e4m3fn);

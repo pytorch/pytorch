@@ -25,6 +25,11 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch._prims_common import make_contiguous_strides_for
+from torch.cuda._utils import (
+    _check_cuda_bindings,
+    _cuda_bindings_driver as drv,
+    _HAS_CUDA_BINDINGS,
+)
 from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -41,6 +46,7 @@ from torch.distributed._symmetric_memory._nccl import (
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
+    dtypes,
     e4m3_type,
     instantiate_device_type_tests,
 )
@@ -2085,6 +2091,24 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         del t
         self._verify_symmetric_memory(symm_mem_hdl)
 
+    @skipIf(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_teardown_releases_virtual_address_ranges(self) -> None:
+        # Freed ranges (multicast where supported) can be re-reserved at their base.
+        self._init_process(set_device=True)
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        t = symm_mem.empty(1024, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        ptrs = [p for p in (*hdl.buffer_ptrs, hdl.multicast_ptr) if p]
+        ranges = [_check_cuda_bindings(drv.cuMemGetAddressRange(p)) for p in ptrs]
+        del hdl, t
+        device_module.synchronize()
+        for base, size in ranges:
+            ptr = _check_cuda_bindings(drv.cuMemAddressReserve(size, 0, base, 0))
+            _check_cuda_bindings(drv.cuMemAddressFree(ptr, size))
+            self.assertEqual(int(ptr), int(base))
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2757,6 +2781,73 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         ref = torch.ops._c10d_functional.wait_tensor(ref)
 
         self.assertTrue(out.eq(ref).all())
+
+
+@requires_accelerator_p2p_access()
+class SymmMemAllReduceOrderingTest(MultiProcContinuousTest):
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("numel", [2048, 65536])
+    @parametrize("op", ["two_shot", "one_shot_copy"])
+    def test_all_reduce_ordering(self, device, dtype, numel, op):
+        device = torch.device(torch.device(device).type, self.rank)
+        device_module.set_device(device)
+        if TEST_WITH_ROCM:
+            if not symm_mem.is_nvshmem_available():
+                self.skipTest("rocSHMEM is not available")
+            if symm_mem.get_backend(device) != "NVSHMEM":
+                self.skipTest("select rocSHMEM with TORCH_SYMMMEM=NVSHMEM")
+        group = dist.group.WORLD.group_name
+        buf = symm_mem.empty(numel, dtype=dtype, device=device)
+        symm_mem.rendezvous(buf, group=group)
+        index = torch.arange(numel, device=device)
+        inputs = [
+            ((index + step * 3 + self.rank * 2) % 9 - 4).to(dtype) for step in range(16)
+        ]
+        expected = [
+            sum(
+                ((index + step * 3 + rank * 2) % 9 - 4).to(dtype)
+                for rank in range(self.world_size)
+            )
+            for step in range(16)
+        ]
+        outputs = [torch.empty_like(buf) for _ in inputs]
+
+        def run():
+            for inp, out in zip(inputs, outputs):
+                if op == "one_shot_copy":
+                    torch.ops.symm_mem.one_shot_all_reduce_copy_out(
+                        buf, inp, "sum", group, out
+                    )
+                else:
+                    buf.copy_(inp)
+                    torch.ops.symm_mem.two_shot_all_reduce_(buf, "sum", group)
+                    out.copy_(buf)
+
+        def check():
+            correct = (
+                torch.stack([(out == ref).all() for out, ref in zip(outputs, expected)])
+                .all()
+                .to(torch.int32)
+            )
+            dist.all_reduce(correct, op=dist.ReduceOp.MIN)
+            self.assertEqual(correct, torch.ones_like(correct))
+
+        run()
+        check()
+        graph = graph_cls()
+        with device_module.graph(graph):
+            run()
+        for _ in range(5):
+            for inp, ref in zip(inputs, expected):
+                inp.neg_()
+                ref.neg_()
+            graph.replay()
+            check()
+
+
+instantiate_device_type_tests(SymmMemAllReduceOrderingTest, globals(), only_for="cuda")
 
 
 @instantiate_parametrized_tests
@@ -3535,6 +3626,27 @@ class SymmMemCleanupTest(TestCase):
             dist.destroy_process_group()
             """,
             env_overrides={"TORCH_SYMM_MEM_DISABLE_MULTICAST": "1"},
+        )
+
+    # torch.cuda._utils disables cuda.bindings on ROCm, so hipMemAddressFree is
+    # not covered.
+    @skipIf(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    def test_free_releases_virtual_address_range(self, device):
+        # The address passed to cuMemAddressReserve is only a hint, so reserving
+        # at a freed block's base lands there only if free() released the range.
+        self._run_cleanup(
+            device,
+            "CUDA",
+            """
+            from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+            base, size = _check_cuda_bindings(drv.cuMemGetAddressRange(tensor.data_ptr()))
+            del tensor
+            torch.cuda.synchronize(device)
+            ptr = _check_cuda_bindings(drv.cuMemAddressReserve(size, 0, base, 0))
+            _check_cuda_bindings(drv.cuMemAddressFree(ptr, size))
+            test.assertEqual(int(ptr), int(base))
+            """,
         )
 
     def _run_cleanup(self, device, backend, body, env_overrides=None):

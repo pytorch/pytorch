@@ -67,6 +67,15 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
+  # Flash Attention runtime (aotriton_v2.dll + its liblzma.dll dependency).
+  # aotriton's ExternalProject generates these in torch/lib/ during the build,
+  # after configure, so OPTIONAL defers the existence check to install time;
+  # a configure-time EXISTS guard misses them (WinError 126 loading torch_hip).
+  foreach(_fa_dll aotriton_v2.dll liblzma.dll)
+    install(FILES "${TORCH_SRC_DIR}/lib/${_fa_dll}"
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+  endforeach()
+
   # MSVC OpenMP (libomp140) - TheRock copies this into torch/lib/ before the
   # wheel build when using MSVC OpenMP instead of MKL libiomp.
   set(_libomp140 "${TORCH_SRC_DIR}/lib/libomp140.x86_64.dll")
@@ -117,12 +126,6 @@ if(WIN32 AND BUILD_PYTHON)
         install(FILES ${_dlls} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
       endif()
     endforeach()
-
-    # zlibwapi (needed by some CUDA libraries).
-    if(EXISTS "C:/Windows/System32/zlibwapi.dll")
-      install(FILES "C:/Windows/System32/zlibwapi.dll"
-              DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
   endif()
 
   # Retain the legacy NvToolsExt DLL for existing Windows binaries until its
