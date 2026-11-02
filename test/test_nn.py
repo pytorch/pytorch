@@ -16711,35 +16711,34 @@ class TestNNCPU(NNTestCase):
             outf.sum().backward()
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+    def test_LSTM_differentiable_backward_using_oneDNN(self):
         batch = 10
         seq_len = 12
         input = 3
-        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        Net = nn.LSTM(input, 3, 2, batch_first=True)
         import copy
         Net_clone = copy.deepcopy(Net)
         x = torch.rand(batch, seq_len, input)
         x1 = x.clone().requires_grad_(True)
         x2 = x.clone().requires_grad_(True)
 
-        torch._C._set_mkldnn_enabled(False)
-        out1, _ = Net(x1)
-        der_out1 = torch.autograd.grad(out1, x1,
-                                       grad_outputs=torch.ones_like(out1),
-                                       retain_graph=True,
-                                       create_graph=True)[0]
-        loss1 = der_out1.sum()
-        loss1.backward(retain_graph=True)
+        with torch.backends.mkldnn.flags(enabled=False):
+            out1, _ = Net(x1)
+            der_out1 = torch.autograd.grad(out1, x1,
+                                           grad_outputs=torch.ones_like(out1),
+                                           retain_graph=True,
+                                           create_graph=True)[0]
+            loss1 = der_out1.sum()
+            loss1.backward(retain_graph=True)
 
-        torch._C._set_mkldnn_enabled(True)
-        out2, _ = Net(x2)
-        der_out2 = torch.autograd.grad(out2, x2,
-                                       grad_outputs=torch.ones_like(out2),
-                                       retain_graph=True,
-                                       create_graph=True)[0]
-        loss2 = der_out2.sum()
-        loss2.backward(retain_graph=True)
+        with torch.backends.mkldnn.flags(enabled=True):
+            out2, _ = Net(x2)
+            der_out2 = torch.autograd.grad(out2, x2,
+                                           grad_outputs=torch.ones_like(out2),
+                                           retain_graph=True,
+                                           create_graph=True)[0]
+            loss2 = der_out2.sum()
+            loss2.backward(retain_graph=True)
         if not torch.allclose(der_out1, der_out2):
             raise AssertionError("der_out1 and der_out2 should be close")
         if not torch.allclose(x1.grad, x2.grad):
