@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
+    from .codegen.multi_kernel import MultiKernel
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
@@ -504,23 +505,13 @@ class MixOrderReduction:
             # fully cached by L2
             size_thres = 5 * 2**20
 
-            # Call evaluate_expr rather than statically_known_geq since nrow can
-            # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow * ncol, size_thres),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow, 4096)):
                 return False
 
         # Equal groups can be true square inner+outer reductions, but also
@@ -5950,7 +5941,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
-        self.previous_node: BaseSchedulerNode | None = None
+        self.previous_nodes: list[BaseSchedulerNode] | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -5976,8 +5967,8 @@ class Scheduler:
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_real_name = {"buf0" : "buf1"}
-        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        # mutation_real_name = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_real_name: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
@@ -5986,8 +5977,8 @@ class Scheduler:
         #                   (changed once per mutation)
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_renames = {"buf1" : "buf0"}
-        # in codegen we only use buf0, never buf1
+        # mutation_renames = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_renames: dict[str, str] = {}
 
         self.seen_template_fusions: OrderedSet[
@@ -8091,8 +8082,9 @@ class Scheduler:
 
         while template_fusion_candidates:
             template_futures: list[Future] = []
-            future_to_pending_fusion: dict[
-                Future, tuple[PendingFusion, BaseSchedulerNode]
+            # Fusions that render identical kernel source share one compile future.
+            future_to_pending_fusions: dict[
+                Future, list[tuple[PendingFusion, BaseSchedulerNode]]
             ] = {}
             fusions_to_remove: OrderedSet[BaseSchedulerNode] = OrderedSet()
             for candidate in template_fusion_candidates:
@@ -8136,8 +8128,11 @@ class Scheduler:
                     f = pending_fusion.future.future
                     if f is None:
                         raise AssertionError("expected f to be set")
-                    template_futures.append(f)
-                    future_to_pending_fusion[f] = (pending_fusion, candidate)
+                    if f not in future_to_pending_fusions:
+                        template_futures.append(f)
+                    future_to_pending_fusions.setdefault(f, []).append(
+                        (pending_fusion, candidate)
+                    )
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self._fusion_memory_state is not None:
@@ -8150,14 +8145,14 @@ class Scheduler:
 
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
-                pending_fusion, cand = future_to_pending_fusion[f]
-                if self.fuse_if_speedup(
-                    self.get_fused_node(pending_fusion.node1),
-                    self.get_fused_node(pending_fusion.node2),
-                    pending_fusion.callable_fn,
-                    fused_nodes,
-                ):
-                    fusions_to_remove.add(cand)
+                for pending_fusion, cand in future_to_pending_fusions[f]:
+                    if self.fuse_if_speedup(
+                        self.get_fused_node(pending_fusion.node1),
+                        self.get_fused_node(pending_fusion.node2),
+                        pending_fusion.callable_fn,
+                        fused_nodes,
+                    ):
+                        fusions_to_remove.add(cand)
 
             for f in fusions_to_remove:
                 template_fusion_candidates.pop(f)
@@ -12630,10 +12625,10 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
-        if self.previous_node is not None:
-            raise AssertionError("expected previous_node to be None")
+        if self.previous_nodes is not None:
+            raise AssertionError("expected previous_nodes to be None")
         previous_nodes_by_stream: dict[
-            tuple[torch.device | None, int], BaseSchedulerNode
+            tuple[torch.device | None, int], list[BaseSchedulerNode]
         ] = {}
 
         # pyrefly: ignore [unbound-name]
@@ -12663,7 +12658,7 @@ class Scheduler:
 
         for node in nodes:
             stream_key = (node.get_device(), self.get_node_stream(node))
-            self.previous_node = previous_nodes_by_stream.get(stream_key)
+            self.previous_nodes = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12758,6 +12753,7 @@ class Scheduler:
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
+            kernel = None
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
@@ -12792,7 +12788,7 @@ class Scheduler:
                 self.get_backend(device).codegen_mix_order_reduction(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore [unbound-name]
-                self.get_backend(device).codegen_node(node)
+                kernel = self.get_backend(device).codegen_node(node)
             else:
                 if not isinstance(node, NopKernelSchedulerNode):
                     raise AssertionError("expected node to be a NopKernelSchedulerNode")
@@ -12824,7 +12820,17 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                previous_nodes_by_stream[stream_key] = node
+                from .codegen.multi_kernel import MultiKernel
+                from .codegen.triton import TritonKernel
+
+                waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
+                if self.previous_nodes is None or waited:
+                    previous_nodes_by_stream[stream_key] = []
+                previous_nodes_by_stream[stream_key].append(node)
+                if isinstance(kernel, MultiKernel):
+                    kernel = kernel.kernels[0]
+                if isinstance(kernel, TritonKernel) and kernel.args.workspace_args:
+                    previous_nodes_by_stream.pop(stream_key, None)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
 
@@ -12839,7 +12845,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
-        self.previous_node = None
+        self.previous_nodes = None
         self.flush()
 
     def benchmark_combo_kernel(
@@ -13187,7 +13193,9 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """

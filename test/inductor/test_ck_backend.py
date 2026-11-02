@@ -19,13 +19,12 @@ import torch
 from torch._inductor import config
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import try_import_ck_lib
+from torch._inductor.utils import run_and_get_code, try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocmVersionAtLeast,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -333,7 +332,6 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
-    @skipIfRocmVersionAtLeast((10, 1))
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -522,6 +520,44 @@ class TestCKBackend(TestCase):
             Y_compiled = conv2d(x_cl, w_cl)
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    def test_max_autotune_conv_transpose2d_skips_forward_ck(self):
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+        x = torch.randn(1, 64, 32, 32, **tensor_options).to(
+            memory_format=torch.channels_last
+        )
+        w = torch.randn(64, 64, 3, 3, **tensor_options).to(
+            memory_format=torch.channels_last
+        )
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": "CK",
+                    "compile_threads": 4,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv_transpose2d(x, w):
+                return torch.conv_transpose2d(x, w, stride=1, padding=1)
+
+            y_eager = torch.conv_transpose2d(x, w, stride=1, padding=1)
+            y_compiled, codes = run_and_get_code(conv_transpose2d, x, w)
+
+            self.assertFalse(any("async_compile.rocm" in c for c in codes))
+            torch.testing.assert_close(y_compiled, y_eager, atol=2e-4, rtol=2e-4)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)

@@ -4156,16 +4156,11 @@ _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_
 module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool1d,
-               skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
                skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),
                    # Fails on backward check if output size is 1x1
                    DecorateInfo(
                        unittest.expectedFailure,
@@ -4178,9 +4173,7 @@ module_db: list[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool3d,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
@@ -4321,6 +4314,8 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(skipIfXpu, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -4370,6 +4365,10 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.CosineEmbeddingLoss,
                module_inputs_func=module_inputs_torch_nn_CosineEmbeddingLoss,
@@ -4460,6 +4459,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.LazyConvTranspose1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True, transposed=True),
@@ -4505,6 +4508,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
@@ -4909,7 +4916,8 @@ module_db: list[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                decorators=[
-                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=1e-3)}),
+                   # M1-M4 fp16 linear rounds strided and contiguous inputs differently
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-1, rtol=1e-3)}),
                                 'TestModule', 'test_non_contiguous_tensors',
                                 device_type='mps')],
                skips=(
@@ -4952,10 +4960,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.PReLU,
                module_inputs_func=module_inputs_torch_nn_PReLU,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),

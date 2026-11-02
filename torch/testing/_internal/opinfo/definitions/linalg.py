@@ -918,6 +918,14 @@ def sample_inputs_linalg_matrix_sqrth(
         yield SampleInput(a)
 
 
+def error_inputs_linalg_eig(op_info, device, **kwargs):
+    yield ErrorInput(
+        SampleInput(torch.randn(8, 8, device=device, dtype=torch.float16)),
+        error_type=RuntimeError,
+        error_regex="not implemented for 'Half'",
+    )
+
+
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.eig
@@ -930,6 +938,72 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
     for sample in samples:
         sample.output_process_fn_grad = out_fn
         yield sample
+
+    if torch.device(device).type == "mps":
+        make_fn = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(
+            make_fn, dtype=dtype, device=device, requires_grad=requires_grad
+        )
+
+        batches = [(), (3,)]
+        # Test sizes surrounding 32 KB threadgroup memory cutoff
+        ns = [32, 62, 63, 150]
+
+        for batch, n in product(batches, ns):
+            sample = SampleInput(make_arg(*batch, n, n))
+            sample.output_process_fn_grad = out_fn
+            yield sample
+
+        # The backward for most of these special matrices is ill-defined
+        if not requires_grad:
+            n = 8
+            scale = 2.0 ** torch.arange(0, 4 * n, 4)
+
+            A = torch.randn(n, n, dtype=dtype)
+            perm = torch.randperm(n)
+
+            special_matrices = [
+                torch.zeros(n, n, dtype=dtype),
+                torch.eye(n, dtype=dtype),
+                # Repeated eigenvalues
+                torch.tensor([2, 2, 2, -1, -1, 3, 3, 3], dtype=dtype).diag(),
+                torch.triu(torch.randn(n, n, dtype=dtype)),
+                # A cyclic permutation, on which Wilkinson shifts make no progress
+                torch.roll(torch.eye(n, dtype=dtype), 1, 0),
+                # A Jordan block, which is defective: all eigenvectors are parallel
+                2 * torch.eye(n, dtype=dtype)
+                + torch.diag(torch.ones(n - 1, dtype=dtype), 1),
+                # Badly scaled matrices
+                torch.randn(n, n, dtype=dtype) * scale.unsqueeze(-1) / scale,
+                A * 1e-30,
+                A * 1e-22,
+                A * 1e20,
+                torch.eye(4, dtype=dtype) * 1.4e-45,
+                torch.randn(8, 8, dtype=dtype) * 1e-40,
+                torch.randn(32, 32, dtype=dtype) * 1e-38,
+                # A lower triangular matrix
+                torch.tril(torch.randn(64, 64, dtype=dtype)),
+                # A randomly permuted upper triangular matrix
+                torch.randn(n, n, dtype=dtype).triu()[perm[:, None], perm],
+                # A badly scaled 2x2 diagonal matrix
+                torch.diag(torch.tensor([2.0**127, 1.0], dtype=dtype)),
+                torch.block_diag(
+                    torch.tensor([1]),
+                    1e-25 * torch.roll(torch.eye(3, dtype=dtype), -1, 0),
+                    torch.tensor([-1]),
+                    torch.tensor([0]),
+                ),
+                torch.tensor([[1e12, 1e12], [0.01, 1]], dtype=dtype),
+            ]
+
+            if dtype.is_complex:
+                special_matrices += [
+                    # Imaginary identity with swapped rows
+                    1j * torch.roll(torch.eye(3, dtype=dtype), 1, 0),
+                ]
+
+            for m in special_matrices:
+                yield SampleInput(m.to(device))
 
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -983,9 +1057,7 @@ def sample_inputs_linalg_pinv_hermitian(
         yield o
 
 
-def sample_inputs_linalg_solve(
-    op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True, **kwargs
-):
+def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates always solvable input for torch.linalg.solve
     We sample a fullrank square matrix (i.e. invertible) A
@@ -1002,11 +1074,6 @@ def sample_inputs_linalg_solve(
         (1,) - same as () but explicit
         (3,) - solve for 3 vectors.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
-    'vector_rhs_allowed' controls whether to include nrhs = () to the list of SampleInputs.
-    torch.solve / triangular_solve / cholesky_solve (opposed to torch.linalg.solve) do not allow
-    1D tensors (vectors) as the right-hand-side.
-    Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
-    'vector_rhs_allowed' may be removed here as well.
     """
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_a = partial(
@@ -1018,10 +1085,7 @@ def sample_inputs_linalg_solve(
 
     batches = [(), (0,), (2,), (2, 2)]
     ns = [5, 0]
-    if vector_rhs_allowed:
-        nrhs = [(), (1,), (3,)]
-    else:
-        nrhs = [(1,), (3,)]
+    nrhs = [(), (1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
         yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
@@ -1107,29 +1171,6 @@ def sample_inputs_linalg_solve_triangular(
             args=(B.requires_grad_(requires_grad),),
             kwargs={"upper": upper, "unitriangular": uni, "left": left},
         )
-
-
-def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    """
-    This function generates always solvable input for legacy solve functions
-    (the ones that are not in torch.linalg module).
-    The difference from sample_inputs_linalg_solve is that here the right-hand-side of A x = b equation
-    should have b.ndim >= 2, vectors are not allowed.
-    Also the arguments order is swapped.
-    """
-    out = sample_inputs_linalg_solve(
-        op_info, device, dtype, requires_grad=requires_grad, vector_rhs_allowed=False
-    )
-
-    def out_fn(output):
-        return output[0]
-
-    # Reverses tensor order
-    for sample in out:
-        sample.input, sample.args = sample.args[0], (sample.input,)
-        if op_info.name == "solve":
-            sample.output_process_fn_grad = out_fn
-        yield sample
 
 
 def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -1410,6 +1451,7 @@ op_db: list[OpInfo] = [
         op=torch.linalg.eig,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_eig,
+        error_inputs_func=error_inputs_linalg_eig,
         check_batched_forward_grad=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -1427,22 +1469,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),
@@ -1467,29 +1493,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCPUIfNoLapack],
         skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),

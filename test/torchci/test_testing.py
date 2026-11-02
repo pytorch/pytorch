@@ -74,6 +74,7 @@ _REPORT_CHILD_ENV = {
 _RUN_TYPES = {
     "type": str,
     "schema_version": str,
+    "id": str,
     "file": str,
     "suite": str,
     "case_name": str,
@@ -103,8 +104,9 @@ def _assert_run_line(
 ) -> None:
     test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
     test.assertEqual(
-        (run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {})
+        (run["type"], run["schema_version"], run["properties"]), ("run", "1.0", {})
     )
+    test.assertEqual(str(uuid.UUID(run["id"])), run["id"])
     test.assertIn(run["language"], ("python", "cpp"))
     test.assertIn(run["outcome"], _RUN_OUTCOMES)
     test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
@@ -247,7 +249,7 @@ test_no_rerun_needed      | 0            | passed  |""",
             ],
         )
         self.assertEqual(report["type"], "report")
-        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["schema_version"], "1.0")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
@@ -267,6 +269,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
+        # A new uuid per line, not one per report or per test.
+        self.assertEqual(len({run["id"] for run in runs}), len(runs))
 
     def test_identities(self) -> None:
         rendered = {}
