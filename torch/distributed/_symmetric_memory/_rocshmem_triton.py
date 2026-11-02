@@ -240,8 +240,6 @@ if has_triton():
     _ROCM_VERSION = tuple(int(v) for v in (torch.version.rocm or "0.0").split(".")[:2])
     # ROCm < 10.1 ships rocSHMEM < 3.7.0, whose device reduce breaks when n_pes * nreduce > 1024.
     _ROCSHMEM_REDUCE_SIZE_LIMITED = tl.constexpr(_ROCM_VERSION < (10, 1))
-    # ROCm 10.2 added the extern "C" rocshmem_ctx_{alltoall,broadcast}mem_wg wrappers
-    # to the device bitcode; earlier versions only have the C++ mangled functions.
     _ROCSHMEM_HAS_ALLTOALL_BROADCAST = tl.constexpr(_ROCM_VERSION >= (10, 2))
 
     # -----------------------------------------------------------------------
@@ -525,7 +523,6 @@ if has_triton():
         )
 
     def _check_world_team(team, op_name, _semantic):  # type: ignore[no-untyped-def]
-        # Check before the cast: tl.cast turns a constexpr into a tensor.
         if isinstance(team, core.constexpr) and team.value != 0:
             raise ValueError(
                 f"Unsupported rocSHMEM {op_name} team: {team.value}. Only team 0 is supported."

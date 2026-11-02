@@ -883,7 +883,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.tensor([expected_remote], device=self.device, dtype=dtype),
         )
 
-    # 16 B, 512 B and 8 KiB per PE: rocSHMEM alltoall switches algorithms at 512 B.
     @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
@@ -978,12 +977,11 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         expected = torch.arange(100, 100 + nelems, dtype=dtype, device=self.device)
         torch.testing.assert_close(dst, expected)
 
+    @skip_but_pass_in_sandcastle_if(not TEST_WITH_ROCM, "rocSHMEM-only team check")
     @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @parametrize("op", ["alltoall", "broadcast"])
     def test_triton_rocshmem_runtime_nonworld_team(self, op: str) -> None:
-        if not TEST_WITH_ROCM:
-            self.skipTest("rocSHMEM-only team check")
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
         nelems = 4
@@ -1001,12 +999,11 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         self.assertNotEqual(status.item(), 0)
         self.assertEqual(dst, torch.full_like(dst, -1))
 
+    @skip_but_pass_in_sandcastle_if(not TEST_WITH_ROCM, "rocSHMEM-only team check")
     @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @parametrize("op", ["alltoall", "broadcast"])
     def test_triton_rocshmem_constexpr_nonworld_team(self, op: str) -> None:
-        if not TEST_WITH_ROCM:
-            self.skipTest("rocSHMEM-only team check")
         self._init_device()
         buf = torch.empty(4, dtype=torch.int64, device=self.device)
         with self.assertRaisesRegex(CompilationError, "Only team 0 is supported"):
