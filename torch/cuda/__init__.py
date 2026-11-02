@@ -67,7 +67,10 @@ try:
 
     try:
         if not _version.hip:
-            import pynvml  # type: ignore[import]
+            # NVML is accessed through an in-tree ctypes binding rather than the
+            # optional nvidia-ml-py package, which is often absent on
+            # Windows/conda (issue #118173).
+            from torch.cuda import _nvml as pynvml
         else:
             import ctypes
             from pathlib import Path
@@ -1524,12 +1527,10 @@ def _get_pynvml_handler(device: Device = None):
             "nvidia-ml-py does not seem to be installed or it can't be imported."
             # pyrefly: ignore [invalid-inheritance]
         ) from _PYNVML_ERR
-    # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
-    from pynvml import NVMLError_DriverNotLoaded
 
     try:
         pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
+    except pynvml.NVMLError_DriverNotLoaded as e:
         raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
 
     device = _get_nvml_device_index(device)

@@ -8934,6 +8934,20 @@ print(value, end="")
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "ctypes NVML binding is CUDA-only")
+    def test_nvml_ctypes_backend(self):
+        # The NVML-backed APIs go through the in-tree ctypes binding
+        # (torch.cuda._nvml) rather than nvidia-ml-py (issue #118173).
+        self.assertIs(torch.cuda.pynvml, torch.cuda._nvml)
+        self.assertIsInstance(torch.cuda.utilization(), int)
+        self.assertIsInstance(torch.cuda.memory_usage(), int)
+        self.assertIsInstance(torch.cuda.device_memory_used(), int)
+        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+        self.assertGreaterEqual(torch.cuda.power_draw(), 0)
+        self.assertGreaterEqual(torch.cuda.clock_rate(), 0)
+        self.assertIn("GPU:", torch.cuda.list_gpu_processes())
+
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfNonPrimaryRocmPartition
     def test_temperature(self):
