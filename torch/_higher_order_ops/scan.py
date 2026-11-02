@@ -528,6 +528,8 @@ def trace_scan(
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
+        # Inside vmap or jvp, meta["val"] holds no functorch wrapper, so
+        # _scan_output_value reads the values the combine function returns.
         combine_outs: list[Any] = []
         run_combine = _maybe_run_with_interpreter(combine_fn)
 
@@ -580,9 +582,16 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
-        (combine_out,) = combine_outs
+        if len(combine_outs) != 1:
+            raise AssertionError(
+                "expected the combine function to be traced once, but it ran "
+                f"{len(combine_outs)} times"
+            )
         fake_carry, fake_outputs = _extract_carry_and_out(
-            [_scan_output_value(o, v) for o, v in zip(outputs, combine_out)],
+            [
+                _scan_output_value(o, v)
+                for o, v in zip(outputs, combine_outs[0], strict=True)
+            ],
             len(init),
         )
         for t in fake_outputs:
