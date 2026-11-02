@@ -14,6 +14,7 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
@@ -28,6 +29,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <c10/util/irange.h>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -285,55 +287,206 @@ static c10::DispatchKeySet pyobject_dispatch_compute_keyset(
 // torch/csrc/jit/python/pybind_utils.cpp. Since we're trying to avoid
 // conversion to IValue, we have to manually implement normalization here.
 //
-// TODO(#187974): normalization is incomplete and will just return false which
-// leads to falling back to the C++ Dispatcher. We'll build out this path
-// some more in the future.
+static py::object pyobject_dispatch_schema_aware_arg(
+    const c10::TypePtr& type,
+    c10::IValue value) {
+  if (value.isNone()) {
+    return py::none();
+  }
+  if (type->kind() == c10::TypeKind::OptionalType) {
+    return pyobject_dispatch_schema_aware_arg(
+        type->expect<c10::OptionalType>()->getElementType(), std::move(value));
+  }
+  if (type->kind() == c10::TypeKind::ScalarTypeType) {
+    return py::reinterpret_borrow<py::object>(
+        reinterpret_cast<PyObject*>(
+            torch::getTHPDtype(static_cast<c10::ScalarType>(value.toInt()))));
+  }
+  if (type->kind() == c10::TypeKind::LayoutType) {
+    return py::reinterpret_borrow<py::object>(
+        reinterpret_cast<PyObject*>(
+            torch::getTHPLayout(static_cast<c10::Layout>(value.toInt()))));
+  }
+  if (type->kind() == c10::TypeKind::MemoryFormatType) {
+    return py::cast(static_cast<c10::MemoryFormat>(value.toInt()));
+  }
+  if (type->kind() == c10::TypeKind::ListType) {
+    const auto& element_type =
+        type->expect<c10::ListType>()->getElementType();
+    if (element_type->kind() == c10::TypeKind::ScalarTypeType ||
+        element_type->kind() == c10::TypeKind::LayoutType ||
+        element_type->kind() == c10::TypeKind::MemoryFormatType) {
+      const auto& elements = value.toListRef();
+      py::list result(elements.size());
+      for (const auto i : c10::irange(elements.size())) {
+        result[i] =
+            pyobject_dispatch_schema_aware_arg(element_type, elements[i]);
+      }
+      return result;
+    }
+  }
+  return torch::jit::toPyObject(std::move(value));
+}
+
+// For types which need IValue conversion, only convert the individual
+// argument, never the Tensor arguments in the same call.
+static PyObject* pyobject_dispatch_normalize_arg(
+    const c10::FunctionSchema& schema,
+    size_t index,
+    PyObject* value,
+    std::vector<py::object>& owned_args) {
+  const auto& argument = schema.arguments()[index];
+  auto type = argument.real_type();
+  if (type->kind() == c10::TypeKind::OptionalType) {
+    if (value == Py_None) {
+      return value;
+    }
+    type = type->expect<c10::OptionalType>()->getElementType();
+  }
+  if (type->kind() == c10::TypeKind::TensorType) {
+    return THPVariable_Check(value) ? value : nullptr;
+  }
+  if (type->kind() == c10::TypeKind::ListType) {
+    const auto& element_type =
+        type->expect<c10::ListType>()->getElementType();
+    auto kind = element_type->kind();
+    if (kind == c10::TypeKind::OptionalType) {
+      kind = element_type->expect<c10::OptionalType>()
+                 ->getElementType()
+                 ->kind();
+    }
+    if (kind == c10::TypeKind::TensorType) {
+      if (!PyList_Check(value) && !PyTuple_Check(value)) {
+        return nullptr;
+      }
+      auto list = py::reinterpret_steal<py::object>(PySequence_List(value));
+      if (!list) {
+        PyErr_Clear();
+        return nullptr;
+      }
+      if (argument.N() && PyList_GET_SIZE(list.ptr()) != *argument.N()) {
+        return nullptr;
+      }
+      for (Py_ssize_t j = 0; j < PyList_GET_SIZE(list.ptr()); ++j) {
+        PyObject* element = PyList_GET_ITEM(list.ptr(), j);
+        if (element == Py_None) {
+          if (element_type->kind() != c10::TypeKind::OptionalType) {
+            return nullptr;
+          }
+        } else if (!THPVariable_Check(element)) {
+          return nullptr;
+        }
+      }
+      PyObject* result = list.ptr();
+      owned_args.emplace_back(std::move(list));
+      return result;
+    }
+  }
+  try {
+    auto converted = pyobject_dispatch_schema_aware_arg(
+        argument.real_type(),
+        torch::jit::argumentToIValue(schema, index, py::handle(value)));
+    PyObject* result = converted.ptr();
+    owned_args.emplace_back(std::move(converted));
+    return result;
+  } catch (const std::exception&) {
+    // Let the regular dispatcher produce the schema-mismatch error.
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
+    }
+    return nullptr;
+  }
+}
+
 static bool pyobject_dispatch_try_normalize_args(
     const c10::FunctionSchema& schema,
     PyObject* const* args,
     Py_ssize_t nargs,
     PyObject* kwnames,
     c10::SmallVector<PyObject*, 64>& normalized_args,
+    Py_ssize_t& normalized_nargs,
+    py::object& normalized_kwnames,
     std::vector<py::object>& owned_args) {
   const auto& schema_args = schema.arguments();
-  if ((kwnames != nullptr && PyTuple_GET_SIZE(kwnames) != 0) ||
-      static_cast<size_t>(nargs) != schema_args.size()) {
+  const Py_ssize_t nkwargs = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
+  if (static_cast<size_t>(nargs + nkwargs) > schema_args.size()) {
     return false;
   }
-  for (const auto i : c10::irange(static_cast<size_t>(nargs))) {
-    const auto& type = schema_args[i].real_type();
-    if (type->kind() == c10::TypeKind::TensorType) {
-      if (!THPVariable_Check(args[i])) {
+  normalized_nargs = nargs;
+  if (nkwargs == 0 && static_cast<size_t>(nargs) == schema_args.size()) {
+    for (const auto i : c10::irange(schema_args.size())) {
+      if (schema_args[i].kwarg_only()) {
         return false;
       }
-      continue;
-    }
-
-    if (type->kind() != c10::TypeKind::ListType) {
-      return false;
-    }
-    auto list_type = type->cast<c10::ListType>();
-    if (list_type->getElementType()->kind() != c10::TypeKind::TensorType) {
-      return false;
-    }
-
-    PyObject* list = PySequence_List(args[i]);
-    if (list == nullptr) {
-      PyErr_Clear();
-      return false;
-    }
-    if (normalized_args.empty()) {
-      normalized_args.assign(args, args + nargs);
-    }
-    normalized_args[i] = list;
-    owned_args.emplace_back(py::reinterpret_steal<py::object>(list));
-    for (Py_ssize_t j = 0; j < PyList_GET_SIZE(list); ++j) {
-      if (!THPVariable_Check(PyList_GET_ITEM(list, j))) {
+      PyObject* result =
+          pyobject_dispatch_normalize_arg(schema, i, args[i], owned_args);
+      if (result == nullptr) {
         return false;
       }
+      if (result != args[i]) {
+        if (normalized_args.empty()) {
+          normalized_args.assign(args, args + nargs);
+        }
+        normalized_args[i] = result;
+      }
+    }
+    return true;
+  }
+
+  auto first_kwonly = schema_args.size();
+  for (const auto i : c10::irange(schema_args.size())) {
+    if (schema_args[i].kwarg_only()) {
+      first_kwonly = i;
+      break;
     }
   }
-  return true;
+  if (static_cast<size_t>(nargs) > first_kwonly) {
+    return false;
+  }
+  normalized_nargs = static_cast<Py_ssize_t>(first_kwonly);
+  normalized_args.resize(schema_args.size());
+  normalized_kwnames = py::reinterpret_steal<py::object>(
+      PyTuple_New(static_cast<Py_ssize_t>(schema_args.size() - first_kwonly)));
+  TORCH_CHECK_PYTHON(normalized_kwnames.ptr() != nullptr);
+  Py_ssize_t used_kwargs = 0;
+  for (const auto i : c10::irange(schema_args.size())) {
+    PyObject* value = i < static_cast<size_t>(nargs) ? args[i] : nullptr;
+    if (value == nullptr) {
+      for (Py_ssize_t j = 0; j < nkwargs; ++j) {
+        const int comparison = PyUnicode_CompareWithASCIIString(
+            PyTuple_GET_ITEM(kwnames, j), schema_args[i].name().c_str());
+        if (comparison == 0) {
+          value = args[nargs + j];
+          ++used_kwargs;
+          break;
+        }
+        if (PyErr_Occurred()) {
+          PyErr_Clear();
+          return false;
+        }
+      }
+    }
+    if (value == nullptr) {
+      if (!schema_args[i].default_value()) {
+        return false;
+      }
+      auto default_value = pyobject_dispatch_schema_aware_arg(
+          schema_args[i].real_type(), *schema_args[i].default_value());
+      value = default_value.ptr();
+      owned_args.emplace_back(std::move(default_value));
+    }
+    value = pyobject_dispatch_normalize_arg(schema, i, value, owned_args);
+    if (value == nullptr) {
+      return false;
+    }
+    normalized_args[i] = value;
+    if (i >= first_kwonly) {
+      PyObject* name = PyUnicode_FromString(schema_args[i].name().c_str());
+      TORCH_CHECK_PYTHON(name != nullptr);
+      PyTuple_SET_ITEM(normalized_kwnames.ptr(), i - first_kwonly, name);
+    }
+  }
+  return used_kwargs == nkwargs;
 }
 
 static bool pyobject_dispatch_arg_has_torch_function(PyObject* arg) {
@@ -602,6 +755,8 @@ static PyObject* pyobject_dispatch_vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
   c10::SmallVector<PyObject*, 64> normalized_args;
+  Py_ssize_t normalized_nargs = nargs;
+  py::object normalized_kwnames;
   std::vector<py::object> owned_args;
   if (!pyobject_dispatch_try_normalize_args(
           self->handle->schema(),
@@ -609,6 +764,8 @@ static PyObject* pyobject_dispatch_vectorcall(
           nargs,
           kwnames,
           normalized_args,
+          normalized_nargs,
+          normalized_kwnames,
           owned_args)) {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
@@ -616,12 +773,20 @@ static PyObject* pyobject_dispatch_vectorcall(
   PyObject* const* op_args =
       normalized_args.empty() ? args : normalized_args.data();
   auto key_set = pyobject_dispatch_compute_keyset(
-      self->handle->dispatchKeyExtractor(), op_args, nargs);
+      self->handle->dispatchKeyExtractor(),
+      op_args,
+      static_cast<Py_ssize_t>(self->handle->schema().arguments().size()));
   if (C10_UNLIKELY(skip_torch_function)) {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
-      self, key_set, skip_torch_function, op_args, nargs, kwnames, 0);
+      self,
+      key_set,
+      skip_torch_function,
+      op_args,
+      normalized_nargs,
+      normalized_kwnames ? normalized_kwnames.ptr() : kwnames,
+      0);
   END_HANDLE_TH_ERRORS
 }
 
@@ -661,8 +826,32 @@ static PyObject* pyobject_redispatch_vectorcall(
   if (C10_UNLIKELY(skip_torch_function)) {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
+  c10::SmallVector<PyObject*, 64> normalized_args;
+  Py_ssize_t normalized_nargs = nargs - 1;
+  py::object normalized_kwnames;
+  std::vector<py::object> owned_args;
+  if (!pyobject_dispatch_try_normalize_args(
+          self->handle->schema(),
+          args + 1,
+          nargs - 1,
+          kwnames,
+          normalized_args,
+          normalized_nargs,
+          normalized_kwnames,
+          owned_args)) {
+    return PyObject_Vectorcall(
+        self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
+  }
+  PyObject* const* op_args =
+      normalized_args.empty() ? args + 1 : normalized_args.data();
   return pyobject_dispatch_with_keyset(
-      self, key_set, skip_torch_function, args, nargs, kwnames, 1);
+      self,
+      key_set,
+      skip_torch_function,
+      op_args,
+      normalized_nargs,
+      normalized_kwnames ? normalized_kwnames.ptr() : kwnames,
+      0);
   END_HANDLE_TH_ERRORS
 }
 
