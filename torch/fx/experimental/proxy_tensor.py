@@ -60,6 +60,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -300,6 +301,7 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
+        track_fake_tensor_for_export(obj)
     elif isinstance(obj, (_AnyScriptObject)) or is_custom_class_obj(obj):
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
@@ -1932,15 +1934,6 @@ def dispatch_trace(
         if is_accessor_node(n):
             return False
 
-        # Views only compute metadata, so they are OK to DCE unless they bind
-        # unbacked symbols
-        if (
-            isinstance(n.target, OpOverload)
-            and n.target.is_view
-            and "unbacked_bindings" not in n.meta
-        ):
-            return False
-
         # If the operator in question takes SymInt args to SymInt output,
         # we assume it's pure and OK to DCE
         if (
@@ -2789,7 +2782,10 @@ class _ModuleStackTracer(PythonKeyTracer):
         # In non-strict export, we don't have dynamo's side effect
         # tracking logic which makes some cases hard to detect.
         # In general, our detecting strategy is:
-        #  (1) We instrument fake tensor creation to log all the fake tensors created during export.
+        #  (1) We log the fake tensors created during export: FakeTensor.__init__ records
+        #      Python fakes, and set_proxy_slot records every fake registered with the tracer,
+        #      which also covers C++ fakes (no Python __init__) and fakes created before
+        #      export started (parameters of nn.Module inputs).
         #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT))
         #  (3) Filter out fake tensors that are logged during (1):
         #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)

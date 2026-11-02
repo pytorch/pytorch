@@ -339,7 +339,7 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         if not (len(inner_tensors) >= 2 and len(inner_tensors) <= 5):
@@ -362,8 +362,9 @@ class NestedTensor(torch.Tensor):
         # Alternatively, we could make it the caller's responsibility to
         # cache it. But this heuristic seems simple enough.
         ragged_source = offsets if lengths is None else lengths
-        if isinstance(ragged_source, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        if is_fake_tensor(ragged_source):
             ragged_size = outer_size[ragged_idx]
+            # pyrefly: ignore [missing-attribute]
             ragged_source.nested_int_memo = ragged_size
 
         return NestedTensor(

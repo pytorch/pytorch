@@ -311,21 +311,88 @@ class PlanOnlyTest(unittest.TestCase):
         self.assertNotIn("- Mode:", summary_text)
         self.assertIn("`soulitzer`", summary_text)
         self.assertNotIn("@soulitzer", summary_text)
+        self.assertTrue(
+            summary_text.startswith(
+                "## Auto PR Triage: requests review from `soulitzer`\n"
+            )
+        )
         self.assertIn(
-            "### Why this PR was admitted\n\n"
-            "Admitted because it fixes an issue labeled `actionable`.\n",
+            "| Admission | Admitted because it fixes an issue labeled `actionable`. |\n",
             summary_text,
         )
         self.assertIn(
-            "- **`soulitzer`** (new request): `soulitzer` was picked at random from "
-            "`autograd`'s roster, seeded by this PR so that reruns pick the same "
-            "member.\n"
-            "  - Semantic owner `autograd`: autograd owns this changed behavior.\n",
+            "| `codepath-owner` | no new request | `codepath-owner` is a codepath owner in CODEOWNERS but has no pending request or review, so GitHub may not have requested them or someone may have removed the request.<br>Codepath owner `@codepath-owner` matched CODEOWNERS rules for: <code>torch/file.py</code>. |\n",  # noqa: B950
+            summary_text,
+        )
+        self.assertIn(
+            "| `soulitzer` | new request | `soulitzer` was picked at random from `autograd`'s roster, seeded by this PR so that reruns pick the same member.<br>[See why `autograd` owns this](#auto-pr-triage-why-autograd) |\n",  # noqa: B950
+            summary_text,
+        )
+        self.assertIn(
+            '<a id="auto-pr-triage-why-autograd"></a>\n\n'
+            "### Why `autograd` owns this\n\n"
+            "Semantic owner `autograd`: autograd owns this changed behavior.\n",
+            summary_text,
+        )
+        self.assertIn(
+            "- <code>torch/semantic.py</code>: This line implements the owned behavior.\n"
+            "  ```diff\n"
+            "  +new semantic behavior\n"
+            "  ```\n",
+            summary_text,
+        )
+        self.assertIn(
+            "<details><summary>Auto PR Triage decision plan</summary>\n\n"
+            "- Decision: `triage`\n",
             summary_text,
         )
         self.assertIn(
             "Planned effect: one deduplicated request for @soulitzer.",
             printed_reviewer_routing(output),
+        )
+
+    def test_step_summary_renders_paths_and_excerpts_inertly(self) -> None:
+        concern = AdditionalOwnerConcern.from_dict(
+            {
+                "concern": {
+                    "description": "Autograd owns this changed behavior.",
+                    "files": ["torch/a|b_`x`.py"],
+                    "evidence": [
+                        {
+                            "file": "torch/a|b_`x`.py",
+                            "diff_excerpt": "+```\n+</details> | cell",
+                            "relevance": "This explains the relevant change.",
+                        }
+                    ],
+                },
+                "owner_id": "autograd",
+                "rationale": [
+                    "The configured description covers this changed contract."
+                ],
+                "confidence": "high",
+                "bypass_intake_match": None,
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "summary.md"
+            with mock.patch("builtins.print"):
+                run_plan(
+                    FakeGitHub(),
+                    codepath_owners=(),
+                    additional_owners=("autograd",),
+                    additional_owner_concerns=(concern,),
+                    github_step_summary=summary,
+                )
+            summary_text = summary.read_text()
+
+        self.assertIn(
+            "- <code>torch/a&#124;b&#95;&#96;x&#96;.py</code>: "
+            "This explains the relevant change.\n"
+            "  ````diff\n"
+            "  +```\n"
+            "  +</details> | cell\n"
+            "  ````\n",
+            summary_text,
         )
 
     def test_step_summary_failure_does_not_block_planning(self) -> None:
@@ -533,7 +600,7 @@ class ApplyTriageTest(unittest.TestCase):
         self.assertEqual(result, ApplyOutcome("incomplete"))
         reason = "The LLM run failed; only codepath owners remain."
         self.assertEqual(printed_plan(output)["incomplete_reasons"], [reason])
-        self.assertIn(f"### Why this run is incomplete\n\n- {reason}\n", summary_text)
+        self.assertIn(f"| Why this run is incomplete | {reason} |\n", summary_text)
         self.assertIn(
             f"Why this run is incomplete: {reason}", printed_reviewer_routing(output)
         )

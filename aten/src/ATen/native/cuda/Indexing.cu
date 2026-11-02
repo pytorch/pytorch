@@ -2,6 +2,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/quantized/IndexKernel.h>
+#include <ATen/native/cuda/IndexKernelUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
@@ -33,6 +34,7 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
@@ -1518,6 +1520,23 @@ void index_reduce_func_cuda_impl(
 
 #undef SMALL_INDEX
 #undef LARGE_INDEX
+}
+
+TORCH_IMPL_FUNC(index_copy_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
+  // Like index_add, delegate row copies to scatter's fast-path dispatch.
+  if (dim == 0 && index.is_contiguous() && index.numel() > 1 &&
+      source.nbytes() / index.numel() >= kFastScatterMinSliceBytes &&
+      !globalContext().deterministicAlgorithms()) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    std::vector<int64_t> index_shape(source.dim(), 1);
+    index_shape[0] = index.numel();
+    result.scatter_(dim, index.view(index_shape).expand_as(source), source);
+    return;
+  }
+  index_copy_out_impl(self, dim, index, source, result);
 }
 
 TORCH_IMPL_FUNC(index_add_cuda_out)
