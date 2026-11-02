@@ -188,6 +188,18 @@ class _ShapeEnvGuardError(RuntimeError):
     """Raised when a guard is attempted while the ShapeEnv is in error-on-guard mode."""
 
 
+class _FallbackTaken(Exception):
+    """Raised so that lru_cache does not keep evaluate_expr's fallback results."""
+
+
+class _UseFallback:
+    pass
+
+
+# Returned by _evaluate_expr when the result is unknown and a fallback is allowed.
+_USE_FALLBACK = _UseFallback()
+
+
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
@@ -4414,6 +4426,12 @@ class ShapeEnv:
             source: The source of the symbol to specialize
             check_fn: A function that takes a sympy Symbol and returns a sympy expression
                      representing a constraint/specialization to be applied
+
+        WARNING: Not safe with ShapeEnv caching. axioms and replacements are
+        mutated without bumping _version_counter/_replacements_version_counter,
+        so results cached inside the context leak out of it (and vice versa).
+        Only used by mark_dynamic(..., specialize_on=...), which has no known
+        users; we should probably deprecate it rather than fix this.
         """
         name = source.name
         sym = self.source_to_var[name]
@@ -4889,7 +4907,7 @@ class ShapeEnv:
 
         Temporarily freezes the ShapeEnv and makes _check_frozen raise
         instead of warn, so that guard-installing code paths produce an
-        exception that is not cached by the _inner_evaluate_expr LRU cache.
+        exception that is not cached by the evaluate_expr LRU caches.
         """
         old_frozen = self.frozen
         old_error = self._error_on_new_guards
@@ -7485,24 +7503,20 @@ class ShapeEnv:
             return result
         return None
 
-    def _maybe_evaluate_range_only(
-        self,
-        expr: sympy.Basic,
-        fallback: sympy.Basic | None = None,
-    ) -> sympy.Basic | None:
+    def _maybe_evaluate_range_only(self, expr: sympy.Basic) -> sympy.Basic | None:
         """
         Lightweight range-based evaluation using only bound_sympy (value range
         analysis), without expensive simplification, axiom matching, or symbol
         reallocation.
 
         Returns the resolved value if range analysis determines it, otherwise
-        returns fallback.
+        returns None.
         """
         var_ranges = {x: self.var_to_range.get(x) for x in expr.free_symbols}
         out = bound_sympy(expr, var_ranges)  # type: ignore[arg-type]
         if out.is_singleton():
             return out.lower
-        return fallback
+        return None
 
     @_lru_cache
     def _maybe_evaluate_static(
@@ -8834,7 +8848,17 @@ class ShapeEnv:
 
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
-        return self._inner_evaluate_expr(
+        if fallback_value is None:
+            return self._cached_evaluate_expr(
+                orig_expr,
+                hint,
+                fx_node,
+                size_oblivious,
+                forcing_spec,
+                suppress_guards_tls,
+                allow_fallback=False,
+            )
+        return self._cached_evaluate_expr_with_fallback(
             orig_expr,
             hint,
             fx_node,
@@ -8844,7 +8868,77 @@ class ShapeEnv:
             fallback_value,
         )
 
+    # NOTE [evaluate_expr caching with fallback_value]
+    # guard_or_true/guard_or_false pass a fallback_value that evaluate_expr
+    # returns when it cannot decide the expression. That answer is an
+    # assumption: a guard or range refinement added later may decide the
+    # expression, so it must not be cached for good. Every other result is a
+    # decision that stays valid as the ShapeEnv learns more, whether it was
+    # derived from known facts or made true by a guard or runtime assert that
+    # evaluate_expr installed, so it can be cached for good.
+    #
+    # Two caches implement this:
+    #  - _cached_evaluate_expr (plain lru_cache) keeps decided results for the
+    #    life of the ShapeEnv. lru_cache stores every return value but never an
+    #    exception, so when _evaluate_expr reports that it could not decide (by
+    #    returning _USE_FALLBACK), this layer raises _FallbackTaken instead.
+    #  - _cached_evaluate_expr_with_fallback (_lru_cache, cleared whenever the
+    #    ShapeEnv version changes) is only used when fallback_value is set. It
+    #    catches _FallbackTaken and returns fallback_value, so an assumed answer
+    #    is only reused until the ShapeEnv learns something new.
+    @functools.partial(_lru_cache, maxsize=256)
+    def _cached_evaluate_expr_with_fallback(
+        self,
+        orig_expr: sympy.Basic,
+        hint: int | bool | float | None,
+        fx_node: torch.fx.Node | None,
+        size_oblivious: bool,
+        forcing_spec: bool,
+        _suppress_guards_tls: bool,
+        fallback_value: bool,
+    ) -> sympy.Basic:
+        try:
+            return self._cached_evaluate_expr(
+                orig_expr,
+                hint,
+                fx_node,
+                size_oblivious,
+                forcing_spec,
+                _suppress_guards_tls,
+                allow_fallback=True,
+            )
+        except _FallbackTaken:
+            self._log_suppressed_dde(orig_expr, fallback_value)
+            return fallback_value
+
     @lru_cache(256)
+    def _cached_evaluate_expr(
+        self,
+        orig_expr: sympy.Basic,
+        hint: int | bool | float | None,
+        fx_node: torch.fx.Node | None,
+        size_oblivious: bool,
+        forcing_spec: bool,
+        _suppress_guards_tls: bool,
+        *,
+        allow_fallback: bool,
+    ) -> sympy.Basic:
+        """Caches decided results only; see NOTE [evaluate_expr caching with
+        fallback_value].
+        """
+        result = self._inner_evaluate_expr(
+            orig_expr,
+            hint,
+            fx_node,
+            size_oblivious,
+            forcing_spec,
+            _suppress_guards_tls,
+            allow_fallback,
+        )
+        if isinstance(result, _UseFallback):
+            raise _FallbackTaken
+        return result
+
     @record_shapeenv_event(save_tracked_fakes=True, name="evaluate_expr")
     def _inner_evaluate_expr(
         self,
@@ -8854,15 +8948,15 @@ class ShapeEnv:
         size_oblivious: bool,
         forcing_spec: bool,
         _suppress_guards_tls: bool,
-        fallback_value: bool | None = None,
-    ) -> sympy.Basic:
+        allow_fallback: bool,
+    ) -> sympy.Basic | _UseFallback:
         try:
             return self._evaluate_expr(
                 orig_expr,
                 hint,
                 fx_node,
                 size_oblivious,
-                fallback_value,
+                allow_fallback,
                 forcing_spec=forcing_spec,
             )
         except Exception as e:
@@ -8894,10 +8988,14 @@ class ShapeEnv:
         hint: bool | int | float | None = None,
         fx_node: torch.fx.Node | None = None,
         size_oblivious: bool = False,
-        fallback_value: bool | None = None,
+        allow_fallback: bool = False,
         *,
         forcing_spec: bool = False,
-    ) -> sympy.Basic:
+    ) -> sympy.Basic | _UseFallback:
+        """Returns _USE_FALLBACK when allow_fallback and the result is unknown.
+
+        See NOTE [evaluate_expr caching with fallback_value].
+        """
         # TODO: split conjunctions and evaluate them separately
         if isinstance(
             orig_expr,
@@ -8937,7 +9035,7 @@ class ShapeEnv:
         #   3. the guard should not be suppressed
         #   4. the guard doesn't contain backed symfloat symbols
         #      since z3 can't handle floats
-        #   5. fallback_value is none.
+        #   5. no fallback is allowed.
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         node = None
@@ -8948,7 +9046,7 @@ class ShapeEnv:
             and not self._suppress_guards_tls()
             and not size_oblivious
             and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
-            and fallback_value is None
+            and not allow_fallback
         ):
             # TODO: does this even worked with unbacked :think:
             concrete_val = compute_concrete_val()
@@ -9011,17 +9109,14 @@ class ShapeEnv:
             aggressive_level = (
                 torch.fx.experimental._config.aggressive_guard_free_semantics
             )
-            if hint is None and aggressive_level > 0 and fallback_value is not None:
+            if hint is None and aggressive_level > 0 and allow_fallback:
                 if aggressive_level >= AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS:
                     # Skip range analysis entirely
-                    self._log_suppressed_dde(orig_expr, fallback_value)
-                    return fallback_value
+                    return _USE_FALLBACK
                 else:
                     # Level 1: try range analysis first
-                    range_result = self._maybe_evaluate_range_only(expr, fallback_value)
-                    if range_result is fallback_value:
-                        self._log_suppressed_dde(orig_expr, fallback_value)
-                    return range_result
+                    range_result = self._maybe_evaluate_range_only(expr)
+                    return _USE_FALLBACK if range_result is None else range_result
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
@@ -9059,10 +9154,9 @@ class ShapeEnv:
                 if not (new_expr.free_symbols <= self.backed_var_to_val.keys()):
                     ok = False
 
-                    # fallback_value is set when guard_or_true or guard_or_false are used.
-                    if not ok and fallback_value is not None:
-                        self._log_suppressed_dde(orig_expr, fallback_value)
-                        return fallback_value
+                    # allow_fallback is set when guard_or_true or guard_or_false are used.
+                    if not ok and allow_fallback:
+                        return _USE_FALLBACK
 
                     # real_tensor_prop_unbacked_vals is not None iff propagate_real_tensors is on.
                     # if propagate_real_tensors is on, we check the example values to generate (unsound_result)
