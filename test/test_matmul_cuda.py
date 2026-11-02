@@ -4,6 +4,7 @@ import contextlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -1255,7 +1256,8 @@ class TestMatmulCuda(InductorTestCase):
             FileCheck().check(f"{template}_tem_fused__grouped_mm").run(code[0])
             self.assertNotIn("_poi_", code[0])
             if tma_store:
-                self.assertEqual(code[0].count("tma.async_store("), num_tma_stores)
+                # 2-D A with 3-D B stores through the ragged-descriptor helper, one call per output.
+                self.assertEqual(len(re.findall(r"async_store_ragged\w*\(\s*\w+_desc,", code[0])), num_tma_stores)
 
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("b_k_major", [True, False])
