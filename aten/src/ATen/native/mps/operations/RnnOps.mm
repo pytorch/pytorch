@@ -28,44 +28,24 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Rnn_metallib.h>
 #endif
 
-template <typename F>
-void lstm_layer(const Tensor& weight, const Tensor& result, MTLComputePipelineState_t pso, const F& encode) {
-  if (result.numel() == 0) {
+template <typename... Args>
+void lstm_cell(MTLComputePipelineState_t pso, const Tensor& cell, const Args&... args) {
+  if (cell.numel() == 0) {
     return;
   }
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto cached = LookUpOrCreateCachedKernel<MPSCachedKernel>("lstm_mm_" + scalarToMetalTypeString(weight), [&]() {
-        return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:stream->device() sourceCount:2] autorelease];
-      });
-      auto kernel = cached->template kernel<MPSNDArrayMatrixMultiplication>();
-      auto w = getMPSNDArray(weight, weight.sizes(), weight.strides());
-      auto out = getMPSNDArray(result, result.sizes());
-      stream->endKernelCoalescing();
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pso, "lstm_layer", {result}, stream);
-      encode(encoder, [&](const Tensor& input) {
-        auto in = getMPSNDArray(input, input.sizes());
-        [kernel encodeToCommandEncoder:encoder
-                         commandBuffer:stream->commandBuffer()
-                          sourceArrays:@[ in, w ]
-                      destinationArray:out];
-      });
+      getMPSProfiler().beginProfileKernel(pso, "lstm_cell", {cell}, stream);
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, args..., static_cast<uint32_t>(cell.size(-1)));
+      mtl_dispatch1DJob(encoder, pso, cell.numel());
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
 }
 
-template <typename... Args>
-void lstm_cell(MTLComputeCommandEncoder_t encoder,
-               MTLComputePipelineState_t pso,
-               const Tensor& cell,
-               const Args&... args) {
-  [encoder setComputePipelineState:pso];
-  mtl_setArgs(encoder, args..., static_cast<uint32_t>(cell.size(-1)));
-  mtl_dispatch1DJob(encoder, pso, cell.numel());
-}
 /**
  * Accepts tensors in Pytorch API format and returns tensors in MPS API format
  * @return tuple of tensors to use with MPS API in order:
@@ -171,12 +151,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
           has_biases ? params[param + 2].add(params[param + 3]).contiguous() : at::zeros({4 * hidden}, input.options());
       const auto recurrent_weight = params[param + 1].contiguous().t();
       auto recurrent_gates = at::empty({batch, 4 * hidden}, input.options());
-      lstm_layer(recurrent_weight, recurrent_gates, pso, [&](auto encoder, auto&& matmul) {
-        for (const auto step : c10::irange(seq_len)) {
-          matmul(h[step]);
-          lstm_cell(encoder, pso, c[step], z[step], recurrent_gates, c[step], c[step + 1], h[step + 1], bias);
-        }
-      });
+      for (const auto step : c10::irange(seq_len)) {
+        at::mm_out(recurrent_gates, h[step], recurrent_weight);
+        lstm_cell(pso, c[step], z[step], recurrent_gates, c[step], c[step + 1], h[step + 1], bias);
+      }
       graph_gates[layer].narrow(-1, direction * 4 * hidden, 4 * hidden).copy_(direction ? z.flip({0}) : z);
       auto cells = c.narrow(0, 1, seq_len);
       graph_cells[layer].narrow(-1, direction * hidden, hidden).copy_(direction ? cells.flip({0}) : cells);
