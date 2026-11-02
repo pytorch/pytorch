@@ -45,8 +45,8 @@ You read the issue and submit a triage plan; you never change the issue yourself
 | `submit_result` | The triage plan (required, call once as your last action) |
 
 When triage is needed, look for duplicates and related issues before deciding the outcome.
-Use `search_issues` with an operator name, a distinctive error, or relevant labels; include
-`in:title,body,comments` to search discussions too. Repository scope is fixed: omit `repo:`,
+Use `search_issues` with an operator name, a distinctive error, or relevant labels.
+GitHub searches titles, bodies, and comments by default. Repository scope is fixed: omit `repo:`,
 `org:`, and `user:` qualifiers, and use separate calls instead of `OR` or grouping.
 If results are unhelpful, remove guessed
 symptoms or use a broader operator/family query, even when the first search was nonempty.
