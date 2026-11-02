@@ -27,7 +27,7 @@ from typing_extensions import ParamSpec, Self
 import numpy
 
 import torch
-from torch import inf, SymInt, Tensor
+from torch import inf, SymBool, SymFloat, SymInt, Tensor
 from torch._C import (
     _acc,
     _aoti,
@@ -2297,6 +2297,14 @@ def _set_fake_sym_memo(
     fake: Tensor, name: str, memo: SymInt | _int, epoch: _int
 ) -> None: ...
 def _get_fake_sym_memo(fake: Tensor, name: str, epoch: _int) -> SymInt | _int | None: ...
+def _set_fake_item_memo(
+    fake: Tensor,
+    memo: _int | _float | _bool | SymInt | SymFloat | SymBool,
+    epoch: _int,
+) -> None: ...
+def _get_fake_item_memo(
+    fake: Tensor,
+) -> tuple[_int | _float | _bool | SymInt | SymFloat | SymBool, _int] | None: ...
 def _set_fake_constant(fake: Tensor, constant: Tensor | None) -> None: ...
 def _fake_tensor_to_list(t: Tensor) -> Any: ...
 

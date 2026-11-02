@@ -379,14 +379,22 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
             torch._C._set_real_tensor(x, real)
 
 
+# The item memo of a fake. A C++ fake keeps it on the C++ tensor, which drops it
+# once the tensor is mutated; the epoch check is done here, as in
+# SymNumberMemoDescriptor.__get__.
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
-    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            return cast(Any, fake_mode).get_item_memo(x)
-    return None
+    if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
+    fake_mode = maybe_get_fake_mode(x)
+    if fake_mode is None or (record := torch._C._get_fake_item_memo(x)) is None:
+        return None
+    memo, epoch = record
+    # Backed SymFloats are stable across retracing epochs
+    if isinstance(memo, SymFloat) and memo.node.hint is not None:
+        return memo
+    return memo if epoch == fake_mode.epoch else None
 
 
 def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
@@ -395,7 +403,7 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         fake_mode = maybe_get_fake_mode(x)
         if fake_mode is not None:
-            cast(Any, fake_mode).set_item_memo(x, memo)
+            torch._C._set_fake_item_memo(x, memo, fake_mode.epoch)
 
 
 # The SymInt memos of a fake (nonzero_memo, unique_memo,

@@ -322,6 +322,16 @@ struct C10_API ExtraMeta {
     uint64_t epoch = 0;
   };
   std::unordered_map<std::string, FakeSymMemo> fake_sym_memos_;
+  // The item memo of a C++ fake (Python FakeTensor.item_memo); see
+  // TensorImpl::set_fake_item_memo. Held as a Python object, since item() can
+  // return a SymFloat or SymBool as well as a SymInt. Like fake_sym_memos_, the
+  // copy constructor does not copy it.
+  struct FakeItemMemo {
+    std::shared_ptr<c10::SafePyObject> value;
+    std::optional<uint32_t> version;
+    uint64_t epoch = 0;
+  };
+  std::optional<FakeItemMemo> fake_item_memo_;
   // See TensorImpl::symbolic_wrapped_number.
   c10::SymNode symbolic_wrapped_number_ = nullptr;
 
@@ -1603,6 +1613,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   std::optional<c10::SymInt> fake_sym_memo(
       const std::string& name,
       uint64_t epoch);
+
+  // Records memo as this fake's item memo, set in fake mode epoch `epoch`.
+  // Like set_fake_sym_memo, safe to call concurrently.
+  void set_fake_item_memo(
+      std::shared_ptr<c10::SafePyObject> memo,
+      uint64_t epoch);
+
+  // The item memo and the epoch it was set in, or nullopt if there is none or
+  // the tensor was mutated since, in which case the memo is dropped. Unlike
+  // fake_sym_memo, checking the epoch is left to the caller, since a backed
+  // SymFloat memo outlives an epoch change (see SymNumberMemoDescriptor).
+  std::optional<std::pair<std::shared_ptr<c10::SafePyObject>, uint64_t>>
+  fake_item_memo();
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.

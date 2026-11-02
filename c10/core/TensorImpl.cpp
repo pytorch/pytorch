@@ -311,9 +311,10 @@ bool TensorImpl::try_incref_pyobject() const noexcept {
   return pyobj_slot_.try_incref();
 }
 
-// Guards ExtraMeta::fake_sym_memos_ of every tensor. Only the nonzero and
-// unique fake impls use these memos, so one lock is enough.
-static std::mutex& fake_sym_memo_mutex() {
+// Guards ExtraMeta::fake_sym_memos_ and fake_item_memo_ of every tensor. Only
+// the nonzero, unique and item fake impls use these memos, so one lock is
+// enough.
+static std::mutex& fake_memo_mutex() {
   static std::mutex mutex;
   return mutex;
 }
@@ -331,7 +332,7 @@ void TensorImpl::set_fake_sym_memo(
   // The replaced memo may hold a Python SymNode, so destroy it after the lock
   // is released.
   c10::SymInt replaced;
-  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
   auto& entry = get_extra_meta().fake_sym_memos_[name];
   replaced = std::exchange(entry.value, std::move(memo));
   entry.version = version;
@@ -343,7 +344,7 @@ std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
     uint64_t epoch) {
   // Like the replaced memo in set_fake_sym_memo, destroyed after unlocking.
   c10::SymInt dropped;
-  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
   if (!extra_meta_) {
     return std::nullopt;
   }
@@ -363,6 +364,38 @@ std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
   return entry.value;
 }
 
+void TensorImpl::set_fake_item_memo(
+    std::shared_ptr<c10::SafePyObject> memo,
+    uint64_t epoch) {
+  // Like set_fake_sym_memo, read the version first, and drop the replaced
+  // memo, which may be the last reference to a Python object, after unlocking.
+  auto version = is_inference()
+      ? std::nullopt
+      : std::optional<uint32_t>(version_counter().current_version());
+  std::optional<ExtraMeta::FakeItemMemo> replaced;
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
+  replaced = std::exchange(
+      get_extra_meta().fake_item_memo_,
+      ExtraMeta::FakeItemMemo{std::move(memo), version, epoch});
+}
+
+std::optional<std::pair<std::shared_ptr<c10::SafePyObject>, uint64_t>>
+TensorImpl::fake_item_memo() {
+  // Like the replaced memo in set_fake_item_memo, dropped after unlocking.
+  std::optional<ExtraMeta::FakeItemMemo> dropped;
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
+  if (!extra_meta_ || !extra_meta_->fake_item_memo_) {
+    return std::nullopt;
+  }
+  const auto& entry = *extra_meta_->fake_item_memo_;
+  if (entry.version.has_value() &&
+      *entry.version != version_counter().current_version()) {
+    dropped = std::exchange(extra_meta_->fake_item_memo_, std::nullopt);
+    return std::nullopt;
+  }
+  return std::make_pair(entry.value, entry.epoch);
+}
+
 void TensorImpl::release_resources() {
   if (extra_meta_ && extra_meta_->fake_constant_) {
     auto mode = extra_meta_->fake_tensor_mode_;
@@ -376,6 +409,7 @@ void TensorImpl::release_resources() {
   if (extra_meta_) {
     extra_meta_->real_tensor_.reset();
     extra_meta_->fake_sym_memos_.clear();
+    extra_meta_->fake_item_memo_.reset();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }

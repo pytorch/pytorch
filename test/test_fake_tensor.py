@@ -5613,6 +5613,28 @@ class TestCppFakeTensorModeBindings(TestCase):
         finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
+    def test_item_memo(self):
+        mode, _ = self._make_mode()
+
+        def make_fake():
+            meta = torch.empty((), device="meta")
+            return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        fake = make_fake()
+        self.assertIsNone(torch._C._get_fake_item_memo(fake))
+        memo = ShapeEnv().create_unbacked_symfloat()
+        torch._C._set_fake_item_memo(fake, memo, 3)
+        self.assertEqual(torch._C._get_fake_item_memo(fake), (memo, 3))
+        self.assertIs(torch._C._get_fake_item_memo(fake)[0], memo)
+        # Dropped once the tensor is mutated, and by a shallow copy (set_data)
+        bumped = (fake._version + 1,)
+        torch._C._autograd._unsafe_set_version_counter((fake,), bumped)
+        self.assertIsNone(torch._C._get_fake_item_memo(fake))
+        torch._C._set_fake_item_memo(fake, True, 0)
+        self.assertEqual(torch._C._get_fake_item_memo(fake), (True, 0))
+        fake.data = make_fake()
+        self.assertIsNone(torch._C._get_fake_item_memo(fake))
+
 
 if __name__ == "__main__":
     run_tests()
