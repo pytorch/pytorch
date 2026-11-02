@@ -14,7 +14,7 @@ from torch._library.dispatchless import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 
 
 def apply_transform(fn, transform):
@@ -23,6 +23,7 @@ def apply_transform(fn, transform):
     if transform == "jvp":
         return lambda x: torch.func.jvp(fn, (x,), (torch.ones_like(x),))
     if transform == "gradgrad":
+
         def scalar(x):
             return fn(x).sum()
 
@@ -34,6 +35,9 @@ def apply_transform(fn, transform):
 
 
 class DispatchlessTest(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_make_fx_autograd(self, device):
         @dispatchless_custom_op
         def op(x):
