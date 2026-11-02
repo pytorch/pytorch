@@ -199,6 +199,50 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
         with self.assertRaises((RuntimeError, TypeError)):
             op((x,), (1.0,), unknown=x)
 
+    def test_ordered_symints_and_out_of_order_scalar_kwargs(self) -> None:
+        lib = torch.library.Library("_pyobject_dispatch_scalar_args", "DEF")
+        self.addCleanup(lib._destroy)
+        lib.define(
+            "combine(Tensor x, SymInt n, float scale, bool negate, "
+            "Tensor? bias=None) -> (Tensor, Tensor, Tensor)"
+        )
+        received = []
+
+        def combine(x, n, scale, negate, bias=None):
+            received.append((type(n), type(scale), type(negate), bias))
+            result = x * n * scale
+            if negate:
+                result = -result
+            if bias is not None:
+                result = result + bias
+            return result, result + 1, x.clone()
+
+        lib.impl("combine", combine, "CPU")
+        lib.impl("combine", torch.library.fallthrough_kernel, "Autograd")
+        op = torch.ops._pyobject_dispatch_scalar_args.combine.default
+        op._enable_pyobj_dispatch(True)
+        x = torch.ones(2)
+
+        result = op(x=x, n=2, scale=1.5, negate=False, bias=x)
+        torch.testing.assert_close(result, (x * 4, x * 4 + 1, x))
+        self.assertEqual(received[-1][:3], (int, float, bool))
+        self.assertIs(received[-1][3], x)
+
+        result = op(scale=2, negate=True, x=x, n=3)
+        torch.testing.assert_close(result, (-x * 6, -x * 6 + 1, x))
+        self.assertEqual(received[-1][:3], (int, float, bool))
+        self.assertIsNone(received[-1][3])
+
+        class IntSubclass(int):
+            pass
+
+        result = op(x=x, n=IntSubclass(2), scale=1.0, negate=False)
+        torch.testing.assert_close(result, (x * 2, x * 2 + 1, x))
+        self.assertEqual(received[-1][0], int)
+
+        with self.assertRaises((RuntimeError, TypeError, OverflowError)):
+            op(x=x, n=1 << 80, scale=1.0, negate=False)
+
     def test_string_device_argument_is_normalized(self) -> None:
         lib = torch.library.Library("_pyobject_dispatch_device_arg", "DEF")
         self.addCleanup(lib._destroy)
@@ -354,3 +398,51 @@ class PyObjectDispatchPythonKeyTest(unittest.TestCase):
             boxed_result = custom(x)
         torch.testing.assert_close(boxed_result, result)
         self.assertEqual(calls, ["mode", "subclass"])
+
+
+class PyObjectDispatchProfileTest(unittest.TestCase):
+    def test_pyobj_dispatched_op_appears_in_profiler(self) -> None:
+        @torch.library.custom_op(
+            "_pyobject_dispatch_profile::visible", mutates_args=()
+        )
+        def visible(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        op = torch.ops._pyobject_dispatch_profile.visible.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+        x = torch.ones(2)
+        with torch.profiler.profile() as prof:
+            for _ in range(3):
+                visible(x)
+        names = {e.key for e in prof.key_averages()}
+        self.assertIn("_pyobject_dispatch_profile::visible", names)
+
+
+class PyObjectDispatchCachedDefaultsTest(unittest.TestCase):
+    def test_omitted_scalar_defaults_use_cached_values(self) -> None:
+        @torch.library.custom_op(
+            "_pyobject_dispatch_defaults::scaled", mutates_args=()
+        )
+        def scaled(
+            x: torch.Tensor,
+            scale: float = 2.0,
+            count: int = 3,
+            flag: bool = True,
+            other: torch.Tensor | None = None,
+        ) -> torch.Tensor:
+            out = x * scale * count
+            if flag:
+                out = out + 1
+            if other is not None:
+                out = out + other
+            return out
+
+        x = torch.ones(2)
+        for _ in range(3):
+            torch.testing.assert_close(scaled(x), torch.full((2,), 7.0))
+        torch.testing.assert_close(
+            scaled(x, count=1, other=x), torch.full((2,), 4.0)
+        )
+        torch.testing.assert_close(
+            scaled(x=x, flag=False, scale=1.0), torch.full((2,), 3.0)
+        )

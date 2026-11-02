@@ -1202,10 +1202,13 @@ static void visit_tensors(
     }
   }
   if (kwargs && PyDict_Check(kwargs)) {
-    auto vals = THPObjectPtr{PyDict_Values(kwargs)};
-    for (const auto i : c10::irange(PyList_Size(vals))) {
-      if (visit<skip_tensors_in_non_tensorlist>(
-              PyList_GetItem(vals, i), visit_tensor)) {
+    // PyDict_Next borrows references and allocates nothing, unlike
+    // PyDict_Values. visit() never mutates the dict, so this is safe.
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      if (visit<skip_tensors_in_non_tensorlist>(value, visit_tensor)) {
         return;
       }
     }
