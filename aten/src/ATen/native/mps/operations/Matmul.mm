@@ -8,7 +8,6 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
-#include <ATen/native/mps/kernels/Matmul.h>
 #include <ATen/native/mps/operations/GemmHeuristics.h>
 #include <ATen/native/mps/operations/Matmul.h>
 
@@ -630,22 +629,26 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
       other.size(1) >= min_matrix_dim;
 }
 
-template <typename idx_t>
-MatmulParams<idx_t> matmul_params(const Tensor& a, const Tensor& b, const Tensor& out) {
-  return {c10::checked_convert<uint32_t>(a.size(0), "matmul rows"),
-          c10::checked_convert<uint32_t>(b.size(1), "matmul columns"),
-          c10::checked_convert<uint32_t>(a.size(1), "matmul contraction dimension"),
-          static_cast<idx_t>(a.stride(0)),
-          static_cast<idx_t>(a.stride(1)),
-          static_cast<idx_t>(b.stride(0)),
-          static_cast<idx_t>(b.stride(1)),
-          static_cast<idx_t>(out.stride(0)),
-          static_cast<idx_t>(out.stride(1))};
-}
-
 } // anonymous namespace
 
 void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
+  check_mm_shapes(a, b, "metal_mm_out");
+  TORCH_CHECK_VALUE(out.dim() == 2 && out.size(0) == a.size(0) && out.size(1) == b.size(1),
+                    "metal_mm_out: expected out of shape [",
+                    a.size(0),
+                    ", ",
+                    b.size(1),
+                    "], got ",
+                    out.sizes());
+  const auto scalar_type = out.scalar_type();
+  TORCH_CHECK_TYPE(a.scalar_type() == scalar_type && b.scalar_type() == scalar_type,
+                   "metal_mm_out: expected matching dtypes, got ",
+                   a.scalar_type(),
+                   ", ",
+                   b.scalar_type(),
+                   " and ",
+                   scalar_type);
+  TORCH_CHECK_TYPE(supportedFloatingType(scalar_type), "metal_mm_out: unsupported dtype ", scalar_type);
   if (out.numel() == 0) {
     return;
   }
@@ -677,8 +680,10 @@ void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
       } else {
         mtl_setArgs(encoder, a, b, out, params);
       }
+      const auto grid_size_x = at::ceil_div<NSUInteger>(params.n, kMatmulTileN);
+      const auto grid_size_y = at::ceil_div<NSUInteger>(params.m, bm);
       [encoder
-           dispatchThreadgroups:MTLSizeMake(at::ceil_div(params.n, kMatmulTileN), at::ceil_div(params.m, bm), 1)
+           dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
           threadsPerThreadgroup:MTLSizeMake(matmul_simdgroups(bm, kMatmulTileN) * c10::metal::simdgroup_size, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
