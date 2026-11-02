@@ -281,19 +281,7 @@ class TunableOp {
       // donor of either kind (nearest or wildcard) is a miss rather than a
       // reason to return an unvalidated wildcard hint.
       if (ctx->IsNearestMatchEnabled()) {
-        // Record the verdict, the same way a validated borrow is recorded.
-        // Without it every later call repeats LookupNearest, which copies the
-        // kernel map under lock_ and re-parses every candidate signature. The
-        // reuse pass leaves nearest match on after a successful warm-up, so
-        // that scan would land inside the measured call -- the compile-time
-        // cost the warm/measure split exists to keep out of the measurement.
-        auto no_donor = ResultEntry::Default();
-        if (ctx->IsRecordBorrowedEnabled()) {
-          mgr.RecordBorrowed(op_sig, concrete_sig, no_donor);
-        } else {
-          mgr.CacheBorrowedInMemory(op_sig, concrete_sig, no_donor);
-        }
-        return no_donor;
+        return ResultEntry::Default();
       }
       if (ctx->IsWildcardFallbackEnabled()) {
         return mgr.LookupWildcardFallback(op_sig, concrete_sig);

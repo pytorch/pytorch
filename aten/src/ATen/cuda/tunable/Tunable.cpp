@@ -62,7 +62,9 @@ namespace {
 // the reuse pass, 0 forces the feature off for the whole process, 1 defers to
 // the pass as well, and check_env warns on anything else. NEAREST_MATCH_ENABLED
 // governs borrowing, RECORD_BORROWED_ENABLED governs recording a borrow, in
-// memory as well as in the results file. Both are kept out of the user-facing
+// memory as well as in the results file -- and, since a borrow that records
+// nothing leaves runtime on Default while the pass measured the donor, it
+// disables borrowing too. Both are kept out of the user-facing
 // table in README.md: the mechanism they govern has no public entry point yet,
 // and documenting them there would promise a contract before there is a feature
 // to attach it to. Add them when it goes public.
@@ -866,6 +868,14 @@ bool TuningContext::IsNearestMatchEnabled() const {
   // Same kill switch LookupNearest itself applies, so the pass's own check and
   // the enforcement point cannot disagree. The member is the reuse pass's policy.
   if (NearestMatchDisabledByEnv()) {
+    return false;
+  }
+  // Borrowing without recording is worse than not borrowing: the pass measures
+  // the borrowed kernel and reports that time, but with nothing written the
+  // deployed process misses the shape and runs Default, so the decision rests
+  // on a measurement runtime cannot reproduce. Checked here so it holds for
+  // every caller, not only one that thinks to ask.
+  if (RecordBorrowedDisabledByEnv()) {
     return false;
   }
   return nearest_match_enable_;
