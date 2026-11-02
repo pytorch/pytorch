@@ -233,6 +233,7 @@ def _get_jiterator_fn(
     )
     # LLVM clobbers "~{reg}" are spelled "reg" in GNU inline asm.
     clobbers_str = ", ".join(f'"{c[1:].strip("{}")}"' for c in clobbers)
+    clobber_section = f"\n        : {clobbers_str}" if clobbers else ""
     escaped_asm = (
         cuda_asm.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     )
@@ -244,8 +245,7 @@ template <typename T>
     asm volatile (
         "{escaped_asm}"
         : {out_constraints_str}
-        : {in_constraints_str}
-        : {clobbers_str}
+        : {in_constraints_str}{clobber_section}
     );
     return result;
 }}
