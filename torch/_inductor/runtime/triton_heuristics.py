@@ -2848,8 +2848,10 @@ class CachingAutotuner(KernelInterface):
             if torch.version.hip:
                 n_scratch = max(n_scratch, 2)
 
+            # Only launchers with supports_launch_pdl take the trailing launch_pdl flag.
+            launch_pdl = (True,) if kernel.launch_pdl else ()
             fast_runner = fast_launcher_cls(
-                kernel_function, num_warps, shared, arg_tys, n_scratch
+                kernel_function, num_warps, shared, arg_tys, n_scratch, *launch_pdl
             )
 
             new_globals = {**launcher.__globals__, "runner": fast_runner}
@@ -3253,11 +3255,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
 
-            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
-                kernel.metadata, "launch_cooperative_grid", False
-            ):
+            if getattr(kernel.metadata, "launch_cooperative_grid", False):
                 raise CannotStaticallyLaunchKernel(
-                    "static launch does not support launch attributes"
+                    "static launch does not support cooperative grid launches"
                 )
 
             binary_ext = GPU_KERNEL_BIN_EXTS.get(
