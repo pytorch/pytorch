@@ -105,11 +105,15 @@ class ItertoolsVariable(VariableTracker):
         args: list["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker | None":
+        from .builder import SourcelessBuilder
+
         # Only itertools.chain has from_iterable; declining (None) falls
         # through to the generic protocol for other itertools callables.
         if self.value is not itertools.chain:
             return None
-        return ItertoolsVariable(_CHAIN_FROM_ITERABLE).call_function(tx, args, kwargs)
+        return SourcelessBuilder.create_internal_itertools(
+            _CHAIN_FROM_ITERABLE
+        ).call_function(tx, args, kwargs)
 
     tp_methods = {
         "from_iterable": Method(_from_iterable),
@@ -133,11 +137,11 @@ class ItertoolsVariable(VariableTracker):
             source = variables.ListIteratorVariable(
                 list(args), mutation_type=ValueMutationNew()
             )
-            return ChainVariable(source, mutation_type=ValueMutationNew())
+            return ChainVariable.create(source)
         elif self.value is _CHAIN_FROM_ITERABLE and not kwargs and len(args) == 1:
             # Convert outer iterable to iterator; each sub-iterable converted lazily.
             source = generic_getiter(tx, args[0])
-            return ChainVariable(source, mutation_type=ValueMutationNew())
+            return ChainVariable.create(source)
         elif self.value is itertools.zip_longest:
             fillvalue_vt = kwargs.pop("fillvalue", ConstantVariable.create(None))
             if kwargs:
@@ -149,11 +153,7 @@ class ItertoolsVariable(VariableTracker):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
             iterables = [generic_getiter(tx, arg) for arg in args]
-            return ZipLongestVariable(
-                iterables,
-                fillvalue=fillvalue_vt,
-                mutation_type=ValueMutationNew(),
-            )
+            return ZipLongestVariable.create(iterables, fillvalue=fillvalue_vt)
         elif self.value is itertools.product:
             if any(kw != "repeat" for kw in kwargs):
                 unimplemented(
@@ -168,7 +168,9 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [unpack_iterable(tx, arg) for arg in args]
+            seqs: list[list[VariableTracker]] = (
+                [] if r == 0 else [unpack_iterable(tx, arg) for arg in args]
+            )
             items = [
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
@@ -275,7 +277,7 @@ class ItertoolsVariable(VariableTracker):
             item = bound.arguments["object"]
             times = bound.arguments.get("times")
             if times is None:
-                return RepeatIteratorVariable(item, mutation_type=ValueMutationNew())
+                return RepeatIteratorVariable.create(item)
             if not times.is_python_constant():
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.repeat),
@@ -289,9 +291,7 @@ class ItertoolsVariable(VariableTracker):
                     f"'{times.python_type_name()}' object cannot be interpreted "
                     "as an integer",
                 )
-            return RepeatIteratorVariable(
-                item, times=max(times_val, 0), mutation_type=ValueMutationNew()
-            )
+            return RepeatIteratorVariable.create(item, times=max(times_val, 0))
         elif self.value is itertools.count:
             # count(start=0, step=1): let Python's own argument binding validate
             # the call. Anything it rejects (extra args, duplicate/unknown
@@ -304,9 +304,7 @@ class ItertoolsVariable(VariableTracker):
                 item, step = count_sig(*args, **kwargs)
             except TypeError:
                 return super().call_function(tx, args, kwargs)
-            return variables.CountIteratorVariable(
-                item, step, mutation_type=ValueMutationNew()
-            )
+            return variables.CountIteratorVariable.create(item, step)
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -365,6 +363,10 @@ class ChainVariable(IteratorVariable):
         self.source_iterator = source_iterator
         # current sub-iterator (None = not started or just exhausted a sub-iterable)
         self.current = current
+
+    @staticmethod
+    def create(source_iterator: VariableTracker) -> "ChainVariable":
+        return ChainVariable(source_iterator, mutation_type=ValueMutationNew())
 
     def python_type(self) -> type:
         return itertools.chain
@@ -442,6 +444,14 @@ class RepeatIteratorVariable(IteratorVariable):
         self.item = item
         self.times = times
         self.remaining = times if remaining is None else remaining
+
+    @staticmethod
+    def create(
+        item: VariableTracker, *, times: int | None = None
+    ) -> "RepeatIteratorVariable":
+        return RepeatIteratorVariable(
+            item, times=times, mutation_type=ValueMutationNew()
+        )
 
     def python_type(self) -> type:
         return itertools.repeat
@@ -525,6 +535,12 @@ class CountIteratorVariable(IteratorVariable):
         self.step = step
         self.advance_count = advance_count
 
+    @staticmethod
+    def create(
+        item: int | VariableTracker = 0, step: int | VariableTracker = 1
+    ) -> "CountIteratorVariable":
+        return CountIteratorVariable(item, step, mutation_type=ValueMutationNew())
+
     @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4189-L4216
@@ -538,16 +554,14 @@ class CountIteratorVariable(IteratorVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
-        if not (self.item.is_python_constant() and self.step.is_python_constant()):
-            return super().tp_repr_impl(tx)
-        cnt = self.item.as_python_constant()
-        step = self.step.as_python_constant()
+        cnt = tracked_repr(tx, self.item)
         # Suppress step in the repr when it is an integer equal to 1.
+        step = (
+            self.step.as_python_constant() if self.step.is_python_constant() else None
+        )
         if isinstance(step, int) and step == 1:
-            result = f"count({cnt!r})"
-        else:
-            result = f"count({cnt!r}, {step!r})"
-        return ConstantVariable.create(result)
+            return ConstantVariable.create(f"count({cnt})")
+        return ConstantVariable.create(f"count({cnt}, {tracked_repr(tx, self.step)})")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -588,6 +602,23 @@ class ZipVariable(IteratorVariable):
         # can be list[Variable] or VariableTracker (with next_variable implemented)
         self.iterable = iterable
         self.strict = strict
+
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase",
+        args: tuple[VariableTracker, ...],
+        *,
+        strict: VariableTracker,
+    ) -> "ZipVariable":
+        items = []
+        for arg in args:
+            items.append(generic_getiter(tx, arg))
+        iter_args = variables.TupleVariable(items, mutation_type=ValueMutationNew())
+        return ZipVariable(
+            iter_args,
+            strict=strict.as_python_constant(),
+            mutation_type=ValueMutationNew(),
+        )
 
     def python_type(self) -> type[zip]:  # type: ignore[type-arg]
         return zip
@@ -673,6 +704,14 @@ class ZipLongestVariable(IteratorVariable):
         self.fillvalue = fillvalue
         self.exhausted = (
             exhausted if exhausted is not None else [False] * len(iterables)
+        )
+
+    @staticmethod
+    def create(
+        iterables: list[VariableTracker], *, fillvalue: VariableTracker
+    ) -> "ZipLongestVariable":
+        return ZipLongestVariable(
+            iterables, fillvalue=fillvalue, mutation_type=ValueMutationNew()
         )
 
     def python_type(self) -> type:
@@ -771,6 +810,23 @@ class MapVariable(IteratorVariable):
         self.iterable = iterables
         self.strict = strict
 
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase",
+        fn: VariableTracker,
+        seqs: tuple[VariableTracker, ...],
+        *,
+        strict: VariableTracker,
+    ) -> "MapVariable":
+        iterables = [generic_getiter(tx, seq) for seq in seqs]
+        iter_args = variables.TupleVariable(iterables, mutation_type=ValueMutationNew())
+        return MapVariable(
+            fn,
+            iter_args,
+            strict=strict.as_python_constant(),
+            mutation_type=ValueMutationNew(),
+        )
+
     def python_type(self) -> type:
         return map
 
@@ -852,6 +908,16 @@ class FilterVariable(IteratorVariable):
         self.fn = fn
         self.iterable = iterable
 
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", fn: VariableTracker, seq: VariableTracker
+    ) -> "FilterVariable":
+        return FilterVariable(
+            fn,
+            generic_getiter(tx, seq),
+            mutation_type=ValueMutationNew(),
+        )
+
     def python_type(self) -> type:
         return filter
 
@@ -865,8 +931,10 @@ class FilterVariable(IteratorVariable):
                 res = item
             else:
                 res = self.fn.call_function(tx, [item], {})
-            pred_res = variables.UserFunctionVariable(
-                polyfills.predicate  # type: ignore[arg-type]
+            from .builder import SourcelessBuilder
+
+            pred_res = SourcelessBuilder.create_internal_user_function(
+                polyfills.predicate
             ).call_function(tx, [res], {})
             if pred_res.as_python_constant():
                 return item
@@ -904,6 +972,12 @@ class DictViewIterator(IteratorVariable):
                     f"Expected view_type 'items', got {self.view_type!r}"
                 )
             self._iter = iter(items.items())  # type: ignore[bad-assignment]
+
+    @classmethod
+    def create(
+        cls, items: dict[HashableTracker, VariableTracker]
+    ) -> "DictViewIterator":
+        return cls(items)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # dictiter_iternextitem: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5538-L5578

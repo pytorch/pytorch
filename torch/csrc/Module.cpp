@@ -174,7 +174,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (Py_ssize_t i = 0; i < num_classes; i++) {
+  for (const auto i : c10::irange(num_classes)) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
@@ -2876,6 +2876,29 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_clear_fake_real_tensor", [](const at::Tensor& fake) {
     fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
   });
+
+  py_module.def(
+      "_set_fake_sym_memo",
+      [](const at::Tensor& fake,
+         const std::string& name,
+         c10::SymInt memo,
+         uint64_t epoch) {
+        fake.unsafeGetTensorImpl()->set_fake_sym_memo(
+            name, std::move(memo), epoch);
+      },
+      py::arg("fake"),
+      py::arg("name"),
+      py::arg("memo"),
+      py::arg("epoch"));
+
+  py_module.def(
+      "_get_fake_sym_memo",
+      [](const at::Tensor& fake, const std::string& name, uint64_t epoch) {
+        return fake.unsafeGetTensorImpl()->fake_sym_memo(name, epoch);
+      },
+      py::arg("fake"),
+      py::arg("name"),
+      py::arg("epoch"));
 
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
     TORCH_CHECK(t.defined(), "Expected a defined tensor");

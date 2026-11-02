@@ -13,19 +13,19 @@ def define_kineto():
     cxx_library(
         name = "libkineto",
         srcs = [
-            "kineto/libkineto/src/ActivityProfilerController.cpp",
-            "kineto/libkineto/src/ActivityProfilerProxy.cpp",
-            "kineto/libkineto/src/CuptiActivityApi.cpp",
-            "kineto/libkineto/src/CuptiActivityProfiler.cpp",
-            "kineto/libkineto/src/Demangle.cpp",
-            "kineto/libkineto/src/init.cpp",
-            "kineto/libkineto/src/output_csv.cpp",
-            "kineto/libkineto/src/output_json.cpp",
+            "src/ActivityProfilerController.cpp",
+            "src/ActivityProfilerProxy.cpp",
+            "src/CuptiActivityApi.cpp",
+            "src/CuptiActivityProfiler.cpp",
+            "src/Demangle.cpp",
+            "src/init.cpp",
+            "src/output_csv.cpp",
+            "src/output_json.cpp",
         ],
         headers = subdir_glob(
             [
-                ("kineto/libkineto/include", "*.h"),
-                ("kineto/libkineto/src", "*.h"),
+                ("include", "*.h"),
+                ("src", "*.h"),
             ],
         ),
         compiler_flags = KINETO_COMPILER_FLAGS,
@@ -43,12 +43,12 @@ def define_kineto():
     cxx_library(
         name = "libkineto_api",
         srcs = [
-            "kineto/libkineto/src/libkineto_api.cpp",
+            "src/libkineto_api.cpp",
         ],
         headers = subdir_glob(
             [
-                ("kineto/libkineto/include", "*.h"),
-                ("kineto/libkineto/src", "*.h"),
+                ("include", "*.h"),
+                ("src", "*.h"),
             ],
         ),
         compiler_flags = KINETO_COMPILER_FLAGS,
@@ -66,12 +66,12 @@ def define_kineto():
     cxx_library(
         name = "config_loader",
         srcs = [
-            "kineto/libkineto/src/ConfigLoader.cpp",
+            "src/ConfigLoader.cpp",
         ],
         headers = subdir_glob(
             [
-                ("kineto/libkineto/include", "ActivityType.h"),
-                ("kineto/libkineto/src", "*.h"),
+                ("include", "ActivityType.h"),
+                ("src", "*.h"),
             ],
         ),
         compiler_flags = KINETO_COMPILER_FLAGS,
@@ -84,18 +84,18 @@ def define_kineto():
     cxx_library(
         name = "config",
         srcs = [
-            "kineto/libkineto/src/AbstractConfig.cpp",
-            "kineto/libkineto/src/ActivityType.cpp",
-            "kineto/libkineto/src/Config.cpp",
+            "src/AbstractConfig.cpp",
+            "src/ActivityType.cpp",
+            "src/Config.cpp",
         ],
         compiler_flags = KINETO_COMPILER_FLAGS,
         public_include_directories = [
-            "kineto/libkineto/include",
-            "kineto/libkineto/src",
+            "include",
+            "src",
         ],
         raw_headers = glob([
-            "kineto/libkineto/include/*.h",
-            "kineto/libkineto/src/*.h",
+            "include/*.h",
+            "src/*.h",
         ]),
         exported_deps = [
             ":logger",
@@ -107,19 +107,19 @@ def define_kineto():
     cxx_library(
         name = "logger",
         srcs = [
-            "kineto/libkineto/src/ILoggerObserver.cpp",
-            "kineto/libkineto/src/Logger.cpp",
+            "src/ILoggerObserver.cpp",
+            "src/Logger.cpp",
         ],
         compiler_flags = KINETO_COMPILER_FLAGS,
         public_include_directories = [
-            "kineto/libkineto/include",
-            "kineto/libkineto/src",
+            "include",
+            "src",
         ],
         raw_headers = [
-            "kineto/libkineto/include/ILoggerObserver.h",
-            "kineto/libkineto/include/ThreadUtil.h",
-            "kineto/libkineto/src/Logger.h",
-            "kineto/libkineto/src/LoggerCollector.h",
+            "include/ILoggerObserver.h",
+            "include/ThreadUtil.h",
+            "src/Logger.h",
+            "src/LoggerCollector.h",
         ],
         exported_deps = [
             ":thread_util",
@@ -130,16 +130,16 @@ def define_kineto():
     cxx_library(
         name = "base_logger",
         srcs = [
-            "kineto/libkineto/src/GenericTraceActivity.cpp",
+            "src/GenericTraceActivity.cpp",
         ],
         public_include_directories = [
-            "kineto/libkineto/include",
-            "kineto/libkineto/src",
+            "include",
+            "src",
         ],
         raw_headers = glob([
-            "kineto/libkineto/include/*.h",
-            "kineto/libkineto/src/*.h",
-            "kineto/libkineto/src/*.tpp",
+            "include/*.h",
+            "src/*.h",
+            "src/*.tpp",
         ]),
         exported_deps = [
             ":thread_util",
@@ -149,17 +149,17 @@ def define_kineto():
     cxx_library(
         name = "thread_util",
         srcs = [
-            "kineto/libkineto/src/ThreadUtil.cpp",
+            "src/ThreadUtil.cpp",
         ],
         compiler_flags = KINETO_COMPILER_FLAGS,
         exported_preprocessor_flags = [
             "-DKINETO_NAMESPACE=libkineto",
         ],
         public_include_directories = [
-            "kineto/libkineto/include",
+            "include",
         ],
         raw_headers = [
-            "kineto/libkineto/include/ThreadUtil.h",
+            "include/ThreadUtil.h",
         ],
         exported_deps = [
             "//third_party:fmt",
@@ -169,10 +169,10 @@ def define_kineto():
     cxx_library(
         name = "libkineto_headers",
         exported_headers = native.glob([
-            "kineto/libkineto/include/*.h",
+            "include/*.h",
         ]),
         public_include_directories = [
-            "kineto/libkineto/include",
+            "include",
         ],
         visibility = ["PUBLIC"],
     )
