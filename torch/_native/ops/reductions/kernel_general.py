@@ -316,10 +316,10 @@ def _physical_col_view(
 # B200 CUDA-graph timings of the batched column kernel against the general kernel, for
 # sum and var_mean at 16 and 512 MiB: R <= 64 wins at every C (4-33x). Longer R needs
 # C >= 16 (sum 1.3x or better), and two outputs also need B * C >= 8192 kept outputs;
-# below that, general is up to 4x faster. The other traits were measured on the stack's
-# later column tuning; the gate accepts their regressions on 8-16 MiB inputs at its
-# boundaries (0.82-0.86x one-output at R = 1024, C = 16, B * C = 4096; fp16 var_mean
-# 0.70x at B * C = 8192), which run 1.1-3.1x at 512 MiB.
+# below that, general is up to 4x faster. For fp16 sum, amax, argmax, aminmax, max.dim
+# and fp16 var_mean, the gate accepts regressions on 8-16 MiB inputs at its boundaries
+# (0.82-0.86x one-output at R = 1024, C = 16, B * C = 4096; fp16 var_mean 0.70x at
+# B * C = 8192), which run 1.1-3.1x at 512 MiB.
 # Only B200 is measured, so other architectures keep the general kernel for these routes.
 _BATCHED_COL_CCS = ((10, 0),)
 _BATCHED_COL_SHORT_R = 64
@@ -340,6 +340,26 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
     return C >= _BATCHED_COL_MIN_C and (
         nouts == 1 or B * C >= _BATCHED_COL_2OUT_MIN_OUTPUTS
     )
+
+
+# B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16, argmax, var_mean;
+# R 20-9000, B * C 32-524288; bitwise equal): ordered columns win 1.1-11x once B * C
+# fills the GPU, but one 32-output block per tile leaves SMs idle below that
+# (0.16-0.6x), and wider traits need more outputs. Short rows (measured at R = 20, a
+# multirow plan) tie for one and two fields and run Welford at 0.5x, while R = 128
+# wins, so the cutoff sits between them.
+_ORDERED_COL_CCS = ((10, 0),)
+_ORDERED_COL_MIN_R = 65
+_ORDERED_COL_MIN_OUTPUTS = {1: 2048, 2: 16384, 3: 32768}
+
+
+def _ordered_col_route_ok(
+    view: torch.Tensor, nfields: int, cc: tuple[int, int]
+) -> bool:
+    """Whether the ordered column kernel beats the indexed tree on this view."""
+    B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
+    min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(nfields, 3)]
+    return cc in _ORDERED_COL_CCS and R >= _ORDERED_COL_MIN_R and B * C >= min_outputs
 
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
@@ -716,14 +736,16 @@ def _reduce(
                 col_view = _physical_col_view(
                     x, red_axes, red_pairs, kept_pairs, count, num_o
                 )
-                if col_view is not None:
+                cc = _hw.caps(x.device).cc
+                if col_view is not None and _ordered_col_route_ok(
+                    col_view, trait.nfields, cc
+                ):
                     ordered = ct.reduce_ordered_col(
                         trait,
                         trait_key,
                         col_view,
                         out_dtypes,
                         nouts,
-                        order=order,
                     )
                 if ordered is None:
                     ordered = _try_indexed_itree(

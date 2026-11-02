@@ -425,6 +425,18 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
 
+    def test_batched_rows_must_fit_int32(self):
+        # Stage one indexes batched rows as batch * R + row in Int32.
+        x = torch.randn(4, 8, 32, device="cuda")
+        args = (x, {1}, [], [], 8, 128)
+        self.assertEqual(kg._physical_col_view(*args).shape, (4, 8, 32))
+        with mock.patch.object(kg, "_INT32_LIMIT", 32):
+            self.assertIsNone(kg._physical_col_view(*args))
+        trait = T.SumOps(acc=cutlass.Float32)
+        with mock.patch.object(ct, "_INT32_LIMIT", 32):
+            with self.assertRaisesRegex(AssertionError, r"want B \* R < 2\^31"):
+                ct.reduce_batched_col_tile(trait, "rows", x, [torch.float32], 1)
+
     @parametrize(
         "launcher, rank, args",
         [
@@ -441,6 +453,29 @@ class TestColTileHost(TestCase):
             fn(trait, "badrank", x, *args)
 
 
+class TestOrderedColRoute(TestCase):
+    @parametrize(
+        "nfields,shape,cc,routed",
+        [
+            (1, (16, 128, 128), (10, 0), True),
+            (1, (16, 128, 127), (10, 0), False),
+            (1, (16, 64, 128), (10, 0), False),
+            (2, (128, 128, 128), (10, 0), True),
+            (2, (127, 128, 128), (10, 0), False),
+            (3, (256, 128, 128), (10, 0), True),
+            (3, (255, 128, 128), (10, 0), False),
+            (4, (256, 128, 128), (10, 0), True),
+            (1, (16, 128, 128), (9, 0), False),
+        ],
+        name_fn=lambda nfields, shape, cc, routed: "_".join(
+            [f"{nfields}f", "x".join(map(str, shape)), f"sm{cc[0]}{cc[1]}"]
+        ),
+    )
+    def test_gate_boundaries(self, nfields, shape, cc, routed):
+        view = torch.empty(shape, device="meta")
+        self.assertEqual(kg._ordered_col_route_ok(view, nfields, cc), routed)
+
+
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
     @parametrize(
@@ -451,6 +486,8 @@ class TestOrderedColDevice(TestCase):
             ("sum", torch.float32, (9000, 32)),
             ("argmax", torch.float32, (4, 2048, 64)),
             ("var_mean", torch.bfloat16, (2, 2048, 40)),
+            ("argmax", torch.float32, (9000, 32)),
+            ("var_mean", torch.float32, (2, 9000, 32)),
         ],
         name_fn=lambda op, dtype, shape: f"{op}_{len(shape)}d_{shape[-2]}",
     )
@@ -493,17 +530,48 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(len(keys), 1)
 
     def test_inner_tree_middle_axis_routes_to_ordered_columns(self, device):
-        x = torch.randn(2, 128, 33, device=device)
+        x = torch.randn(16, 128, 128, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         real = ct.reduce_ordered_col
-        with mock.patch.object(ct, "reduce_ordered_col", wraps=real) as served:
+        ccs = (torch.cuda.get_device_capability(device),)
+        with (
+            mock.patch.object(kg, "_ORDERED_COL_CCS", ccs),
+            mock.patch.object(ct, "reduce_ordered_col", wraps=real) as served,
+        ):
             got = kg.reduce_dim(trait, "route", x, 1, torch.float32, order="inner_tree")
         served.assert_called_once()
-        expected = real(trait, "route_direct", x, [torch.float32], 1)[0]
-        self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
+        expected = kg._try_indexed_itree(
+            trait,
+            "route_indexed",
+            x,
+            [(128, 128)],
+            [(128, 1), (16, 128 * 128)],
+            16 * 128,
+            128,
+            [torch.float32],
+            1,
+        )[0]
+        self.assertEqual(got.flatten().view(torch.uint8), expected.view(torch.uint8))
+
+    def test_declined_ordered_columns_fall_back_to_the_indexed_tree(self, device):
+        # The gate admits 4096 outputs, but the kernel declines fewer than 32 columns.
+        x = torch.randn(256, 128, 16, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        real = kg._try_indexed_itree
+        ccs = (torch.cuda.get_device_capability(device),)
+        with (
+            mock.patch.object(kg, "_ORDERED_COL_CCS", ccs),
+            mock.patch.object(kg, "_try_indexed_itree", wraps=real) as fallback,
+        ):
+            got = kg.reduce_dim(
+                trait, "fallback", x, 1, torch.float32, order="inner_tree"
+            )
+        fallback.assert_called_once()
+        self.assertEqual(got, x.sum(dim=1), atol=1e-4, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
+instantiate_parametrized_tests(TestOrderedColRoute)
 
 instantiate_parametrized_tests(TestKernelColTile)
 instantiate_parametrized_tests(TestColTileHost)
