@@ -775,7 +775,10 @@ with tempfile.TemporaryDirectory() as build_directory:
         loss = MyFn.apply(inp).sum()
         test_backward_deadlock.run_back_no_gil(loss)
 
+    @torch.compiler.disable
     def test_storage_dealloc_releases_gil_for_native_deleter(self):
+        # This test checks final-reference destruction timing, which Dynamo
+        # may change by retaining references across graph breaks.
         source = r"""
         #include <torch/extension.h>
 
@@ -817,13 +820,14 @@ with tempfile.TemporaryDirectory() as build_directory:
           deleter_observed_progress = false;
         }
 
-        void wait_for_observer() {
+        bool wait_for_observer() {
           pybind11::gil_scoped_release no_gil;
           std::unique_lock<std::mutex> lock(mutex);
-          condition.wait(lock, [] { return observer_waiting; });
+          return condition.wait_for(
+              lock, std::chrono::seconds(5), [] { return observer_waiting; });
         }
 
-        void observer_wait_for_deleter() {
+        bool observer_wait_for_deleter() {
           {
             std::lock_guard<std::mutex> lock(mutex);
             observer_waiting = true;
@@ -831,13 +835,19 @@ with tempfile.TemporaryDirectory() as build_directory:
           condition.notify_all();
           pybind11::gil_scoped_release no_gil;
           std::unique_lock<std::mutex> lock(mutex);
-          condition.wait(lock, [] { return deleter_entered; });
+          return condition.wait_for(
+              lock, std::chrono::seconds(5), [] { return deleter_entered; });
         }
 
         void observer_report_progress() {
           std::lock_guard<std::mutex> lock(mutex);
           observer_progressed = true;
           condition.notify_all();
+        }
+
+        bool deleter_has_entered() {
+          std::lock_guard<std::mutex> lock(mutex);
+          return deleter_entered;
         }
 
         bool deleter_saw_observer_progress() {
@@ -852,6 +862,7 @@ with tempfile.TemporaryDirectory() as build_directory:
           m.def("wait_for_observer", &wait_for_observer);
           m.def("observer_wait_for_deleter", &observer_wait_for_deleter);
           m.def("observer_report_progress", &observer_report_progress);
+          m.def("deleter_has_entered", &deleter_has_entered);
           m.def("deleter_saw_observer_progress", &deleter_saw_observer_progress);
         }
         """
@@ -860,34 +871,48 @@ with tempfile.TemporaryDirectory() as build_directory:
             cpp_sources=source,
             verbose=True,
         )
-        module.reset()
+        for retain_reference in (False, True):
+            with self.subTest(retain_reference=retain_reference):
+                module.reset()
 
-        # Keep only the Python storage wrapper alive. Its final decref takes
-        # the THPStorage_dealloc path rather than THPVariable_dealloc.
-        tensor = module.make_tensor()
-        storage_holder = [tensor.untyped_storage()]
-        del tensor
+                # Keep only the Python storage wrapper alive. Its final decref
+                # takes THPStorage_dealloc rather than THPVariable_dealloc.
+                tensor = module.make_tensor()
+                storage_holder = [tensor.untyped_storage()]
+                del tensor
 
-        def observe_deleter():
-            module.observer_wait_for_deleter()
-            module.observer_report_progress()
+                if retain_reference:
+                    # An additional owner legitimately delays teardown. The GIL
+                    # guarantee must still hold when the last owner releases it.
+                    retained_holder = storage_holder.copy()
+                    storage_holder.clear()
+                    self.assertFalse(module.deleter_has_entered())
+                    storage_holder = retained_holder
 
-        def destroy_storage():
-            storage = storage_holder.pop()
-            del storage
+                def observe_deleter():
+                    if module.observer_wait_for_deleter():
+                        module.observer_report_progress()
 
-        observer = threading.Thread(target=observe_deleter)
-        observer.start()
-        module.wait_for_observer()
+                def destroy_storage():
+                    storage = storage_holder.pop()
+                    del storage
 
-        destroyer = threading.Thread(target=destroy_storage)
-        destroyer.start()
-        destroyer.join(timeout=5)
-        observer.join(timeout=5)
+                observer = threading.Thread(target=observe_deleter)
+                destroyer = threading.Thread(target=destroy_storage)
+                observer.start()
+                try:
+                    self.assertTrue(module.wait_for_observer())
+                    destroyer.start()
+                finally:
+                    # Native waits are also bounded, so failed assertions cannot
+                    # leave an observer blocking interpreter shutdown forever.
+                    if destroyer.ident is not None:
+                        destroyer.join(timeout=10)
+                    observer.join(timeout=10)
 
-        self.assertFalse(destroyer.is_alive())
-        self.assertFalse(observer.is_alive())
-        self.assertTrue(module.deleter_saw_observer_progress())
+                self.assertFalse(destroyer.is_alive())
+                self.assertFalse(observer.is_alive())
+                self.assertTrue(module.deleter_saw_observer_progress())
 
     def test_custom_compound_op_autograd(self):
         # Test that a custom compound op (i.e. a custom op that just calls other aten ops)
