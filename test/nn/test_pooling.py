@@ -163,6 +163,49 @@ class TestAvgPoolDevice(TestCase):
         )
         self.assertTrue(not torch.isnan(y).any())
 
+    @onlyOn(["cpu", "cuda"])
+    @dtypes(torch.float32, torch.float64)
+    def test_avg_pool3d_window_larger_than_input(self, device, dtype):
+        # avg_pool1d/2d accept an input that is smaller than the kernel when the
+        # padding (or ceil_mode) makes the window valid. avg_pool3d used to
+        # reject it by comparing the unpadded input size with the kernel size.
+        configs = itertools.product(
+            (1, 2), (3, 4), (1, 2, 3), (0, 1, 2), (False, True), (False, True)
+        )
+        for width, kernel, stride, padding, ceil_mode, count_include_pad in configs:
+            if padding > kernel // 2:
+                continue
+            x2d = torch.randn(
+                1, 2, 1, width, device=device, dtype=dtype, requires_grad=True
+            )
+            x3d = x2d.detach().clone().view(1, 2, 1, 1, width).requires_grad_()
+            kwargs = {"ceil_mode": ceil_mode, "count_include_pad": count_include_pad}
+            args_2d = {
+                "kernel_size": (1, kernel),
+                "stride": (1, stride),
+                "padding": (0, padding),
+            }
+            args_3d = {
+                "kernel_size": (1, 1, kernel),
+                "stride": (1, 1, stride),
+                "padding": (0, 0, padding),
+            }
+            try:
+                expected = F.avg_pool2d(x2d, **args_2d, **kwargs)
+            except RuntimeError:
+                # No valid output window, avg_pool3d must reject it as well.
+                with self.assertRaises(RuntimeError):
+                    F.avg_pool3d(x3d, **args_3d, **kwargs)
+                continue
+            actual = F.avg_pool3d(x3d, **args_3d, **kwargs)
+            msg = f"{width=} {kernel=} {stride=} {padding=} {ceil_mode=} {count_include_pad=}"
+            self.assertEqual(actual.view_as(expected), expected, msg=msg)
+
+            grad = torch.randn_like(expected)
+            expected.backward(grad)
+            actual.backward(grad.view_as(actual))
+            self.assertEqual(x3d.grad.view_as(x2d.grad), x2d.grad, msg=msg)
+        
 
 class TestPoolingNN(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
