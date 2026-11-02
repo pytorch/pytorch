@@ -3521,6 +3521,11 @@ class GraphModuleDeserializer(metaclass=Final):
             ) from e
         where = f"flat_apply node {serialized_node.name}"
         _check_flat_apply_inputs(where, flat_inputs)
+        if in_spec.num_leaves != len(flat_inputs):
+            raise SerializeError(
+                f"{where} has {len(flat_inputs)} flat inputs, but its input spec "
+                f"has {in_spec.num_leaves} leaves"
+            )
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
         _check_flat_apply_operators(where, flat_inputs, args, kwargs)
         func = _find_flat_apply_func(func_name, in_spec, args)

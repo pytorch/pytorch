@@ -3293,6 +3293,10 @@ class TestPredispatchSerialization(TestCase):
             lambda node: node["inputs"][0]["arg"].update(as_operator=5),
             "does not start with its function",
         ),
+        "leaf_count": (
+            lambda node: node["inputs"].pop(),
+            "flat inputs, but its input spec",
+        ),
     }
 
     @parametrize("case", list(_BAD_SPECS))
