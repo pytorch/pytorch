@@ -87,7 +87,7 @@ from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .backends.registry import _is_registered_backend
-from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
+from .bytecode_analysis import remove_dead_code
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
     Instruction,
@@ -744,10 +744,7 @@ class ConvertFrameAssert:
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
         # pyrefly: ignore [bad-assignment]
-        while (
-            prev_frame
-            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
-        ):
+        while prev_frame and prev_frame.f_code.co_filename == __file__:
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
         if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
             return disabled
@@ -1005,7 +1002,7 @@ def trace_frame(
         code_options.update(output.code_options)
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        instructions[:] = remove_dead_code(instructions)
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
@@ -1744,13 +1741,6 @@ def _compile(
 
     check_compilation_allowed("Dynamo graph compilation")
 
-    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
-        # Overlap the one-time source hashing for Inductor's cache keys with
-        # Dynamo and AOTAutograd tracing.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
-
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
@@ -1853,6 +1843,9 @@ def _compile(
                     package=package,
                 )
         except exc.SkipFrame as e:
+            if package is not None:
+                # Dynamo runs this frame eagerly from now on, so a load does too.
+                package.record_eager_fallback(code)
             if one_graph:
                 log.debug("No graph captured with export/fullgraph=True")
             if e._torch_dynamo_tracer_output is None:
@@ -2288,11 +2281,6 @@ def _compile(
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
 
-            if torch._dynamo.config.run_gc_after_compile:
-                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
-                    log.info("run_gc_after_compile: running gc")
-                    gc.collect(1)
-
             output = None
             if tracer_output:
                 output = tracer_output.output_graph
@@ -2390,6 +2378,17 @@ def _compile(
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.clear()
 
             clear_compile_context_weakrefs(tracer_output, compiler_fn)
+
+            # Collect only after dropping this frame's references to the tracing state.
+            # Collected while still referenced, the OutputGraph / SideEffects cycle (which
+            # holds the frame's real inputs via local_scope and LazyCache.value) survives
+            # into the oldest generation, which gc.collect(1) never scans again, so it
+            # pins those tensors until a full collection.
+            if torch._dynamo.config.run_gc_after_compile:
+                tracer_output = output = output_graph = tracer = None
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
 
 
 class ConvertFrame:
@@ -2524,6 +2523,19 @@ class ConvertFrame:
             if not config.suppress_errors and not soft_fail:
                 raise
 
+            package = self._inner_convert._package
+            if (
+                package is not None
+                and isinstance(e, (Unsupported, UserError))
+                and e.frame_exec_strategy is None
+                and e.apply_to_code
+            ):
+                # Dynamo gave up on the frame and skips it from now on, so a load
+                # runs it eagerly too. A recompile limit hit sets RUN_ONLY instead
+                # and stays a coverage gap. These are exactly the soft failures
+                # Dynamo skips the frame for whatever suppress_errors says.
+                package.record_eager_fallback(code)
+
             # Suppress the error.  NB: It's very important to do the
             # suppression logging HERE, where the actual suppression
             # happens. Previously it was somewhere else and so it was
@@ -2604,8 +2616,6 @@ def replay(filename: str) -> None:
 
 
 def first_real_inst_idx(code: CodeType) -> int:
-    if sys.version_info < (3, 11):
-        return 0
     for inst in dis.get_instructions(code):
         if inst.opname == "RESUME":
             return inst.offset // 2
