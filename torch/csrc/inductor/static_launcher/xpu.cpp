@@ -442,21 +442,6 @@ void setKernelArg(
   }
 }
 
-/**
-  Submits the kernel with the arguments packed in `argStorage`. `numParams` is
-  the number of those arguments, and `bindLocal` says whether the kernel takes a
-  trailing dynamic shared memory argument.
-
-  Neither is checked here, so a caller must guarantee:
-    - numParams == strlen(argTypes), and argStorage has numParams slots. It may
-      only be null when numParams is 0.
-    - loadedKernel->numArgs == numParams + (bindLocal ? 1 : 0). Otherwise a
-      kernel argument is left unbound, or set_arg binds one the kernel does
-      not have.
-  launchKernel() checks the second one before every launch it makes, while
-  fast_launcher_vectorcall() relies on the check FastXpuLauncher_new() made
-  once, when it built the launcher.
-*/
 void submitKernel(
     const LoadedKernel* loadedKernel,
     uint32_t gridX,
