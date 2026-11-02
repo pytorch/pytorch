@@ -1254,8 +1254,89 @@ class _InitReturnValue:
 _INIT_RETURN_TYPES = {"int": int, "str": str, "user_class": _InitReturnValue}
 
 
+class _ConstructorInt(int):
+    pass
+
+
+class _ConstructorFloat(float):
+    pass
+
+
+class _ConstructorStr(str):
+    __slots__ = ()
+
+
 class TestObjectConstruction(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "cls,base,args,direct,exc_type",
+        [
+            (_ConstructorInt, int, ("1" * 641,), False, ValueError),
+            (_ConstructorInt, int, ("1" * 641,), True, ValueError),
+            (_ConstructorInt, int, ("not-an-int", 16), False, ValueError),
+            (_ConstructorFloat, float, ("not-a-float",), False, ValueError),
+            (_ConstructorStr, str, (b"\xff", "ascii"), False, UnicodeDecodeError),
+        ],
+    )
+    def test_constant_subclass_constructor_error(
+        self, cls, base, args, direct, exc_type
+    ):
+        def fn(x):
+            try:
+                if direct:
+                    base.__new__(cls, *args)
+                else:
+                    cls(*args)
+            except Exception as exc:
+                return x + 1, type(exc), exc.args
+            return x + 2, None, ()
+
+        previous_limit = None
+        if cls is _ConstructorInt and len(args[0]) > 640:
+            if not all(
+                hasattr(sys, name)
+                for name in ("get_int_max_str_digits", "set_int_max_str_digits")
+            ):
+                self.skipTest("integer string digit limit API is unavailable")
+            previous_limit = sys.get_int_max_str_digits()
+            sys.set_int_max_str_digits(640)
+        try:
+            x = torch.tensor(0)
+            expected = fn(x)
+            backend = dynamo_testing.CompileCounter()
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            self.assertEqual(actual[0], expected[0])
+            self.assertIs(actual[1], exc_type)
+            self.assertEqual(actual[2], expected[2])
+            self.assertEqual(backend.frame_count, 1)
+        finally:
+            if previous_limit is not None:
+                sys.set_int_max_str_digits(previous_limit)
+
+    @parametrize(
+        "cls,args",
+        [
+            (_ConstructorInt, ("123",)),
+            (_ConstructorInt, ("7b", 16)),
+            (_ConstructorFloat, ("1.25",)),
+            (_ConstructorStr, (b"hello", "ascii")),
+        ],
+    )
+    def test_constant_subclass_constructor_value(self, cls, args):
+        def fn(x):
+            value = cls(*args)
+            return x + 1, type(value), value
+
+        x = torch.tensor(0)
+        expected = fn(x)
+        backend = dynamo_testing.CompileCounter()
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertIs(actual[1], cls)
+        self.assertIs(type(actual[2]), cls)
+        self.assertEqual(actual[2], expected[2])
+        self.assertEqual(backend.frame_count, 1)
 
     @parametrize("value_kind", list(_INIT_RETURN_TYPES))
     @parametrize("via_super", [False, True])
