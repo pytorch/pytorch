@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from typing import Generic, TYPE_CHECKING, TypeVar
@@ -10,6 +9,10 @@ from torch._ops import HigherOrderOperator
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    
+    
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
@@ -71,7 +74,7 @@ def _call_with_tensor_checks(fn, args, kwargs):
                 for info, value in zip_schema(func._schema, args, kwargs):
                     if info.is_write and any(
                         isinstance(tensor, torch.Tensor)
-                        and any(torch._C._is_alias_of(unwrap(tensor), x) for x in inputs)
+                        and any(torch._C._is_alias_of(unwrap(tensor)  # pyrefly: ignore[missing-attribute], x) for x in inputs)
                         for tensor in pytree.tree_leaves(value)
                     ):
                         raise RuntimeError(
@@ -86,7 +89,7 @@ def _call_with_tensor_checks(fn, args, kwargs):
     for value in pytree.tree_leaves(result):
         if isinstance(value, torch.Tensor):
             tensor = unwrap(value)
-            if any(torch._C._is_alias_of(tensor, x) for x in (*inputs, *outputs)):
+            if any(torch._C._is_alias_of(tensor, x)  # pyrefly: ignore[missing-attribute] for x in (*inputs, *outputs)):
                 raise RuntimeError(
                     "dispatchless_custom_op outputs must not alias inputs or "
                     "other outputs during tracing; return a clone instead"
@@ -178,7 +181,9 @@ def _trace_flat_call(
     )
 
     node_args = (func_spec, input_spec, output_spec, *flat_args)
-    result = maybe_handle_decomp(mode, flat_dispatchless_call, node_args, {})
+    result = maybe_handle_decomp(
+        mode, flat_dispatchless_call, node_args, {}
+    )  # pyrefly: ignore[bad-argument-type]
     if result is not NotImplemented:
         return result
     if flat_out is None:
