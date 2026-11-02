@@ -32,6 +32,30 @@ def clone_backward(ctx: object, grad_output: torch.Tensor) -> torch.Tensor:
     return grad_output
 
 
+def profile_call_path(min_run_time: float) -> dict[str, float]:
+    from torch._library.dispatchless import _proxy_mode_getter
+
+    statements = {
+        "uncached_helper_import_us": (
+            "from torch.fx.experimental.proxy_tensor import "
+            "disable_proxy_modes_tracing, get_proxy_mode"
+        ),
+        "cached_helper_lookup_us": "_proxy_mode_getter()",
+        "active_mode_lookup_us": "get_proxy_mode()",
+    }
+    scope = {
+        "_proxy_mode_getter": _proxy_mode_getter,
+        "get_proxy_mode": _proxy_mode_getter(),
+    }
+    return {
+        name: Timer(stmt=stmt, globals=scope, num_threads=1, timer=timeit.default_timer)
+        .blocked_autorange(min_run_time=min_run_time)
+        .median
+        * 1e6
+        for name, stmt in statements.items()
+    }
+
+
 def benchmark_case(
     variants: dict[str, Callable[[torch.Tensor], torch.Tensor]],
     size: int,
@@ -99,6 +123,7 @@ def main() -> None:
     parser.add_argument("--min-run-time", type=float, default=1.0)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--sizes", type=int, nargs="+", default=[0, 1, 1024])
+    parser.add_argument("--profile-call-path", action="store_true")
     args = parser.parse_args()
     if (
         args.min_run_time <= 0
@@ -138,6 +163,8 @@ def main() -> None:
         },
         "results": rows,
     }
+    if args.profile_call_path:
+        report["call_path_profile_us"] = profile_call_path(args.min_run_time)
     print(json.dumps(report, indent=2))
 
 
