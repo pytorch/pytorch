@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
+    periodic,
     run_tests,
     serialTest,
     skipIfCppFakeTensor,
@@ -319,6 +320,7 @@ def convert_nt_to_jagged(nt):
 
 
 @markDynamoStrictTest
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(NestedTensorTestCase):
     @parametrize("batch_size", [2, 4])
@@ -910,6 +912,7 @@ class TestNestedTensor(NestedTensorTestCase):
 
 
 @markDynamoStrictTest
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorDeviceType(NestedTensorTestCase):
     # Helper function to generate a pair of random nested tensors
@@ -3145,6 +3148,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
 
 @markDynamoStrictTest
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorAutograd(NestedTensorTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
@@ -3968,6 +3972,7 @@ def get_tolerances(
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 @markDynamoStrictTest
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorSubclass(NestedTensorTestCase):
     # TODO: consolidate with the below
@@ -9058,6 +9063,7 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
 # op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
 #   * All tests run with dtype=torch.float32 only
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this
@@ -9306,6 +9312,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 from torch.nested._internal.nested_int import NestedIntNode
 
 
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
