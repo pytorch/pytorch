@@ -13,7 +13,7 @@ from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
 from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_code
+from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
@@ -26,6 +26,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    IS_MIG,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
     with_tf32_off,
@@ -57,6 +58,10 @@ if IS_WINDOWS and IS_CI:
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
+
+# Launching the 256-row decode kernel can need GBs of free device memory, and fails
+# with CUDA_ERROR_OUT_OF_MEMORY on MIG slices such as an A100 1g.5gb.
+skip_on_mig = unittest.skipIf(IS_MIG, "BLOCK_M=256 launch OOMs on MIG slices")
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -2270,10 +2275,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             # capped at 32, the largest power of two dividing 96 (a 64-position tile won't fit).
             (64, 16, (96, 128), None, 64),
             # Pinned BLOCK_Ms the old check rejected: 256 rows / 8 heads = 32 positions.
-            (32, 4, 128, 256, 256),
+            common_utils.subtest((32, 4, 128, 256, 256), decorators=[skip_on_mig]),
             # Q = 16 is a multiple of the default tile but not of the pinned one: SAFE_M_BOUNDARY
             # must follow the pinned BLOCK_M, or rows past Q_LEN overwrite the next head's.
-            (16, 4, 128, 256, 256),
+            common_utils.subtest((16, 4, 128, 256, 256), decorators=[skip_on_mig]),
         ],
     )
     def test_gqa_block_m_fits_sparse_q_block(
@@ -2281,10 +2286,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     ):
         # The decode kernel tiles GQA-folded rows: each BLOCK_M tile covers
         # BLOCK_M // (Hq // Hkv) query positions, which must fit in one sparse Q block.
-        if pinned_block_m is not None and not is_big_gpu(torch.device(device)):
-            # Launching the pinned 256-row kernel can fail with CUDA_ERROR_OUT_OF_MEMORY
-            # on a small GPU such as an A100 1g.5gb MIG slice.
-            self.skipTest("pinned BLOCK_M=256 needs a big GPU")
         kv_seq_len = 256
         offset = kv_seq_len - q_seq_len
 
