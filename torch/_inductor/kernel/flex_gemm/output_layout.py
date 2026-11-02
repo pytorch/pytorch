@@ -11,6 +11,8 @@ import importlib
 from collections.abc import Callable
 from typing import Any
 
+from .constraints import LOCAL_REDUCE_FRAGMENT_WIDTH
+
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputStorageLayout:
@@ -24,6 +26,7 @@ class FlexGemmOutputStorageLayout:
     validate_geometry_fn: Callable[[Any], None] | None = None
     supports_config_fn: Callable[[Any, int, int], bool] | None = None
     validate_carrier_fn: Callable[[Any], None] | None = None
+    varlen_m: bool = False
 
     def validate_geometry(self, geometry: Any) -> None:
         """Validate layout-specific logical reduction geometry."""
@@ -45,6 +48,7 @@ class FlexGemmOutputStorageLayout:
             carrier_ndim=self.carrier_ndim,
             supports_config_fn=self.supports_config_fn,
             validate_carrier_fn=self.validate_carrier_fn,
+            varlen_m=self.varlen_m,
         )
 
     def codegen_reference(self) -> str:
@@ -73,6 +77,27 @@ def blocked_128x4_cutedsl_callbacks() -> tuple[Callable[..., Any], Callable[...,
 def blocked_128x4_carrier_shape(batch: Any, rows: Any, cols: Any) -> tuple[Any, ...]:
     """Return the physical carrier shape for blocked 128x4 matrices."""
     return (batch, (rows + 127) // 128, (cols + 3) // 4, 512)
+
+
+def grouped_blocked_128x4_carrier_shape(
+    groups: Any, rows: Any, cols: Any
+) -> tuple[Any, ...]:
+    """Bound compact per-group blocked scales without reading dynamic offsets."""
+    return (1, (rows + 127) // 128 + groups - 1, (cols + 3) // 4, 512)
+
+
+def grouped_blocked_128x4_cutedsl_callbacks() -> tuple[
+    Callable[..., Any], Callable[..., Any]
+]:
+    cutedsl = output_layout_cutedsl()
+    return cutedsl.blocked_128x4_output_tensor, cutedsl.grouped_blocked_128x4_fake_shape
+
+
+def grouped_blocked_128x4_validate_geometry(geometry: Any) -> None:
+    if geometry.axis != 1 or geometry.group != LOCAL_REDUCE_FRAGMENT_WIDTH:
+        raise NotImplementedError(
+            "grouped-M output quantization supports MXFP8 only (axis-1 groups of 32)"
+        )
 
 
 def blocked_128x4_validate_geometry(geometry: Any) -> None:
@@ -144,6 +169,18 @@ BLOCKED_128X4 = FlexGemmOutputStorageLayout(
     validate_geometry_fn=blocked_128x4_validate_geometry,
     supports_config_fn=blocked_128x4_supports_config,
     validate_carrier_fn=blocked_128x4_validate_carrier,
+)
+
+GROUPED_BLOCKED_128X4 = FlexGemmOutputStorageLayout(
+    symbol="GROUPED_BLOCKED_128X4",
+    name="grouped_blocked_128x4",
+    carrier_shape_fn=grouped_blocked_128x4_carrier_shape,
+    cutedsl_callbacks_fn=grouped_blocked_128x4_cutedsl_callbacks,
+    carrier_ndim=4,
+    validate_geometry_fn=grouped_blocked_128x4_validate_geometry,
+    supports_config_fn=blocked_128x4_supports_config,
+    validate_carrier_fn=blocked_128x4_validate_carrier,
+    varlen_m=True,
 )
 
 TRANSPOSED = FlexGemmOutputStorageLayout(

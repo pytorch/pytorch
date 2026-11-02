@@ -212,18 +212,60 @@ def grouped_mm_offset_lengths(offs, total, message):
 
 
 @torch.library.custom_op("flex_gemm::to_blocked", mutates_args=())
-def to_blocked(input_matrix: torch.Tensor) -> torch.Tensor:
-    """Rearrange a scale matrix into the cuBLAS 128x4 blocked format.
+def to_blocked(
+    input_matrix: torch.Tensor, offs: torch.Tensor | None = None
+) -> torch.Tensor:
+    r"""to_blocked(input_matrix, offs=None) -> Tensor
+
+    Rearrange a scale matrix into the cuBLAS 128x4 blocked format.
 
     Args:
-        input_matrix: Two-dimensional matrix of block-scaling factors.
+        input_matrix (Tensor): Two-dimensional matrix of block-scaling factors.
+        offs (Tensor, optional): Contiguous int32 group-end row offsets. Each
+          group is padded and blocked separately. Inside a FlexGEMM epilogue,
+          use the same offsets tensor as the grouped GEMM. Default: ``None``.
 
     Returns:
-        Flattened blocked storage, including zero-filled padding tiles.
+        Tensor: Flattened blocked storage when ``offs`` is absent. Otherwise,
+        a two-dimensional grouped scale buffer with capacity for
+        ``ceil(rows / 128) + offs.numel() - 1`` row tiles and columns padded to
+        a multiple of four. Unused storage is zero-filled.
     """
     if input_matrix.ndim != 2:
         raise ValueError(f"to_blocked expects a 2-D tensor, got {input_matrix.ndim}-D")
     rows, cols = input_matrix.shape
+    if offs is not None:
+        validate_grouped_mm_offs(input_matrix, offs, "to_blocked")
+        shape = (((rows + 127) // 128 + offs.numel() - 1) * 128, ((cols + 3) // 4) * 4)
+        ends = offs.to(torch.int64)
+        lengths = grouped_mm_offset_lengths(
+            ends,
+            rows,
+            "to_blocked offs must be nondecreasing and within the input rows",
+        )
+        starts = ends - lengths
+        if rows == 0 or cols == 0:
+            return input_matrix.new_zeros(shape)
+        tiles = (lengths + 127) // 128
+        tile_ends = tiles.cumsum(0)
+        compact = tile_ends - tiles
+        index = torch.arange(shape[0] * shape[1], device=input_matrix.device)
+        row_tile = index // (shape[1] * 128)
+        owner = torch.bucketize(row_tile, tile_ends, right=True).clamp_max(
+            offs.numel() - 1
+        )
+        local_row = (
+            (row_tile - compact[owner]) * 128
+            + (index % 16) // 4 * 32
+            + index % 512 // 16
+        )
+        row = starts[owner] + local_row
+        col = index // 512 % (shape[1] // 4) * 4 + index % 4
+        valid = (local_row < lengths[owner]) & (col < cols) & (row_tile < tile_ends[-1])
+        source = input_matrix.contiguous().view(torch.uint8).reshape(rows, cols, -1)
+        values = source[row.clamp(0, rows - 1), col.clamp_max(cols - 1)]
+        result = torch.where(valid[:, None], values, 0)
+        return result.reshape(shape[0], -1).view(input_matrix.dtype)
     if rows == 0 or cols == 0:
         return input_matrix.new_empty(0)
     row_blocks = (rows + 127) // 128
@@ -243,10 +285,15 @@ def to_blocked(input_matrix: torch.Tensor) -> torch.Tensor:
 
 
 @to_blocked.register_fake
-def _(input_matrix: torch.Tensor) -> torch.Tensor:
+def _(input_matrix: torch.Tensor, offs: torch.Tensor | None = None) -> torch.Tensor:
     if input_matrix.ndim != 2:
         raise ValueError(f"to_blocked expects a 2-D tensor, got {input_matrix.ndim}-D")
     rows, cols = input_matrix.shape
+    if offs is not None:
+        validate_grouped_mm_offs(input_matrix, offs, "to_blocked")
+        return input_matrix.new_empty(
+            (((rows + 127) // 128 + offs.numel() - 1) * 128, ((cols + 3) // 4) * 4)
+        )
     return torch.empty(
         512 * ((rows + 127) // 128) * ((cols + 3) // 4),
         device=input_matrix.device,
