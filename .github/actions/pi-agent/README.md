@@ -98,8 +98,8 @@ probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the al
 
 `.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
 `issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
-`global.anthropic.claude-sonnet-5` at medium thinking, preserving the Claude Code triage model.
-Sol remains available through the `model` dispatch input. Distributed triage uses the same default:
+`global.openai.gpt-6.1-sol` at medium thinking. Other allowlisted models remain available
+through the `model` dispatch input. Distributed triage uses the same default:
 
 1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
    egress blocked): the model reads the issue through
@@ -108,14 +108,15 @@ Sol remains available through the `model` dispatch input. Distributed triage use
    matching `.github/pi/schemas/issue-triage-plan.json`.
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
-   dropped), only adds labels, posts fixed template or umbrella-reference comments the bot
+   dropped), only adds labels, posts fixed template or related-issue comments the bot
    has not already posted, and adds `bot-triaged`. It closes usage questions, expected
    numerical behavior, or covered reports for catalog-enabled closing umbrellas. It then
    hands the issue to `distributed-triage-pi.yml`.
 
 Related-issue discovery uses the existing `search_issues` tool with GitHub search syntax,
-followed by `get_issue` / `get_issue_comments` for candidate evidence. The skill encourages
-searching titles, bodies and comments, then broadening unhelpful queries. Before calling GitHub,
+with `get_issue` / `get_issue_comments` for candidate evidence. Triage includes checking for
+duplicates and applicable umbrellas, without a prescribed query strategy or tool-call sequence.
+A match requires inspecting candidate context. Before calling GitHub,
 the tool rejects `repo:`, `org:`, and `user:` qualifiers, unquoted `OR`, grouping, and malformed
 quotes. The workflow fixes `TRIAGE_REPO`; it is not a model input. Search responses are also
 filtered to issues in `TRIAGE_REPO`, excluding pull requests, `TRIAGE_SOURCE_ISSUE` (bound

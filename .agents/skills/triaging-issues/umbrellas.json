@@ -2,7 +2,7 @@
   "pytorch/pytorch": {
     "195547": {
       "action": "close",
-      "scope": "Missing shape, size, list-length, or boundary validation causing out-of-bounds access, SIGFPE, or sanitizer-only undefined behavior in the missing-validation hardening class: invalid direct ATen/internal calls, extreme parameters, or empty/degenerate inputs. The check is absent in eager, not just lost under compilation.",
+      "scope": "Missing shape, size, list-length, or boundary validation causing out-of-bounds access, SIGFPE, or sanitizer-only undefined behavior in the missing-validation hardening class: invalid direct ATen/internal calls, extreme parameters, or empty/degenerate inputs. The check is absent in eager, not just lost under compilation. A fully covered instance may use this close policy without adding review solely for its OOB/SIGFPE/sanitizer symptom. Uncertain scope or additional unresolved impact requires review.",
       "exclusions": [
         "Ordinary supported public-API usage with an unresolved actionable crash or correctness problem; route for review instead of assuming hardening.",
         "Eager rejects the input but compilation loses that validation (see #197554).",
