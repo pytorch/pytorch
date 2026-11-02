@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 #ifdef USE_RUY_QMATMUL
@@ -60,7 +61,7 @@ Tensor qmatmul(
 
   std::vector<int64_t> out_size_vec(num_dims);
   size_t num_matmuls = 1;
-  for (int64_t i = 0; i < num_dims - 2; i++) {
+  for (const auto i : c10::irange(num_dims - 2)) {
     const int64_t dim = qa.size(i);
     const int64_t qb_dim = qb.size(i);
 
@@ -138,7 +139,7 @@ Tensor qmatmul(
       const underlying_t* qb_subtensor = qb_data + begin * qb_stride;
       underlying_t* out_subtensor = out_data + begin * out_stride;
 
-      for (int64_t i = begin; i < end; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(begin, end)) {
         qa_matrix.set_data(qa_subtensor);
         qb_matrix.set_data(qb_subtensor);
         out_matrix.set_data(out_subtensor);
