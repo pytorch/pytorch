@@ -1849,6 +1849,46 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         self.run_test(test_name, parent_pipe)
 
 
+def _get_system_exit_skip(error):
+    if isinstance(error, SystemExit):
+        return next((s for s in TEST_SKIPS.values() if s.exit_code == error.code), None)
+    return None
+
+
+class _ExpectedFailure(Exception):
+    pass
+
+
+class _MultiProcTestResult(unittest.TestResult):
+    def __init__(self):
+        super().__init__()
+        self.failfast = True
+        self.in_test_body = False
+        self.failure = None
+
+    def addError(self, test, err):
+        if self.failure is None:
+            self.failure = err
+
+    addFailure = addError
+
+    def addSubTest(self, test, subtest, err):
+        if err is None:
+            return
+        skip = _get_system_exit_skip(err[1]) if self.in_test_body else None
+        if skip is not None:
+            self.addSkip(subtest, skip.message)
+        else:
+            self.addError(test, err)
+
+    def addExpectedFailure(self, test, err):
+        skip = _get_system_exit_skip(err[1])
+        if skip is not None:
+            self.addSkip(test, skip.message)
+        else:
+            super().addExpectedFailure(test, err)
+
+
 class MultiProcContinuousTest(TestCase):
     # Class variables:
     MAIN_PROCESS_RANK = -1
@@ -1924,11 +1964,30 @@ class MultiProcContinuousTest(TestCase):
         # Ensure all the ranks use the same seed.
         common_utils.set_rng_seed()
 
-        # Workers call the test directly, so unittest won't run cleanups.
-        try:
-            test_fn(**kwargs)
-        finally:
-            self.doCleanups()
+        result = _MultiProcTestResult()
+
+        @wraps(test_fn)
+        def test_body():
+            result.in_test_body = True
+            try:
+                return test_fn(**kwargs)
+            except SystemExit as error:
+                skip = _get_system_exit_skip(error)
+                if skip is not None:
+                    raise unittest.SkipTest(skip.message) from error
+                raise
+            finally:
+                result.in_test_body = False
+
+        setattr(self, test_name, test_body)
+        unittest.TestCase.run(self, result)
+        if result.failure is not None:
+            _, error, tb = result.failure
+            raise error.with_traceback(tb)
+        if result.skipped:
+            raise unittest.SkipTest(result.skipped[0][1])
+        if result.expectedFailures:
+            raise _ExpectedFailure(result.expectedFailures[0][1])
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
@@ -1952,11 +2011,7 @@ class MultiProcContinuousTest(TestCase):
         try:
             cls._init_pg(rank, world_size, rdvz_file)
         except SystemExit as ex:
-            exit_code = getattr(ex, "code", None)
-            skip_entry = next(
-                (v for v in TEST_SKIPS.values() if v.exit_code == exit_code),
-                None,
-            )
+            skip_entry = _get_system_exit_skip(ex)
             if skip_entry:
                 init_skip_reason = skip_entry.message
             else:
@@ -1983,25 +2038,9 @@ class MultiProcContinuousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:
-                if isinstance(ex, unittest.SkipTest):
+                if isinstance(ex, (unittest.SkipTest, _ExpectedFailure)):
                     completion_queue.put(ex)
                     continue
-                if isinstance(ex, SystemExit):
-                    # Get exit code from the process
-                    exit_code = getattr(ex, "code", None)
-
-                    # Look up exit code in TEST_SKIPS to see if it is a valid skip
-                    skip_entry = next(
-                        (v for v in TEST_SKIPS.values() if v.exit_code == exit_code),
-                        None,
-                    )
-
-                    # If we found an entry, we want to skip the test and the object back to the main process
-                    if skip_entry:
-                        completion_queue.put(unittest.SkipTest(skip_entry.message))
-                        # Skip exception handling below, move to main thread for processing the skip
-                        continue
-
                 raised_exception = True
                 # Send the exception and stack trace back to the dispatcher
                 exc_info = sys.exc_info()
@@ -2017,7 +2056,7 @@ class MultiProcContinuousTest(TestCase):
         # while others are doing collectives will cause a deadlock since
         # it waits for enqueued collectives to finish.
         # Only call this on a clean exit path
-        if not raised_exception:
+        if not raised_exception and init_skip_reason is None:
             c10d.destroy_process_group()
 
     @classmethod
@@ -2178,6 +2217,8 @@ class MultiProcContinuousTest(TestCase):
         Test fixture. Run before each test.
         """
         super().setUp()
+        if self.rank >= 0:
+            return
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
@@ -2198,12 +2239,16 @@ class MultiProcContinuousTest(TestCase):
         @wraps(fn)
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
+                # Workers classify body xfails; fixture errors must stay errors.
+                if self._outcome is not None:
+                    self._outcome.expecting_failure = False
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
                 # Drain all completion queues before raising any exception,
                 # so stale results don't desync subsequent tests. A failure on
                 # any rank takes precedence over a skip on another.
                 failure = None
                 skip = None
+                expected_failure = None
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
@@ -2212,6 +2257,9 @@ class MultiProcContinuousTest(TestCase):
                     )
                     if isinstance(rv, unittest.SkipTest):
                         skip = skip or rv
+                        continue
+                    if isinstance(rv, _ExpectedFailure):
+                        expected_failure = expected_failure or rv
                         continue
                     if not isinstance(rv, BaseException) and rv != self.id():
                         rv = AssertionError(
@@ -2235,6 +2283,14 @@ class MultiProcContinuousTest(TestCase):
                     raise failure
                 if skip is not None:
                     raise skip
+                if expected_failure is not None:
+                    if self._outcome is None:
+                        raise expected_failure
+                    self._outcome.expectedFailure = (
+                        type(expected_failure),
+                        expected_failure,
+                        None,
+                    )
             else:
                 # Worker just runs the test
                 fn()
