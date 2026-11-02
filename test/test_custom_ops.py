@@ -770,7 +770,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         f.register_autograd(backward, setup_context=setup_context)
 
         op = self.ns().pyobject_dispatch_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2, requires_grad=True)
         sizes = torch.tensor([1, 2, 3])
@@ -820,7 +820,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                 return self.list_module([input_embs[0]])[0]
 
         op = self.ns().pyobject_dispatch_module_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2)
         sizes = torch.tensor([1, 2, 3])
@@ -828,6 +828,86 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertIsInstance(y, list)
         self.assertEqual(passthrough, x)
         self.assertEqual(Consumer()(y), y[0])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_scalar_and_void_outputs(self):
+        seen = []
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_float_output", mutates_args=()
+        )
+        def float_output(x: Tensor) -> float:
+            return float(x.numel())
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_void_output", mutates_args=()
+        )
+        def void_output(x: Tensor) -> None:
+            seen.append(x.numel())
+
+        self.assertTrue(
+            self.ns().pyobject_dispatch_float_output.default._is_pyobj_dispatcher_enabled()
+        )
+        self.assertTrue(
+            self.ns().pyobject_dispatch_void_output.default._is_pyobj_dispatcher_enabled()
+        )
+
+        x = torch.zeros(2)
+        self.assertEqual(float_output(x), 2.0)
+        self.assertIsNone(void_output(x))
+        self.assertEqual(seen, [2])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_optional_tensor_output(self):
+        lib = self.lib()
+        lib.define("pyobject_dispatch_optional_some(Tensor x) -> Tensor?")
+        lib.define("pyobject_dispatch_optional_none(Tensor x) -> Tensor?")
+        lib.impl(
+            "pyobject_dispatch_optional_some",
+            lambda x: x.clone(),
+            "CPU",
+        )
+        lib.impl(
+            "pyobject_dispatch_optional_none",
+            lambda x: None,
+            "CPU",
+        )
+        for name in (
+            "pyobject_dispatch_optional_some",
+            "pyobject_dispatch_optional_none",
+        ):
+            lib.impl(
+                name,
+                torch.library.fallthrough_kernel,
+                "Autograd",
+            )
+
+        some = self.ns().pyobject_dispatch_optional_some.default
+        none = self.ns().pyobject_dispatch_optional_none.default
+        some._enable_pyobj_dispatch(True)
+        none._enable_pyobj_dispatch(True)
+
+        x = torch.ones(2)
+        self.assertEqual(some(x), x)
+        self.assertIsNone(none(x))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_multiple_tensor_outputs(self):
+        lib = self.lib()
+        lib.define("pyobject_dispatch_multiple(Tensor x) -> (Tensor, Tensor)")
+        lib.impl("pyobject_dispatch_multiple", lambda x: [x.clone(), x + 1], "CPU")
+        lib.impl(
+            "pyobject_dispatch_multiple",
+            torch.library.fallthrough_kernel,
+            "Autograd",
+        )
+        op = self.ns().pyobject_dispatch_multiple.default
+        op._enable_pyobj_dispatch(True)
+
+        x = torch.ones(2)
+        result = op(x)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(result, (x, x + 1))
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_normalizes_tensor_list_input(self):

@@ -434,6 +434,97 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
       kwnames);
 }
 
+// Keep Tensor objects in Python on the common path; for other schema types,
+// use the same IValue conversion as the boxed Python kernel. Tensor lists need
+// their own path so that normalizing a tuple does not copy every at::Tensor.
+static PyObject* pyobject_dispatch_normalize_return(
+    const c10::TypePtr& type,
+    PyObject* value) {
+  if (type->kind() == c10::TypeKind::TensorType && THPVariable_Check(value)) {
+    return Py_NewRef(value);
+  }
+  if (type->kind() == c10::TypeKind::OptionalType) {
+    if (value == Py_None) {
+      return Py_NewRef(value);
+    }
+    return pyobject_dispatch_normalize_return(
+        type->expect<c10::OptionalType>()->getElementType(), value);
+  }
+  if (type->kind() == c10::TypeKind::ListType) {
+    const auto& element_type = type->expect<c10::ListType>()->getElementType();
+    const auto element_kind = element_type->kind();
+    if (element_kind == c10::TypeKind::TensorType ||
+        (element_kind == c10::TypeKind::OptionalType &&
+         element_type->expect<c10::OptionalType>()->getElementType()->kind() ==
+             c10::TypeKind::TensorType)) {
+      auto list = py::reinterpret_steal<py::object>(PySequence_List(value));
+      if (!list) {
+        return nullptr;
+      }
+      bool valid = true;
+      for (Py_ssize_t i = 0; i < PyList_GET_SIZE(list.ptr()); ++i) {
+        PyObject* element = PyList_GET_ITEM(list.ptr(), i);
+        if ((element != Py_None && !THPVariable_Check(element)) ||
+            (element == Py_None &&
+             element_kind != c10::TypeKind::OptionalType)) {
+          valid = false;
+          break;
+        }
+      }
+      if (valid) {
+        return list.release().ptr();
+      }
+    }
+  }
+  return torch::jit::toPyObject(torch::jit::toIValue(py::handle(value), type))
+      .release()
+      .ptr();
+}
+
+static PyObject* pyobject_dispatch_normalize_results(
+    const c10::FunctionSchema& schema,
+    PyObject* value) {
+  const auto& returns = schema.returns();
+  if (returns.empty()) {
+    TORCH_CHECK(
+        value == Py_None,
+        "Expected PythonKernelHolder for ",
+        schema.name(),
+        " to return None but it returned something else instead.");
+    return Py_NewRef(value);
+  }
+  if (returns.size() == 1) {
+    return pyobject_dispatch_normalize_return(returns[0].real_type(), value);
+  }
+
+  auto values = py::reinterpret_steal<py::object>(PySequence_Fast(
+      value, "expected a sequence of return values from Python kernel"));
+  if (!values) {
+    return nullptr;
+  }
+  TORCH_CHECK(
+      static_cast<size_t>(PySequence_Fast_GET_SIZE(values.ptr())) ==
+          returns.size(),
+      "Expected ",
+      returns.size(),
+      " return values for ",
+      schema.name());
+  auto normalized = py::reinterpret_steal<py::object>(
+      PyTuple_New(static_cast<Py_ssize_t>(returns.size())));
+  if (!normalized) {
+    return nullptr;
+  }
+  for (const auto i : c10::irange(returns.size())) {
+    PyObject* result = pyobject_dispatch_normalize_return(
+        returns[i].real_type(), PySequence_Fast_GET_ITEM(values.ptr(), i));
+    if (result == nullptr) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(normalized.ptr(), i, result);
+  }
+  return normalized.release().ptr();
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -487,7 +578,9 @@ static PyObject* pyobject_dispatch_with_keyset(
   if (result == nullptr) {
     return nullptr;
   }
-  return result;
+  auto owned_result = py::reinterpret_steal<py::object>(result);
+  return pyobject_dispatch_normalize_results(
+      self->handle->schema(), owned_result.ptr());
 }
 
 static PyObject* pyobject_dispatch_vectorcall(
@@ -860,8 +953,9 @@ void initDispatchBindings(PyObject* module) {
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            if (func.is(py::module::import("torch.library")
-                            .attr("fallthrough_kernel"))) {
+            if (func.is(
+                    py::module::import("torch.library")
+                        .attr("fallthrough_kernel"))) {
               lib.impl(
                   name,
                   torch::dispatch(dispatch, CppFunction::makeFallthrough()),
@@ -924,16 +1018,18 @@ void initDispatchBindings(PyObject* module) {
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            if (func.is(py::module::import("torch.library")
-                            .attr("fallthrough_kernel"))) {
+            if (func.is(
+                    py::module::import("torch.library")
+                        .attr("fallthrough_kernel"))) {
               lib.fallback(
                   torch::dispatch(dispatch, CppFunction::makeFallthrough()));
             } else {
-              lib.fallback(torch::dispatch(
-                  dispatch,
-                  CppFunction::makeFromBoxedFunctor(
-                      std::make_unique<PythonKernelHolder>(
-                          func, dispatch, with_keyset, /*with_op*/ true))));
+              lib.fallback(
+                  torch::dispatch(
+                      dispatch,
+                      CppFunction::makeFromBoxedFunctor(
+                          std::make_unique<PythonKernelHolder>(
+                              func, dispatch, with_keyset, /*with_op*/ true))));
             }
             END_HANDLE_TH_ERRORS_PYBIND
           },
@@ -1279,16 +1375,20 @@ void initDispatchBindings(PyObject* module) {
           [](c10::DispatchKeySet self, c10::DispatchKeySet other) {
             return self.raw_repr() == other.raw_repr();
           })
-      .def(py::pickle(
-          [](const c10::DispatchKeySet&
-                 obj) { // __getstate__ : creates tuple of state
-            return py::make_tuple(obj.raw_repr());
-          },
-          [](const py::tuple& t) { // __setstate__ : restores state from tuple
-            TORCH_CHECK(
-                t.size() == 1, "__setstate__ expected tuple with one element");
-            return c10::DispatchKeySet::from_raw_repr(t[0].cast<uint64_t>());
-          }))
+      .def(
+          py::pickle(
+              [](const c10::DispatchKeySet&
+                     obj) { // __getstate__ : creates tuple of state
+                return py::make_tuple(obj.raw_repr());
+              },
+              [](const py::tuple&
+                     t) { // __setstate__ : restores state from tuple
+                TORCH_CHECK(
+                    t.size() == 1,
+                    "__setstate__ expected tuple with one element");
+                return c10::DispatchKeySet::from_raw_repr(
+                    t[0].cast<uint64_t>());
+              }))
       .def_static("from_raw_repr", &c10::DispatchKeySet::from_raw_repr);
 
   m.attr("_dispatch_autogradother_backends") =
@@ -1484,8 +1584,9 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_get_nested_int", [](int64_t data, int64_t coeff) {
-    return c10::SymInt(c10::SymNode(
-        c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
+    return c10::SymInt(
+        c10::SymNode(
+            c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {
