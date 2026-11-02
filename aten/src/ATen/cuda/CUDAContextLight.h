@@ -127,6 +127,10 @@ TORCH_CUDA_CPP_API CUDABlasHandleWithWorkspace
 getCurrentCUDABlasHandleWithWorkspace();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 #ifdef USE_ROCM
+// Like getCurrentCUDABlasLtHandle(), but returns nullptr instead of creating a
+// handle when the current thread has none for the current (device, stream) and
+// the pool has no spare. Safe to call under stream capture.
+TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandleIfAvailable();
 // hipblaslt handles are pooled per (device, stream) and cannot be created
 // while stream capture is active. Pre-stock the shared free list so other
 // threads (e.g. autograd workers) can reserve one mid-capture.
