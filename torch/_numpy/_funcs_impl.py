@@ -355,40 +355,38 @@ def geomspace(
 ) -> torch.Tensor:
     if axis != 0 or not endpoint:
         raise NotImplementedError
-    if not isinstance(start, torch.Tensor):
-        start = torch.as_tensor(start)
-    if not isinstance(stop, torch.Tensor):
-        stop = torch.as_tensor(stop)
     if bool(torch.any(start == 0)) or bool(torch.any(stop == 0)):
         raise ValueError("Geometric sequence cannot include zero")
+    # Like NumPy, compute in a floating or complex dtype and only cast to
+    # the requested dtype at the end: an integer or half-precision dtype
+    # would otherwise truncate the log10 exponents before interpolation.
+    float_dtype = _dtypes_impl.default_dtypes().float_dtype
+    comp_dtype = _dtypes_impl.result_type_impl(
+        start, stop, torch.empty((), dtype=float_dtype if dtype is None else dtype)
+    )
+    if not (comp_dtype.is_floating_point or comp_dtype.is_complex):
+        comp_dtype = float_dtype
     if dtype is None:
-        if start.is_complex() or stop.is_complex():
-            dtype = _dtypes_impl.default_dtypes().complex_dtype
-        else:
-            dtype = _dtypes_impl.default_dtypes().float_dtype
-    elif not isinstance(dtype, torch.dtype):
-        from . import _dtypes
-
-        dtype = _dtypes.dtype(dtype).torch_dtype
+        dtype = comp_dtype
+    start = start.to(comp_dtype)
+    stop = stop.to(comp_dtype)
     out_sign = torch.sgn(start)
     start = start / out_sign
     stop = stop / out_sign
-    log_start = torch.log10(start)
-    log_stop = torch.log10(stop)
     # torch.logspace accepts tensor start/end at runtime.
     res = torch.logspace(  # pyrefly: ignore[no-matching-overload]
-        log_start,
-        log_stop,
+        torch.log10(start),
+        torch.log10(stop),
         num,
         base=10.0,
-        dtype=dtype,
+        dtype=comp_dtype,
     )
-    res = (res * out_sign).to(dtype)
+    # Overwrite the endpoints to avoid log/pow round-off, as NumPy does.
     if num > 0:
-        res[0] = start * out_sign
+        res[0] = start
         if num > 1:
-            res[-1] = stop * out_sign
-    return res
+            res[-1] = stop
+    return (res * out_sign).to(dtype)
 
 
 def logspace(

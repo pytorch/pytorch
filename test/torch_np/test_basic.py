@@ -692,44 +692,37 @@ class TestCtorNested(TestCase):
         assert_equal(w.asarray(lst), [[1, 2], [3, 4]])
 
 
+@instantiate_parametrized_tests
 class TestGeomspace(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_geomspace_num_one_and_zero(self):
-        res1 = w.geomspace(1, 1000, num=1)
-        assert_equal(res1, w.array([1.0]))
-        assert_equal(res1.dtype, w.float64)
+    def _check(self, *args, **kwargs):
+        res = w.geomspace(*args, **kwargs)
+        expected = _np.geomspace(*args, **kwargs)
+        assert_equal(res.dtype.name, expected.dtype.name)
+        assert_allclose(res, expected)
 
-        res0 = w.geomspace(1, 1000, num=0)
-        assert_equal(res0.shape, (0,))
-        assert_equal(res0.dtype, w.float64)
+    @parametrize("start, stop", [(1, 7), (2.5, 300), (-1, -1000), (3, 3)])
+    @parametrize("num", [0, 1, 2, 5, 50])
+    @parametrize("dtype", [None, "int64", "float32", "float64"])
+    def test_geomspace_real(self, start, stop, num, dtype):
+        self._check(start, stop, num, dtype=dtype)
 
-    def test_geomspace_dtype(self):
-        res32 = w.geomspace(1, 1000, num=4, dtype=w.float32)
-        assert_equal(res32.dtype, w.float32)
+    @parametrize("start, stop", [(1j, 1000j), (1, 1j), (-1 + 0j, 1j)])
+    @parametrize("num", [0, 1, 5])
+    @parametrize("dtype", [None, "complex64", "complex128"])
+    def test_geomspace_complex(self, start, stop, num, dtype):
+        self._check(start, stop, num, dtype=dtype)
 
-        res64 = w.geomspace(1, 1000, num=4, dtype=w.float64)
-        assert_equal(res64.dtype, w.float64)
-
-        res_int = w.geomspace(1, 1000, num=4, dtype=w.int64)
-        assert_equal(res_int.dtype, w.int64)
-        assert_equal(res_int, w.array([1, 10, 100, 1000]))
-
-    def test_geomspace_negative(self):
-        res_neg = w.geomspace(-1, -1000, num=4)
-        assert_allclose(res_neg, w.array([-1.0, -10.0, -100.0, -1000.0]))
-        assert_equal(w.geomspace(-1, -1000, num=1), w.array([-1.0]))
+    def test_geomspace_float32_endpoints(self):
+        self._check(_np.float32(1), _np.float32(7), 5)
+        self._check(_np.float32(1), _np.float32(7), 5, dtype="float32")
 
     def test_geomspace_zero_raises(self):
         with self.assertRaises(ValueError):
             w.geomspace(0, 1000, num=4)
         with self.assertRaises(ValueError):
             w.geomspace(1, 0, num=4)
-
-    def test_geomspace_complex(self):
-        res = w.geomspace(1j, 1000j, num=4)
-        assert_allclose(res, w.array([1j, 10j, 100j, 1000j]))
-        assert_equal(res.dtype, w.complex128)
 
 
 class TestMisc(TestCase):
