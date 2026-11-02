@@ -700,13 +700,15 @@ def user_defined_triton_kernel_transitive_closure(
     source_modules: list[TritonKernelSource] = []
 
     def add_source_module(
-        source_owner: JITFunction
-        | triton.runtime.jit.ConstexprFunction
-        | FunctionType
-        | BuiltinFunctionType
-        | type
-        | triton_dtype
-        | None,
+        source_owner: (
+            JITFunction
+            | triton.runtime.jit.ConstexprFunction
+            | FunctionType
+            | BuiltinFunctionType
+            | type
+            | triton_dtype
+            | None
+        ),
         source: IndentedBuffer,
         symbol_name: str | None = None,
     ) -> None:
@@ -2039,7 +2041,7 @@ class IndexPutFallbackLine(WrapperLine):
         node = self.node
         if not ir.is_node_sequence(node.inputs):
             raise AssertionError("expected node.inputs to be a node sequence")
-        (x, values) = (t.codegen_reference() for t in node.inputs[:2])
+        x, values = (t.codegen_reference() for t in node.inputs[:2])
         indices = [
             idx.codegen_reference() if idx else self.wrapper.none_str
             for idx in self.indices
@@ -2076,9 +2078,9 @@ class ScatterFallbackLine(WrapperLine):
         if not ir.is_node_sequence(node.inputs):
             raise AssertionError("expected node.inputs to be a node sequence")
         if node.src_is_tensor:
-            (x, index, src) = (t.codegen_reference() for t in node.inputs)
+            x, index, src = (t.codegen_reference() for t in node.inputs)
         else:
-            (x, index) = (t.codegen_reference() for t in node.inputs)
+            x, index = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
         device = d.type if (d := node.get_device()) else V.graph.device_type
         kwargs = node.codegen_kwargs()
@@ -2420,11 +2422,9 @@ class PythonWrapperCodegen(CodeGen):
 
         # Graph-local relocatable objects linked into the AOTI model.
         self.aot_kernel_objects: OrderedSet[str] = OrderedSet()
-        self.external_aot_artifact_cache: dict[tuple[Any, ...], Any] = {}
         self.external_aot_artifacts: dict[str, Any] = {}
         self.deferred_aot_call_wrappers: dict[str, Any] = {}
-        self.aot_link_libraries: OrderedSet[str] = OrderedSet()
-        self.aot_link_options: OrderedSet[str] = OrderedSet()
+        self.aot_link_args: list[str] = []
 
         # Precompiled kernel .so paths for JIT C++ wrappers and graph-local
         # linker flags for AOT objects (e.g. CUTLASS, ROCm CK, FlyDSL).
@@ -2645,8 +2645,7 @@ class PythonWrapperCodegen(CodeGen):
             self.header.writeline(
                 "from torch._inductor.runtime.proton_utils import process_proton_trace as _proton_process_trace"
             )
-            self.header.splice(
-                f"""
+            self.header.splice(f"""
                 def _proton_finalize_and_postprocess():
                     proton.finalize()
                     _trace_path = {trace_path}
@@ -2657,8 +2656,7 @@ class PythonWrapperCodegen(CodeGen):
                             split_invocations={split_invocations},
                             per_cta_occupancy={per_cta_occupancy},
                         )
-                """
-            )
+                """)
             # Start proton before kernel compilation (instrumentation backend needs to hook JIT)
             self.header.writeline(
                 "if not _ProtonHookManager.active_hooks: "
@@ -2671,8 +2669,7 @@ class PythonWrapperCodegen(CodeGen):
         pass
 
     def write_kernel_autotune_defs_header(self) -> None:
-        self.kernel_autotune_defs.splice(
-            f"""
+        self.kernel_autotune_defs.splice(f"""
                 import torch
                 from math import inf, nan
                 from torch._dynamo.testing import rand_strided
@@ -2684,8 +2681,7 @@ class PythonWrapperCodegen(CodeGen):
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
-            """
-        )
+            """)
 
         try:
             from torch._C import _cuda_getCurrentRawStream  # noqa: F401
@@ -2819,8 +2815,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def write_launcher_fn_call_get_indent(self) -> int:
         if config.graph_partition:
-            self.prefix.splice(
-                """
+            self.prefix.splice("""
                 class Runner:
                     def __init__(self, partitions):
                         self.partitions = partitions
@@ -2832,15 +2827,12 @@ class PythonWrapperCodegen(CodeGen):
                         self.partitions = new_callables
 
                     def call(self, args):
-                """
-            )
+                """)
             prefix_indent = 2
         else:
-            self.prefix.splice(
-                f"""
+            self.prefix.splice(f"""
                 def {self.launcher_fn_name}(args):
-                """
-            )
+                """)
             prefix_indent = 1
 
         return prefix_indent
@@ -3287,13 +3279,11 @@ class PythonWrapperCodegen(CodeGen):
                 "," if len(self.all_partition_names) == 1 else ""
             )
 
-            result.splice(
-                f"""
+            result.splice(f"""
                 runner = Runner(partitions=[{all_partition_name_list}])
                 call = runner.call
                 recursively_apply_fns = runner.recursively_apply_fns
-                """
-            )
+                """)
 
     def generate_end(self, result: IndentedBuffer) -> None:
         return
@@ -3683,12 +3673,10 @@ class PythonWrapperCodegen(CodeGen):
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
         code and execute it to trigger Triton kernel compilation and auto-tuning
         """
-        self.kernel_autotune_defs.splice(
-            """
+        self.kernel_autotune_defs.splice("""
             async_compile.wait(globals())
             del async_compile
-        """
-        )
+        """)
         scope = {}  # type: ignore[var-annotated]
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
@@ -4110,17 +4098,20 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_alloc_from_pool(
         self, name, offset, dtype, shape, stride
     ) -> tuple[str, list[str]]:
-        return "alloc_from_pool({})".format(
-            ", ".join(
-                [
-                    name,
-                    pexpr(offset),  # bytes not numel
-                    str(dtype),
-                    self.codegen_python_shape_tuple(shape),
-                    self.codegen_python_shape_tuple(stride),
-                ]
-            )
-        ), []
+        return (
+            "alloc_from_pool({})".format(
+                ", ".join(
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        str(dtype),
+                        self.codegen_python_shape_tuple(shape),
+                        self.codegen_python_shape_tuple(stride),
+                    ]
+                )
+            ),
+            [],
+        )
 
     def codegen_reinterpret_view(
         self,
@@ -4961,8 +4952,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
-        compile_wrapper.splice(
-            f"""
+        compile_wrapper.splice(f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
@@ -4971,8 +4961,7 @@ class PythonWrapperCodegen(CodeGen):
                 custom_kernel=True,
             )
             @triton.jit
-            """
-        )
+            """)
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
             kernel, epilogue_fusion
         )
@@ -5114,14 +5103,12 @@ class PythonWrapperCodegen(CodeGen):
         self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
     def generate_reset_kernel_saved_flags(self):
-        self.wrapper_call.splice(
-            f"""
+        self.wrapper_call.splice(f"""
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     kernel.cuda_kernel_saved = False
                     kernel.cpu_kernel_saved = False
-            """
-        )
+            """)
 
     def generate_save_uncompiled_kernels(self):
         """
@@ -5135,8 +5122,7 @@ class PythonWrapperCodegen(CodeGen):
         save the Triton kernels outside the active control flow path for
         subsequent AOTInductor code generation and compilation.
         """
-        self.wrapper_call.splice(
-            f"""
+        self.wrapper_call.splice(f"""
             for kernel in globals().values():
                 if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     if kernel.device_props.type == "cpu":
@@ -5152,8 +5138,7 @@ class PythonWrapperCodegen(CodeGen):
                                 stream="stream",  # use dummy stream
                                 launcher=kernel.launchers[0],
                             )
-            """
-        )
+            """)
 
     def prepare_triton_kernel_call(self, call_args):
         def wrap_arg(arg):
@@ -6685,11 +6670,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
         self.aot_kernel_objects = root.aot_kernel_objects
-        self.external_aot_artifact_cache = root.external_aot_artifact_cache
         self.external_aot_artifacts = root.external_aot_artifacts
         self.deferred_aot_call_wrappers = root.deferred_aot_call_wrappers
-        self.aot_link_libraries = root.aot_link_libraries
-        self.aot_link_options = root.aot_link_options
+        self.aot_link_args = root.aot_link_args
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
@@ -6740,11 +6723,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         return
 
     def write_launcher_fn_call_get_indent(self) -> int:
-        self.prefix.splice(
-            f"""
+        self.prefix.splice(f"""
             def {self.launcher_fn_name}(args):
-            """
-        )
+            """)
         prefix_indent = 1
         return prefix_indent
 

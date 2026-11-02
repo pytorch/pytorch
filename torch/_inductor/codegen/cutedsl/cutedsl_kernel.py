@@ -37,6 +37,7 @@ from .aux_scalars import CuteDSLAuxScalarBindings
 from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
 from .lane_analysis import classify_lane_expr
 
+
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
 MAIN_SUFFIX = "main"
 
@@ -515,18 +516,16 @@ class CuteDSLTemplateKernel(Kernel):
         """
         wrapper = V.graph.wrapper_code
         if getattr(V.graph, "aot_mode", False):
-            from torch._inductor.codegen.external_aot import (
-                get_external_aot_backend,
-            )
+            from torch._inductor.codegen.cutedsl.aot import emit_cutedsl_external_call
 
-            binding = {"output": self.output_node}
+            binding: dict[str, Any] = {"output": self.output_node}
             for arg_name, input_node in self._template_input_args:
                 capture = self._get_reinterpret_view(input_node)
                 binding[arg_name.removeprefix("arg_")] = (
                     capture if capture is not None else input_node
                 )
             artifact = wrapper.external_aot_artifacts[name]
-            get_external_aot_backend("cutedsl").emit_call(
+            emit_cutedsl_external_call(
                 wrapper,
                 artifact,
                 binding,
