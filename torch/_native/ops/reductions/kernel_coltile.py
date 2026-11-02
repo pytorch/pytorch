@@ -39,6 +39,10 @@ _VEC_MAX = 4
 _THREADS_PER_BLOCK = 32
 _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 _ORDERED_WORKER_WARPS = 16
+# Multi-field lane replays roll by this factor. On B200, ordered argmax and var_mean
+# columns compiled in 0.8-1.2s instead of 7.8-8.6s and ran at 0.92-1.06x. Single-field
+# replays stay static: rolled, fp32 sums ran at as little as 0.46x.
+_ORDERED_LANE_UNROLL = 4
 
 
 class OrderedColConfig(NamedTuple):
@@ -475,6 +479,36 @@ class _OrderedColReduce:
                                 )[0]
                             load_root = tile._inner_tree_reduce(
                                 [(lane_roots[i],) for i in range(WARP)], op
+                            )
+                        elif const_expr(trait.nfields > 1):
+                            lane_roots = [
+                                cute.make_rmem_tensor(
+                                    cute.make_layout(WARP), trait.fdtypes[f]
+                                )
+                                for f in range(nf)
+                            ]
+                            for original_lane in cutlass.range(
+                                WARP, unroll=_ORDERED_LANE_UNROLL
+                            ):
+                                root = self._lane_root(
+                                    mIn,
+                                    in_base,
+                                    batch,
+                                    col,
+                                    warp_base
+                                    + Int32(load * WARP * plan.vec)
+                                    + Int32(original_lane) * Int32(plan.vec),
+                                    active,
+                                    bound,
+                                )
+                                for f in cutlass.range_constexpr(nf):
+                                    lane_roots[f][original_lane] = root[f]
+                            load_root = tile._inner_tree_reduce(
+                                [
+                                    tuple(lane_roots[f][i] for f in range(nf))
+                                    for i in range(WARP)
+                                ],
+                                op,
                             )
                         else:
                             lane_tree = []
