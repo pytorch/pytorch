@@ -208,6 +208,15 @@
 - test/test_mps.py
 - test/inductor/test_mps_basic.py
 
+# TestNestedTensorOpInfo only runs in periodic-strict
+"ciflow/periodic-strict":
+- aten/src/ATen/NestedTensorImpl.*
+- aten/src/ATen/native/nested/**
+- torch/csrc/utils/nested.*
+- torch/nested/**
+- torch/testing/_internal/opinfo/definitions/nested.py
+- test/test_nestedtensor.py
+
 "ciflow/h100-symm-mem":
 - torch/csrc/distributed/c10d/symm_mem/**
 - torch/distributed/_symmetric_memory/**
