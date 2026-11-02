@@ -2965,6 +2965,10 @@ Call this whenever a new thread is created in order to propagate values from
                 std::make_shared<c10::SafePyObject>(
                     converter.inc_ref().ptr(), getPyInterpreter()),
                 functorch_config.attr("fake_tensor_allow_meta").cast<bool>());
+            mode->allow_unsafe_data_ptr_access_ =
+                functorch_config
+                    .attr("fake_tensor_allow_unsafe_data_ptr_access")
+                    .cast<bool>();
             PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
             if (weakref == nullptr) {
               throw py::error_already_set();
@@ -2976,7 +2980,10 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("converter"),
           py::arg("shape_env"),
           py::arg("wrapper"))
-      .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_);
+      .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_)
+      .def_readwrite(
+          "allow_unsafe_data_ptr_access",
+          &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
   // A plain meta tensor is turned into a fake of mode on device in place.
