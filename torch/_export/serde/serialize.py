@@ -803,12 +803,28 @@ def _check_flat_apply_inputs(where: str, inputs: Sequence[NamedArgument]) -> Non
         _check_operator_name(where, inp)
 
 
-# Kinds of saved inputs that load turns into objects the function could call.
-_HELPER_CALL_REFUSED_KINDS = frozenset({"as_graph", "as_custom_obj"})
+# The kinds of saved inputs that a direct call of the helper may have. Its
+# inputs are not flattened, so lists of values and dicts are allowed too.
+_HELPER_CALL_INPUT_KINDS = _FLAT_APPLY_INPUT_KINDS | {
+    "as_tensors",
+    "as_ints",
+    "as_floats",
+    "as_strings",
+    "as_bools",
+    "as_sym_ints",
+    "as_sym_floats",
+    "as_sym_bools",
+    "as_optional_tensor",
+    "as_optional_tensors",
+    "as_nested_tensors",
+    "as_int_lists",
+    "as_float_lists",
+    "as_string_to_argument",
+}
 
 
 def _check_helper_call_argument(where: str, arg: Argument) -> None:
-    if arg.type in _HELPER_CALL_REFUSED_KINDS:
+    if arg.type not in _HELPER_CALL_INPUT_KINDS:
         raise SerializeError(
             f"{where} has an input of kind {arg.type}, which cannot be saved or loaded"
         )
@@ -826,9 +842,9 @@ def _check_helper_call_argument(where: str, arg: Argument) -> None:
 def _check_helper_call_inputs(where: str, inputs: Sequence[NamedArgument]) -> None:
     """
     The inputs of a direct call of the helper for custom autograd functions
-    reach the autograd function, as the inputs of a flat_apply call do. They
-    are not flattened, so lists and dicts of values are fine, but save and load
-    refuse the same callables, and operators inside dicts.
+    reach the autograd function, as the inputs of a flat_apply call do. Save
+    and load refuse kinds outside ``_HELPER_CALL_INPUT_KINDS``, and operators
+    inside dicts.
     """
     for inp in inputs:
         _check_helper_call_argument(where, inp.arg)
