@@ -161,6 +161,100 @@ class XpuProfilerTest(TestCase):
         if Verbose:
             print(p.key_averages().table())
 
+    def trace_events(self, p):
+        with tempfile.NamedTemporaryFile(mode="w+", delete=True) as tmp:
+            p.export_chrome_trace(tmp.name)
+            with open(tmp.name) as f:
+                return json.load(f)["traceEvents"]
+
+    @staticmethod
+    def complete_event_categories(events):
+        return {e.get("cat") for e in events if e.get("ph") == "X"}
+
+    def profile_with_sync(self, activities):
+        a = torch.rand([100, 200], device="xpu")
+        b = torch.rand([200, 300], device="xpu")
+        with torch.profiler.profile(activities=activities) as p:
+            r = torch.matmul(a, b)
+            torch.xpu.synchronize()
+        self.assertTrue(r.numel() > 0)
+        return p
+
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_xpu_sync_collected_by_default(self):
+        p = self.profile_with_sync(
+            [
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.XPU,
+            ]
+        )
+        sync_events = [
+            e
+            for e in self.trace_events(p)
+            if e.get("ph") == "X" and e.get("cat") == "xpu_sync"
+        ]
+
+        if Verbose:
+            print(f"{len(sync_events) = }")
+
+        self.assertTrue(sync_events, "no xpu_sync events captured")
+        for e in sync_events:
+            self.assertIn("Type", e.get("args", {}))
+
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_xpu_sync_selectable_by_name(self):
+        # An unrecognised name would be read as a hardware metric and force
+        # kernel tracing on, so an absent "kernel" proves the name matched.
+        p = self.profile_with_sync(
+            [
+                torch.profiler.ProfilerActivity.CPU,
+                {torch.profiler.ProfilerActivity.XPU: ["XPU_SYNC"]},
+            ]
+        )
+        categories = self.complete_event_categories(self.trace_events(p))
+
+        if Verbose:
+            print(f"{sorted(categories) = }")
+
+        self.assertIn("xpu_sync", categories)
+        self.assertNotIn("kernel", categories)
+
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_xpu_sync_can_be_opted_out(self):
+        p = self.profile_with_sync(
+            [
+                torch.profiler.ProfilerActivity.CPU,
+                {torch.profiler.ProfilerActivity.XPU: ["CONCURRENT_KERNEL"]},
+            ]
+        )
+        categories = self.complete_event_categories(self.trace_events(p))
+
+        if Verbose:
+            print(f"{sorted(categories) = }")
+
+        self.assertIn("kernel", categories)
+        self.assertNotIn("xpu_sync", categories)
+
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    def test_xpu_sync_reported_on_device(self):
+        p = self.profile_with_sync(
+            [
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.XPU,
+            ]
+        )
+        # XPUPTI names a sync record after the L0 API it came from, which is
+        # also the name of the XPU_DRIVER record for the same call, so match on
+        # the activity type rather than the event name.
+        sync_events = [e for e in p.events() if e.activity_type == "xpu_sync"]
+
+        if Verbose:
+            print(f"{len(sync_events) = }")
+
+        self.assertTrue(sync_events, "no xpu_sync events captured")
+        for event in sync_events:
+            self.assertEqual(event.device_type, DeviceType.XPU)
+
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_ac2g_flows_end_on_device(self):
         # ac2g = Async CPU-to-GPU: every CPU->GPU flow arrow starts at a host
