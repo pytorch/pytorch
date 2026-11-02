@@ -154,6 +154,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     supports_caching = False
 
+    @classmethod
+    def subgraph_buffer_blocker(cls, stream_idx: int | None) -> str | None:
+        return "the FX wrapper"
+
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.subgms: dict[str, torch.fx.GraphModule] = {}
