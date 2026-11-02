@@ -1,42 +1,25 @@
 # Owner(s): ["module: inductor"]
 
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from torch._inductor.codegen.external_aot import (
-    ExternalAOTArtifact,
-    ExternalAOTBackend,
-    ExternalAOTBuildSpec,
-    ExternalAOTTensorArg,
-    get_external_aot_backend,
-    publish_external_aot_artifact,
-    register_external_aot_backend,
-)
+from torch._inductor.codegen.common import IndentedBuffer
 from torch._inductor.codegen.cutedsl.aot import (
     CuteDSLAOTBackend,
     CuteDSLAOTExportRequest,
 )
-from torch._inductor.codegen.common import IndentedBuffer
+from torch._inductor.codegen.external_aot import (
+    export_external_aot_files,
+    ExternalAOTArtifact,
+    ExternalAOTBuildSpec,
+    ExternalAOTTensorArg,
+    publish_external_aot_artifact,
+)
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet
-
-
-class _Backend(ExternalAOTBackend):
-    kind = "test"
-
-    def export(self, request, spec, output_dir):
-        raise NotImplementedError
-
-    def validate_abi(self, artifact, spec):
-        return None
-
-    def make_deferred_call(self, artifact):
-        return ("deferred", artifact.content_hash)
-
-    def emit_call(self, wrapper, artifact, binding, *, device):
-        raise NotImplementedError
 
 
 class TestExternalAOT(TestCase):
@@ -50,10 +33,9 @@ class TestExternalAOT(TestCase):
                 ExternalAOTTensorArg(
                     name="out",
                     source="output",
+                    dtype="float32",
                     dynamic_sizes=(0,),
                     dynamic_strides=(0,),
-                    read_only=False,
-                    mutated=True,
                 ),
             ),
         )
@@ -70,8 +52,11 @@ class TestExternalAOT(TestCase):
                 spec=spec,
                 object_path=object_path,
                 header_path=header_path,
-                link_libraries=("libbackend.so",),
-                link_options=("-pthread",),
+                link_args=(
+                    "-Wl,--whole-archive",
+                    "libbackend.a",
+                    "-Wl,--no-whole-archive",
+                ),
                 payload={"symbol": "kernel"},
                 runtime_versions={"test-dsl": "1.0"},
             )
@@ -84,8 +69,11 @@ class TestExternalAOT(TestCase):
                 spec=spec,
                 object_path=second_object,
                 header_path=second_header,
-                link_libraries=("libbackend.so",),
-                link_options=("-pthread",),
+                link_args=(
+                    "-Wl,--whole-archive",
+                    "libbackend.a",
+                    "-Wl,--no-whole-archive",
+                ),
                 payload={"symbol": "kernel"},
                 runtime_versions={"test-dsl": "1.0"},
             )
@@ -94,10 +82,8 @@ class TestExternalAOT(TestCase):
             wrapper = SimpleNamespace(
                 additional_files=[],
                 aot_kernel_objects=OrderedSet(),
-                aot_link_libraries=OrderedSet(),
-                aot_link_options=OrderedSet(),
+                aot_link_args=[],
                 deferred_aot_call_wrappers={},
-                external_aot_artifact_cache={},
                 external_aot_artifacts={},
             )
             deferred = object()
@@ -106,27 +92,50 @@ class TestExternalAOT(TestCase):
             )
             self.assertIs(published, artifact)
             self.assertEqual(wrapper.aot_kernel_objects, {str(object_path)})
-            self.assertEqual(wrapper.aot_link_libraries, {"libbackend.so"})
-            self.assertEqual(wrapper.aot_link_options, {"-pthread"})
             self.assertEqual(
-                wrapper.additional_files,
-                [str(header_path), artifact.sidecar_path],
+                wrapper.aot_link_args,
+                ["-Wl,--whole-archive", "libbackend.a", "-Wl,--no-whole-archive"],
             )
+            self.assertEqual(wrapper.additional_files, [])
             self.assertIs(wrapper.deferred_aot_call_wrappers["kernel"], deferred)
 
             object_path.write_bytes(b"stale")
             with self.assertRaisesRegex(RuntimeError, "stale external AOT object"):
                 artifact.validate_files()
 
-    def test_build_spec_digest_and_backend_registry(self):
+    def test_build_spec_digest(self):
         spec = self._spec()
         self.assertEqual(spec.digest, self._spec().digest)
         changed = replace(spec, target="gfx1250")
         self.assertNotEqual(spec.digest, changed.digest)
+        changed_dtype = replace(
+            spec,
+            tensor_args=(replace(spec.tensor_args[0], dtype="float16"),),
+        )
+        self.assertNotEqual(spec.digest, changed_dtype.digest)
 
-        backend = _Backend()
-        register_external_aot_backend(backend)
-        self.assertIs(get_external_aot_backend("test"), backend)
+    def test_export_files_are_published_once(self):
+        exports = []
+
+        def exporter(directory):
+            exports.append(directory)
+            (directory / "kernel.o").write_bytes(b"object")
+            (directory / "kernel.h").write_text("header")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                paths = list(
+                    pool.map(
+                        lambda _: export_external_aot_files(
+                            directory,
+                            "kernel",
+                            exporter,
+                        ),
+                        range(2),
+                    )
+                )
+            self.assertEqual(len(exports), 1)
+            self.assertEqual(paths[0], paths[1])
 
     def test_cutedsl_export_header_validation_and_launcher(self):
         spec = ExternalAOTBuildSpec(
@@ -138,6 +147,7 @@ class TestExternalAOT(TestCase):
                 ExternalAOTTensorArg(
                     name="x",
                     source="x",
+                    dtype="float32",
                     dynamic_sizes=(0,),
                     dynamic_strides=(0,),
                 ),
@@ -184,6 +194,15 @@ int32_t cute_dsl_{function_prefix}_wrapper(
             self.assertIn("c10::call_once", code)
             self.assertIn("dynamic_shapes[0]", code)
             self.assertIn("dynamic_strides[0]", code)
+            header_path = Path(artifact.header_path)
+            header_path.write_text(
+                header_path.read_text().replace(
+                    "cute_kernel_Kernel_Module_t*,\n    cute_kernel_Tensor_x_t*",
+                    "cute_kernel_Tensor_x_t*,\n    cute_kernel_Kernel_Module_t*",
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "parameters"):
+                backend.validate_abi(artifact, spec)
 
 
 if __name__ == "__main__":

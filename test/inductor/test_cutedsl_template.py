@@ -15,6 +15,7 @@ from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
+
 try:
     import cutlass
     import cutlass.cute as cute  # noqa: F401
@@ -79,6 +80,7 @@ def {{kernel_name}}_precompile(
     device_index=0,
     device_capability=None,
     hw_info=None,
+    aot_options=None,
 ):
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -101,13 +103,13 @@ def {{kernel_name}}_precompile(
             dtype=getattr(torch, precompile_dtypes["output"]),
             device="cpu",
         )
-        cute.compile(
+        return cute.compile(
             {{kernel_name}}_jit,
             from_dlpack(a),
             from_dlpack(b),
             from_dlpack(out),
             cute.runtime.make_fake_stream(),
-            options="--enable-tvm-ffi",
+            options=aot_options or "--enable-tvm-ffi",
         )
 """
 

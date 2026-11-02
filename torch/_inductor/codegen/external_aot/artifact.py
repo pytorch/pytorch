@@ -6,7 +6,11 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 EXTERNAL_AOT_SIDECAR_VERSION = 1
 
@@ -15,20 +19,9 @@ EXTERNAL_AOT_SIDECAR_VERSION = 1
 class ExternalAOTTensorArg:
     name: str
     source: str
+    dtype: str
     dynamic_sizes: tuple[int, ...] = ()
     dynamic_strides: tuple[int, ...] = ()
-    read_only: bool = True
-    mutated: bool = False
-    workspace: bool = False
-    alias_of: str | None = None
-    flattened: bool = False
-
-
-@dataclass(frozen=True)
-class ExternalAOTScalarArg:
-    name: str
-    ctype: str
-    source: str
 
 
 @dataclass(frozen=True)
@@ -38,7 +31,6 @@ class ExternalAOTBuildSpec:
     target: str
     source_hash: str
     tensor_args: tuple[ExternalAOTTensorArg, ...]
-    scalar_args: tuple[ExternalAOTScalarArg, ...] = ()
     options: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,7 +40,6 @@ class ExternalAOTBuildSpec:
             "target": self.target,
             "source_hash": self.source_hash,
             "tensor_args": [asdict(arg) for arg in self.tensor_args],
-            "scalar_args": [asdict(arg) for arg in self.scalar_args],
             "options": list(self.options),
         }
 
@@ -70,8 +61,7 @@ class ExternalAOTArtifact:
     sidecar_path: str
     content_hash: str
     target: str
-    link_libraries: tuple[str, ...]
-    link_options: tuple[str, ...]
+    link_args: tuple[str, ...]
     payload: dict[str, Any]
 
     @classmethod
@@ -81,8 +71,7 @@ class ExternalAOTArtifact:
         spec: ExternalAOTBuildSpec,
         object_path: str | os.PathLike[str],
         header_path: str | os.PathLike[str],
-        link_libraries: tuple[str, ...],
-        link_options: tuple[str, ...],
+        link_args: tuple[str, ...],
         payload: dict[str, Any],
         runtime_versions: dict[str, str | None],
     ) -> ExternalAOTArtifact:
@@ -96,8 +85,7 @@ class ExternalAOTArtifact:
                     "spec": spec.to_dict(),
                     "object_hash": object_hash,
                     "header_hash": header_hash,
-                    "link_libraries": link_libraries,
-                    "link_options": link_options,
+                    "link_args": link_args,
                     "payload": payload,
                     "runtime_versions": runtime_versions,
                 },
@@ -126,8 +114,7 @@ class ExternalAOTArtifact:
                 },
             },
             "link": {
-                "libraries": list(link_libraries),
-                "options": list(link_options),
+                "args": list(link_args),
             },
             "payload": payload,
         }
@@ -139,8 +126,7 @@ class ExternalAOTArtifact:
             sidecar_path=str(sidecar_path),
             content_hash=artifact_hash,
             target=spec.target,
-            link_libraries=link_libraries,
-            link_options=link_options,
+            link_args=link_args,
             payload=payload,
         )
 
@@ -178,6 +164,41 @@ def _write_sidecar_atomically(path: Path, value: dict[str, Any]) -> None:
             pass
 
 
+def export_external_aot_files(
+    output_dir: str | os.PathLike[str],
+    prefix: str,
+    exporter: Callable[[Path], None],
+) -> tuple[Path, Path]:
+    """Publish one immutable object/header pair under a cross-process lock."""
+    from torch._inductor import config
+    from torch.utils._filelock import FileLock
+
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    object_path = output / f"{prefix}.o"
+    header_path = output / f"{prefix}.h"
+    lock_dir = output / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    with FileLock(
+        str(lock_dir / f"{prefix}.lock"),
+        timeout=config.file_lock_timeout,
+    ):
+        if object_path.is_file() and header_path.is_file():
+            return object_path, header_path
+        with tempfile.TemporaryDirectory(prefix=f".{prefix}.", dir=output) as temporary:
+            temporary_path = Path(temporary)
+            exporter(temporary_path)
+            temporary_object = temporary_path / object_path.name
+            temporary_header = temporary_path / header_path.name
+            if not temporary_object.is_file() or not temporary_header.is_file():
+                raise RuntimeError(
+                    "external AOT exporter did not produce an object and header"
+                )
+            os.replace(temporary_object, object_path)
+            os.replace(temporary_header, header_path)
+    return object_path, header_path
+
+
 def publish_external_aot_artifact(
     wrapper,
     kernel_name: str,
@@ -185,14 +206,8 @@ def publish_external_aot_artifact(
     deferred_call: Any,
 ) -> ExternalAOTArtifact:
     artifact.validate_files()
-    cache_key = (artifact.kind, artifact.target, artifact.content_hash)
-    artifact = wrapper.external_aot_artifact_cache.setdefault(cache_key, artifact)
     wrapper.external_aot_artifacts[kernel_name] = artifact
     wrapper.deferred_aot_call_wrappers[kernel_name] = deferred_call
     wrapper.aot_kernel_objects.add(artifact.object_path)
-    wrapper.aot_link_libraries.update(artifact.link_libraries)
-    wrapper.aot_link_options.update(artifact.link_options)
-    for path in (artifact.header_path, artifact.sidecar_path):
-        if path not in wrapper.additional_files:
-            wrapper.additional_files.append(path)
+    wrapper.aot_link_args.extend(artifact.link_args)
     return artifact
