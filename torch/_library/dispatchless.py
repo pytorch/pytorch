@@ -2,14 +2,26 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from functools import cache
+from typing import Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 from torch._ops import HigherOrderOperator
 
 
+if TYPE_CHECKING:
+    from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+@cache
+def _proxy_mode_getter() -> Callable[[], ProxyTorchDispatchMode | None]:
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    return get_proxy_mode
 
 
 @dataclass(frozen=True, eq=False)
@@ -17,17 +29,13 @@ class _DispatchlessCustomOp(Generic[_P, _R]):
     __wrapped__: Callable[_P, _R]
 
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        from torch.fx.experimental.proxy_tensor import (
-            disable_proxy_modes_tracing,
-            get_proxy_mode,
-        )
-
-        mode = get_proxy_mode()
+        mode = _proxy_mode_getter()()
         if mode is None:
             return self.__wrapped__(*args, **kwargs)
 
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable, to_graphable
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
         # Dispatch normally removes the active mode before invoking its handler.
         with disable_proxy_modes_tracing():
@@ -103,14 +111,12 @@ class _FlatDispatchlessCall(HigherOrderOperator):
         super().__init__("flat_dispatchless_call")
 
     def __call__(self, func_spec, input_spec, output_spec, *flat_args):
-        from torch.fx.experimental.proxy_tensor import (
-            disable_proxy_modes_tracing,
-            get_proxy_mode,
-        )
-
-        mode = get_proxy_mode()
+        mode = _proxy_mode_getter()()
         if mode is None:
             return _flat_call(func_spec, input_spec, output_spec, *flat_args)
+
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
         with disable_proxy_modes_tracing():
             return _trace_flat_call(mode, func_spec, input_spec, output_spec, flat_args)
 

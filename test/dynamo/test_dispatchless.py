@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from threading import Barrier
 
 import torch
 from torch._dynamo.testing import EagerAndRecordGraphs
@@ -11,7 +13,7 @@ from torch._library.dispatchless import (
     dispatchless_custom_op,
     flat_dispatchless_call,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -28,6 +30,72 @@ class Payload:
 
 
 class DispatchlessTest(PytreeRegisteringTestCase):
+    @parametrize("pre_dispatch", [False, True])
+    def test_nested_and_disabled_proxy_modes(self, pre_dispatch):
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin() + 1
+
+        nested_graphs = []
+
+        def fn(x):
+            first = op(x)
+            with disable_proxy_modes_tracing():
+                op(x)
+                nested_graphs.append(make_fx(op, pre_dispatch=pre_dispatch)(x))
+            return op(first)
+
+        x = torch.randn(4)
+        gm = make_fx(fn, pre_dispatch=pre_dispatch)(x)
+        self.assertEqual(gm(x + 1), op(op(x + 1)))
+        self.assertEqual(len(nested_graphs), 1)
+        self.assertEqual(nested_graphs[0](x + 1), op(x + 1))
+        for graph, count in ((gm, 2), (nested_graphs[0], 1)):
+            targets = [node.target for node in graph.graph.nodes]
+            self.assertEqual(targets.count(flat_dispatchless_call), count)
+
+    @parametrize("pre_dispatch", [False, True])
+    def test_eager_and_tracing_mode_transitions(self, pre_dispatch):
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin() + 1
+
+        x = torch.randn(4)
+        expected = x.sin() + 1
+        for _ in range(2):
+            self.assertEqual(op(x), expected)
+            gm = make_fx(op, pre_dispatch=pre_dispatch)(x)
+            self.assertEqual(gm(x), expected)
+            targets = [node.target for node in gm.graph.nodes]
+            self.assertEqual(targets.count(flat_dispatchless_call), 1)
+        self.assertEqual(op(x), expected)
+
+    @parametrize("pre_dispatch", [False, True])
+    def test_proxy_mode_is_thread_local(self, pre_dispatch):
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin() + 1
+
+        barrier = Barrier(2, timeout=30)
+        x = torch.randn(4)
+
+        def synchronized_call(x):
+            barrier.wait()
+            result = op(x)
+            barrier.wait()
+            return result
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            traced = pool.submit(make_fx(synchronized_call, pre_dispatch=pre_dispatch), x)
+            eager = pool.submit(synchronized_call, x)
+            gm, result = traced.result(), eager.result()
+
+        expected = x.sin() + 1
+        self.assertEqual(result, expected)
+        self.assertEqual(gm(x), expected)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(targets.count(flat_dispatchless_call), 1)
+
     def test_eager_direct_call(self):
         class Unregistered:
             def __init__(self, value):
