@@ -1413,15 +1413,16 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
     def _init_process_group(self):
         """Initialize the accelerator process group for each spawned process."""
+        device_type = torch.accelerator.current_accelerator().type
         torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            dist.get_default_backend_for_device(GPU_TYPE),
+            dist.get_default_backend_for_device(device_type),
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        self.device = f"{GPU_TYPE}:{self.rank}"
+        self.device = f"{device_type}:{self.rank}"
 
     def _destroy_process_group(self):
         """Destroy the process group."""
