@@ -985,10 +985,10 @@ AOTITorchError aoti_torch__foreach_copy_(
     int32_t non_blocking) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(
-        dst_len == src_len,
-        "aoti_torch__foreach_copy_: ",
+        dst_len == src_len && dst_len > 0,
+        "aoti_torch__foreach_copy_: expected non-empty lists of equal length, got ",
         dst_len,
-        " dst tensors but ",
+        " dst and ",
         src_len,
         " src tensors");
     TORCH_CHECK(
