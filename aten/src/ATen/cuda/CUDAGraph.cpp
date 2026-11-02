@@ -495,11 +495,14 @@ void CUDAGraph::reset() {
       c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
     }
     retained_mempool_ids_.clear();
+    // The graph's own pool first, as above: blocks that its capture kept in a
+    // retained pool are then reclaimed while that pool is still referenced,
+    // and releasing the pool can free them.
+    at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     for (const auto& pool : retained_host_mempool_ids_) {
       at::getHostAllocator(at::kCUDA)->release_pool(pool);
     }
     retained_host_mempool_ids_.clear();
-    at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
     allocated_pool_ = false;
   }
