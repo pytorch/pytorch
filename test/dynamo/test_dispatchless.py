@@ -13,6 +13,7 @@ from torch._library.dispatchless import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -28,6 +29,8 @@ class Payload:
 
 
 class DispatchlessTest(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_eager_direct_call(self):
         class Unregistered:
             def __init__(self, value):

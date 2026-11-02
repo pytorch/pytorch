@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 from typing_extensions import ParamSpec
@@ -86,7 +85,9 @@ def _trace_flat_call(
     )
 
     node_args = (func_spec, input_spec, output_spec, *flat_args)
-    result = maybe_handle_decomp(mode, flat_dispatchless_call, node_args, {})
+    result = maybe_handle_decomp(
+        mode, flat_dispatchless_call, node_args, {}
+    )  # pyrefly: ignore[bad-argument-type]
     if result is not NotImplemented:
         return result
     if flat_out is None:
