@@ -95,23 +95,101 @@ class TestAOTIShimVersions(unittest.TestCase):
                 self.assertIn(f"aoti_torch_{device}_op_v2", declaration)
                 self.assertEqual(declaration.count("#if"), 2)
 
-    def test_backend_does_not_gate_other_variants(self) -> None:
+    def test_backend_floor_for_variants(self) -> None:
+        schema = FunctionSchema.parse("op(Tensor self, int x=0) -> Tensor")
+        cases: list[tuple[str, dict[str, str], str, str | None]] = [
+            ("2_16_0", {}, "2_16_0", None),
+            ("2_16_0", {"since": "2_12_0"}, "2_16_0", "2_12_0"),
+            ("2_16_0", {"since": "2_17_0"}, "2_17_0", "2_17_0"),
+            ("2_16_0", {"since_cuda": "2_12_0"}, "2_16_0", None),
+            ("2_16_0", {"since_cuda": "2_17_0"}, "2_17_0", None),
+            (
+                "2_16_0",
+                {"since": "2_17_0", "since_cuda": "2_15_0"},
+                "2_16_0",
+                "2_17_0",
+            ),
+            ("2_9_0", {"since": "2_12_0"}, "2_12_0", "2_12_0"),
+            ("2_12_0", {"since": "2_9_0"}, "2_12_0", "2_9_0"),
+            ("2_16_2", {"since": "2_16_10"}, "2_16_10", "2_16_10"),
+            ("2_16_10", {"since": "2_16_2"}, "2_16_10", "2_16_2"),
+            ("3_0_0", {"since": "2_16_0"}, "3_0_0", "2_16_0"),
+            ("2_16_0", {"since": "3_0_0"}, "3_0_0", "3_0_0"),
+        ]
+        for base, overrides, cuda_version, cpu_version in cases:
+            variant: dict[str, list[str] | str] = {"new_args": ["x"]}
+            variant.update({k: f"TORCH_VERSION_{v}" for k, v in overrides.items()})
+            metadata: dict[str, str | dict[str, list[str] | str]] = {
+                "since_cuda": f"TORCH_VERSION_{base}",
+                "v2": variant,
+            }
+            for device, version in [("cuda", cuda_version), ("cpu", cpu_version)]:
+                with self.subTest(base=base, overrides=overrides, device=device):
+                    expected = f"TORCH_VERSION_{version}" if version else None
+                    self.assertEqual(
+                        _get_earliest_torch_version_for_op_variant(metadata, 2, device),
+                        expected,
+                    )
+                    declaration_definition_cache.clear()
+                    declaration, definition = gen_declaration_and_definition(
+                        schema, device, "at::op", metadata
+                    )
+                    variant_decl = (
+                        f"AOTI_TORCH_EXPORT AOTITorchError aoti_torch_{device}_op_v2("
+                    )
+                    if expected:
+                        self.assertIn(
+                            f"#if TORCH_FEATURE_VERSION >= {expected}\n{variant_decl}",
+                            declaration,
+                        )
+                    self.assertEqual(
+                        declaration.count("#if"),
+                        int(device == "cuda") + int(expected is not None),
+                    )
+                    self.assertNotIn("#if", definition)
+
+    def test_backend_floor_does_not_inherit_sibling_versions(self) -> None:
         metadata: dict[str, str | dict[str, list[str] | str]] = {
             "since_cuda": "TORCH_VERSION_2_16_0",
-            "v2": {"new_args": ["x"]},
+            "v2": {"new_args": ["x"], "since_cuda": "TORCH_VERSION_2_18_0"},
+            "v3": {"new_args": ["y"], "since": "TORCH_VERSION_2_17_0"},
         }
-        self.assertIsNone(
-            _get_earliest_torch_version_for_op_variant(metadata, 1, "cpu")
-        )
-        self.assertIsNone(
-            _get_earliest_torch_version_for_op_variant(metadata, 2, "cuda")
-        )
+        for device, versions in [
+            ("cuda", ["2_16_0", "2_18_0", "2_17_0"]),
+            ("cpu", [None, None, "2_17_0"]),
+        ]:
+            for op_version, version in enumerate(versions, 1):
+                with self.subTest(device=device, op_version=op_version):
+                    self.assertEqual(
+                        _get_earliest_torch_version_for_op_variant(
+                            metadata, op_version, device
+                        ),
+                        f"TORCH_VERSION_{version}" if version else None,
+                    )
         self.assertIsNone(_get_earliest_torch_version_for_op_variant({}, 1, "cuda"))
+
+    def test_global_version_is_not_inherited_by_variants(self) -> None:
+        for version in [None, "TORCH_VERSION_2_12_0"]:
+            variant: dict[str, list[str] | str] = {"new_args": ["x"]}
+            if version is not None:
+                variant["since"] = version
+            metadata: dict[str, str | dict[str, list[str] | str]] = {
+                "since": "TORCH_VERSION_2_17_0",
+                "v2": variant,
+            }
+            for device in ["cpu", "cuda"]:
+                with self.subTest(version=version, device=device):
+                    self.assertEqual(
+                        _get_earliest_torch_version_for_op_variant(metadata, 2, device),
+                        version,
+                    )
 
     def test_invalid_backend_version(self) -> None:
         cases: list[dict[str, str | dict[str, list[str] | str]]] = [
             {"since_cdua": "TORCH_VERSION_2_16_0"},
             {"since_cuda": "2.16"},
+            {"since_cuda": "2.16", "v2": {"new_args": ["x"]}},
+            {"since_cdua": "TORCH_VERSION_2_16_0", "v2": {"new_args": ["x"]}},
             {"v2": {"new_args": ["x"], "since_cdua": "TORCH_VERSION_2_16_0"}},
         ]
         for metadata in cases:

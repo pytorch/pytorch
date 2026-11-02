@@ -314,32 +314,45 @@ def _get_earliest_torch_version_for_op_variant(
     op_version is the integer extracted from a "vN" key in `op_metadata`. The base op
     has op_version == 1 and reads from a top-level "since" key; later variants read
     "since" from their own dict-form entry {"new_args": [...], "since": "..."}.
-    A "since_<device>" key overrides "since" for that backend only.
+    A "since_<device>" key overrides "since" for that backend only. The base op
+    backend version is also a lower bound for every variant on that backend.
     """
     variant = op_metadata if op_version == 1 else op_metadata.get(f"v{op_version}")
     if not isinstance(variant, dict):
         return None
-    for key, value in variant.items():
-        if key != "since" and not key.startswith("since_"):
+    for metadata in (op_metadata, variant):
+        for key, value in metadata.items():
+            if key != "since" and not key.startswith("since_"):
+                continue
+            if key != "since" and key.removeprefix("since_") not in {
+                "cpu",
+                "cuda",
+                "mps",
+                "xpu",
+                "aten",
+            }:
+                raise AssertionError(f"Unknown backend in version key {key!r}")
+            if not isinstance(value, str) or not _TORCH_VERSION_PATTERN.match(value):
+                raise AssertionError(
+                    f"`{key}` value {value!r} is not of the form TORCH_VERSION_X_Y_Z"
+                )
+    versions: list[str] = []
+    for since in (
+        op_metadata.get(f"since_{device}"),
+        variant.get(f"since_{device}", variant.get("since")),
+    ):
+        if since is None:
             continue
-        if key != "since" and key.removeprefix("since_") not in {
-            "cpu",
-            "cuda",
-            "mps",
-            "xpu",
-            "aten",
-        }:
-            raise AssertionError(f"Unknown backend in version key {key!r}")
-        if not isinstance(value, str) or not _TORCH_VERSION_PATTERN.match(value):
-            raise AssertionError(
-                f"`{key}` value {value!r} is not of the form TORCH_VERSION_X_Y_Z"
-            )
-    since = variant.get(f"since_{device}", variant.get("since"))
-    if since is None:
-        return None
-    if not isinstance(since, str):
-        raise AssertionError(f"Expected a string version, got {since!r}")
-    return since
+        if not isinstance(since, str):
+            raise AssertionError(f"Expected a string version, got {since!r}")
+        versions.append(since)
+    return max(
+        versions,
+        key=lambda version: tuple(
+            map(int, version.removeprefix("TORCH_VERSION_").split("_"))
+        ),
+        default=None,
+    )
 
 
 def gen_declaration_and_definition(

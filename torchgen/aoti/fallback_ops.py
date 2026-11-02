@@ -27,6 +27,8 @@
 # TO THE CURRENT TORCH VERSION (the version when the op was added).
 # A backend added later can override this with "since_<device>" (e.g. "since_cuda")
 # on the base op or a vN entry without changing other backends' availability.
+# The base op's backend version is a lower bound for all variants on that backend;
+# a variant's own version can raise this bound but cannot lower it.
 
 inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten._adaptive_avg_pool2d_backward.default": {},
