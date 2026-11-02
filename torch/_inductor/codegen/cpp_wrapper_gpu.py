@@ -1116,6 +1116,10 @@ class DeferredTritonCallWrapper:
         ]
         if wrapper.device_codegen.cpp_kernel_launch_supports_pdl():
             launch_kernel_args.append(_launch_pdl_cpp_literal(triton_meta))
+            if num_ctas != 1:
+                launch_kernel_args.append(str(num_ctas))
+        elif num_ctas != 1:
+            raise NotImplementedError("num_ctas > 1 needs a cluster launch")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
