@@ -510,6 +510,9 @@ class HuggingfaceRunner(BenchmarkRunner):
     def use_model_forward_for_accuracy(self):
         return self.args.hf_inference_mode == "prefill"
 
+    def report_eager_latency(self):
+        return self.args.hf_inference_mode == "prefill"
+
     def get_request_tokens(self, example_inputs):
         if self.args.hf_inference_mode == "prefill":
             return {"input_tokens_per_second": example_inputs["input_ids"].numel()}

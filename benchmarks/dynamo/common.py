@@ -1192,10 +1192,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    request_tokens = kwargs.get("request_tokens")
-    if request_tokens is not None:
+    if kwargs.get("report_eager_latency", False):
         headers.append("eager_latency")
         row.append(median[0] * 1000)
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
         for column, tokens in request_tokens.items():
             headers.append(column)
             row.append(times * tokens / median[1])
@@ -2061,9 +2062,11 @@ class BenchmarkRunner:
     def use_model_forward_for_accuracy(self):
         return False
 
+    def report_eager_latency(self):
+        return False
+
     def get_request_tokens(self, example_inputs):
-        # Return {throughput column: tokens per timed request} for token workloads,
-        # which also report eager_latency; None for everything else.
+        # Return {throughput column: tokens per timed request}, or None.
         return None
 
     def iter_models(self, args):
@@ -3215,6 +3218,7 @@ class BenchmarkRunner:
                 )
 
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+            experiment_kwargs["report_eager_latency"] = self.report_eager_latency()
             if setup_fn is not None:
                 experiment_kwargs["setup_fn"] = setup_fn
             request_tokens = self.get_request_tokens(example_inputs)
