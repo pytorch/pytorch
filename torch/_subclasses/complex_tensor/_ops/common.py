@@ -14,6 +14,8 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 from .._core import ComplexTensor
 
 
+aten = torch.ops.aten
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -124,10 +126,60 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
+# Only decompositions verified by `test_decompositions` in `test/complex_tensor`.
+DECOMPOSED_OPS: set[OpType] = {
+    aten.addcdiv,
+    aten.addcmul,
+    aten.alias_copy,
+    aten.arange,
+    aten.block_diag,
+    aten.count_nonzero,
+    aten.diagonal_copy,
+    aten.empty_strided,
+    aten.expand_copy,
+    aten.eye,
+    aten.full,
+    aten.index_copy,
+    aten.index_fill,
+    aten.item,
+    aten.ldexp,
+    aten.lerp,
+    aten.linspace,
+    aten.logaddexp,
+    aten.logspace,
+    aten.logsumexp,
+    aten.meshgrid,
+    aten.mv,
+    aten.new_empty,
+    aten.new_full,
+    aten.new_ones,
+    aten.norm,
+    aten.ones,
+    aten.ones_like,
+    aten.permute_copy,
+    aten.randn,
+    aten.renorm,
+    aten.roll,
+    aten.rot90,
+    aten.sinc,
+    aten.split_with_sizes_copy,
+    aten.squeeze_copy,
+    aten.std,
+    aten.t_copy,
+    aten.transpose_copy,
+    aten.tril,
+    aten.triu,
+    aten.unsafe_split,
+    aten.unsqueeze_copy,
+    aten.vdot,
+    aten.view_copy,
+    aten.zeros,
+}
+
 DECOMPOSITIONS = {
     op: fn
     for op, fn in decomposition_table.items()
-    if isinstance(op, OpOverload) and op.namespace == "aten"
+    if isinstance(op, OpOverload) and op.overloadpacket in DECOMPOSED_OPS
 }
 
 
