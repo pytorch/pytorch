@@ -686,6 +686,14 @@ def _private_register_pytree_node(
             to_dumpable_context,
             from_dumpable_context,
         )
+        # Registering a type again replaces its name, unless a later
+        # registration took that name.
+        old_def = SUPPORTED_SERIALIZED_TYPES.get(cls)
+        if (
+            old_def is not None
+            and SERIALIZED_TYPE_TO_PYTHON_TYPE.get(old_def.serialized_type_name) is cls
+        ):
+            del SERIALIZED_TYPE_TO_PYTHON_TYPE[old_def.serialized_type_name]
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
         # Every type registered without a name gets the placeholder, so it
         # cannot name one of them.
