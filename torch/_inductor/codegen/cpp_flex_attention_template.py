@@ -1712,17 +1712,21 @@ class CppFlexAttentionTemplate(CppTemplate):
             pow2_m_tails=True,
         )
 
+        pv_used = self.input_dtype == torch.float16
+        pv_blocking = GemmBlocking(1, 16, 1)
+        if pv_used:
+            pv_blocking = self.gemm_blocking(self.head_size_v)
         micro_gemm = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm",
             self.input_dtype,
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            self.gemm_blocking(self.head_size_v),
+            pv_blocking,
             1,
             True,
             False,
-            pow2_m_tails=True,
+            pow2_m_tails=pv_used,
         )
 
         with V.set_graph_handler(V.graph):
