@@ -3003,6 +3003,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             invoke_subgraph.subgraph, outer_inputs, outer_outputs
         )
 
+    def codegen_subgraph_buffer(self, node: ir.SubgraphBuffer) -> None:
+        # in ABI-compatible mode, pre-declare the output variable, as
+        # codegen_invoke_subgraph does
+        self.writeline(f"RAIIAtenTensorHandle {node.get_name()};")
+        super().codegen_subgraph_buffer(node)
+
     def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""
         outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
@@ -3114,8 +3120,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ):
         """Inline a subgraph, moving its outputs into outer_outputs, which the
         caller must already have declared (codegen_invoke_subgraph and
-        SubgraphBuffer.codegen do). The Python wrapper's version binds the names
-        instead."""
+        codegen_subgraph_buffer do). The Python wrapper's version binds the
+        names instead."""
         # The subgraph runs its own Scheduler, which re-emits per-device state such
         # as `<stream_t> stream0;`; unscoped that redefines the parent's declaration.
         self.writeline("{")
