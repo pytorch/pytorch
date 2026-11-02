@@ -2984,6 +2984,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """
         outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
 
+        outer_outputs = []
         for out in invoke_subgraph.outputs:
             if isinstance(out, (ir.ShapeAsConstantBuffer, ir.NoneAsConstantBuffer)):
                 # codegen_subgraph_suffix assigns into outer_outputs unconditionally,
@@ -2993,13 +2994,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     "cpp wrapper invoke_subgraph: non-tensor region output "
                     f"({type(out).__name__}) is not supported"
                 )
+            # in ABI-compatible mode, ir.MultiOutput is not codegened,
+            # hence pre-declare output variables directly and separately
+            self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
+            outer_outputs.append(out.get_name())
 
-        # in ABI-compatible mode, ir.MultiOutput is not codegened, hence the
-        # helper pre-declares the output variables directly
         self.codegen_subgraph_with_flattened_outputs(
-            invoke_subgraph.subgraph,
-            outer_inputs,
-            [out.get_name() for out in invoke_subgraph.outputs],
+            invoke_subgraph.subgraph, outer_inputs, outer_outputs
         )
 
     def codegen_switch(self, node) -> None:
@@ -3111,11 +3112,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_subgraph_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_outputs
     ):
-        """Inline a subgraph whose outputs are declared here, unlike the Python
-        wrapper's version, which assigns into outputs that already exist."""
-        for outer_output in outer_outputs:
-            self.writeline(f"RAIIAtenTensorHandle {outer_output};")
-
+        """Inline a subgraph, moving its outputs into outer_outputs, which the
+        caller must already have declared (codegen_invoke_subgraph and
+        SubgraphBuffer.codegen do). The Python wrapper's version binds the names
+        instead."""
         # The subgraph runs its own Scheduler, which re-emits per-device state such
         # as `<stream_t> stream0;`; unscoped that redefines the parent's declaration.
         self.writeline("{")
