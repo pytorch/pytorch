@@ -419,7 +419,12 @@ def require_tma_loadable_tile_captures(
     sizevars = V.graph.sizevars
 
     def loadable(arg: TensorBox, unit_dims: tuple[int, ...], alignment: int) -> bool:
-        stride = arg.maybe_get_stride()
+        if ir.is_storage_and_layout(arg) and isinstance(
+            arg.get_layout(), ir.FlexibleLayout
+        ):
+            # strides are not final yet; the require below freezes it in place
+            return False
+        stride = arg.maybe_get_stride_hint()
         if stride is None:
             return False
         for unit in unit_dims:
