@@ -365,6 +365,37 @@ TEST(PytorchStreamWriterAndReader, ValidSerializationId) {
   EXPECT_EQ(writer_serialization_id, writer2_serialization_id);
 }
 
+TEST(PytorchStreamWriterAndReader, SerializationIdRecordNameOrder) {
+  const auto serialize_records = [](const std::vector<std::string>& names) {
+    std::ostringstream oss;
+    PyTorchStreamWriter writer([&](const void* data, size_t size) -> size_t {
+      oss.write(
+          static_cast<const char*>(data), static_cast<std::streamsize>(size));
+      return oss ? size : 0;
+    });
+    // Equal payloads keep the CRC contribution unchanged when records move.
+    // This test isolates the record-name component of the serialization id.
+    const std::string payload = "record payload";
+    for (const auto& name : names) {
+      writer.writeRecord(name, payload.data(), payload.size());
+    }
+    writer.writeEndOfFile();
+
+    std::istringstream iss(oss.str());
+    PyTorchStreamReader reader(&iss);
+    EXPECT_EQ(reader.serializationId(), writer.serializationId());
+    for (const auto& name : names) {
+      auto [data, size] = reader.getRecord(name);
+      EXPECT_EQ(std::string(static_cast<const char*>(data.get()), size), payload);
+    }
+    return writer.serializationId();
+  };
+
+  const auto id = serialize_records({"alpha.bin", "beta.bin", "gamma.bin"});
+  EXPECT_EQ(id, serialize_records({"gamma.bin", "beta.bin", "alpha.bin"}));
+  EXPECT_EQ(id, serialize_records({"beta.bin", "alpha.bin", "gamma.bin"}));
+}
+
 TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   std::ostringstream oss;
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
