@@ -3412,6 +3412,12 @@ class TestPredispatchSerialization(TestCase):
             ),
             "not an operator overload",
         ),
+        "direct_helper_call_dict": (
+            _call_helper_in_graph(
+                lambda args: (*args[2:-1], {"f": torch.ops.aten.add.Tensor})
+            ),
+            "operator in a dict input",
+        ),
     }
 
     @parametrize("case", list(_OTHER_INPUTS_IN_GRAPH))
