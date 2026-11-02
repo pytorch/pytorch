@@ -11046,6 +11046,34 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
 
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_scan_in_vmap_output_drops_traced_step(self):
+        # Tracing runs the combine function for one step. Inside vmap, the
+        # output of scan keeps the wrapper that the combine function returned,
+        # but not the constant or real tensor of that step.
+        from torch._higher_order_ops.scan import _scan_output_value
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            maybe_get_fake_constant,
+            maybe_get_real_tensor,
+        )
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        with mode:
+            step = torch.tensor([5])
+        level = functorch._vmap_increment_nesting(1, "error")
+        try:
+            with mode:
+                batched = functorch._add_batch_dim(step, 0, level)
+            out = _scan_output_value(None, batched)
+            self.assertTrue(functorch.is_batchedtensor(out))
+            inner = functorch.get_unwrapped(out)
+        finally:
+            functorch._vmap_decrement_nesting()
+        self.assertIsNone(maybe_get_fake_constant(inner))
+        self.assertIsNone(maybe_get_real_tensor(inner))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_scan_in_vmap_simple(self):
         x = torch.randn(3, 4, 4)

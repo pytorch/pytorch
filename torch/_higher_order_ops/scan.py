@@ -42,7 +42,12 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_clear_fake_constant,
+    maybe_set_real_tensor,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -500,13 +505,21 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 def _scan_output_value(node: Any, value: Any) -> Any:
     # Inside vmap or jvp, meta["val"] holds a plain fake tensor, while the output
     # of scan must keep the functorch wrapper that the combine function returned.
-    # Otherwise meta["val"] is the value to use: unlike the returned value, it
-    # holds no constant or real tensor from the one step that tracing ran.
+    # Otherwise meta["val"] is the value to use. Either way, the output holds no
+    # constant or real tensor from the one step that tracing ran.
     functorch = torch._C._functorch
     if isinstance(value, torch.Tensor) and (
         functorch.is_batchedtensor(value) or functorch.is_gradtrackingtensor(value)
     ):
-        return value.detach()
+        value = value.detach()
+        inner = value
+        while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(
+            inner
+        ):
+            inner = functorch.get_unwrapped(inner)
+        maybe_clear_fake_constant(inner)
+        maybe_set_real_tensor(inner, None)
+        return value
     return node.meta["val"] if node is not None else None
 
 
