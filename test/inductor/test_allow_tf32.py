@@ -2,6 +2,8 @@
 
 import unittest
 
+import sympy
+
 import torch
 from torch._dynamo.device_interface import (
     CudaInterface,
@@ -11,14 +13,23 @@ from torch._dynamo.device_interface import (
     register_interface_for_device,
     XpuInterface,
 )
+from torch._dynamo.source import ConstantSource
 from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.template.triton import MMTemplateConfigMixin
+from torch._inductor.heuristics.template.triton import (
+    mm_allow_tf32,
+    MMTemplateConfigMixin,
+)
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class _TensorNode:
@@ -89,6 +100,42 @@ class TestAllowTf32Interface(TestCase):
             self.assertTrue(XpuInterface.allow_tf32())
         with torch.backends.mkldnn.flags(allow_tf32=False):
             self.assertFalse(XpuInterface.allow_tf32())
+
+
+@instantiate_parametrized_tests
+class TestAllowTf32DynamicShapes(TestCase):
+    def _gate(self, m, *, aot_mode=False, precision="tf32"):
+        shape_env = ShapeEnv()
+        if m == "unbacked":
+            sym_m = shape_env.create_unbacked_symint().node.expr
+        else:
+            sym_m = shape_env.create_symbol(m, ConstantSource("m"))
+        gm = make_fx(lambda: torch.zeros(2, 2))()
+        graph = GraphLowering(gm, shape_env=shape_env, aot_mode=aot_mode)
+        orig = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = precision
+            with V.set_graph_handler(graph):
+                result = mm_allow_tf32(sym_m, 512, 512, "cuda")
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = orig
+        return result, [
+            str(g.expr.subs(sym_m, sympy.Symbol("m"))) for g in shape_env.guards
+        ]
+
+    @parametrize(
+        "m,expected,guards",
+        [(1024, True, ["m >= 16"]), (8, False, ["m < 16"]), ("unbacked", False, [])],
+    )
+    def test_cuda_gate_guards_backed_dims(self, m, expected, guards):
+        self.assertEqual(self._gate(m), (expected, guards))
+
+    def test_cuda_gate_no_guard_without_tf32(self):
+        self.assertEqual(self._gate(1024, precision="ieee"), (False, []))
+
+    def test_cuda_gate_aot_mode_needs_proof(self):
+        # AOT mode never checks guards at runtime, so a hint alone is not enough.
+        self.assertEqual(self._gate(1024, aot_mode=True), (False, []))
 
 
 class TestAllowTf32ExtraKwargs(TestCase):

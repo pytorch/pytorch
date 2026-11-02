@@ -2441,13 +2441,19 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
             iface = None
         else:
             allow_tf32 = bool(iface.allow_tf32())
-    if device_type == "cuda":
+    if device_type == "cuda" and allow_tf32:
         # CUDA applies a shape threshold on top of the backend flag.
-        # Based on reverse engineering H100 CUDA 12.8 behavior.
-        size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-        )
-        return allow_tf32 and size_threshold
+        # Based on reverse engineering H100 CUDA 12.8 behavior. Backed dynamic
+        # dims follow their hint and get a guard, so a later shape on the other
+        # side of the threshold recompiles. Unbacked dims fall back to no TF32.
+        # AOT mode never checks the guard at runtime, so it needs a proof.
+        # Known limitation: the guard narrows the dim's range, so a ranged
+        # mark_dynamic (min/max) spanning the threshold raises
+        # ConstraintViolationError.
+        size_threshold = sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+        if V.graph.aot_mode:
+            return V.graph.sizevars.statically_known_true(size_threshold)
+        return V.graph.sizevars.guard_or_false(size_threshold)
     return allow_tf32
 
 

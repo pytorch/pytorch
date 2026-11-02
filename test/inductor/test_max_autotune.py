@@ -1711,6 +1711,114 @@ class TestMaxAutotune(TestCase):
         expected = precision == "tf32" and torch.cuda.is_tf32_supported()
         self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expected}", code[0])
 
+    def _compile_mm_counting(self, fn, b, mark):
+        # Unlike run_and_get_code, this keeps Dynamo's cache across calls so
+        # recompiles show up in frame_count.
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=cnt)
+
+        def run(m):
+            a = torch.randn(*b.shape[:-2], m, b.shape[-2], device=GPU_TYPE)
+            mark(a, a.dim() - 2)
+            codes = []
+            with mock.patch.object(GraphLowering, "save_output_code", codes.append):
+                out = compiled(a, b)
+            ref = fn(a.double(), b.double())
+            err = ((out - ref).abs().max() / ref.abs().max()).item()
+            return err, codes
+
+        return cnt, run
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
+    )
+    @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @parametrize("op", ("mm", "bmm"))
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+            "fx_graph_cache": False,
+        }
+    )
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_dynamic_m(self, op):
+        # A backed dynamic M follows its hint through the TF32 size gate and is
+        # guarded, so only crossing M >= 16 recompiles.
+        torch._dynamo.reset()
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        fn = torch.mm if op == "mm" else torch.bmm
+        b = torch.randn(*(() if op == "mm" else (2,)), 512, 512, device=GPU_TYPE)
+        cnt, run = self._compile_mm_counting(fn, b, torch._dynamo.mark_dynamic)
+
+        err, codes = run(1024)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = True", codes[0])
+        self.assertLess(err, 1e-2)
+        for m in (512, 2048):
+            err, codes = run(m)
+            self.assertEqual(codes, [])
+            self.assertLess(err, 1e-2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        err, codes = run(8)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", codes[0])
+        self.assertLessEqual(err, 1e-5)
+        for m in (4, 1024):
+            run(m)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+            "fx_graph_cache": False,
+        }
+    )
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_dynamic_m_ieee_no_guard(self):
+        # With TF32 off the size gate is skipped, so it adds no guard.
+        torch._dynamo.reset()
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        cnt, run = self._compile_mm_counting(torch.mm, b, torch._dynamo.mark_dynamic)
+        err, codes = run(1024)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", codes[0])
+        self.assertLessEqual(err, 1e-5)
+        err, codes = run(8)
+        self.assertEqual(codes, [])
+        self.assertLessEqual(err, 1e-5)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+            "fx_graph_cache": False,
+        }
+    )
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_unbacked_m(self):
+        # An unbacked M can't be guarded, so the gate falls back to no TF32.
+        torch._dynamo.reset()
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        mark = torch._dynamo.decorators.mark_unbacked
+        _, run = self._compile_mm_counting(torch.mm, b, mark)
+        err, codes = run(1024)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", codes[0])
+        self.assertLessEqual(err, 1e-5)
+
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
