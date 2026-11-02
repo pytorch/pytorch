@@ -206,15 +206,15 @@ class BenchmarkJob:
             if measured is None:
                 raise RuntimeError("TunableOp tune-only warm-up failed")
             return measured
-        # Nearest match is deliberately left on after a successful warm: if the
-        # warm call recorded nothing, turning it off would measure the default
-        # instead of the borrowed solution. After a FAILED warm, nothing was
-        # cached, so turn it off -- otherwise the timed call runs the
-        # validation inside the measurement, folding exactly the
-        # compile-time-only cost this split exists to exclude.
+        # Neither flag reaches the measured call: tuning would re-run FindFastest
+        # and nearest match the donor search, both compile-time-only costs this
+        # split exists to keep out of the timing. Turning borrowing off cannot
+        # change which kernel is measured -- a borrow that happened was recorded,
+        # so this call is an exact hit, and with no donor the warm ran the
+        # default too. IsNearestMatchEnabled() rules out borrowed-but-unrecorded.
         torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable._nearest_match_enable(False)
         if not warm_ok:
-            torch.cuda.tunable._nearest_match_enable(False)
             log.warning(
                 "TunableOp warm-up failed and no borrow was validated; "
                 "measuring the default kernel instead"
