@@ -6,8 +6,10 @@ using namespace metal;
 struct addr_functor {
   template <typename T, typename A>
   inline T operator()(const T a, const T b, const T c, const A params) {
-    const auto prod = c10::metal::mul(c10::metal::mul(T(params[0]), b), c);
-    return all(params[1] == 0) ? prod : c10::metal::mul(T(params[1]), a) + prod;
+    const auto alpha = params[0];
+    const auto beta = params[1];
+    const auto prod = c10::metal::mul(c10::metal::mul(alpha, b), c);
+    return all(beta == 0) ? prod : c10::metal::mul(beta, a) + prod;
   }
 };
 

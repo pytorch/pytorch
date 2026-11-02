@@ -26,6 +26,13 @@ static void addcdiv_mps_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 static void addr_mps_kernel(TensorIterator& iter, const Scalar& beta, const Scalar& alpha) {
+  const auto dtype = iter.common_dtype();
+  TORCH_CHECK_NOT_IMPLEMENTED(!isBarebonesUnsignedType(dtype), "addr_mps not implemented for '", dtype, "'");
+  const auto is_inexact = mps::supportedFloatingOrComplexType(dtype);
+  TORCH_CHECK(is_inexact || beta.isIntegral(true),
+              "For integral input tensors, argument beta must not be a floating point number.");
+  TORCH_CHECK(is_inexact || alpha.isIntegral(true),
+              "For integral input tensors, argument alpha must not be a floating point number.");
   lib.exec_ternary_kernel(iter, "addr", alpha, std::nullopt, beta);
 }
 

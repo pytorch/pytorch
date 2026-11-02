@@ -1624,6 +1624,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
                                              std::optional<c10::Scalar> alpha,
                                              std::optional<c10::ScalarType> scalar_arg_type,
                                              std::optional<c10::Scalar> beta) {
+  TORCH_INTERNAL_ASSERT(!beta || alpha, "beta requires alpha");
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1672,8 +1673,9 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
+  using namespace std::string_view_literals;
   const auto alpha_suffix =
-      alpha.has_value() ? fmt::format("_{}{}", scalarToMetalTypeString(alpha_type), beta ? "_pair" : "") : "";
+      alpha.has_value() ? fmt::format("_{}{}", scalarToMetalTypeString(alpha_type), beta ? "_pair"sv : ""sv) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto direct_name = fmt::format(
       "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
@@ -1705,7 +1707,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
           std::array<uint8_t, 2 * sizeof(a.value)> params;
           std::memcpy(params.data(), &a.value, a.size);
           std::memcpy(params.data() + a.size, &b.value, b.size);
-          [computeEncoder setBytes:params.data() length:a.size + b.size atIndex:idx++];
+          mtl_setBytes(computeEncoder, c10::ArrayRef<uint8_t>(params.data(), a.size + b.size), idx++);
         } else {
           mtl_setBytes(computeEncoder, a, idx++);
         }
