@@ -10350,8 +10350,8 @@ class TestCachingHostAllocatorConfig(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorCudaGraph(TestCase):
     # As soon as pinned host memory allocated by a private pool is
-    # used (by copy_ in this case) during stream capture, it can never
-    # be recycled.
+    # used (by copy_ in this case) during stream capture, it is not
+    # recycled until the pool loses its last reference.
     @parametrize("use_cuda_host_register", [True, False])
     def test_pin_memory_no_use(self, use_cuda_host_register):
         # A pinned host memory block cannot be reused if it is not deleted
@@ -10636,7 +10636,7 @@ class TestHostMemPool(TestCase):
 
     def test_wrong_pool_type(self):
         hp = torch.cuda.HostMemPool()
-        with self.assertRaisesRegex(ValueError, "no device memory"):
+        with self.assertRaisesRegex(ValueError, "pinned=False does not apply"):
             torch.cuda.use_mem_pool(hp, pinned=False)
         with self.assertRaisesRegex(ValueError, "device does not apply"):
             torch.cuda.use_mem_pool(hp, device=0)
@@ -10815,8 +10815,8 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
     )
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "MemPool and memory snapshot not supported")
     def test_mem_pool_routes_pinned(self):
-        # use_mem_pool(pool, pinned=True) puts device and pinned memory in one
-        # pool id, in both orders of capture and context.
+        # use_mem_pool(pool, pinned=True) routes pinned memory to the pool's id,
+        # eagerly and when the context is entered inside a capture.
         mp = torch.cuda.MemPool()
         with self._record_host_segments():
             with torch.cuda.use_mem_pool(mp, pinned=True):
@@ -10860,7 +10860,8 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
             del used
         graphs[0].reset()
         # A new capture into the pool must not take the block graphs[1] reads.
-        with torch.cuda.graph(graphs[2], pool=handle, capture_error_mode="thread_local"):
+        g = graphs[2]
+        with torch.cuda.graph(g, pool=handle, capture_error_mode="thread_local"):
             bufs = [torch.full((1000,), 9.0).pin_memory() for _ in range(2)]
             gpus[2].copy_(bufs[0], non_blocking=True)
         del bufs
@@ -10894,7 +10895,7 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
                         gpu.copy_(buf, non_blocking=True)
                     del buf
                     torch.empty(64 << 20, dtype=torch.uint8, pin_memory=True)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(e)
             finished.set()
 
@@ -10947,6 +10948,18 @@ class TestMemPool(TestCase):
         # each call to torch.cuda.graph_pool_handle() or torch.cuda.MemPool()
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    def test_use_mem_pool_device_on_entry(self):
+        # With device=None, the context routes the device current on entry.
+        pool = torch.cuda.MemPool()
+        ctx = torch.cuda.use_mem_pool(pool)
+        with torch.cuda.device(1):
+            with ctx:
+                x = torch.empty(1024, device="cuda")
+        self.assertEqual(x.device.index, 1)
+        self.assertEqual([s["device"] for s in pool.snapshot()], [1])
 
     def test_memory_snapshot_preserves_argument_references(self):
         # Run in a subprocess since a refcount underflow can corrupt the interpreter.

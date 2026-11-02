@@ -713,24 +713,33 @@ constexpr c10::MempoolId_t kDefaultPool{0, 0};
 
 } // namespace
 
-// CUDAGraph::capture_begin rejects a host mem pool before it gets here, so
-// only this test reaches the allocator's own check.
-TEST(HostMemPoolTest, not_a_capture_pool) {
+// A host mem pool can be a capture pool. A block allocated during the capture
+// and used by a stream is kept until the last reference to the pool is
+// released.
+TEST(HostMemPoolTest, host_mem_pool_as_capture_pool) {
   PoolMockAllocator a;
   const c10::MempoolId_t P{0, 1};
   a.create_pool(P);
-  EXPECT_THROW(a.begin_capture(P), c10::Error);
-  // The rejection took no reference and left no capture route.
-  EXPECT_EQ(a.get_pool_use_count(P), 1);
+  a.begin_capture(P);
+  EXPECT_EQ(a.get_pool_use_count(P), 2);
   tl_capturing = true;
   auto alloc = a.allocate(N);
-  tl_capturing = false;
-  EXPECT_EQ(owner(alloc), kDefaultPool);
+  EXPECT_EQ(owner(alloc), P);
+  EXPECT_TRUE(a.record_event(alloc.first, alloc.second, kStream));
   a.free(alloc.second);
-  a.release_pool(P);
+  tl_capturing = false;
+  a.end_allocate_to_pool(P);
+  a.release_pool(P); // the graph's reference
+  // The pool still has its own reference, so the block is not handed out.
+  a.begin_allocate_current_thread_to_pool(P);
+  auto again = a.allocate(N);
+  a.end_allocate_current_thread_to_pool(P);
+  EXPECT_NE(again.second, alloc.second);
+  a.free(again.second);
+  a.release_pool(P); // the pool's own reference
   EXPECT_FALSE(a.is_host_mem_pool(P));
-  a.empty_cache();
-  EXPECT_EQ(a.host_allocs, a.host_frees);
+  EXPECT_EQ(a.host_allocs, 2);
+  EXPECT_EQ(a.host_frees, 2);
 }
 
 // Threads with no route never query the current stream, while other threads
