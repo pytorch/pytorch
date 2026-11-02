@@ -33,10 +33,10 @@ template <typename T, int BM, typename idx_t>
 [[max_total_threads_per_threadgroup(
     matmul_simdgroups(BM, kMatmulTileN) * simdgroup_size)]]
 kernel void matmul_simd(
-    device const T* a,
-    device const T* b,
-    device T* out,
-    constant MatmulParams<idx_t>& params,
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    constant MatmulParams<idx_t>& params [[buffer(3)]],
     uint2 tgid [[threadgroup_position_in_grid]],
     uint simd_group [[simdgroup_index_in_threadgroup]],
     uint simd_lane [[thread_index_in_simdgroup]]) {
@@ -75,10 +75,10 @@ template <typename T, int BM, bool TA, bool TB>
 [[max_total_threads_per_threadgroup(
     matmul_simdgroups(BM, kMatmulTileN) * simdgroup_size)]]
 kernel void matmul_mpp(
-    device const T* a,
-    device const T* b,
-    device T* out,
-    constant MatmulParams<uint64_t>& params,
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    constant MatmulParams<uint64_t>& params [[buffer(3)]],
     uint2 tgid [[threadgroup_position_in_grid]]) {
   auto tile = matmul_tile<T, BM>(a, b, out, params, tgid);
   matmul_mpp_gemm<T, BM, kMatmulTileN, TA, TB>(tile, params);
