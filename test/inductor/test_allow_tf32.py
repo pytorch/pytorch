@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from unittest import mock
 
 import sympy
 
@@ -138,6 +139,7 @@ class TestAllowTf32DynamicShapes(TestCase):
         self.assertEqual(self._gate(1024, aot_mode=True), (False, []))
 
 
+@instantiate_parametrized_tests
 class TestAllowTf32ExtraKwargs(TestCase):
     mixin = MMTemplateConfigMixin()
 
@@ -211,6 +213,33 @@ class TestAllowTf32ExtraKwargs(TestCase):
             self.assertTrue(extra["ALLOW_TF32"])
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
+
+    @parametrize(
+        "b200,hip,mnk,expected",
+        [
+            (False, None, (16, 512, 512), True),
+            (False, None, (1365, 512, 320), False),
+            (False, None, (15, 4096, 4096), False),
+            (True, None, (1365, 512, 320), True),
+            (True, None, (16, 128, 128), True),
+            (True, None, (15, 4096, 4096), False),
+            (True, "7.0", (1365, 512, 320), False),
+        ],
+    )
+    def test_cuda_shape_threshold_b200(self, b200, hip, mnk, expected):
+        # B200 drops the min(N, K) >= 512 term. Other GPUs and ROCm keep it.
+        kernel_inputs = self._mm_kernel_inputs("cuda", *mnk)
+        orig = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            with (
+                mock.patch(f"{mm_allow_tf32.__module__}.using_b200", return_value=b200),
+                mock.patch("torch.version.hip", hip),
+            ):
+                extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = orig
+        self.assertEqual(extra["ALLOW_TF32"], expected)
 
     def test_xpu_unaffected_by_cuda_shape_threshold(self):
         # Platform check. On a non-XPU build both sides are False, so this does
