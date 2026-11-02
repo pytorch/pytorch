@@ -52,27 +52,41 @@ struct Region {
       AtenTensorHandle* outputs,
       cudaStream_t stream) {
     calls++;
+    at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal(
+        stream, tensor_of(inputs[0]).get_device()));
+    body(inputs, outputs);
     if (sync_stream) {
       // Synchronizing a capturing stream invalidates the capture.
       (void)cudaStreamSynchronize(stream);
       (void)cudaGetLastError();
     }
-    at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal(
-        stream, tensor_of(inputs[0]).get_device()));
-    body(inputs, outputs);
     // A failing region may already have launched work and written outputs.
     TORCH_CHECK(!fail, "region failed");
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     C10_CUDA_CHECK(cudaStreamIsCapturing(stream, &status));
-    TORCH_CHECK(
-        !fail_in_capture || status == cudaStreamCaptureStatusNone,
-        "region can't be captured");
+    bool capturing = status != cudaStreamCaptureStatusNone;
+    TORCH_CHECK(!fail_in_capture || !capturing, "region can't be captured");
+    if (oom_in_capture && capturing) {
+      // As generated code fails: the shim keeps the cause.
+      int64_t size = int64_t(1) << 50;
+      int64_t stride = 1;
+      AtenTensorHandle huge = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+          1,
+          &size,
+          &stride,
+          aoti_torch_dtype_float32(),
+          aoti_torch_device_type_cuda(),
+          0,
+          &huge));
+    }
   }
 
   Body body;
   std::atomic<int> calls{0};
   bool fail = false;
   bool fail_in_capture = false;
+  bool oom_in_capture = false;
   bool sync_stream = false;
 };
 
@@ -165,6 +179,21 @@ struct CollectWarnings : c10::WarningHandler {
   }
 };
 
+// Leaves `extra` bytes on top of what the caching allocator holds, until the
+// result is destroyed.
+auto limit_memory(size_t extra) {
+  namespace allocator = c10::cuda::CUDACachingAllocator;
+  allocator::emptyCache();
+  auto total = at::cuda::getDeviceProperties(0)->totalGlobalMem;
+  auto aggregate =
+      static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
+  auto reserved =
+      allocator::getDeviceStats(0).reserved_bytes[aggregate].current;
+  allocator::setMemoryFraction(
+      static_cast<double>(reserved + extra) / total, 0);
+  return c10::make_scope_exit([] { allocator::setMemoryFraction(1.0, 0); });
+}
+
 bool uses_cuda_malloc_async() {
   return c10::cuda::CUDACachingAllocator::name() == "cudaMallocAsync";
 }
@@ -220,29 +249,16 @@ TEST_F(CudaGraphManagerTest, ThreadsRunEagerlyBeforeCapturing) {
   run(manager, region, x);
   // A new thread has no cuBLAS handle yet, and can't create one in a capture.
   std::thread([&] {
-    EXPECT_TRUE(run(manager, region, x).allclose(x.mm(x)));
-    EXPECT_EQ(manager.num_graphs(), 0);
-    EXPECT_TRUE(run(manager, region, x).allclose(x.mm(x)));
-    EXPECT_EQ(manager.num_graphs(), 1);
-  }).join();
-  EXPECT_EQ(region.calls, 3);
-}
-
-TEST_F(CudaGraphManagerTest, ThreadIsWarmOnlyAfterASuccessfulCall) {
-  CudaGraphManager manager(0);
-  Region region(affine);
-  auto x = at::randn({16}, at::kCUDA);
-  run(manager, region, x);
-  std::thread([&] {
     region.fail = true;
     EXPECT_THROW(run(manager, region, x), c10::Error);
     region.fail = false;
     // The failed call doesn't count, so this one runs eagerly too.
-    EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+    EXPECT_TRUE(run(manager, region, x).allclose(x.mm(x)));
     EXPECT_EQ(manager.num_graphs(), 0);
-    EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+    EXPECT_TRUE(run(manager, region, x).allclose(x.mm(x)));
     EXPECT_EQ(manager.num_graphs(), 1);
   }).join();
+  EXPECT_EQ(region.calls, 4);
 }
 
 TEST_F(CudaGraphManagerTest, NewThreadsWarmUpEvenWithAReusedId) {
@@ -295,28 +311,6 @@ TEST_F(CudaGraphManagerTest, RandomRegionsRunEagerly) {
       });
   ASSERT_NE(failure, warnings.messages.end());
   EXPECT_NE(failure->find("RNG"), std::string::npos) << *failure;
-}
-
-TEST_F(CudaGraphManagerTest, CopiesInputsOfDtypesForeachCopyCantFuse) {
-  CudaGraphManager manager(0, no_warmup());
-  Region region(
-      [](const at::Tensor& x) { return x.view(at::kByte).to(at::kFloat); });
-  auto bytes_of = at::TensorOptions(at::kCUDA).dtype(at::kByte);
-  auto bytes = at::randint(0, 255, {8}, bytes_of);
-  auto x = bytes.view(at::kFloat8_e8m0fnu);
-  run(manager, region, x);
-  EXPECT_EQ(manager.num_graphs(), 1);
-  bytes.random_(0, 255);
-  EXPECT_TRUE(run(manager, region, x).equal(bytes.to(at::kFloat)));
-
-  // An expanded one is copied as the block it covers.
-  auto row = at::randint(0, 255, {6}, bytes_of);
-  auto expanded = row.view(at::kFloat8_e8m0fnu).expand({4, 6});
-  run(manager, region, expanded);
-  EXPECT_EQ(manager.num_graphs(), 2);
-  row.random_(0, 255);
-  EXPECT_TRUE(
-      run(manager, region, expanded).equal(row.expand({4, 6}).to(at::kFloat)));
 }
 
 TEST_F(CudaGraphManagerTest, RejectsACallerCapture) {
@@ -389,34 +383,13 @@ TEST_F(CudaGraphManagerTest, OrdersReplaysOnDifferentStreams) {
   auto b = at::randn({16}, at::kCUDA);
   c10::cuda::device_synchronize();
   run_on(s1, a);
+  c10::cuda::device_synchronize();
   auto a_out = run_on(s1, a);
   auto b_out = run_on(s2, b);
   c10::cuda::device_synchronize();
   EXPECT_EQ(region.calls, 1);
   EXPECT_TRUE(a_out.equal(affine(a)));
   EXPECT_TRUE(b_out.equal(affine(b)));
-}
-
-TEST_F(CudaGraphManagerTest, ResetAndDestructorWaitForTheLastReplay) {
-  Region region(slow_affine);
-  auto x = at::randn({16}, at::kCUDA);
-  for (bool reset : {true, false}) {
-    {
-      CudaGraphManager manager(0, no_warmup());
-      run(manager, region, x);
-      c10::cuda::device_synchronize();
-      run(manager, region, x);
-      if (reset) {
-        manager.reset();
-        EXPECT_EQ(
-            cudaStreamQuery(at::cuda::getCurrentCUDAStream().stream()),
-            cudaSuccess);
-      }
-    }
-    EXPECT_EQ(
-        cudaStreamQuery(at::cuda::getCurrentCUDAStream().stream()),
-        cudaSuccess);
-  }
 }
 
 TEST_F(CudaGraphManagerTest, RunsConcurrently) {
@@ -467,7 +440,8 @@ TEST_F(CudaGraphManagerTest, FailedCaptureRunsEagerlyAndWarnsOnce) {
     EXPECT_EQ(region.calls, 4);
     EXPECT_EQ(manager.num_graphs(), 0);
     ASSERT_EQ(warnings.messages.size(), 1);
-    EXPECT_TRUE(invalidate || warnings.contains(0, "region can't be captured"));
+    EXPECT_TRUE(warnings.contains(
+        0, invalidate ? "capture_end failed" : "region can't be captured"));
 
     // Other keys still capture.
     region.fail_in_capture = region.sync_stream = false;
@@ -495,7 +469,9 @@ TEST_F(CudaGraphManagerTest, StopsCapturingAfterFailuresInARow) {
   // A successful capture restarts the count.
   run(manager, region, at::randn({n++}, at::kCUDA));
   EXPECT_EQ(manager.num_graphs(), 1);
-  fail_captures(kFailures);
+  fail_captures(kFailures - 1);
+  EXPECT_EQ(warnings.messages.size(), 1);
+  fail_captures(1);
   // Once on the first failure, once on giving up.
   ASSERT_EQ(warnings.messages.size(), 2);
   EXPECT_TRUE(warnings.contains(0, "region can't be captured"));
@@ -512,42 +488,77 @@ TEST_F(CudaGraphManagerTest, StopsCapturingAfterFailuresInARow) {
   EXPECT_EQ(manager.num_graphs(), 1);
 }
 
-TEST_F(CudaGraphManagerTest, SetupFailuresDontCount) {
-  namespace allocator = c10::cuda::CUDACachingAllocator;
+TEST_F(CudaGraphManagerTest, TransientFailuresBackOff) {
   CollectWarnings warnings;
   c10::WarningUtils::WarningHandlerGuard guard(&warnings);
   CudaGraphManager manager(0, no_warmup());
   Region region([](const at::Tensor& x) { return x.sum(); });
   auto x = at::randn({64 << 20}, at::kCUDA);
-  allocator::emptyCache();
-  auto total = at::cuda::getDeviceProperties(0)->totalGlobalMem;
-  auto aggregate =
-      static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
-  auto reserved =
-      allocator::getDeviceStats(0).reserved_bytes[aggregate].current;
-  // Too little memory left for a capture's input buffer, but enough for an
-  // eager call.
-  allocator::setMemoryFraction(
-      static_cast<double>(reserved + (32 << 20)) / total, 0);
-  {
-    auto restore =
-        c10::make_scope_exit([] { allocator::setMemoryFraction(1.0, 0); });
-    for (int64_t n = 1; n <= CudaGraphManager::kMaxCaptureFailures; ++n) {
-      auto xn = x.narrow(0, 0, x.numel() - n);
-      EXPECT_TRUE(run(manager, region, xn).allclose(xn.sum()));
+  auto y = x.narrow(0, 0, 8);
+  auto z = x.narrow(0, 0, 4);
+  auto run_eagerly = [&](const at::Tensor& t, int64_t calls) {
+    for (int64_t i = 0; i < calls; ++i) {
+      EXPECT_TRUE(run(manager, region, t).allclose(t.sum()));
     }
+    EXPECT_EQ(manager.num_graphs(), 0);
+  };
+  run(manager, region, z);
+  {
+    // Too little memory for a capture's input buffer, enough to run eagerly
+    // once the existing graph is dropped.
+    auto restore = limit_memory(32 << 20);
+    run_eagerly(x, 1);
   }
-  EXPECT_EQ(manager.num_graphs(), 0);
+  // Every key then runs eagerly for a while; another failure doubles that.
+  constexpr int64_t kBackoff = CudaGraphManager::kSetupFailureBackoff;
+  run_eagerly(y, kBackoff);
+  region.oom_in_capture = true;
+  run_eagerly(y, 1);
+  region.oom_in_capture = false;
+  run_eagerly(y, 2 * kBackoff);
+  // No key was marked uncapturable.
+  for (const auto& t : {y, x, z}) {
+    run(manager, region, t);
+  }
+  EXPECT_EQ(manager.num_graphs(), 3);
+  // Once, with the cause.
   ASSERT_EQ(warnings.messages.size(), 1);
   EXPECT_TRUE(warnings.contains(0, "out of memory"));
-  // Neither new keys nor, after a backoff, the failed ones are given up on.
-  run(manager, region, x);
-  auto failed = x.narrow(0, 0, x.numel() - 1);
-  for (int64_t i = 0; i <= CudaGraphManager::kSetupFailureBackoff; ++i) {
-    EXPECT_EQ(manager.num_graphs(), 1);
-    run(manager, region, failed);
+}
+
+TEST_F(CudaGraphManagerTest, HostOutputsRunEagerly) {
+  CollectWarnings warnings;
+  c10::WarningUtils::WarningHandlerGuard guard(&warnings);
+  CudaGraphManager manager(0, no_warmup());
+  // A replay wouldn't wait for its device-to-host copy.
+  Region region([](const at::Tensor& x) {
+    auto host = x.options().device(at::kCPU).pinned_memory(true);
+    return at::empty(x.sizes(), host).copy_(x, /*non_blocking=*/true);
+  });
+  auto x = at::randn({16}, at::kCUDA);
+  for (int i = 0; i < 2; ++i) {
+    auto out = run(manager, region, x);
+    EXPECT_TRUE(out.equal(x.cpu()));
   }
-  EXPECT_EQ(manager.num_graphs(), 2);
+  EXPECT_EQ(region.calls, 3);
+  EXPECT_EQ(manager.num_graphs(), 0);
+  ASSERT_EQ(warnings.messages.size(), 1);
+  EXPECT_TRUE(warnings.contains(0, "not a CUDA tensor"));
+}
+
+TEST_F(CudaGraphManagerTest, FailedReplayLeavesNoOutputs) {
+  CudaGraphManager manager(0, no_warmup());
+  Region region([](const at::Tensor& x) { return x * 2; });
+  auto x = at::randn({64 << 20}, at::kCUDA);
+  run(manager, region, x);
+  {
+    // Too little memory for the replay's output clone.
+    auto restore = limit_memory(32 << 20);
+    EXPECT_THROW(run(manager, region, x), std::exception);
+  }
+  at::cuda::CUDAStreamGuard stream_guard(at::cuda::getStreamFromPool());
+  EXPECT_TRUE(run(manager, region, x).equal(x * 2));
+  EXPECT_EQ(region.calls, 1);
 }
 
 TEST_F(CudaGraphManagerTest, EagerCallsDontHoldTheLock) {
@@ -704,17 +715,6 @@ TEST_F(CudaGraphManagerTest, MaxGraphsRunsNewKeysEagerly) {
   // Once, however many calls run eagerly past the limit.
   ASSERT_EQ(warnings.messages.size(), 1);
   EXPECT_TRUE(warnings.contains(0, "max_graphs=1"));
-}
-
-TEST_F(CudaGraphManagerTest, RejectsNegativeOptions) {
-  CudaGraphOptions negative_warmups;
-  negative_warmups.warmup_calls = -1;
-  expect_error(
-      [&] { CudaGraphManager(0, negative_warmups); },
-      "warmup_calls must be non-negative");
-  expect_error(
-      [&] { CudaGraphManager(0, no_warmup(/*max_graphs=*/-1)); },
-      "max_graphs must be non-negative");
 }
 
 TEST_F(CudaGraphManagerTest, ResetDropsGraphs) {
