@@ -1870,10 +1870,11 @@ class HostMemPool(_HostMemPool):
     placed. A typical use is one pool per NUMA node, entered by the loader
     threads bound to that node; see :ref:`cuda-pinned-host-memory-pools`.
 
-    Creating a pool allocates no memory. A CUDA graph that captures inside the
-    pool's context, or uses the pool as its ``pool``, keeps the pool until the
-    graph is reset. Deleting the pool frees its cached blocks, unless a capture
-    is underway; what remains is freed by a later
+    Creating a pool allocates no memory. A CUDA graph keeps the pool until it
+    is reset if the pool's context is entered while the current stream is
+    capturing into the graph, or if the graph uses the pool as its ``pool``. Deleting the pool frees its cached
+    blocks, or, if a graph keeps the pool, the reset of the last such graph
+    does, unless a capture is underway; what remains is freed by a later
     :func:`torch.accelerator.empty_host_cache`.
     """
 
@@ -1892,7 +1893,7 @@ class _PinnedRoutes(threading.local):
     def __init__(self) -> None:
         # The open use_mem_pool contexts that route pinned memory on this
         # thread, innermost last.
-        self.stack: list["use_mem_pool"] = []
+        self.stack: list[use_mem_pool] = []
 
 
 _pinned_routes = _PinnedRoutes()
@@ -1908,7 +1909,8 @@ class use_mem_pool(contextlib.ContextDecorator):
             allocations only.
         device (torch.device or int, optional): selected device. Uses MemPool on
             the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default). Not used for a HostMemPool.
+            if :attr:`device` is ``None`` (default). Must be ``None`` for a
+            HostMemPool.
         pinned (bool, optional): also route pinned host allocations, such as
             ``torch.empty(n, pin_memory=True)``, to the pool. Default ``False``
             for a :class:`MemPool`; always ``True`` for a :class:`HostMemPool`.
@@ -1941,17 +1943,15 @@ class use_mem_pool(contextlib.ContextDecorator):
     ) -> None:
         self._args = (pool, device, pinned)
         self._pool = pool
+        # Set on entry for a MemPool.
+        self._device_index: int | None = None
         if isinstance(pool, HostMemPool):
             if pinned is False:
-                raise ValueError("a HostMemPool has no device memory; pinned must be True or None")
+                raise ValueError("pinned=False does not apply to a HostMemPool")
             if device is not None:
                 raise ValueError("device does not apply to a HostMemPool")
-            self._device_index = None
             self._pinned = True
         else:
-            self._device_index = (
-                torch.cuda.current_device() if device is None else _get_device_index(device)
-            )
             self._pinned = bool(pinned)
             if self._pinned:
                 pool._enable_pinned()  # a host pool with the same id as this pool
@@ -1961,7 +1961,13 @@ class use_mem_pool(contextlib.ContextDecorator):
         return type(self)(pool, device, pinned=pinned)
 
     def __enter__(self) -> None:
-        if self._device_index is not None:
+        if not isinstance(self._pool, HostMemPool):
+            # The current device on entry, not at construction, as it was when
+            # use_mem_pool was a generator.
+            device = self._args[1]
+            if device is None:
+                device = torch.cuda.current_device()
+            self._device_index = _get_device_index(device)
             _cuda_beginAllocateCurrentThreadToPool(self._device_index, self._pool.id)
         if self._pinned:
             try:

@@ -1037,7 +1037,8 @@ with torch.cuda.use_mem_pool(host_pool):
 ```
 
 What a pool guarantees is cache isolation: a pinned block freed by any thread returns to the
-pool it came from, and is handed out again only to threads inside that pool.
+pool it came from, and is handed out again only to threads inside that pool, or to the capture
+of a graph that uses it as its `pool`.
 
 Routing follows the thread:
 
@@ -1050,8 +1051,9 @@ Routing follows the thread:
 * CUDA graph capture follows the same rules for device and pinned memory: the newest of the
   capture and the context takes the capturing stream. Entered inside a capture, the context
   wins and the graph keeps the pool until it is reset. A HostMemPool, like a MemPool, can be the
-  `pool` of a graph. Pinned blocks that captured work used are reused only after that graph is
-  reset.
+  `pool` of a graph. Pinned blocks allocated during the capture and then used by a stream are
+  reused only once the capture's pool loses its last reference: every graph that keeps it is
+  reset and, if it is a HostMemPool or a MemPool used with `pinned=True`, the pool is deleted.
 * Use contexts from synchronous code, on threads you control. A context that stays open across
   an `await` or a generator's `yield` also routes whatever runs on the thread in between. The
   pin-memory thread of {class}`torch.utils.data.DataLoader` is not covered yet.
@@ -1061,11 +1063,12 @@ Routing follows the thread:
 on any thread and each graph that keeps the pool.
 
 Creating a pool allocates nothing. While the pool is alive, emptying the host cache, which
-{class}`torch.cuda.graph` does on entry, leaves its cache alone. Deleting the pool frees its
-cached pinned blocks at once, with the GIL released, since `cudaFreeHost` waits for the work
-already issued on the current device. Blocks that tensors or pending copies still use, and the
-whole cache if a CUDA graph capture is underway, are freed by a later
-{func}`torch.accelerator.empty_host_cache`.
+{class}`torch.cuda.graph` does on entry, leaves its cache alone. Once the pool is deleted and
+no graph keeps it, its cached pinned blocks are freed at once, by the deletion or by the reset
+of the last graph that keeps it. Deleting a HostMemPool frees them with the GIL released, since
+`cudaFreeHost` waits for the work already issued on the current device. Blocks that tensors,
+pending copies or other graphs still use, and the whole cache if a CUDA graph capture is
+underway at that point, are freed by a later {func}`torch.accelerator.empty_host_cache`.
 
 ### One pool per NUMA node
 
@@ -1103,14 +1106,17 @@ The allocator knows nothing about NUMA, so placement depends on the setup:
   kernel can fall back to another node when the local one is full; `MPOL_BIND` does not.
 * `pinned_use_cuda_host_register` with `pinned_num_register_threads` greater than 1 touches
   the pages from a shared thread pool, which then decides where they go.
-* Blocks of a HostMemPool never come from the `pinned_reserve_segment_size_mb` segment, which
-  the first allocating thread placed for the whole process.
-* Pinned allocations that a graph's own pool takes during capture are placed like default-pool
-  allocations (by the capturing thread, or from the reserve segment).
-
-Stream-ordered host memory pools (`cudaMemPoolCreate` with `cudaMemLocationTypeHostNuma`,
-CUDA 12.8+) could back a HostMemPool with explicit placement in the future, and this API may
-move to {mod}`torch.accelerator`.
+* Blocks that a context allocates for its pool never come from the
+  `pinned_reserve_segment_size_mb` segment, which the first allocating thread placed for the
+  whole process.
+* Pinned allocations that a graph's own pool takes during capture, including a HostMemPool or
+  MemPool passed as `pool`, are placed like default-pool allocations (by the capturing thread,
+  or from the reserve segment).
+* On ROCm 7.2 and later, the blocks that a context allocates for its pool come from
+  `hipHostMalloc` with `hipHostMallocNumaUser`, so HIP follows the thread's memory policy, but
+  only `MPOL_BIND` and `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes
+  the pages from the node nearest a GPU. With `pinned_use_cuda_host_register`, the thread that
+  touches the pages places them, as on CUDA.
 
 (cuda-memory-python-allocators)=
 ## Python-defined CUDA allocators
@@ -2089,7 +2095,8 @@ g1.replay()
 g2.replay()
 ```
 
-The `pool` argument also accepts {class}`~torch.cuda.MemPool`. If
+The `pool` argument also accepts {class}`~torch.cuda.MemPool` and
+{class}`~torch.cuda.HostMemPool`. If
 {func}`~torch.cuda.use_mem_pool` is used during capture, the graph retains that
 pool until the graph is reset or destroyed. {meth}`torch.cuda.CUDAGraph.pool`
 returns the primary capture pool, while `CUDAGraph.pools()` returns all pools

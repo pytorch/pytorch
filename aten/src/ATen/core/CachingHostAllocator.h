@@ -54,8 +54,9 @@ struct HostBlock {
   // The HostBlockPool of owning_pool_, also fixed at construction. A pool is
   // erased only once it has no blocks, so it outlives the block.
   void* owning_block_pool_{nullptr};
-  // Graph whose capture allocated this block, if a stream used it during that
-  // capture. The block is not reused until that graph releases its pool.
+  // Pool of the capture during which this block was allocated, or (0, 0). If a
+  // stream used the block, it is not reused until that pool loses its last
+  // reference (reclaim_capture_blocks_under_lock).
   c10::MempoolId_t capture_owner_{0, 0};
   bool was_allocated_during_stream_capture_;
   std::shared_ptr<c10::GatheredContext> context_when_allocated_;
@@ -258,10 +259,15 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  * Note that this caching host allocator does not split larger allocations into
  * smaller blocks, unlike the caching device allocator.
  *
- * Besides the default pool there are private pools of two kinds. Graph pools
- * receive the allocations of capturing streams (begin_allocate_to_pool). Host
- * mem pools (create_pool) receive the allocations of the threads routed to
- * them (begin_allocate_current_thread_to_pool), unless a capture claims them.
+ * Besides the default pool there are private pools. A capture routes the
+ * allocations of its streams to a pool (begin_allocate_to_pool). A thread
+ * routes its own allocations to a host mem pool, one that create_pool or
+ * create_or_incref_host_mem_pool made routable
+ * (begin_allocate_current_thread_to_pool). A pool can be both. When a capture
+ * and a route both match, the newest wins, as in the device allocator. A block
+ * allocated on a capturing stream and then used by any stream is not reused
+ * until the capture's pool loses its last reference
+ * (reclaim_capture_blocks_under_lock).
  * Once a pool has no owner left (release_pool) and no thread is routed to it,
  * it becomes freeable: empty_cache() frees its cached blocks, and erases it
  * once it has no blocks. A host mem pool has its cached blocks freed and is
@@ -320,10 +326,11 @@ struct HostPrivatePool {
   HostPrivatePool& operator=(const HostPrivatePool&) = delete;
 
   c10::MempoolId_t id;
-  // References from owners: a graph and its begin_allocate_to_pool calls, or
-  // the creator of a host mem pool.
+  // References from owners: graphs (begin_allocate_to_pool, retain_pool), and
+  // the HostMemPool, or MemPool with pinned routing, that made it routable.
   int use_count{1};
-  // Made by create_pool: only threads route to it, never a capture.
+  // Threads may route to it (create_pool, create_or_incref_host_mem_pool). It
+  // may also be a capture's pool.
   bool is_host_mem_pool{false};
   // Open thread routes to this pool, over all threads.
   int route_count{0};
@@ -568,9 +575,11 @@ struct CachingHostAllocatorImpl {
 
       // If the block was ever used, block->event_count_ will be above
       // 0 and thus can never be recycled by
-      // process_events_for_specific_size. Thus, this block will never
-      // be returned again. "Leaking" memory like this is intentional
-      // to avoid subtle cuda graph problems described here:
+      // process_events_for_specific_size. It stays out of reuse until
+      // the pool of its capture (capture_owner_) loses its last
+      // reference, see reclaim_capture_blocks_under_lock. "Leaking"
+      // memory like this is intentional to avoid subtle cuda graph
+      // problems described here:
       // https://github.com/pytorch/pytorch/pull/161583#issuecomment-3229885771
 
       // Otherwise, if the block was never used, block->event_count_
@@ -1252,9 +1261,10 @@ struct CachingHostAllocatorImpl {
     return {kNone, default_pool_, false, kNone};
   }
 
-  // Makes the blocks that captures into `graph_id` kept out of reuse available
-  // again, once the last graph sharing that pool releases it. Blocks still in
-  // use follow the normal free path from now on. instance_mutex_ must be held.
+  // Called when graph_id's pool loses its last reference (see
+  // HostPrivatePool::use_count). Makes the blocks that captures into it kept
+  // out of reuse available again; blocks still in use follow the normal free
+  // path from now on. instance_mutex_ must be held.
   void reclaim_capture_blocks_under_lock(c10::MempoolId_t graph_id, std::vector<B*>& detached) {
     std::vector<std::pair<B*, BlockPool*>> ready;
     {
@@ -1375,6 +1385,12 @@ protected:
       return false;
     }
     return stream_is_capturing(get_current_stream());
+  }
+
+  // Whether a capture routes to a private pool (begin_allocate_to_pool) on
+  // any thread.
+  bool any_capture_underway() const {
+    return !captures_underway_empty_.load(std::memory_order_relaxed);
   }
 
 private:
@@ -1735,10 +1751,11 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   // Creates a host mem pool holding one reference, which release_pool drops.
   // Take pool_id from the backend's graph pool id counter (for CUDA,
-  // at::cuda::MemPool::graph_pool_handle), so it never names a graph pool. A
-  // host mem pool cannot be used for stream capture (begin_allocate_to_pool).
-  // Once it is released and no thread is routed to it, the call that made it
-  // so (release_pool or end_allocate_current_thread_to_pool) frees its cached
+  // at::cuda::MemPool::graph_pool_handle), so it does not collide with an
+  // existing pool. A capture may also use it as its pool
+  // (begin_allocate_to_pool), and graphs may hold it (retain_pool). Once no
+  // reference and no thread route is left, the call that dropped the last one
+  // (release_pool or end_allocate_current_thread_to_pool) frees its cached
   // blocks, with no allocator lock held, unless a capture is underway. Blocks
   // still in use or waiting for events, and a cache left during a capture,
   // are freed by a later empty_cache().
@@ -1749,8 +1766,10 @@ struct TORCH_API HostAllocator : public at::Allocator {
   // Routes the calling thread's allocations to a host mem pool until the
   // matching end call on the same thread. Several threads may route to one
   // pool, and routes nest: the innermost wins, and they must end in reverse
-  // order. Stream capture routing (begin_allocate_to_pool) takes precedence.
-  // Routes that a thread leaves open when it exits are ended then.
+  // order. Against a capture's routing (begin_allocate_to_pool) the newest
+  // wins: a capture begun inside the route takes its streams, and a route
+  // begun inside a capture takes them back. Routes that a thread leaves open
+  // when it exits are ended then.
   virtual void begin_allocate_current_thread_to_pool(
       c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(
@@ -1767,11 +1786,6 @@ struct TORCH_API HostAllocator : public at::Allocator {
   // live pool.
   virtual int get_pool_use_count(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for get_pool_use_count");
-  }
-
-  // Whether pool_id names a pool made by create_pool.
-  virtual bool is_host_mem_pool(c10::MempoolId_t /*pool_id*/) {
-    return false;
   }
 
   // A graph that routes to pool_id during capture takes a reference on it.
@@ -1880,10 +1894,6 @@ struct CachingHostAllocatorInterface : public HostAllocator {
 
   int get_pool_use_count(c10::MempoolId_t pool_id) override {
     return impl_->get_pool_use_count(pool_id);
-  }
-
-  bool is_host_mem_pool(c10::MempoolId_t pool_id) override {
-    return impl_->is_host_mem_pool(pool_id);
   }
 
   bool retain_pool(c10::MempoolId_t pool_id) override {
