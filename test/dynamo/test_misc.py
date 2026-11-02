@@ -101,7 +101,6 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     parametrize,
     recover_orig_fp32_precision,
-    scoped_load_inline,
     set_default_dtype,
     skipIfCppFakeTensor,
     skipIfHpu,
@@ -114,10 +113,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
-
-
-if IS_FBCODE:
-    from caffe2.test.dynamo import _pybind11_enum_test
 
 
 pytree_modules = {
@@ -230,23 +225,6 @@ class UserDefineSetAttr:
             return None
 
 
-@functools.cache
-@scoped_load_inline
-def _load_pybind11_enum_mod(*, load_inline):
-    cpp_source = """
-    #include <torch/extension.h>
-
-    enum class E { A = 0, B = 1 };
-
-    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-        py::enum_<E>(m, "E")
-            .value("A", E::A)
-            .value("B", E::B);
-    }
-    """
-    return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
-
-
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_storage_offset_scalar_output(self):
         def fn(x):
@@ -302,13 +280,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(entries), 0)
 
     def test_pybind11_enum_conversion(self):
-        if IS_FBCODE:
-            # fbcode's Python runtime lacks the shared libs load_inline needs, so
-            # we use the Buck-prebuilt fixture instead of the load_inline argument.
-            mod = _pybind11_enum_test
-        else:
-            mod = _load_pybind11_enum_mod()
-        e = mod.E.A
+        ProfilerActivity = torch._C._profiler.ProfilerActivity
+        e = ProfilerActivity.CPU
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
         )
@@ -317,7 +290,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(
             torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
-                mod.E.B
+                ProfilerActivity.XPU
             ),
             20,
         )

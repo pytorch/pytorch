@@ -1558,26 +1558,6 @@
       ]
     }
   ],
-  "GB0799": [
-    {
-      "Gb_type": "int() with non-constant arguments",
-      "Context": "int(*{args}, **{kwargs})",
-      "Explanation": "Attempted to call int() with non-constant args.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB9845": [
-    {
-      "Gb_type": "float() with non-constant arguments",
-      "Context": "float(*{args}, **{kwargs})",
-      "Explanation": "Attempted to call float() with non-constant args.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB8114": [
     {
       "Gb_type": "complex() with non-constant arguments",

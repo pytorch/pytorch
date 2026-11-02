@@ -1309,9 +1309,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     @staticmethod
     def _make_handler(
-        fn: Callable[..., Any],
-        arg_types: list[type],
-        has_kwargs: bool,
+        fn: Callable[..., Any], arg_types: list[type], has_kwargs: bool
     ) -> Callable[
         [
             "InstructionTranslatorBase",
@@ -2833,12 +2831,8 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, value, source)
         if ConstantVariable.is_literal(value):
             return VariableTracker.build(tx, value, source)
-        if (
-            self.fn in (object, type)
-            and name != "__init__"  # handled by call_method, see object_init
-            and isinstance(
-                value, (types.WrapperDescriptorType, types.MethodDescriptorType)
-            )
+        if self.fn in (object, type) and isinstance(
+            value, (types.WrapperDescriptorType, types.MethodDescriptorType)
         ):
             # Unbound slot wrapper or method read off object / type, e.g.
             # object.__eq__: bind it to its owner so a call runs that slot on args[0].
@@ -4097,6 +4091,37 @@ def _constant_fold_classmethod(name: str) -> Method:
     return Method(handler)
 
 
+def _constant_fold_on_unsupported(
+    call_function: Callable[..., VariableTracker],
+) -> Callable[..., VariableTracker]:
+    """If the modeled path graph breaks on constant arguments, evaluate the call
+    at trace time instead (e.g. int() of a pybind11 enum, whose C __int__ has no
+    model)."""
+
+    @functools.wraps(call_function)
+    def wrapper(
+        self: "BuiltinTypeVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            return call_function(self, tx, args, kwargs)
+        except Unsupported as exc:
+            if check_unspec_or_constant_args(args, kwargs):
+                exc.remove_from_stats()
+                try:
+                    res = self._fn(
+                        *(a.as_python_constant() for a in args),
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                except Exception as e:
+                    raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, res)
+
+    return wrapper
+
+
 class ByteArrayBuiltinVariable(BuiltinTypeVariable):
     """Variable tracker for the `bytearray` builtin constructor."""
 
@@ -4180,6 +4205,7 @@ class IntBuiltinVariable(BuiltinTypeVariable):
         "from_bytes": _constant_fold_classmethod("from_bytes"),
     }
 
+    @_constant_fold_on_unsupported
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -4206,26 +4232,8 @@ class IntBuiltinVariable(BuiltinTypeVariable):
         if len(args) == 2:
             base = args[1]
         if base is None:
-            result = pynumber_int(tx, args[0])
-        else:
-            result = pylong_from_base(tx, args[0], base)
-        if result is not None:
-            return result
-        if check_unspec_or_constant_args(args, kwargs):
-            try:
-                res = int(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-        unimplemented(
-            gb_type="int() with non-constant arguments",
-            context=f"int(*{args}, **{kwargs})",
-            explanation="Attempted to call int() with non-constant args.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+            return pynumber_int(tx, args[0])
+        return pylong_from_base(tx, args[0], base)
 
 
 class FloatBuiltinVariable(BuiltinTypeVariable):
@@ -4240,6 +4248,7 @@ class FloatBuiltinVariable(BuiltinTypeVariable):
         ),
     }
 
+    @_constant_fold_on_unsupported
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -4252,24 +4261,7 @@ class FloatBuiltinVariable(BuiltinTypeVariable):
             raise_type_error(tx, f"float expected at most 1 argument, got {len(args)}")
         if not args:
             return ConstantVariable.create(0.0)
-        result = pynumber_float(tx, args[0])
-        if result is not None:
-            return result
-        if check_unspec_or_constant_args(args, kwargs):
-            try:
-                res = float(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-        unimplemented(
-            gb_type="float() with non-constant arguments",
-            context=f"float(*{args}, **{kwargs})",
-            explanation="Attempted to call float() with non-constant args.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return pynumber_float(tx, args[0])
 
 
 class ComplexBuiltinVariable(BuiltinTypeVariable):
