@@ -1,11 +1,11 @@
 ---
 name: pr-review
-description: Review PyTorch pull requests for code quality, test coverage, security, and backward compatibility. Use when reviewing PRs, when asked to review code changes, or when the user mentions "review PR", "code review", or "check this PR".
+description: Review PyTorch pull requests for code quality, security, and backward compatibility. Use when reviewing PRs, when asked to review code changes, or when the user mentions "review PR", "code review", or "check this PR".
 ---
 
 # PyTorch PR Review Skill
 
-Review PyTorch pull requests focusing on what CI cannot check: code quality, test coverage adequacy, security vulnerabilities, and backward compatibility.
+Review PyTorch pull requests focusing on what CI cannot check: code quality, security vulnerabilities, and backward compatibility.
 
 ## Usage Modes
 
@@ -118,7 +118,7 @@ A single line of code can have deep cross-cutting implications: a missing device
 1. **Only report problems** — The review output must contain only issues, concerns, and actionable suggestions. Do NOT mention things that are done correctly, do NOT praise good decisions, do NOT explain why something is fine. If a section has no problems, omit it entirely. The reader's time is precious — every sentence must point to something that needs fixing or further discussion.
 2. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
 3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
-4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test adequacy, and pattern adherence.
+4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test patterns, and pattern adherence.
 5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
 6. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
 7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
@@ -127,7 +127,7 @@ A single line of code can have deep cross-cutting implications: a missing device
 
 ### Using sub-agents
 
-The review checklist is large. You cannot hold the full context of every infrastructure system in your head. **Spawn sub-agents** to investigate whether checklist items apply: read surrounding code, infrastructure the PR should be using, or tests that should exist. Spawn them in parallel for independent areas. A typical medium PR should spawn 3-8 sub-agents.
+The review checklist is large. You cannot hold the full context of every infrastructure system in your head. **Spawn sub-agents** to investigate whether checklist items apply: read surrounding code or infrastructure the PR should be using. Spawn them in parallel for independent areas. A typical medium PR should spawn 3-8 sub-agents.
 
 Sub-agents overlap on purpose. Expect the same defect back from two or three of them in different words; that signals importance, not multiplicity. Reconcile in Step 4, before spending verification agents on it.
 
@@ -226,7 +226,7 @@ What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the over
 [Problems only — flag checklist items that are violated]
 
 ### Testing
-[Problems only — missing tests, wrong patterns, inadequate coverage]
+[Problems only — tests that do not follow the checklist, as adjusted by any applicable `REVIEW.md`]
 
 ### API Design
 [Problems only]
@@ -246,19 +246,19 @@ What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the over
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
-Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**. So does an unaddressed maintainer comment.
+An unaddressed maintainer comment always means **Request Changes**.
 
 [Brief justification — focus on what blocks approval, if anything]
 ```
 
-**One finding, one section.** The categories overlap by construction — a missing test for a bad public API is legitimately API Design, Testing, and Code Quality. Assign each finding to exactly one section, first match wins:
+**One finding, one section.** The categories overlap by construction — a thread-unsafe public API is legitimately Thread Safety, API Design, and Code Quality. Assign each finding to exactly one section, first match wins:
 
 1. **Security** — has a security consequence
 2. **Thread Safety** — has a concurrency consequence
 3. **Backward Compatibility** — breaks or risks breaking existing callers
 4. **API Design** — the defect is in a public or frozen interface (names, signatures, documented semantics)
 5. **Infrastructure** — a missing or incorrect hook into an existing PyTorch subsystem
-6. **Testing** — the defect is *only* absent or inadequate coverage
+6. **Testing** — the defect is *only* in how the tests are written
 7. **Performance**
 8. **Code Quality** — everything else
 
