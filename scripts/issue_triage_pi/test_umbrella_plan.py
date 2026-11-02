@@ -289,6 +289,17 @@ class UmbrellaPlanTest(unittest.TestCase):
             self.assertEqual(result.comment, "")
             self.assertNotIn("triaged", result.add_labels)
 
+    def test_redirects_skip_uncertain_or_invalid_umbrellas_without_review(self):
+        for match, target in (("uncertain", issue(TARGET)), ("covered", {})):
+            with self.subTest(match=match, target=target):
+                proposal = plan(match=match, labels=["oncall: distributed"])
+                result = self.evaluate(proposal, target=target)
+                self.assertEqual(result.umbrella_action, "skip")
+                self.assertIn("oncall: distributed", result.add_labels)
+                self.assertNotIn("triage review", result.add_labels)
+                self.assertEqual(result.comment, "")
+                self.assertFalse(result.close)
+
     def test_apply_revalidates_stale_previews_and_unavailable_targets(self):
         for labels, target, error, action in (
             (["high priority"], issue(TARGET), False, "link"),
@@ -347,6 +358,15 @@ class UmbrellaPlanTest(unittest.TestCase):
                 api.writes.clear()
                 self.assertFalse(self.apply(api, proposal).mutates)
                 self.assertEqual(api.writes, [])
+
+    def test_completed_pt2_receipt_does_not_close_a_reopened_issue(self):
+        proposal, api = plan(labels=["oncall: pt2"]), GitHub()
+        self.assertTrue(self.apply(api, proposal).close)
+        api.source.update(state="open", state_reason="reopened")
+        api.writes.clear()
+        self.assertFalse(self.apply(api, proposal).mutates)
+        self.assertEqual(api.source["state"], "open")
+        self.assertEqual(api.writes, [])
 
     def test_only_bot_close_receipts_can_resume_preexisting_pt2_routing(self):
         source = issue(SOURCE, labels=["high priority"])
