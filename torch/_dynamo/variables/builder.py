@@ -65,6 +65,7 @@ from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.dispatchless import _DispatchlessCustomOp
 from torch._library.opaque_object import (
     is_custom_class,
     is_opaque_constant_type,
@@ -1839,6 +1840,11 @@ class VariableBuilder:
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif isinstance(value, CudagraphOverrideContextManager):
             return CudagraphOverrideVariable(value.fwd, value.bwd)
+        elif isinstance(value, _DispatchlessCustomOp):
+            from .torch import DispatchlessCustomOpVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return DispatchlessCustomOpVariable(value, source=self.source)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -5810,6 +5816,10 @@ class SourcelessBuilder:
             return NumpyDTypeVariable(value)
         elif trace_rules.is_numpy_type_info(value):
             return ConstantLikeVariable(value)
+        elif isinstance(value, _DispatchlessCustomOp):
+            from .torch import DispatchlessCustomOpVariable
+
+            return DispatchlessCustomOpVariable(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
