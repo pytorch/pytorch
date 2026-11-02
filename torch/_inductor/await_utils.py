@@ -23,7 +23,7 @@ class TaskFactory(Protocol):
     ) -> asyncio.futures.Future[object]: ...
 
 
-TaskFactoryType = TaskFactory  # type: ignore[valid-type]
+TaskFactoryType = TaskFactory
 
 
 def await_sync(awaitable: Awaitable[T]) -> T:
@@ -146,6 +146,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
     ) -> asyncio.Future:  # type: ignore[valid-type, type-arg]
         task_factory = task_factories[0]
         if task_factory is None:
+            # pyrefly: ignore [bad-argument-type]
             task = asyncio.Task(coro, loop=loop, context=context)
             # pyre-ignore[16]: `Task` has no attribute `_source_traceback`.
             if task._source_traceback:  # type: ignore[attr-defined]
@@ -153,7 +154,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
                     -1
                 ]  # pragma: no cover  # type: ignore[attr-defined]
         else:
-            task = task_factory(loop, coro, context=context)  # type: ignore[arg-type]
+            task = task_factory(loop, coro, context=context)  # type: ignore[arg-type, call-arg, assignment]
         #  `Union[Task[Any], Future[Any]]`.
         tasks.add(task)
         return task
