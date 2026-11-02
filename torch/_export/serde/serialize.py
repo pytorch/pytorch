@@ -717,12 +717,12 @@ def _find_imported(name: str) -> Any:
     Find the class or function that a saved flat_apply node names, without
     running code from a module that the file chooses. Importing a module runs
     its code, so nothing is imported: the module that defines a name has to be
-    imported before loading, as torch's own are. Only top-level classes and
-    functions are found, and the object must report the same qualified name, so
-    aliases such as ``torch.nn.Module`` (defined in ``torch.nn.modules.module``)
-    are refused. Names in ``__main__`` modules are refused too, because a script
-    differs between processes. That includes ``__mp_main__``, the main script of
-    a multiprocessing child.
+    imported before loading, also when it is part of torch. Only top-level
+    classes and functions are found, and the object must report the same
+    qualified name, so aliases such as ``torch.nn.Module`` (defined in
+    ``torch.nn.modules.module``) are refused. Names in ``__main__`` modules are
+    refused too, because a script differs between processes. That includes
+    ``__mp_main__``, the main script of a multiprocessing child.
     """
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
