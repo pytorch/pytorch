@@ -52,15 +52,14 @@ struct MatmulTile {
 
 // simdgroup-matrix tile GEMM: accumulates out[:rows, :cols] = A[:rows, :k] *
 // B[:k, :cols] in fp32 and writes the tile back.
-template <typename T, int BM, typename Params>
+template <typename T, int BM, typename idx_t>
 inline void matmul_tile_gemm(
     thread const MatmulTile<T>& tile,
-    constant Params& params,
+    constant MatmulParams<idx_t>& params,
     threadgroup T* a_tile,
     threadgroup T* b_tile,
     uint simd_group,
     uint simd_lane) {
-  using idx_t = decltype(params.a_stride_m);
   constexpr int BN = kMatmulTileN;
   constexpr int BK = kMatmulTileK;
   constexpr int WN = 2;
@@ -195,10 +194,10 @@ inline void matmul_tile_gemm(
 // transpose flag, which matmul2d requires (it ignores layouts that contradict
 // the descriptor). half/bfloat multiply at relaxed precision; accumulation
 // stays fp32 via the destination cooperative tensor.
-template <typename T, int BM, int BN, bool TA, bool TB, typename Params>
+template <typename T, int BM, int BN, bool TA, bool TB>
 inline void matmul_mpp_gemm(
     thread const MatmulTile<T>& tile,
-    constant Params& params) {
+    constant MatmulParams<uint64_t>& params) {
   constexpr int NSG = matmul_simdgroups(BM, BN);
   constexpr bool relaxed = !is_same_v<T, float>;
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(

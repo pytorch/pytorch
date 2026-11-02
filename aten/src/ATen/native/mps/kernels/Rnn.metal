@@ -1,10 +1,13 @@
-#include <c10/metal/common.h>
 #include <metal_stdlib>
 
 using namespace metal;
 
+// Threads don't interact, so this only caps the threadgroup. Measured up to 7%
+// faster than the default of 1024.
+constant constexpr uint kCellMaxThreadsPerThreadgroup = 128;
+
 template <typename T>
-[[max_total_threads_per_threadgroup(128)]]
+[[max_total_threads_per_threadgroup(kCellMaxThreadsPerThreadgroup)]]
 kernel void lstm_cell_forward(
     device T* gates,
     device const T* recurrent,
