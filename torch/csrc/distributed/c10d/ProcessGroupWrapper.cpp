@@ -107,17 +107,17 @@ struct CollectiveFingerPrint {
       sizes.reserve(num_tensors);
 
       // 3. Tensor dtypes
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         dtypes.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 4. Device types
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         device_types.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 5. Tensor shapes
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         // 5a. Shape size
         int size = serialized_tensor[index].item<int>();
         index++;

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -47,7 +48,15 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
         return None
     if strides == _contiguous_strides(sizes):
         return tuple(strides)
-    if allow_strided and strides[-1] == 1 and all(stride > 0 for stride in strides):
+    # A zero stride is not a broadcast when the corresponding extent is one.
+    if (
+        allow_strided
+        and strides[-1] == 1
+        and all(
+            stride > 0 or (size == 1 and stride == 0)
+            for size, stride in zip(sizes, strides)
+        )
+    ):
         return tuple(strides)
     return None
 
@@ -79,6 +88,87 @@ def _is_contiguous_shape_stride(
     )
 
 
+@dataclass(frozen=True)
+class _BlockMaskMetadata:
+    count_shape: tuple[int, ...]
+    index_shape: tuple[int, ...]
+    full_count_shape: tuple[int, ...]
+    full_index_shape: tuple[int, ...]
+    full_numel: int
+
+
+def _get_block_mask_metadata(
+    query,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+    *,
+    prefix: str = "",
+    static_reason: str = "requires statically known BlockMask dimensions",
+) -> tuple[_BlockMaskMetadata | None, str]:
+    nodes = (
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+    )
+    try:
+        shapes = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
+            for node in nodes
+        )
+        full_numel = V.graph.sizevars.guard_int(full_kv_num_blocks.get_numel())
+        dtypes = tuple(node.get_dtype() for node in nodes)
+        devices = tuple(node.get_device() for node in nodes)
+    except (AttributeError, TypeError, ValueError):
+        return None, f"{prefix}{static_reason}"
+
+    if any(dtype != torch.int32 for dtype in dtypes):
+        return None, f"{prefix}requires int32 BlockMask metadata"
+    if any(device != query.get_device() for device in devices):
+        return None, f"{prefix}requires BlockMask metadata on the query device"
+    try:
+        strides = tuple(
+            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
+            for node in nodes
+        )
+    except (AttributeError, NotImplementedError, TypeError, ValueError):
+        return None, f"{prefix}requires statically known BlockMask metadata strides"
+    if not all(
+        _is_contiguous_shape_stride(shape, stride)
+        for shape, stride in zip(shapes, strides)
+    ):
+        return None, f"{prefix}requires contiguous BlockMask metadata"
+    return _BlockMaskMetadata(
+        shapes[0], shapes[1], shapes[2], shapes[3], full_numel
+    ), ""
+
+
+def _get_mask_program_config(mask_graph, mask_mod_other_buffers):
+    if is_trivial_mask_graph(mask_graph.graph_module):
+        return {
+            "MASK_PROGRAM": (),
+            "MASK_PROGRAM_OUTPUT": 0,
+            "MASK_BUFFER_COUNT": 0,
+            "MASK_BUFFER_SHAPES": (),
+            "MASK_BUFFER_STRIDES": (),
+        }, ""
+    mask_program, reason = lower_flydsl_mask_graph(
+        mask_graph.graph_module,
+        mask_mod_other_buffers,
+    )
+    if mask_program is None:
+        return None, f"unsupported mask_mod: {reason}"
+    return {
+        "MASK_PROGRAM": mask_program.instructions,
+        "MASK_PROGRAM_OUTPUT": mask_program.output,
+        "MASK_BUFFER_COUNT": mask_program.buffer_count,
+        "MASK_BUFFER_SHAPES": mask_program.buffer_shapes,
+        "MASK_BUFFER_STRIDES": mask_program.buffer_strides,
+    }, ""
+
+
 def _is_gfx950_device(device) -> bool:
     if not flydsl_utils.runtime_available() or not torch.cuda.is_available():
         return False
@@ -87,7 +177,7 @@ def _is_gfx950_device(device) -> bool:
     return str(arch).split(":", 1)[0] == "gfx950"
 
 
-def _check_flydsl_common_compatibility(
+def _get_flydsl_common_config(
     *,
     query,
     key,
@@ -95,37 +185,52 @@ def _check_flydsl_common_compatibility(
     subgraph,
     score_mod_other_buffers,
     mask_mod_other_buffers,
-    extra_tensors=(),
+    extra_strides=(),
     allow_mask_mod_buffers: bool = False,
     allow_strided_bhsd: bool = False,
-) -> str:
+) -> tuple[dict[str, tuple[int, ...] | None] | None, str]:
     device = query.get_device()
     if device is None or device.type != "cuda" or not _is_gfx950_device(device):
-        return "requires ROCm gfx950 and the FlyDSL runtime"
+        return None, "requires ROCm gfx950 and the FlyDSL runtime"
     if query.get_dtype() != torch.bfloat16:
-        return f"supports BF16 only, got {query.get_dtype()}"
+        return None, f"supports BF16 only, got {query.get_dtype()}"
     if query.get_dtype() != key.get_dtype() or query.get_dtype() != value.get_dtype():
-        return "requires query, key, and value to have the same dtype"
+        return None, "requires query, key, and value to have the same dtype"
     if not is_trivial_score_graph(subgraph.graph_module):
-        return "supports identity score_mod only"
+        return None, "supports identity score_mod only"
     if score_mod_other_buffers:
-        return "does not support captured score_mod buffers"
+        return None, "does not support captured score_mod buffers"
     if mask_mod_other_buffers and not allow_mask_mod_buffers:
-        return "does not support captured mask_mod buffers"
+        return None, "does not support captured mask_mod buffers"
 
-    tensors = (query, key, value, *extra_tensors)
-    if not all(
-        _get_supported_bhsd_stride(node, allow_strided=allow_strided_bhsd) is not None
-        for node in tensors
-        if node is not None
+    named_tensors = (
+        ("Q_STRIDE", query),
+        ("K_STRIDE", key),
+        ("V_STRIDE", value),
+        *extra_strides,
+    )
+    strides = tuple(
+        None
+        if node is None
+        else _get_supported_bhsd_stride(node, allow_strided=allow_strided_bhsd)
+        for _, node in named_tensors
+    )
+    if any(
+        node is not None and stride is None
+        for (_, node), stride in zip(named_tensors, strides, strict=True)
     ):
         layout = "4D BHSD tensors with contiguous head dimensions"
         if not allow_strided_bhsd:
             layout = "contiguous 4D BHSD tensors"
-        return f"requires {layout}"
-    if not all(_fits_u32_head_slice(node) for node in tensors if node is not None):
-        return "requires every per-head tensor slice to be smaller than 4 GiB"
-    return ""
+        return None, f"requires {layout}"
+    if not all(
+        _fits_u32_head_slice(node) for _, node in named_tensors if node is not None
+    ):
+        return None, "requires every per-head tensor slice to be smaller than 4 GiB"
+
+    return {
+        name: stride for (name, _), stride in zip(named_tensors, strides, strict=True)
+    }, ""
 
 
 def _get_flydsl_flex_attention_forward_config(
@@ -148,12 +253,6 @@ def _get_flydsl_flex_attention_forward_config(
     if full_kv_num_blocks is None or full_kv_indices is None:
         return None, "requires full_kv_num_blocks/full_kv_indices metadata"
 
-    metadata_nodes = (
-        kv_num_blocks,
-        kv_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-    )
     try:
         b, hq, sq, qk_dim = [
             V.graph.sizevars.guard_int(item) for item in query.get_size()
@@ -164,27 +263,8 @@ def _get_flydsl_flex_attention_forward_config(
         bv, hv, sv, v_dim = [
             V.graph.sizevars.guard_int(item) for item in value.get_size()
         ]
-        mask_shape = [
-            V.graph.sizevars.guard_int(item) for item in kv_num_blocks.get_size()
-        ]
-        index_shape = [
-            V.graph.sizevars.guard_int(item) for item in kv_indices.get_size()
-        ]
-        full_count_shape = [
-            V.graph.sizevars.guard_int(item) for item in full_kv_num_blocks.get_size()
-        ]
-        full_index_shape = [
-            V.graph.sizevars.guard_int(item) for item in full_kv_indices.get_size()
-        ]
-        metadata_shapes = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_size())
-            for node in metadata_nodes
-        )
-        metadata_dtypes = tuple(node.get_dtype() for node in metadata_nodes)
-        metadata_devices = tuple(node.get_device() for node in metadata_nodes)
         sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
         sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
-        full_numel = V.graph.sizevars.guard_int(full_kv_num_blocks.get_numel())
         scale_value = float(scale)
         output_stride = tuple(
             V.graph.sizevars.guard_int(item)
@@ -196,52 +276,38 @@ def _get_flydsl_flex_attention_forward_config(
     except (AttributeError, TypeError, ValueError):
         return None, "requires statically known tensor and BlockMask dimensions"
 
-    if any(dtype != torch.int32 for dtype in metadata_dtypes):
-        return None, "requires int32 BlockMask metadata"
-    if any(device != query.get_device() for device in metadata_devices):
-        return None, "requires BlockMask metadata on the query device"
-    try:
-        metadata_strides = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
-            for node in metadata_nodes
-        )
-    except (AttributeError, NotImplementedError, TypeError, ValueError):
-        return None, "requires statically known BlockMask metadata strides"
-    if not all(
-        _is_contiguous_shape_stride(shape, stride)
-        for shape, stride in zip(metadata_shapes, metadata_strides)
-    ):
-        return None, "requires contiguous BlockMask metadata"
+    metadata, reason = _get_block_mask_metadata(
+        query,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        static_reason="requires statically known tensor and BlockMask dimensions",
+    )
+    if metadata is None:
+        return None, reason
+    mask_shape = metadata.count_shape
+    index_shape = metadata.index_shape
+    full_count_shape = metadata.full_count_shape
+    full_index_shape = metadata.full_index_shape
 
-    trivial_mask = is_trivial_mask_graph(mask_graph.graph_module)
-    mask_program = None
-    if not trivial_mask:
-        mask_program, mask_reason = lower_flydsl_mask_graph(
-            mask_graph.graph_module,
-            mask_mod_other_buffers,
-        )
-        if mask_program is None:
-            return None, f"unsupported mask_mod: {mask_reason}"
+    mask_config, reason = _get_mask_program_config(mask_graph, mask_mod_other_buffers)
+    if mask_config is None:
+        return None, reason
 
     decode = 0 < sq < 128
-    common_reason = _check_flydsl_common_compatibility(
+    common_config, reason = _get_flydsl_common_config(
         query=query,
         key=key,
         value=value,
         subgraph=subgraph,
         score_mod_other_buffers=score_mod_other_buffers,
         mask_mod_other_buffers=mask_mod_other_buffers,
-        allow_mask_mod_buffers=mask_program is not None,
+        allow_mask_mod_buffers=bool(mask_config["MASK_BUFFER_COUNT"]),
         allow_strided_bhsd=not decode,
     )
-    if common_reason:
-        return None, common_reason
-
-    q_stride = _get_supported_bhsd_stride(query, allow_strided=not decode)
-    k_stride = _get_supported_bhsd_stride(key, allow_strided=not decode)
-    v_stride = _get_supported_bhsd_stride(value, allow_strided=not decode)
-    if q_stride is None or k_stride is None or v_stride is None:
-        return None, "requires supported Q/K/V BHSD strides"
+    if common_config is None:
+        return None, reason
 
     if (bkv, hkv, sk) != (bv, hv, sv):
         return None, "requires key and value to have matching B/Hkv/Sk dimensions"
@@ -267,7 +333,7 @@ def _get_flydsl_flex_attention_forward_config(
     if sparse_q_block_size <= 0 or sparse_kv_block_size <= 0:
         return None, "requires positive sparse block sizes"
 
-    has_full_blocks = full_numel != 0
+    has_full_blocks = metadata.full_numel != 0
     max_full_blocks = 1
     if has_full_blocks:
         if full_count_shape != mask_shape:
@@ -315,21 +381,9 @@ def _get_flydsl_flex_attention_forward_config(
             "MAX_FULL_BLOCKS": max_full_blocks,
             "SPARSE_Q_BLOCK_SIZE": sparse_q_block_size,
             "SPARSE_KV_BLOCK_SIZE": sparse_kv_block_size,
-            "MASK_PROGRAM": (() if mask_program is None else mask_program.instructions),
-            "MASK_PROGRAM_OUTPUT": (0 if mask_program is None else mask_program.output),
-            "MASK_BUFFER_COUNT": (
-                0 if mask_program is None else mask_program.buffer_count
-            ),
-            "MASK_BUFFER_SHAPES": (
-                () if mask_program is None else mask_program.buffer_shapes
-            ),
-            "MASK_BUFFER_STRIDES": (
-                () if mask_program is None else mask_program.buffer_strides
-            ),
+            **mask_config,
+            **common_config,
             "SM_SCALE": scale_value,
-            "Q_STRIDE": q_stride,
-            "K_STRIDE": k_stride,
-            "V_STRIDE": v_stride,
             "O_STRIDE": output_stride,
         },
         "",
