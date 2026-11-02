@@ -835,6 +835,13 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         return
     if winner.bmreq is None:
         return
+    # The hooks fire while lowering, before finalize() decides layouts: a still
+    # flexible operand would be tuned at placeholder strides, and TunableOp keys
+    # on ld. A recorded constraint is not this case -- _meta_at reads the strides
+    # through it. #201769 defers the ladder past finalize() instead.
+    layouts = [_as_buffer(n).maybe_get_layout() for n in winner.input_nodes]
+    if any(lay is None or isinstance(lay, ir.FlexibleLayout) for lay in layouts):
+        return
 
     # Require exactly one free symbol across the operands (one dynamic dim).
     symbols: OrderedSet[sympy.Symbol] = OrderedSet()
@@ -939,11 +946,12 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             continue
         buckets.append(sym_val)
         dim_vals.append(dim_val)
-    # Hint first, then largest first. The shared budget is spent in this
-    # order, so whatever sorts last is dropped: the hint leads as the one size
-    # runtime asks for, and the largest cannot starve it.
+    # Served dim first, then largest first. The shared budget is spent in this
+    # order, so whatever sorts last is dropped. Keyed on the dim, not the
+    # symbol: a non-injective expression lets a smaller symbol claim the served
+    # dim during dedup, and then no bucket equals sym_hint.
     order = sorted(
-        range(len(buckets)), key=lambda i: (buckets[i] != sym_hint, -dim_vals[i])
+        range(len(buckets)), key=lambda i: (dim_vals[i] != served_dim, -dim_vals[i])
     )
     buckets = [buckets[i] for i in order]
     dim_vals = [dim_vals[i] for i in order]
@@ -1017,7 +1025,10 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         # Summed: the worker allocates every operand and the output at once.
         metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
         footprint = sum(_meta_bytes(m) for m in metas)
-        if footprint > _TUNABLEOP_MAX_LADDER_BYTES:
+        # The served rung is exempt: it is the shape the model runs, not one
+        # the ladder invented, so the memory is already committed to. It can
+        # still cost one OOM and worker restart if the GPU is near full.
+        if footprint > _TUNABLEOP_MAX_LADDER_BYTES and dim_val != served_dim:
             log.info(
                 "TunableOp range pre-tune for %s skipping dim %d: operands "
                 "and output total %.1f GiB, over the %.1f GiB cap.",
@@ -1067,9 +1078,12 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
-        # The floor applies from the second rung on: holding the first to it
-        # would turn the ladder off wholesale for a budget below the floor.
-        if remaining <= 0 or (i and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET):
+        # The served rung is exempt, by dim rather than position: once it is
+        # memoed, position 0 is the largest rung, and exempting that hands the
+        # whole budget to the one likeliest to time out.
+        if remaining <= 0 or (
+            dim_vals[i] != served_dim and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET
+        ):
             log.warning(
                 "TunableOp range pre-tune for %s stopped after %d/%d sizes with "
                 "%.0fs of its %.0fs budget left.",
@@ -1127,9 +1141,6 @@ def run_queued_pretunes(graph: Any) -> None:
     """Ladder the graph's queued winners, now that layouts are final."""
     pending, graph.pending_tunableop_ladder = graph.pending_tunableop_ladder, []
     for winner in pending:
-        # A layout still flexible here means finalize() has not decided it;
-        # tune nothing rather than guess at its strides.
-        layouts = [_as_buffer(n).maybe_get_layout() for n in winner.input_nodes]
-        if any(lay is None or isinstance(lay, ir.FlexibleLayout) for lay in layouts):
-            continue
+        # An operand still flexible here means finalize() left it undecided;
+        # maybe_range_pretune turns that away rather than guess at its strides.
         maybe_range_pretune(winner)

@@ -25,8 +25,8 @@ import sympy
 import torch
 from torch._inductor import config, ir, select_algorithm as sa, tunableop
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -57,11 +56,10 @@ class _FakeSizevars:
         self._hint = hint
         self.shape_env = mock.Mock()
         self.shape_env.bound_sympy = lambda expr: ValueRanges(*declared)
-        self.shape_env.var_to_hint_override = {}
-        self.hint_overrides: dict = {}
+        self.var_to_hint_override: dict = {}
 
-    def all_unbacked_explicitly_hinted(self, exprs) -> bool:
-        return not free_unbacked_symbols(exprs) - OrderedSet(self.hint_overrides)
+    # The real predicate over the fake's dict, not a stand-in for it.
+    all_unbacked_explicitly_hinted = SizeVarAllocator.all_unbacked_explicitly_hinted
 
     def optimization_hint(self, expr):
         return int(sympy.sympify(expr).subs(self._sym, self._hint))
@@ -416,7 +414,7 @@ class TestTunableOpPretune(TestCase):
         u = sympy.Symbol("u1", positive=True, integer=True)
         winner = self._mm_winner("mm", u)
         with _ladder(u) as submitted:
-            V.graph.sizevars.hint_overrides = {u: 512}
+            V.graph.sizevars.var_to_hint_override = {u: 512}
             tunableop.maybe_range_pretune(winner)
         self.assertTrue(submitted, "an explicit hint must re-enable the ladder")
 
@@ -449,18 +447,28 @@ class TestTunableOpPretune(TestCase):
 
     def test_memo_does_not_depend_on_an_unpinned_filename(self):
         # get_filename() reads "" until pinned; keying on it directly would
-        # scope the first GEMM apart from every later one.
+        # scope the first GEMM apart from every later one. The real resolver
+        # runs over a faked tunable, so the pin happens between the two calls.
         s = sympy.Symbol("s_pin", positive=True, integer=True)
+        real = tunableop._resolve_and_pin_filename_locked
+        pinned = [""]
+
+        def _set_filename(name, insert_device_ordinal=False):
+            pinned[0] = name
+
         with _ladder(s) as submitted:
-            with mock.patch("torch.cuda.tunable.get_filename", return_value=""):
-                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
-            first = len(submitted)
-            self.assertTrue(first)
-            with mock.patch(
-                "torch.cuda.tunable.get_filename", return_value="pinned.csv"
+            with mock.patch.multiple(
+                "torch.cuda.tunable",
+                get_filename=lambda: pinned[0],
+                set_filename=_set_filename,
+            ), mock.patch.object(
+                tunableop, "_resolve_and_pin_filename_locked", lambda device: real(0)
             ):
                 tunableop.maybe_range_pretune(self._mm_winner("mm", s))
-            self.assertEqual(len(submitted), first, "pinning must not rekey")
+                first = len(submitted)
+                self.assertTrue(pinned[0], "the resolver must pin the empty name")
+                tunableop.maybe_range_pretune(self._mm_winner("mm", s))
+        self.assertEqual(len(submitted), first, "pinning must not rekey")
 
     def test_memo_distinguishes_extern_kwargs(self):
         # use_fast_accum is in the signature but not the metas.
@@ -522,6 +530,21 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(dims[0], 512, f"traced hint must run first: {dims}")
         self.assertEqual(dims[1:], sorted(dims[1:], reverse=True))
 
+    def test_rung_order_is_keyed_on_the_dim_not_the_symbol(self):
+        # floor(s/2) is not injective: s=512 and the traced s=513 both give a
+        # dim of 256, so dedup keeps 512 and no bucket equals the hint. The
+        # served dim must still lead, or the budget drops it first.
+        s = sympy.Symbol("s_noninj", positive=True, integer=True)
+        m, k, n = sympy.floor(s / 2), 256, 512
+        winner = _FakeWinner(
+            "mm",
+            [_buffer("mat1", [m, k], [k, 1]), _buffer("mat2", [k, n], [n, 1])],
+            [m, n],
+        )
+        submitted = _run(winner, sym=s, hint=513, declared=(2, 1024))
+        dims = [b.input_tensor_meta[0].sizes[0] for b in submitted]
+        self.assertEqual(dims[0], 256, f"the served dim must run first: {dims}")
+
     def test_deadline_skips_remaining_buckets(self):
         s = sympy.Symbol("s_budget", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
@@ -563,7 +586,16 @@ class TestTunableOpPretune(TestCase):
         with config.patch({"cuda.autotune_tunableop_timeout": 30.0}):
             submitted = _run(self._mm_winner("mm", s), sym=s)
         dims = {b.input_tensor_meta[0].sizes[0] for b in submitted}
-        self.assertIn(512, dims, f"the traced shape was dropped: {sorted(dims)}")
+        self.assertEqual(dims, {512}, "only the traced shape fits a short budget")
+
+    def test_a_short_budget_is_spent_on_the_served_rung_only(self):
+        # Once the served rung is memoed it leaves the ladder, and its floor
+        # exemption must not fall through to the largest rung behind it.
+        s = sympy.Symbol("s_shortwiden", positive=True, integer=True)
+        self.assertTrue(_run(self._mm_winner("mm", s), sym=s, declared=(2, 4096)))
+        with config.patch({"cuda.autotune_tunableop_timeout": 30.0}):
+            wide = _run(self._mm_winner("mm", s), sym=s)
+        self.assertEqual(wide, [], "no invented rung may claim the exemption")
 
     def test_non_ok_outcome_continues(self):
         s = sympy.Symbol("s_cont", positive=True, integer=True)
@@ -590,6 +622,14 @@ class TestTunableOpPretune(TestCase):
         self.assertTrue(first)
         second = _run(self._mm_winner("mm", s), sym=s)
         self.assertEqual(second, [])
+
+    def test_flexible_operand_is_skipped(self):
+        # Lowering-time hooks run before finalize(), so an operand that is
+        # still flexible would be tuned at strides it is about to lose.
+        s = sympy.Symbol("s_flex", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.input_nodes[1].layout = ir.FlexibleLayout(DEVICE, DTYPE, [256, 512])
+        self.assertEqual(_run(winner, sym=s), [])
 
     def test_cpu_winner_is_skipped(self):
         # The worker is a CUDA process: a CPU winner's bmreq would spend the
@@ -675,24 +715,31 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(winner, sym=s), [])
 
     def test_oversize_bucket_is_dropped(self):
-        # Batch s declared at exactly 16384 of 4096x4096 fp16 is 512 GiB per
-        # operand -- over the cap -- while smaller rungs must still submit.
+        # One batch of 4096x4096 fp16 plus operands is ~32.5 MiB, so the cap
+        # admits s up to 252. Traced at 512: that rung is oversize but served,
+        # so it is exempt, while the invented rungs above the cap are dropped.
         s = sympy.Symbol("s_oom", positive=True, integer=True)
         m, k, n = 32, 4096, 4096
         mat1 = _buffer("mat1", [s, m, k], _contiguous_strides([s, m, k]))
         mat2 = _buffer("mat2", [s, k, n], _contiguous_strides([s, k, n]))
         winner = _FakeWinner("bmm", [mat1, mat2], [s, m, n])
-        submitted = _run(winner, sym=s, hint=16384, declared=(2, 16384))
-        self.assertTrue(submitted, "smaller rungs must still submit")
+        submitted = _run(winner, sym=s, hint=512, declared=(2, 16384))
+        batches = set()
         for bmreq in submitted:
             # Summed, as the cap is: the worker allocates them all at once.
             total = sum(
                 math.prod(int(d) for d in meta.sizes) * meta.dtype.itemsize
                 for meta in [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
             )
-            self.assertLessEqual(total, tunableop._TUNABLEOP_MAX_LADDER_BYTES)
-        batches = {b.input_tensor_meta[0].sizes[0] for b in submitted}
-        self.assertNotIn(16384, batches, "the oversize rung must be absent")
+            batch = bmreq.input_tensor_meta[0].sizes[0]
+            batches.add(batch)
+            if batch != 512:
+                self.assertLessEqual(total, tunableop._TUNABLEOP_MAX_LADDER_BYTES)
+        self.assertIn(512, batches, "the served rung is exempt from the cap")
+        self.assertNotIn(16384, batches, "an invented oversize rung must be absent")
+        self.assertTrue(
+            batches - {512}, "rungs under the cap must still submit alongside it"
+        )
 
     def test_select_algorithm_hook_queues_until_layouts_are_final(self):
         # The hook fires while lowering, before finalize() decides layouts, so
@@ -732,6 +779,29 @@ class TestTunableOpPretune(TestCase):
             V.graph.pending_tunableop_ladder.append(winner)
             tunableop.run_queued_pretunes(V.graph)
         self.assertEqual(submitted, [], "a flexible operand must not be tuned")
+
+    @parametrize("path", ("single_choice", "deterministic"))
+    def test_algorithm_selector_queues_on_early_return(self, path):
+        # Both early returns in AlgorithmSelectorCache.__call__ skip
+        # benchmarking, so each needs the hook of its own -- covering only the
+        # path finalize_multi_template_buffers takes would miss them. Neither
+        # reaches a device, so this runs on a CPU-only shard.
+        from torch._inductor import select_algorithm as _sa
+
+        s = sympy.Symbol(f"s_sel_{path}", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.output_node = mock.Mock(return_value=mock.Mock())
+        choices = [winner]
+        if path == "deterministic":
+            choices.append(self._mm_winner("mm", s))
+        with _ladder(s) as submitted:
+            with config.patch({"deterministic": path == "deterministic"}):
+                _, chosen = _sa.AlgorithmSelectorCache()(
+                    "mm", choices, winner.input_nodes, winner.layout
+                )
+            self.assertIs(chosen, winner)
+            self.assertEqual(submitted, [], "an early return must not ladder here")
+            self.assertEqual(len(V.graph.pending_tunableop_ladder), 1)
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
