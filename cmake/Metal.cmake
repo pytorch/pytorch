@@ -54,8 +54,8 @@ set(BFLOAT_METAL_CODE "
   }
 ")
 # Probes what the Metal 4.0 pass actually needs, rather than the language
-# standard alone. Two things drifted apart before: the pass compiles every
-# native/mps/*.metal shader with -std=metal4.0 -mmacos-version-min=26.2, and
+# standard alone. Two things drifted apart before: the pass compiles
+# METAL_40_SHADERS with -std=metal4.0 -mmacos-version-min=26.2, and
 # some SDKs accept that standard while not providing the cooperative-tensor
 # input accessors MppAttention.h calls. A language-only probe then passes and
 # Attention_40.air fails to build.
@@ -80,7 +80,7 @@ set(METAL_40_PROBE_CODE "
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
-    execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
+    execute_process(COMMAND xcrun metal -std=metal3.2 bfloat_inc.metal
                     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
                     OUTPUT_VARIABLE XCRUN_OUTPUT
                     ERROR_VARIABLE XCRUN_OUTPUT

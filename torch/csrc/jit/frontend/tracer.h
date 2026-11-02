@@ -358,7 +358,8 @@ void addInputs(
 
 template <size_t N>
 void addInputs(Node* n, const char* name, std::array<bool, N> value) {
-  throw std::runtime_error(
+  TORCH_CHECK(
+      false,
       "Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 

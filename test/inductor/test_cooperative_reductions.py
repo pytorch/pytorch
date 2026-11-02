@@ -9,6 +9,8 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
+from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.runtime_utils import ceildiv
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
@@ -363,6 +365,18 @@ class TestFixedConfigs(TestCase):
         self.assertEqual(heuristic.call_count, 1)
         self.assertIn("@triton_heuristics.fixed_config(", source_code)
 
+    def _skip_if_too_few_sms(self, cfg, xnumel):
+        # A cooperative launch needs all of its blocks resident at once. These
+        # configs can be heavy enough that only one block fits per SM, so a
+        # device with fewer SMs than blocks (e.g. a small MIG slice) rejects
+        # the launch with "too many blocks in cooperative launch".
+        num_blocks = cfg["RSPLIT"] * ceildiv(xnumel, cfg["XBLOCK"])
+        sm_count = DeviceProperties.create(torch.device(GPU_TYPE)).multi_processor_count
+        if num_blocks > sm_count:
+            self.skipTest(
+                f"cooperative launch needs {num_blocks} SMs, device has {sm_count}"
+            )
+
     @parametrize(
         "persistent,cooperative,cfg",
         [
@@ -409,6 +423,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 64
+        self._skip_if_too_few_sms(cfg, x)
         args = [torch.randn(x, r, device=GPU_TYPE)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
@@ -425,6 +440,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 2, "RSPLIT": 33, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 32
+        self._skip_if_too_few_sms(cfg, 2)
 
         args = [
             torch.stack(
@@ -468,6 +484,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
+        self._skip_if_too_few_sms(cfg, 1)
         args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
