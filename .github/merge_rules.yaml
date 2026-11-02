@@ -269,6 +269,7 @@
   patterns:
   - docs/source/distributed/checkpoint.md
   - torch/distributed/checkpoint/**
+  - test/distributed/checkpoint/**
   approved_by:
   - LucasLLC
   - fegin
@@ -279,6 +280,8 @@
   - kirtiteja
   - mhorowitz
   - saiteja64
+  - ivy-zhou
+  - aelavender
   mandatory_checks_name:
   - EasyCLA
   - Lint
