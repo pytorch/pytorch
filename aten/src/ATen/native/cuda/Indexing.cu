@@ -1050,7 +1050,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 
       T val = src.data[srcOffset] * alpha;
       // See Note [fastAtomicAdd bounds for strided tensors]
-      const int64_t column = dstBounds.column(dstOffset);
+      const IndexType column = dstBounds.column(dstOffset);
       op(dst.data + dstOffset - column, column, dstBounds.row_numel, &val);
     }
 
@@ -1105,7 +1105,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 
     T val = src.data[srcOffset] * alpha;
     // See Note [fastAtomicAdd bounds for strided tensors]
-    const int64_t column = dstBounds.column(dstOffset);
+    const IndexType column = dstBounds.column(dstOffset);
     op(dst.data + dstOffset - column, column, dstBounds.row_numel, &val);
   }
 }

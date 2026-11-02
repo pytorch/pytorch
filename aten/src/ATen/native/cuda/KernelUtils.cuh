@@ -45,9 +45,14 @@ struct FastAtomicAddBounds {
   int64_t row_numel;
 
   // Column of the element at offset; pass (data + offset - column, column,
-  // row_numel) to fastAtomicAdd.
-  __device__ __forceinline__ int64_t column(int64_t offset) const {
-    return offset < row_stride ? offset : offset % row_stride;
+  // row_numel) to fastAtomicAdd. Computed in the caller's index type, since a
+  // 64-bit modulo is noticeably slower than a 32-bit one; row_stride is below
+  // any offset that is not in the first row, so it fits that type.
+  template <typename index_t>
+  __device__ __forceinline__ index_t column(index_t offset) const {
+    return static_cast<int64_t>(offset) < row_stride
+        ? offset
+        : offset % static_cast<index_t>(row_stride);
   }
 };
 

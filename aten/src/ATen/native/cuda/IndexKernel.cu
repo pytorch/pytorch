@@ -365,7 +365,7 @@ void put_kernel(TensorIterator& iter, const TensorBase& output, const bool accum
              const auto bounds = fast_atomic_add_bounds(output);
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
                  [bounds, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
-                   const auto column = static_cast<index_t>(bounds.column(offset));
+                   const index_t column = bounds.column(offset);
                    fastSpecializedAtomicAdd(
                        indexed_ptr + offset - column, column,
                        static_cast<index_t>(bounds.row_numel), iterated);
