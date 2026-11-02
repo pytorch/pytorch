@@ -11,26 +11,37 @@ namespace at::native {
     const int64_t& ndims,
     const Tensor& input,
     const Tensor& target) {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
-        "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+        "Expected input to be a scalar, non-empty 1D tensor, or non-empty 2D "
+        "tensor, but got input with ",
+        ndims,
+        " dimensions and shape ",
         input.sizes());
 
     if (ndims <= 1) {
       nframe = 1;
       dim = ndims == 0 ? 1 : input.size(0);
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           target.dim() <= 1 && target.numel() == dim,
-          "inconsistent target size: ", target.sizes(), " for input of size: ",
-          input.sizes());
+          "Expected target to have at most 1 dimension and ",
+          dim,
+          " elements to match input, but got target with shape ",
+          target.sizes());
     } else {
       nframe = input.size(0);
       dim = input.size(1);
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           target.dim() == 2 && target.size(0) == nframe &&
           target.size(1) == dim,
-          "inconsistent target size: ", target.sizes(), " for input of size: ",
-          input.sizes());
+          "Expected target to be 2D with shape [",
+          nframe,
+          ", ",
+          dim,
+          "] to match input, but got target with ",
+          target.dim(),
+          " dimensions and shape ",
+          target.sizes());
     }
   }
 
