@@ -22,6 +22,7 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
+    CompileCounter,
     EagerAndRecordGraphs,
     empty_line_normalizer,
     InductorAndRecordGraphs,
@@ -3662,6 +3663,87 @@ class TestInvokeSubgraphReuse(TestCase):
             _counting,
         ):
             yield lambda: count
+
+    def _check_reused_region_runtime_guard(self, operation, mutate):
+        class Holder:
+            def __init__(self):
+                self.scale = 2
+                self.callback = torch.sin
+                self.shape_only = torch.ones(2)
+                self.mapping = {1: None, 2: None}
+
+        @nested_compile_region
+        def region(x, holder):
+            return operation(x, holder)
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder() for _ in range(3)]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=False)
+        x = torch.ones(1)
+        with self._count_speculate_calls() as count:
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(count(), 1)
+        self.assertEqual(counter.frame_count, 1)
+        mutate(holders[-1])
+        self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_reused_region_runtime_scalar_guard(self):
+        self._check_reused_region_runtime_guard(
+            lambda x, holder: x * holder.scale,
+            lambda holder: setattr(holder, "scale", 3),
+        )
+
+    def test_reused_region_runtime_callback_guard(self):
+        self._check_reused_region_runtime_guard(
+            lambda x, holder: holder.callback(x),
+            lambda holder: setattr(holder, "callback", torch.cos),
+        )
+
+    def test_reused_region_runtime_shape_only_guard(self):
+        self._check_reused_region_runtime_guard(
+            lambda x, holder: x + holder.shape_only.shape[0],
+            lambda holder: setattr(holder, "shape_only", torch.ones(3)),
+        )
+
+    def test_reused_region_runtime_key_order_guard(self):
+        def reorder(holder):
+            holder.mapping[1] = holder.mapping.pop(1)
+
+        self._check_reused_region_runtime_guard(
+            lambda x, holder: x + next(iter(holder.mapping)), reorder
+        )
+
+    def test_reused_region_runtime_guard_nested(self):
+        class Holder:
+            scale = 2
+
+        @nested_compile_region
+        def inner(x, holder):
+            return x * holder.scale
+
+        @nested_compile_region
+        def outer(x, pair):
+            return inner(x, pair[0]) + inner(x, pair[1])
+
+        def fn(x, pairs):
+            return outer(x, pairs[0]), outer(x, pairs[1])
+
+        pairs = [[Holder(), Holder()], [Holder(), Holder()]]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        with self._count_speculate_calls() as count:
+            self.assertEqual(compiled(x, pairs), fn(x, pairs))
+        self.assertEqual(count(), 2)
+        pairs[-1][-1].scale = 3
+        self.assertEqual(compiled(x, pairs), fn(x, pairs))
+        self.assertEqual(counter.frame_count, 2)
 
     def test_subgraph_reuse_skips_tracing(self):
         @nested_compile_region

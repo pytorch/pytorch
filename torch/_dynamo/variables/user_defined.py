@@ -5439,7 +5439,7 @@ class DefaultDictVariable(ConstDictVariable):
     ) -> "VariableTracker":
         if len(args) != 1:
             raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
-        return self.mp_subscript_impl(tx, args[0])
+        return DefaultDictVariable.mp_subscript_impl(self, tx, args[0])
 
     def _missing(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs

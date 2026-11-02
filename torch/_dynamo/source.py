@@ -826,16 +826,33 @@ class GetItemSource(ChainedSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class DictKeysSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "list"))
+
+        def load_keys() -> None:
+            codegen.load_import_from("builtins", "dict")
+            codegen.append_output(codegen.create_load_attr("keys"))
+
+        codegen.add_push_null(load_keys)
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return "list(dict.keys({0}))"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class ConstDictKeySource(ChainedSource):
     index: int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
-        )
-        codegen(self.base)
+        # Reuse a storage-order snapshot across indices in both prologue and suffix codegen.
+        codegen(DictKeysSource(self.base))
         codegen.append_output(codegen.create_load_const(self.index))
-        codegen.extend_output(create_call_function(2, False))
+        codegen.append_output(create_binary_subscr())
 
     @functools.cached_property
     def _name_template(self) -> str:
