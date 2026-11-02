@@ -475,6 +475,12 @@ class TestOrderedColRoute(TestCase):
         view = torch.empty(shape, device="meta")
         self.assertEqual(kg._ordered_col_route_ok(view, nfields, cc), routed)
 
+    @parametrize("dtype", [torch.float16, torch.float64, torch.int8])
+    def test_gate_admits_measured_dtypes(self, dtype):
+        view = torch.empty((16, 128, 128), device="meta", dtype=dtype)
+        routed = kg._ordered_col_route_ok(view, 1, (10, 0))
+        self.assertEqual(routed, dtype == torch.float16)
+
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
