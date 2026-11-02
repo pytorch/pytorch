@@ -1,20 +1,10 @@
 #pragma once
 
-#include <c10/metal/common.h>
+#include <ATen/native/mps/kernels/Matmul.h>
 
-C10_METAL_CONSTEXPR uint32_t kGroupedMMTileN = 64;
-C10_METAL_CONSTEXPR uint32_t kGroupedMMTileK = 16;
 C10_METAL_CONSTEXPR uint32_t kGroupedMMFewRowsMax = 32;
 C10_METAL_CONSTEXPR uint32_t kGroupedMMFewRowsSimdgroups = 16;
 C10_METAL_CONSTEXPR uint32_t kGroupedMMFewRowsLaneChunk = 16;
-
-// Tuned on M5 Pro: the 256-wide MPP tile wants eight SIMD groups, narrower
-// tiles two or four depending on their row count.
-inline constexpr uint32_t grouped_mm_simdgroups(
-    uint32_t tile_rows,
-    uint32_t tile_cols) {
-  return tile_cols >= 256 ? 8 : tile_rows >= 64 ? 4 : 2;
-}
 
 template <typename idx_t>
 struct GroupedMMParams {
