@@ -158,6 +158,11 @@ def inline_lru_cache_fn_with_default_args(x, y, _=None):
     return torch.sin(x * y)
 
 
+@functools.lru_cache
+def mixed_scope_lru_wrapper():
+    return 1
+
+
 @torch.jit.script_if_tracing
 def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
@@ -6089,25 +6094,23 @@ class GraphModule(torch.nn.Module):
             return 1
 
         cached_fn.tag = 1
-        other_fn.tag = 1
+        other_fn.tag = 2
 
         def fn(x, wrapper):
             if global_first:
-                return x + inline_lru_cache_fn_with_default_args.tag + wrapper.tag
-            return x + wrapper.tag + inline_lru_cache_fn_with_default_args.tag
+                return x + mixed_scope_lru_wrapper.tag + wrapper.tag
+            return x + wrapper.tag + mixed_scope_lru_wrapper.tag
 
         backend = CompileCounterWithBackend("eager")
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         x = torch.tensor(10)
-        with patch.dict(globals(), inline_lru_cache_fn_with_default_args=cached_fn):
+        with patch.dict(globals(), mixed_scope_lru_wrapper=cached_fn):
             self.assertEqual(opt_fn(x, cached_fn), torch.tensor(12))
             self.assertEqual(backend.frame_count, 1)
             if replace_global:
-                globals()["inline_lru_cache_fn_with_default_args"] = other_fn
-                other_fn.tag = 2
+                globals()["mixed_scope_lru_wrapper"] = other_fn
                 wrapper = cached_fn
             else:
-                other_fn.tag = 2
                 wrapper = other_fn
             self.assertEqual(fn(x, wrapper), torch.tensor(13))
             self.assertEqual(opt_fn(x, wrapper), torch.tensor(13))
