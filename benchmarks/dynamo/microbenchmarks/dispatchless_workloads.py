@@ -174,7 +174,9 @@ def benchmark_variant(
                 for source in code
             ),
             "dispatchless_call_remains": any(
-                "flat_dispatchless_call(" in source for source in code
+                name in source
+                for source in code
+                for name in ("flat_dispatchless_call(", "flat_dispatchless_graph_call(")
             ),
         }
     return {

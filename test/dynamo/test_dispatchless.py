@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from threading import Barrier
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.testing import EagerAndRecordGraphs
@@ -12,6 +13,7 @@ from torch._library.dispatchless import (
     _flat_call,
     dispatchless_custom_op,
     flat_dispatchless_call,
+    flat_dispatchless_graph_call,
 )
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 from torch.testing._internal.common_utils import (
@@ -27,6 +29,10 @@ from torch.utils._python_dispatch import TorchDispatchMode
 class Payload:
     value: torch.Tensor
     scale: int
+
+
+_guarded_global = 1
+_hidden_tensor = None
 
 
 class DispatchlessTest(PytreeRegisteringTestCase):
@@ -61,7 +67,12 @@ class DispatchlessTest(PytreeRegisteringTestCase):
         x = torch.arange(6.0).reshape(2, 3)
         original = x.clone()
         original_stride = x.stride()
-        with self.assertRaisesRegex(RuntimeError, "must not mutate input tensors"):
+        message = (
+            "inplace view on a graph input"
+            if execution == "dynamo" and mutation == "metadata"
+            else "must not mutate input tensors"
+        )
+        with self.assertRaisesRegex(RuntimeError, message):
             self.trace_for_tensor_checks(fn, x, execution)
         self.assertEqual(x, original)
         self.assertEqual(x.stride(), original_stride)
@@ -312,7 +323,7 @@ class DispatchlessTest(PytreeRegisteringTestCase):
         gm = backend.graphs[0]
         gm.graph.lint()
         targets = [node.target for node in gm.graph.nodes if node.op == "call_function"]
-        self.assertEqual(targets.count(flat_dispatchless_call), 1)
+        self.assertEqual(targets.count(flat_dispatchless_graph_call), 1)
         self.assertNotIn(torch.sin, targets)
 
     def test_dynamo_dynamic_shapes(self):
@@ -365,7 +376,400 @@ class DispatchlessTest(PytreeRegisteringTestCase):
         x = torch.randn(4)
         self.assertEqual(compiled(x), fn(x))
         targets = [node.target for node in backend.graphs[0].graph.nodes]
-        self.assertEqual(targets.count(flat_dispatchless_call), 2)
+        self.assertEqual(targets.count(flat_dispatchless_graph_call), 2)
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_dynamo_executes_captured_graph(self, backend):
+        @dispatchless_custom_op
+        def op(x):
+            return x + (1 if torch.compiler.is_compiling() else 2)
+
+        x = torch.randn(3)
+        compiled = torch.compile(op, backend=backend, fullgraph=True)
+        self.assertEqual(op(x), x + 2)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(compiled(x + 1), x + 2)
+
+    @parametrize(
+        "dependency",
+        ["closure", "default", "kwdefault", "helper", "container", "attribute"],
+    )
+    def test_dynamo_guards_backing_function(self, dependency):
+        class State:
+            offset = 1
+
+        offset = 1
+        state = {"offset": 1}
+        obj = State()
+        helper = lambda x: x + 1
+
+        @dispatchless_custom_op
+        def op(x, default=1, *, kwdefault=1):
+            if dependency == "closure":
+                return x + offset
+            if dependency == "default":
+                return x + default
+            if dependency == "kwdefault":
+                return x + kwdefault
+            if dependency == "helper":
+                return helper(x)
+            if dependency == "attribute":
+                return x + obj.offset
+            return x + state["offset"]
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(op, backend=backend, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(compiled(x), x + 1)
+        offset = 2
+        state["offset"] = 2
+        obj.offset = 2
+        helper = lambda x: x + 2
+        op.__wrapped__.__defaults__ = (2,)
+        op.__wrapped__.__kwdefaults__ = {"kwdefault": 2}
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(compiled(x + 1), x + 3)
+        self.assertEqual(len(backend.graphs), 2)
+
+    @parametrize("metadata", [False, True])
+    @parametrize("preused", [False, True])
+    @parametrize("access", ["closure", "container", "attribute", "global"])
+    def test_dynamo_rejects_hidden_tensor(self, metadata, preused, access):
+        hidden = torch.ones(3)
+        state = [hidden]
+        obj = Payload(hidden, 1)
+
+        @dispatchless_custom_op
+        def op(x):
+            if access == "container":
+                value = state[0]
+            elif access == "attribute":
+                value = obj.value
+            elif access == "global":
+                value = _hidden_tensor
+            else:
+                value = hidden
+            return x + (value.shape[0] if metadata else value)
+
+        def fn(x):
+            if preused:
+                x = x + hidden.sum()
+            return op(x)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with (
+            patch.dict(globals(), {"_hidden_tensor": hidden}),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "explicit arguments"),
+        ):
+            compiled(torch.zeros(3))
+
+    def test_dynamo_captured_explicit_tensor_rebinding(self):
+        hidden = torch.ones(3)
+
+        @dispatchless_custom_op
+        def op(x):
+            return x + hidden
+
+        compiled = torch.compile(op, backend="eager", fullgraph=True)
+        x = hidden
+        self.assertEqual(compiled(x), x * 2)
+        hidden = torch.zeros(3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "explicit arguments"
+        ):
+            compiled(x)
+
+    def test_dynamo_unused_tensor_default(self):
+        @dispatchless_custom_op
+        def op(x, bias=torch.ones(3)):
+            return x + bias
+
+        compiled = torch.compile(op, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(compiled(x, torch.zeros(3)), x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "explicit arguments"
+        ):
+            compiled(x)
+
+    @parametrize(
+        "escape", ["allow_in_graph", "nonstrict_trace", "assume_constant_result"]
+    )
+    def test_dynamo_rejects_opaque_helpers_before_execution(self, escape):
+        calls = []
+
+        def helper(x):
+            calls.append(1)
+            return x.sin()
+
+        helper = getattr(torch._dynamo, escape)(helper)
+        if escape == "allow_in_graph":
+            self.addCleanup(torch._dynamo.disallow_in_graph, helper)
+
+        @dispatchless_custom_op
+        def op(x):
+            return helper(x)
+
+        compiled = torch.compile(op, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "guarded Dynamo tracing"
+        ):
+            compiled(torch.ones(3))
+        self.assertEqual(calls, [])
+
+    def test_dynamo_rejects_python_side_effects(self):
+        state = []
+
+        @dispatchless_custom_op
+        def op(x):
+            state.append(1)
+            return x.sin()
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(op, backend="eager", fullgraph=True)(torch.ones(3))
+        self.assertEqual(state, [])
+
+    def test_dynamo_guards_globals_and_unused_state(self):
+        state = {"unused": torch.ones(3)}
+
+        @dispatchless_custom_op
+        def op(x):
+            if x.ndim == 100:
+                return state["unused"]
+            return x + _guarded_global
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(op, backend=backend, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(compiled(x), x + 1)
+        state["unused"] = torch.zeros(5)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(len(backend.graphs), 1)
+        with patch.dict(globals(), {"_guarded_global": 2}):
+            self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(len(backend.graphs), 2)
+
+    @parametrize(
+        "access", ["getattr", "hasattr", "type", "torch_metadata", "list_operand"]
+    )
+    @parametrize("preused", [False, True])
+    def test_dynamo_rejects_unpacked_hidden_tensors(self, access, preused):
+        hidden = torch.ones(3)
+        values = (hidden,)
+        attr_args = (hidden, "dtype")
+
+        @dispatchless_custom_op
+        def op(x):
+            if access == "getattr":
+                return x.to(getattr(*attr_args))
+            if access == "hasattr":
+                return x + hasattr(*attr_args)
+            if access == "type":
+                return x + (next(map(type, values)) is torch.Tensor)
+            if access == "torch_metadata":
+                return x + next(map(torch.is_floating_point, values))
+            return x + torch.cat(values)
+
+        def fn(x):
+            if preused:
+                x = x + hidden.sum()
+            return op(x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "explicit arguments"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+    def test_dynamo_rejects_constant_result_method(self):
+        calls = []
+
+        class Helper:
+            @torch._dynamo.assume_constant_result
+            def offset(self):
+                calls.append(1)
+                return 2
+
+        helper = Helper()
+
+        @dispatchless_custom_op
+        def op(x):
+            return x + helper.offset()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "guarded Dynamo tracing"
+        ):
+            torch.compile(op, backend="eager", fullgraph=True)(torch.ones(3))
+        self.assertEqual(calls, [])
+
+    def test_dynamo_rejects_side_effect_safety_override(self):
+        from torch._dynamo.utils import (
+            _disable_side_effect_safety_checks_for_current_subtracer,
+        )
+
+        @dispatchless_custom_op
+        def op(x):
+            _disable_side_effect_safety_checks_for_current_subtracer()
+            return x.sin()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "guarded Dynamo tracing"
+        ):
+            torch.compile(op, backend="eager", fullgraph=True)(torch.ones(3))
+
+    @parametrize("metadata", [False, True])
+    def test_dynamo_nested_capture_rejects_hidden_tensors(self, metadata):
+        hidden = torch.ones(3)
+
+        @dispatchless_custom_op
+        def inner(x):
+            return x + (hidden.shape[0] if metadata else hidden)
+
+        @dispatchless_custom_op
+        def outer(x):
+            return inner(x).sin()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "explicit arguments"
+        ):
+            torch.compile(outer, backend="eager", fullgraph=True)(torch.ones(3))
+
+    @parametrize("tensor_output", [False, True])
+    def test_dynamo_factories_and_scalar_only_outputs(self, tensor_output):
+        @dispatchless_custom_op
+        def op(value=3):
+            if tensor_output:
+                return {"value": torch.tensor([value]) + 1, "constant": None}
+            return {"value": value + 1, "constant": None}
+
+        compiled = torch.compile(op, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), op())
+        self.assertEqual(compiled(5), op(5))
+
+    def test_dynamo_unsupported_capture_can_graph_break(self):
+        hidden = torch.ones(3)
+
+        @dispatchless_custom_op
+        def op(x):
+            return x + hidden
+
+        def fn(x):
+            return op(x.sin()).cos()
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(3)
+        self.assertEqual(compiled(x), fn(x))
+        for gm in backend.graphs:
+            self.assertNotIn(flat_dispatchless_call, [n.target for n in gm.graph.nodes])
+
+    def test_dynamo_rejects_storage_less_wrapper(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin()
+
+        x = TwoTensor(torch.ones(3), torch.ones(3))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "tensor representation"
+        ):
+            torch.compile(op, backend="eager", fullgraph=True)(x)
+
+    def test_dynamo_rejects_leaf_function_before_execution(self):
+        from torch._dynamo.decorators import leaf_function
+
+        calls = []
+
+        @leaf_function
+        def helper(x):
+            calls.append("eager")
+            return (x.sin(),)
+
+        @helper.register_fake
+        def helper_fake(x):
+            calls.append("fake")
+            return (torch.empty_like(x),)
+
+        @dispatchless_custom_op
+        def op(x):
+            return helper(x)[0]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "guarded Dynamo tracing"
+        ):
+            torch.compile(op, backend="eager", fullgraph=True)(torch.ones(3))
+        self.assertEqual(calls, [])
+
+    @parametrize("mutation", [False, True])
+    def test_dynamo_rejects_impure_nested_body(self, mutation):
+        @dispatchless_custom_op
+        def inner(x):
+            if mutation:
+                torch._foreach_add_([x], 1)
+                return x.sin()
+            return x.view(-1)
+
+        @dispatchless_custom_op
+        def outer(x):
+            return inner(x).cos()
+
+        x = torch.ones(3)
+        message = "must not mutate" if mutation else "must not alias"
+        with self.assertRaisesRegex(RuntimeError, message):
+            torch.compile(outer, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x, torch.ones(3))
+
+    def test_dynamo_rejects_unsourced_operator(self):
+        def fn(x):
+            op = dispatchless_custom_op(lambda x: x.sin())
+            return op(x)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+    def test_dynamo_traces_constant_foldable_polyfill(self):
+        from torch._dynamo import trace_rules
+        from torch._dynamo.variables.builder import VariableBuilder
+        from torch._dynamo.variables.functions import PolyfilledFunctionVariable
+
+        calls = []
+
+        def offset():
+            calls.append(1)
+            return _guarded_global
+
+        @torch._dynamo.substitute_in_graph(offset, can_constant_fold_through=True)
+        def offset_polyfill():
+            return _guarded_global
+
+        for fn in (offset, offset_polyfill):
+            self.addCleanup(VariableBuilder._id_dispatch().pop, id(fn), None)
+            self.addCleanup(trace_rules._polyfilled_function_ids.remove, id(fn))
+            self.addCleanup(trace_rules.get_torch_obj_rule_map().pop, fn, None)
+            self.addCleanup(
+                PolyfilledFunctionVariable._get_polyfill_handlers().pop, fn, None
+            )
+
+        @dispatchless_custom_op
+        def op(x):
+            return x + offset()
+
+        compiled = torch.compile(op, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        self.assertEqual(compiled(x), x + 1)
+        with patch.dict(globals(), {"_guarded_global": 2}):
+            self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(calls, [])
+
+    def test_dynamo_mutation_is_unsupported_capture(self):
+        @dispatchless_custom_op
+        def op(x):
+            torch._foreach_add_([x], 1)
+            return x.sin()
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "must not mutate"):
+            torch.compile(op, backend="eager", fullgraph=True)(torch.ones(3))
 
     def test_nested_operators_and_repeated_inputs(self):
         @dispatchless_custom_op

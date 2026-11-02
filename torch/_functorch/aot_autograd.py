@@ -28,7 +28,12 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
-from torch._library.dispatchless import _flat_call, flat_dispatchless_call
+from torch._library.dispatchless import (
+    _flat_call,
+    _flat_graph_call,
+    flat_dispatchless_call,
+    flat_dispatchless_graph_call,
+)
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
 from torch._subclasses import FakeTensorMode
@@ -518,6 +523,7 @@ def create_aot_state(
     decompositions = aot_config.decompositions or {}
     decompositions = {
         flat_dispatchless_call: _flat_call,
+        flat_dispatchless_graph_call: _flat_graph_call,
         **aot_autograd_decompositions,
         **decompositions,
     }

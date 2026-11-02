@@ -1049,6 +1049,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
 
+        if tx.output.current_tracer.dispatchless_capture_policy is not None and (
+            self.is_constant
+            or self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            tx.output.current_tracer.dispatchless_capture_policy.reject_escape(
+                self.get_name()
+            )
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -2206,6 +2215,9 @@ def invoke_and_store_as_constant(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
+    if tx.output.current_tracer.dispatchless_capture_policy is not None:
+        tx.output.current_tracer.dispatchless_capture_policy.reject_escape(name)
+
     def convert(x: VariableTracker) -> Any:
         if x.is_tensor():
             return cast("TensorVariable", x).get_real_value()
@@ -3960,8 +3972,10 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
+        if (
+            tx.output.current_tracer.dispatchless_capture_policy is None
+            and self.can_constant_fold_through()
+            and check_unspec_or_constant_args(args, kwargs)
         ):
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
