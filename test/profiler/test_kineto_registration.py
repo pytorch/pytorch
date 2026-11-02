@@ -25,8 +25,9 @@ class TestKinetoRegistration(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_device_tracing_decided_per_session(self):
-        # Each session decides for itself whether to trace the device, whatever
-        # the session that registered Kineto asked for.
+        # Runs several profiling sessions, some with the device and some without.
+        # Sessions without the device must see no device traces, and sessions
+        # with the device must see them.
         x = torch.ones(64, 64, device="cuda")
         runtime_prefix = "cuda" if torch.version.cuda else "hip"
 
