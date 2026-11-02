@@ -2703,6 +2703,11 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   setup_torch_trace
+  if [[ "${TEST_CONFIG}" == "inductor_huggingface" &&
+        "${BUILD_ENVIRONMENT}" == *cuda* &&
+        "${SHARD_NUMBER}" -eq 1 ]]; then
+    python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  fi
   if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
     test_unbacked_parity_smoketest
   else
