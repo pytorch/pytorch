@@ -176,6 +176,21 @@ class DispatchlessCustomOpVariable(VariableTracker):
     def python_type(self) -> type:
         return type(self.value)
 
+    def call_obj_hasattr(self, tx, name):
+        if self.source is not None:
+            install_guard(
+                self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            )
+        return VariableTracker.build(tx, hasattr(self.value, name))
+
+    def tp_getattro_impl(self, tx, name):
+        source = AttrSource(self.source, name) if self.source is not None else None
+        try:
+            value = getattr(self.value, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx, args=[name])
+        return VariableTracker.build(tx, value, source=source)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",

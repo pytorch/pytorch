@@ -24,6 +24,26 @@ def _proxy_mode_getter() -> Callable[[], ProxyTorchDispatchMode | None]:
     return get_proxy_mode
 
 
+def _trace_through_transforms(args) -> bool:
+    import torch
+    import torch.utils._pytree as pytree
+
+    # The C++ any-autocast helper does not yet include MPS or MAIA.
+    return (
+        torch._C._are_functorch_transforms_active()
+        or torch._C._is_any_autocast_enabled()
+        or torch.is_autocast_enabled("mps")
+        or torch.is_autocast_enabled("maia")
+        or (
+            torch.is_grad_enabled()
+            and any(
+                isinstance(arg, torch.Tensor) and arg.requires_grad
+                for arg in pytree.tree_leaves(args)
+            )
+        )
+    )
+
+
 @dataclass(frozen=True, eq=False)
 class _DispatchlessCustomOp(Generic[_P, _R]):
     __wrapped__: Callable[_P, _R]
@@ -31,6 +51,8 @@ class _DispatchlessCustomOp(Generic[_P, _R]):
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         mode = _proxy_mode_getter()()
         if mode is None:
+            return self.__wrapped__(*args, **kwargs)
+        if _trace_through_transforms((args, kwargs)):
             return self.__wrapped__(*args, **kwargs)
 
         import torch.utils._pytree as pytree
@@ -59,9 +81,12 @@ def dispatchless_custom_op(fn: Callable[_P, _R]) -> _DispatchlessCustomOp[_P, _R
 
     The function must not mutate inputs or Python state, or return tensor aliases.
     These purity requirements are preconditions, not eager runtime checks.
-    Autograd follows the backing function eagerly and with Inductor. Other AOT
-    backends must decompose the operator before differentiating it. Custom
-    gradient registration and export serialization are not supported.
+    Autograd follows the backing function. AOTAutograd decomposes the operator
+    before differentiating it. Proxy tracing also traces through the backing
+    function under autograd, torch.func transforms, and autocast. Custom gradient
+    registration and export serialization are not supported. Compiling
+    ``torch.func.functionalize(fn)`` has the same restrictions as for plain
+    functions; eager functionalization and tracing its result are supported.
     """
     if not callable(fn):
         raise TypeError("dispatchless_custom_op expects a callable")
@@ -113,6 +138,8 @@ class _FlatDispatchlessCall(HigherOrderOperator):
     def __call__(self, func_spec, input_spec, output_spec, *flat_args):
         mode = _proxy_mode_getter()()
         if mode is None:
+            return _flat_call(func_spec, input_spec, output_spec, *flat_args)
+        if _trace_through_transforms(flat_args):
             return _flat_call(func_spec, input_spec, output_spec, *flat_args)
 
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
