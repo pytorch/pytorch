@@ -306,6 +306,9 @@ def copy_impl(
 ) -> ComplexTensor:
     src_re, src_im = split_complex_arg(src)
     if not self.dtype.is_complex:
+        warnings.warn(
+            "Casting complex values to real discards the imaginary part", UserWarning
+        )
         return aten.copy(self, src_re, non_blocking=non_blocking)
     self_re, self_im = split_complex_arg(self)
     return ComplexTensor(
