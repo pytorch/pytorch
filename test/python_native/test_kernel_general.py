@@ -302,21 +302,24 @@ class TestKernelGeneral(TestCase):
 
     def test_uniform_welford_tree(self):
         """Equal-count trees must retain Welford accuracy without serial counts."""
-        rows, count = 17, 1024
-        x = torch.randn(rows, count, device="cuda")
-        out = torch.empty(rows, device="cuda")
-        op = kg.ReduceBlock(
-            T.WelfordOps(correction=1, acc=cutlass.Float32),
-            count=count,
-            num_o=rows,
-            red_pairs=((count, 1),),
-            kept_pairs=((rows, count),),
-            tree_count=count,
-        )
-        kg._launch(
-            op, ("test_uniform_welford_tree",) + op.cache_sig, [x.flatten()], [out]
-        )
-        self.assertEqual(out, x.var(dim=1), atol=1e-5, rtol=1e-5)
+        rows = 17
+        # 4095 over 64 threads leaves leftover subtrees and a masked 63-lane remainder.
+        for count, block in ((1024, 128), (4095, 64), (4096, 64)):
+            with self.subTest(count=count, block=block):
+                x = torch.randn(rows, count, device="cuda")
+                out = torch.empty(rows, device="cuda")
+                op = kg.ReduceBlock(
+                    T.WelfordOps(correction=1, acc=cutlass.Float32),
+                    count=count,
+                    num_o=rows,
+                    red_pairs=((count, 1),),
+                    kept_pairs=((rows, count),),
+                    block=block,
+                    tree_count=count,
+                )
+                key = ("test_uniform_welford_tree",) + op.cache_sig
+                kg._launch(op, key, [x.flatten()], [out])
+                self.assertEqual(out, x.var(dim=1), atol=1e-5, rtol=1e-5)
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every

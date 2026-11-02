@@ -579,9 +579,9 @@ def reduce_ordered_col(
         )
         if cfg is None and split:
             return None
-    op_kwargs = {}
+    workers, columns = _ORDERED_WORKER_WARPS, WARP
     if cfg is not None:
-        op_kwargs = {"worker_warps": cfg.worker_warps, "tile_columns": cfg.tile_columns}
+        workers, columns = cfg.worker_warps, cfg.tile_columns
         if full_tiles is None:
             full_tiles = cfg.full_tiles
     if split and full_tiles and plan.split[0] > 1 and plan.split[1] != plan.split[2]:
@@ -594,7 +594,8 @@ def reduce_ordered_col(
                 trait.nfields,
                 full_tiles=True,
                 partition_count=plan.split[0] - 1,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
             _OrderedColReduce(
                 trait,
@@ -604,7 +605,8 @@ def reduce_ordered_col(
                 trait.nfields,
                 partition_begin=plan.split[0] - 1,
                 partition_count=1,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
         )
     else:
@@ -616,7 +618,8 @@ def reduce_ordered_col(
                 C,
                 trait.nfields if split else nouts,
                 full_tiles=False if full_tiles is None else full_tiles,
-                **op_kwargs,
+                worker_warps=workers,
+                tile_columns=columns,
             ),
         )
     outs = [
