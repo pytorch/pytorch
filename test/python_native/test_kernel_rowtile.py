@@ -514,6 +514,34 @@ class TestKernelRowTile(TestCase):
         )
         self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-5)
 
+    @parametrize(
+        "op,dtype,columns",
+        [
+            ("sum", torch.float16, 255),
+            ("sum", torch.bfloat16, 16383),
+            ("argmax", torch.float32, 1025),
+            ("var_mean", torch.float32, 1025),
+        ],
+        name_fn=lambda op, dtype, columns: f"{op}_{str(dtype)[6:]}_{columns}",
+    )
+    def test_ragged_vector_routed_traits(self, op, dtype, columns):
+        """Serve the traits and widths the B200 ragged-row route admits."""
+        # Small integers keep sums exact and give argmax ties to break.
+        x = torch.randint(-4, 5, (33, columns), device="cuda").to(dtype)
+        trait, outs = {
+            "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
+            "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
+            "var_mean": (T.VarMeanOps(correction=1), [torch.float32] * 2),
+        }[op]
+        kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
+        got = rt.reduce_row_tile(trait, f"ragged_{op}", x, outs, **kw)
+        expected = {
+            "sum": lambda: (x.float().sum(dim=1),),
+            "argmax": lambda: (x.argmax(dim=1),),
+            "var_mean": lambda: torch.var_mean(x.float(), dim=1),
+        }[op]()
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
 
 instantiate_parametrized_tests(TestKernelRowTile)
 
