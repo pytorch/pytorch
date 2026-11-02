@@ -718,6 +718,17 @@ class TestGeomspace(TestCase):
         self._check(_np.float32(1), _np.float32(7), 5)
         self._check(_np.float32(1), _np.float32(7), 5, dtype="float32")
 
+    @parametrize("start, stop", [(1, 7), (1.0, 7.0), (1, 7j)])
+    def test_geomspace_default_float_dtype(self, start, stop):
+        try:
+            w.set_default_dtype(fp_dtype="float32")
+            res = w.geomspace(start, stop, 5)
+            expected = w.complex64 if isinstance(stop, complex) else w.float32
+            assert_equal(res.dtype, expected)
+            assert_allclose(res, _np.geomspace(start, stop, 5), rtol=1e-6)
+        finally:
+            w.set_default_dtype(fp_dtype="numpy")
+
     def test_geomspace_zero_raises(self):
         with self.assertRaises(ValueError):
             w.geomspace(0, 1000, num=4)

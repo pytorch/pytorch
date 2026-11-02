@@ -361,11 +361,14 @@ def geomspace(
     # the requested dtype at the end: an integer or half-precision dtype
     # would otherwise truncate the log10 exponents before interpolation.
     float_dtype = _dtypes_impl.default_dtypes().float_dtype
+    # Integer and bool endpoints take the default float dtype, as in linspace.
+    if not (start.is_floating_point() or start.is_complex()):
+        start = start.to(float_dtype)
+    if not (stop.is_floating_point() or stop.is_complex()):
+        stop = stop.to(float_dtype)
     comp_dtype = _dtypes_impl.result_type_impl(
         start, stop, torch.empty((), dtype=float_dtype if dtype is None else dtype)
     )
-    if not (comp_dtype.is_floating_point or comp_dtype.is_complex):
-        comp_dtype = float_dtype
     if dtype is None:
         dtype = comp_dtype
     start = start.to(comp_dtype)
