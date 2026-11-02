@@ -2101,14 +2101,12 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and is_user_kernel_mutation_hop(n.target)
-                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+                and (info := get_user_kernel_hop_info(n.target)) is not None
+                and n.target is info.mutation
+                and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
-                debug("user_defined_triton_kernel_layout_constraints")
-                if (
-                    config.triton_kernel_default_layout_constraint
-                    == "needs_fixed_stride_order"
-                ):
+                debug("user_defined_kernel_layout_constraints")
+                if constraint == "needs_fixed_stride_order":
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
@@ -2129,7 +2127,8 @@ class GraphLowering(torch.fx.Interpreter):
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
-                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                        f"Unknown layout constraint for {info.dsl} user kernels: "
+                        f"{constraint}"
                     )
             else:
                 debug("")
