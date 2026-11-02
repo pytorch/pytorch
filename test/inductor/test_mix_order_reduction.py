@@ -775,6 +775,63 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @parametrize("dtype", (torch.float, torch.bfloat16))
+    @parametrize("shape", ((32768, 768), (32769, 768)))
+    def test_layer_norm_bwd_fuse_shared_producer(self, dtype, shape):
+        # LayerNorm backward whose upstream gradient is a sum of several tensors
+        # (e.g. several matmul outputs). Both the row and the column half read the
+        # summed gradient, so it is materialized unless the mix-order reduction can
+        # absorb its producer.
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def ln_bwd(g0, g1, g2, g3, x, w, mean, rstd):
+            dy = (g0.float() + g1.float() + g2.float() + g3.float()) * 0.5
+            xhat = (x.float() - mean) * rstd
+            wdy = dy * w.float()
+            c1 = (xhat * wdy).mean(dim=1, keepdim=True)
+            c2 = wdy.mean(dim=1, keepdim=True)
+            dx = ((wdy - (xhat * c1 + c2)) * rstd).to(x.dtype)
+            return dx, (dy * xhat).sum(0), dy.sum(0)
+
+        M, N = shape
+        gs = [torch.randn(M, N, device=GPU_TYPE, dtype=dtype) for _ in range(4)]
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
+        w = torch.randn(N, device=GPU_TYPE, dtype=dtype)
+        mean = x.float().mean(dim=1, keepdim=True)
+        rstd = torch.rsqrt(x.float().var(dim=1, unbiased=False, keepdim=True) + 1e-5)
+        args = (*gs, x, w, mean, rstd)
+        ref = ln_bwd(*[a.double() for a in args])
+
+        def run(fuse):
+            torch._dynamo.reset()
+            metrics.reset()
+            with inductor_config.patch(
+                {
+                    "triton.mix_order_reduction_fuse_producers": fuse,
+                    "triton.mix_order_reduction_max_reads": 16,
+                }
+            ):
+                out, (code,) = utils.run_and_get_code(torch.compile(ln_bwd), *args)
+            return out, code.count("@triton.jit"), metrics.codegen_mix_order_reduction
+
+        def maxrel(outs):
+            return [
+                ((o.double() - r).abs().max() / r.abs().max()).item()
+                for o, r in zip(outs, ref)
+            ]
+
+        base, base_kernels, base_mor = run(False)
+        fused, fused_kernels, fused_mor = run(True)
+        self.assertEqual(base_mor, 1)
+        self.assertEqual(fused_mor, 1)
+        # the shared add-chain is computed inside the mix-order kernel
+        self.assertLess(fused_kernels, base_kernels)
+        # numerics: no output gets further from the fp64 reference
+        tol = 1e-5 if dtype == torch.float else 1e-2
+        for e_base, e_fused in zip(maxrel(base), maxrel(fused)):
+            self.assertLessEqual(e_fused, max(1.5 * e_base, tol))
+
     @parametrize("dynamic_dims", ([0], [1], [0, 1]))
     def test_rms_norm_bwd_with_dynamic_shape(self, dynamic_dims):
         if not inductor_config.triton.mix_order_reduction:
