@@ -34,7 +34,7 @@ on:
         options: ["replay", "dry-run", "apply"]
       model:
         description: "Bedrock model ID from .github/actions/pi-agent/allowed-models.json"
-        default: global.anthropic.claude-sonnet-5
+        default: global.openai.gpt-6.1-sol
         type: string
 
 jobs:
@@ -95,7 +95,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           ISSUES: ${{ inputs.issues }}
           MODE: ${{ inputs.mode || 'apply' }}
-          MODEL: ${{ inputs.model || 'global.anthropic.claude-sonnet-5' }}
+          MODEL: ${{ inputs.model || 'global.openai.gpt-6.1-sol' }}
         run: |
           if [[ "$EVENT" == "workflow_run" ]]; then
             ISSUES=$(cat issue_number.txt)
@@ -134,15 +134,8 @@ jobs:
       log-prefix: ${{ needs.prepare.outputs.mode == 'apply' && github.repository == 'pytorch/pytorch' && 'review-logs' || '' }}
       prompt: |
         Triage issue #{0} in ${{ github.repository }} with the `triaging-issues` skill
-        (`.agents/skills/triaging-issues/SKILL.md`). Read the skill and the issue first.
-        If it already has an oncall label, follow Step 0. Otherwise, before the final decision:
-        - Read `labels.json`, `templates.json`, and `umbrellas.json` beside the skill;
-          also read `pt2-triage-rubric.md` for PT2/torch.compile issues.
-        - Use `search_issues` as described in Step 0.5 and read promising candidate issues/comments.
-          Broaden unhelpful queries; neither empty nor nonempty results prove the search is complete.
-        - Check the umbrella catalog's scopes and exclusions; include an `umbrella` annotation
-          when a configured target fits. Do not infer closure permission from search results.
-        Finish by calling `submit_result` with your plan.
+        (`.agents/skills/triaging-issues/SKILL.md`). Consult its reference files as relevant
+        to the report. Finish by calling `submit_result` with your plan.
 
         RELEASE CONTEXT (authoritative: use this and nothing else for the current release
         version, not any version written in the skill files or your own knowledge of PyTorch
