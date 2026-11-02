@@ -830,14 +830,12 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     not on any placeholder, are still missed here, but such a graph fails loudly
     downstream when emit_value rejects the still-symbolic metadata.)
 
-    Both metadata keys are checked: make_fx stashes the fake under "val", while a Dynamo
-    graph (which torch.compiler.precompile's dynamo tracer feeds here) stashes it under
-    "example_value" -- reading only "val" would call a dynamic Dynamo graph static and
-    silently specialize it to the example sizes. The check is a union, not a fallback: a
-    symbolic value under EITHER key makes the graph dynamic, even if the other key holds a
-    static fake (graphs carrying both keys exist, e.g. split_module copies the whole meta
-    dict onto partition placeholders). The make_fx path is unchanged because make_fx never
-    writes "example_value", not because "val" takes precedence."""
+    Both metadata keys are checked, as a union. make_fx writes the fake only under "val".
+    The graph Dynamo hands a torch.compile backend carries it only under "example_value";
+    Dynamo's export paths stamp "val" as well, so "val" alone does not identify a make_fx
+    graph. A symbolic fake under either key makes the graph dynamic even if the other key
+    holds a static one (split_module copies the whole meta dict, so both can coexist). The
+    follow-up Dynamo tracer will feed backend graphs here."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -879,10 +877,12 @@ def compile_to_python(
     import torch
     from torch._higher_order_ops.effects import _get_effect
     from torch._inductor import compile_to_python as _inductor_compile_to_python
+    from torch._inductor.codegen.common import patch_compile_options
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.standalone_compile import (
         _resolve_ignore_shape_env,
         _standalone_context,
+        STANDALONE_PYTHON_PINS,
     )
     from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
@@ -960,7 +960,11 @@ def compile_to_python(
         shapes_mode = (
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
+        # The options cover this step too, which alone runs the pre-grad and
+        # joint-graph passes, under the pins step 2 forces over them, so both steps
+        # compile under one config.
         with (
+            patch_compile_options({**(options or {}), **STANDALONE_PYTHON_PINS}),
             torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),

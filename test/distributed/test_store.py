@@ -33,6 +33,8 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     HardwareClassification,
@@ -55,21 +57,21 @@ else:
 DEFAULT_HOSTNAME = "localhost"
 
 
-_PRIOR_FP32_PRECISION: str | None = None
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
     if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
         _PRIOR_FP32_PRECISION = None
 
 
@@ -1328,6 +1330,32 @@ class TestClientProtocol(TestCase):
         )
 
         thread.join()
+
+
+class PrefixStoreBarrierTimeoutTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_barrier_respects_store_timeout(self):
+        # Store::barrier(key, world_size) must use the virtual getTimeout(),
+        # so PrefixStore forwards the wrapped store's timeout, not the 300s default.
+        import time
+
+        store = dist.PrefixStore("prefix", dist.HashStore())
+        store.set_timeout(timedelta(milliseconds=1))
+        start = time.monotonic()
+        with self.assertRaises(DistStoreError):
+            store.barrier("barrier_key", 2)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_barrier_explicit_timeout_overrides_store_timeout(self):
+        import time
+
+        store = dist.PrefixStore("prefix", dist.HashStore())
+        store.set_timeout(timedelta(seconds=300))
+        start = time.monotonic()
+        with self.assertRaises(DistStoreError):
+            store.barrier("barrier_key2", 2, timedelta(milliseconds=1))
+        self.assertLess(time.monotonic() - start, 10)
 
 
 if __name__ == "__main__":

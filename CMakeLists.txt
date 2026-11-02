@@ -390,6 +390,13 @@ cmake_dependent_option(
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
+# Single source of truth for the GPU archs Composable Kernel GEMM supports. It
+# drives both the ck_gemm build arch filter (torch_filter_ck_gemm_arches in
+# cmake/public/utils.cmake) and the runtime support check / dispatch, which read
+# it through the generated ATen/ROCmCKGEMMConfig.h. Add a WMMA arch (e.g.
+# gfx1200) here to opt it back in without patching source.
+set(TORCH_CK_GEMM_ARCH_LIST "gfx90a;gfx942;gfx950" CACHE STRING
+    "Semicolon-separated GPU archs Composable Kernel GEMM is built and enabled for")
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
 # Off by default because enabling gfx12 adds CK SDPA code generation and compile
 # cost to ROCm builds that already target gfx1200/gfx1201.
@@ -423,7 +430,7 @@ cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
 # Builds NCCL-EP if true.
-cmake_dependent_option(USE_NCCL_EP "Build NCCL EP contrib library" OFF
+cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
@@ -519,7 +526,6 @@ cmake_dependent_option(
   BUILD_LAZY_TS_BACKEND
   "Build the lazy Torchscript backend, not compatible with mobile builds" ON
   "NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(
@@ -567,13 +573,18 @@ if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_B
 endif()
 cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
   "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+set(LLVM_BOLT_PROFILES_DIR "" CACHE PATH
+  "Directory containing LLVM BOLT profiles; empty uses bundled profiles.")
 
-option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
-option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
+set(USE_MIMALLOC_DEFAULT OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
-  set(USE_MIMALLOC ON)
+  set(USE_MIMALLOC_DEFAULT ON)
+endif()
+option(USE_MIMALLOC "Use mimalloc" "${USE_MIMALLOC_DEFAULT}")
+option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
+if(USE_MIMALLOC_DEFAULT)
   # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
   # See https://github.com/pytorch/pytorch/issues/174344
   if(CPU_AARCH64)
@@ -762,6 +773,18 @@ if(MSVC)
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
+
+  # Since VS 2022 17.10 (MSVC 14.40) std::mutex has a constexpr constructor
+  # that zero-initializes the mutex and relies on msvcp140.dll >= 14.40 to
+  # cope with that layout. If an older msvcp140.dll is already loaded in the
+  # process (stale VC redist, or a copy bundled by another package such as
+  # PyQt), the first lock during c10.dll static init faults inside DllMain and
+  # `import torch` fails with WinError 1114. Opt back into the classic
+  # constructor so the wheels work with any 14.x runtime.
+  # See https://github.com/pytorch/pytorch/issues/169429 and
+  # https://github.com/microsoft/STL/issues/4730
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
@@ -956,12 +979,24 @@ if(USE_LLVM_BOLT)
     append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
   endforeach()
 
-  # Extract the committed BOLT profiles for the build-time optimization
-  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
-  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
-  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
-       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+  if(NOT LLVM_BOLT_PROFILES_DIR)
+    # Extract the committed BOLT profiles for the build-time optimization
+    # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
+    set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+    file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
+    file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+         DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+  endif()
+
+  add_custom_target(bolt_profile_quality_summary ALL
+    COMMAND "${Python_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
+      "$<TARGET_PROPERTY:bolt_profile_quality_summary,SCRIPT_ARGS>"
+    COMMENT "Summarizing BOLT profile quality"
+    VERBATIM
+    USES_TERMINAL
+    COMMAND_EXPAND_LISTS
+  )
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -976,7 +1011,6 @@ if(INTERN_BUILD_MOBILE)
     set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
-  set(BUILD_FUNCTORCH OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
@@ -1082,9 +1116,10 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
+if(USE_FBGEMM AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|aarch64)$"
+                   OR CMAKE_SIZEOF_VOID_P EQUAL 4))
   message(WARNING
-    "x86_64 or aarch64 required for FBGEMM. "
+    "64-bit x86 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -1196,14 +1231,14 @@ endif()
 if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
   message(STATUS "Running on macOS with Apple silicon")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+  add_compile_definitions(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
 # Enable sleef on Arm(R) architecture by default (except Android)
 if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
   AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+  add_compile_definitions(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
 
@@ -1368,6 +1403,11 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
   endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    # Suppress GCC's warning without changing the value of
+    # std::hardware_destructive_interference_size in public headers.
+    append_cxx_flag_if_supported("-Wno-interference-size" CMAKE_CXX_FLAGS)
+  endif()
   # needed for compat with newer versions of clang that use C++20 mangling rules
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
     append_cxx_flag_if_supported("-fclang-abi-compat=17" CMAKE_CXX_FLAGS)
@@ -1479,13 +1519,13 @@ if(USE_MIMALLOC)
   set(MI_BUILD_SHARED OFF)
   set(MI_BUILD_OBJECT OFF)
   set(MI_BUILD_TESTS OFF)
-  add_definitions(-DUSE_MIMALLOC)
+  add_compile_definitions(USE_MIMALLOC)
   add_subdirectory(third_party/mimalloc)
   include_directories(third_party/mimalloc/include)
 endif()
 
 if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
-  add_definitions(-DUSE_MIMALLOC_ON_MKL)
+  add_compile_definitions(USE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
@@ -1598,7 +1638,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
 
   string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
 
-  # Set the COMPILE_FLAGS property for each source file
+  # Add debug info for each source file
   foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
@@ -1609,9 +1649,9 @@ if(DEFINED USE_CUSTOM_DEBINFO)
       # @todo test if we can remove this
       set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
     endif()
-    set_source_files_properties(
-      ${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
-      PROPERTIES COMPILE_FLAGS "-g")
+    set_property(SOURCE ${SOURCE_FILE}
+      DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
+      APPEND PROPERTY COMPILE_OPTIONS "-g")
   endforeach()
 
   # Link everything with debug info when any file is in debug mode
@@ -1638,6 +1678,13 @@ if(SKBUILD)
   # headers, etc.) into the torch package.  Previously declared via
   # setup.py package_data.
   include(cmake/PackageData.cmake)
+
+  # setuptools-era top_level.txt; without it importlib.metadata.packages_distributions()
+  # stats every RECORD entry to infer top-level names. Keep in sync with
+  # [tool.scikit-build.wheel] packages in pyproject.toml.
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/top_level.txt" "functorch\ntorch\ntorchgen\n")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/top_level.txt"
+    DESTINATION "${SKBUILD_METADATA_DIR}")
 endif()
 
 include(cmake/PostBuildSteps.cmake)

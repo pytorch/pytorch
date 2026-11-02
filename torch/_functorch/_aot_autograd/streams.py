@@ -447,12 +447,12 @@ def _wrap_sync_node(
     deps_before_sync: list[Node],
     visited: set[Node],
     partition_scoped_deps: set[Node] | None = None,
-) -> tuple[Node, list[Node]]:
+) -> tuple[Node, dict[Node, Node]]:
     """
     Core logic: wrap a single sync node in control_deps.
 
-    Returns (control_deps_node, passthrough_getitems) where passthrough_getitems
-    are the getitem nodes that thread dependencies through the control_deps node.
+    Returns (control_deps_node, replacements), where replacements maps each
+    dependency to the getitem that threads it through the control_deps node.
     ``visited`` is the set of nodes at or before the sync node in graph order,
     used to distinguish pre-sync vs post-sync users.
     """
@@ -590,7 +590,17 @@ def _wrap_sync_node(
     # Remove original sync node
     sync_node.replace_all_uses_with(control_deps_node)
     graph.erase_node(sync_node)
-    return control_deps_node, list(replacements.values())
+    return control_deps_node, replacements
+
+
+def _update_event_passthroughs(
+    event_to_passthrough: dict[int, list[Node]],
+    replacements: dict[Node, Node],
+) -> None:
+    for event, passthroughs in event_to_passthrough.items():
+        event_to_passthrough[event] = [
+            replacements.get(dep, dep) for dep in passthroughs
+        ]
 
 
 def _collect_sync_forward_deps(
@@ -780,9 +790,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                             existing_deps.add(dep)
                     if all_stream_deps:
                         found_sync = True
-                        ctrl_node_sync, passthrough_sync = _wrap_sync_node(
+                        ctrl_node_sync, replacements = _wrap_sync_node(
                             gm, node, all_stream_deps, visited
                         )
+                        _update_event_passthroughs(event_to_passthrough, replacements)
+                        passthrough_sync = list(replacements.values())
                     else:
                         ctrl_node_sync = None
                         passthrough_sync: list[Node] = []
@@ -832,9 +844,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                             existing_deps.add(dep)
                     if deps_before_sync:
                         found_sync = True
-                        ctrl_node_ws, passthrough_ws = _wrap_sync_node(
+                        ctrl_node_ws, replacements = _wrap_sync_node(
                             gm, node, deps_before_sync, visited
                         )
+                        _update_event_passthroughs(event_to_passthrough, replacements)
+                        passthrough_ws = list(replacements.values())
                     else:
                         ctrl_node_ws = None
                         passthrough_ws: list[Node] = []
@@ -947,7 +961,7 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
                 if deps_before_sync:
                     found_sync = True
-                    ctrl_node, passthrough = _wrap_sync_node(
+                    ctrl_node, replacements = _wrap_sync_node(
                         gm,
                         node,
                         deps_before_sync,
@@ -956,6 +970,9 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         if node.target is torch.ops.streams.wait_event.default
                         else None,
                     )
+                    # Keep recorded event data on its latest SSA version.
+                    _update_event_passthroughs(event_to_passthrough, replacements)
+                    passthrough = list(replacements.values())
                 else:
                     ctrl_node = None
                     passthrough: list[torch.fx.Node] = []

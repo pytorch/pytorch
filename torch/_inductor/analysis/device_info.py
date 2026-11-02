@@ -137,6 +137,27 @@ _device_mapping: dict[str, DeviceInfo] = {
     ),
     # Source:
     # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
+    # /instinct-tech-docs/product-briefs/amd-instinct-mi355x-gpu-brochure.pdf
+    "AMD MI355X": DeviceInfo(
+        tops={
+            torch.float64: 78.6,
+            torch.float32: 157.3,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 157.3,
+            torch.bfloat16: 2516.6,
+            torch.float16: 2516.6,
+            torch.float8_e8m0fnu: 5033.2,
+            torch.float8_e4m3fn: 5033.2,
+            torch.float8_e4m3fnuz: 5033.2,
+            torch.float8_e5m2: 5033.2,
+            torch.float8_e5m2fnuz: 5033.2,
+            torch.int8: 5033.2,
+        },
+        dram_bw_gbs=8000.0,
+        dram_gb=288.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
     # /instinct-tech-docs/product-briefs/amd-instinct-mi350x-gpu-brochure.pdf
     "AMD MI350X": DeviceInfo(
         tops={
@@ -224,6 +245,77 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=64.0,
     ),
     # Source:
+    # @lint-ignore https://www.amd.com/en/products/accelerators/instinct/mi200/mi250x.html
+    # The datasheet numbers are for the 2-die module; ROCm exposes each die as its own device,
+    # so the matrix rows below are half of the module's matrix figures (fp64/fp32 95.7, fp16/bf16
+    # and int8 383). dram_bw_gbs is AMD's stated 1.6 TB/s per GCD.
+    # CDNA2 has no fp8 matrix instructions, so the fp8 dtypes are left out; datasheet_tops()
+    # reports a missing dtype as unknown rather than guessing.
+    "AMD MI250X": DeviceInfo(
+        tops={
+            torch.float64: 47.85,
+            torch.float32: 47.85,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 47.85,
+            torch.bfloat16: 191.5,
+            torch.float16: 191.5,
+            torch.int8: 191.5,
+        },
+        dram_bw_gbs=1600.0,
+        dram_gb=64.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7800-48gb.html
+    "AMD RADEON PRO W7800 48GB": DeviceInfo(
+        tops={
+            # RDNA3 runs fp64 at 1/32 of the fp32 rate quoted here
+            torch.float64: 1.41,
+            torch.float32: 45.2,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 45.2,
+            torch.bfloat16: 90.4,
+            torch.float16: 90.4,
+            # RDNA3 WMMA runs int8 at the fp16 rate
+            torch.int8: 90.4,
+        },
+        dram_bw_gbs=864.0,
+        dram_gb=48.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html
+    "AMD RADEON PRO W7900": DeviceInfo(
+        tops={
+            # RDNA3 runs fp64 at 1/32 of the fp32 rate quoted here
+            torch.float64: 1.92,
+            torch.float32: 61.3,
+            # TF32 is not specified; fall back to the FP32 throughput.
+            "torch.tf32": 61.3,
+            torch.bfloat16: 123.0,
+            torch.float16: 123.0,
+            # RDNA3 WMMA runs int8 at the fp16 rate
+            torch.int8: 123.0,
+        },
+        dram_bw_gbs=864.0,
+        dram_gb=48.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7900xt.html
+    "AMD RADEON RX 7900 XT": DeviceInfo(
+        tops={
+            # RDNA3 runs fp64 at 1/32 of the fp32 rate quoted here
+            torch.float64: 1.61,
+            torch.float32: 51.6,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 51.6,
+            torch.bfloat16: 103.0,
+            torch.float16: 103.0,
+            # RDNA3 WMMA runs int8 at the fp16 rate
+            torch.int8: 103.0,
+        },
+        dram_bw_gbs=800.0,
+        dram_gb=20.0,
+    ),
+    # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/241598/
     # intel-arc-b580-graphics/specifications.html
     "INTEL B580": DeviceInfo(
@@ -264,6 +356,63 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=32.0,
     ),
     # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/245796/
+    # intel-arc-pro-b65-graphics/specifications.html
+    "INTEL B65": DeviceInfo(
+        tops={
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=608.0,
+        dram_gb=32.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/243916/
+    # intel-arc-pro-b60-graphics/specifications.html
+    "INTEL B60": DeviceInfo(
+        tops={
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=456.0,
+        dram_gb=24.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/242615/
+    # intel-arc-pro-b50-graphics/specifications.html
+    "INTEL B50": DeviceInfo(
+        tops={
+            torch.float64: 5.33,
+            torch.float32: 10.65,
+            "torch.tf32": 85.0,
+            torch.bfloat16: 85.0,
+            torch.float16: 85.0,
+            torch.float8_e8m0fnu: 85.0,
+            torch.float8_e4m3fnuz: 85.0,
+            torch.float8_e5m2: 85.0,
+            torch.float8_e5m2fnuz: 85.0,
+            torch.int8: 170,
+        },
+        dram_bw_gbs=224.0,
+        dram_gb=16.0,
+    ),
+    # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/232876/\
     # intel-data-center-gpu-max-1100/specifications.html
     "Intel(R) Data Center GPU Max 1100": DeviceInfo(
@@ -279,26 +428,65 @@ _device_mapping: dict[str, DeviceInfo] = {
             # Matrix engine
             torch.float16: 355.5,
             torch.bfloat16: 355.5,
-            # not supported, fall back to float32 numbers
-            torch.float8_e8m0fnu: 22.2,
-            torch.float8_e4m3fnuz: 22.2,
-            torch.float8_e5m2: 22.2,
-            torch.float8_e5m2fnuz: 22.2,
+            # no native fp8, fp8 matmuls run at the fp16 rate
+            torch.float8_e8m0fnu: 355.5,
+            torch.float8_e4m3fnuz: 355.5,
+            torch.float8_e5m2: 355.5,
+            torch.float8_e5m2fnuz: 355.5,
             torch.int8: 711.1,
         },
         dram_bw_gbs=1228.8,
         dram_gb=48,
     ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/ark/products/series/232874/
+    # intel-data-center-gpu-max-series.html
+    # The card has two tiles but a process normally uses one, so bandwidth and
+    # memory are per-tile (half the datasheet values). No native fp8 rate is
+    # listed; fp8 matmuls run at the fp16 rate.
+    "Intel(R) Data Center GPU Max 1550": DeviceInfo(
+        tops={
+            torch.float32: 26.2,
+            "torch.tf32": 26.2,
+            torch.float16: 419.43,
+            torch.bfloat16: 419.43,
+            torch.float8_e4m3fn: 419.43,
+            torch.float8_e4m3fnuz: 419.43,
+            torch.float8_e5m2: 419.43,
+            torch.float8_e5m2fnuz: 419.43,
+            torch.float8_e8m0fnu: 419.43,
+            torch.int8: 838.86,
+        },
+        dram_bw_gbs=1638.4,
+        dram_gb=64,
+    ),
 }
+_device_mapping["AMD INSTINCT MI355X"] = _device_mapping["AMD MI355X"]
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
+_device_mapping["AMD INSTINCT MI210"] = _device_mapping["AMD MI210X"]
+# Both the MI250X and the MI250 report this name; the entry uses the MI250X numbers.
+_device_mapping["AMD INSTINCT MI250X / MI250"] = _device_mapping["AMD MI250X"]
+# Older ROCr builds report this card without the vendor prefix.
+_device_mapping["RADEON RX 7900 XT"] = _device_mapping["AMD RADEON RX 7900 XT"]
 _device_mapping["Intel(R) Arc(TM) B580 Graphics"] = _device_mapping["INTEL B580"]
 _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B70"]
+_device_mapping["Intel(R) Arc(TM) Pro B65 Graphics"] = _device_mapping["INTEL B65"]
+_device_mapping["Intel(R) Arc(TM) Pro B60 Graphics"] = _device_mapping["INTEL B60"]
+_device_mapping["Intel(R) Arc(TM) Pro B50 Graphics"] = _device_mapping["INTEL B50"]
+_device_mapping["NVIDIA GB300 Max-Q"] = _device_mapping["NVIDIA GB300"]
 
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).
 _device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
+
+# Suffixes some hosts append to the marketing name, e.g. "AMD Instinct MI350X VF" for an SR-IOV
+# virtual function or "AMD Instinct MI300X HF". Both are treated as naming variants of a
+# whole card, which holds for the pass-through parts pytorch CI runs on.  A VF that is a
+# fractional partition of the GPU would need its own entry rather than this fallback, since it
+# would otherwise be credited with the whole card's throughput.
+_DEVICE_NAME_VARIANT_SUFFIXES = ("VF", "HF")
 
 
 def register_device_info(name: str, info: DeviceInfo) -> None:
@@ -313,9 +501,16 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     to the recorded device. Therefore, _device_mapping statically contains the information for lots of devices.
     If one is missing, please run DeviceInfo.get_device_info() and add it to _device_mapping.
       name (str): name of the device to lookup. Should map onto torch.cuda.get_device_name().
-      Will be upper-cased before lookup.
+      Will be upper-cased before lookup. A trailing variant suffix (such as the " VF" an SR-IOV
+      virtual function reports) is ignored when the full name has no entry.
     """
-    return _device_mapping.get(name.upper())
+    key = name.upper()
+    info = _device_mapping.get(key)
+    if info is None:
+        base, _, suffix = key.rpartition(" ")
+        if suffix in _DEVICE_NAME_VARIANT_SUFFIXES:
+            info = _device_mapping.get(base)
+    return info
 
 
 def datasheet_tops(

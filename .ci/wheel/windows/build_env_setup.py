@@ -10,7 +10,7 @@ here would die with this process.
 Environment variables expected:
     GPU_ARCH_TYPE      - cpu, cuda, xpu (read from DESIRED_CUDA fallback)
     DESIRED_CUDA       - cpu, cu126, cu128, ..., xpu
-    CUDA_VERSION       - 126, 128, 129, 130, 132 (CUDA builds only)
+    CUDA_VERSION       - 126, 128, 129, 130, 132, 134 (CUDA builds only)
     VSDEVCMD_ARGS      - extra args for vcvarsall.bat (optional)
     VC_YEAR            - 2022 (or 2019)
 """
@@ -72,6 +72,7 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, str] = {
     "129": "7.5;8.0;8.6;9.0;10.0;12.0",
     "130": "7.5;8.0;8.6;9.0;10.0;12.0",
     "132": "7.5;8.0;8.6;9.0;10.0;12.0",
+    "134": "7.5;8.0;8.6;9.0;10.0;12.0",
 }
 
 
@@ -193,7 +194,7 @@ def source_oneapi_vars(scripts: list[Path]) -> dict[str, str]:
 
 def install_cuda_toolkit() -> None:
     """Run the legacy internal/cuda_install.bat which downloads + installs
-    the CUDA toolkit, cuDNN, ZLIB, and the GPU driver DLLs.
+    the CUDA toolkit, cuDNN, and the GPU driver DLLs.
 
     Kept as a .bat invocation rather than ported to Python: the installer
     logic is heavy (multiple version branches, NvToolsExt staging,

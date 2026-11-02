@@ -223,6 +223,10 @@ class OpDispatcher:
             aten.uniform_.default,
             aten.bernoulli.default,
             aten.bernoulli_.float,
+            aten.exponential_.default,
+            aten.geometric_.default,
+            aten.log_normal_.default,
+            aten.multinomial.default,
         }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
@@ -373,27 +377,35 @@ class OpDispatcher:
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
-                first_arg, first_local_arg = (
-                    cast(dtensor.DTensor, args[0]),
-                    cast(torch.Tensor, local_tensor_args[0]),
-                )
+                first_local_arg = cast(torch.Tensor, local_tensor_args[0])
                 random_device = (
                     cast(torch.device | None, op_info.local_kwargs.get("device"))
                     or first_local_arg.device
                 )
+                init_rng_tracker = not random._rng_tracker and is_rng_supported_mesh(
+                    mesh
+                )
+                use_rng_tracker = (
+                    random._rng_tracker.distribute_region_enabled
+                    if random._rng_tracker
+                    else init_rng_tracker
+                )
                 if (
-                    random_device.type != "meta"
+                    use_rng_tracker
+                    and random_device.type != "meta"
                     and random_device.type != mesh.device_type
                 ):
                     # The mesh RNG tracker cannot advance a different device's RNG.
                     raise RuntimeError(
                         f"DTensor random op {op_call} requires the output device "
                         f"({random_device}) to match the device mesh "
-                        f"({mesh.device_type}). Use a device mesh matching the "
-                        "output device."
+                        f"({mesh.device_type}) while distributed RNG is enabled. "
+                        "Initialize on the mesh device before offloading, or initialize "
+                        "the tensor returned by DTensor.to_local() under torch.no_grad() "
+                        "with an explicitly seeded generator."
                     )
 
-                if not random._rng_tracker and is_rng_supported_mesh(mesh):
+                if init_rng_tracker:
                     # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
                     # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
                     run_state_sync = not _are_we_tracing()
@@ -408,6 +420,16 @@ class OpDispatcher:
                     random._rng_tracker = random.OffsetBasedRNGTracker(
                         mesh, run_state_sync
                     )
+
+                # Offsets must follow the spec the local op runs on: e.g. multinomial
+                # redistributes a Shard(-1) input to Replicate before sampling.
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                ):
+                    first_spec = output_sharding.redistribute_schema.args_spec[0]
+                else:
+                    first_spec = cast(dtensor.DTensor, args[0])._spec
 
                 # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
@@ -435,7 +457,7 @@ class OpDispatcher:
                         )
                     ):
                         with random._rng_tracker._distribute_region(
-                            first_arg._spec, generator=maybe_user_generator
+                            first_spec, generator=maybe_user_generator
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                                 output_sharding.output_spec
@@ -450,7 +472,7 @@ class OpDispatcher:
                         ):
                             raise AssertionError
                         start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                            random._rng_tracker._compute_rng_offsets(first_spec)
                         )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec

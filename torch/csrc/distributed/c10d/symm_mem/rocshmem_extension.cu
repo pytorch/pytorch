@@ -89,7 +89,7 @@ extern "C" void rocshmem_init() __attribute__((weak));
 
 bool is_nvshmem_available() {
   static const bool ok =
-      parse_rocshmem_version_ge(rocshmem::VERSION, 3, 3, 0);
+      parse_rocshmem_version_ge(rocshmem::VERSION, 3, 5, 0);
   return ok;
 }
 
@@ -887,6 +887,10 @@ void all_to_all_vdev_2d_offset(
       out_splits_offsets_ptr, ne, world_size, major_align_val);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   C10_CUDA_CHECK(hipStreamSynchronize(stream));
+}
+
+void release_nvshmem_team_pool(const std::string& group_name) {
+  TeamManager::release_group_if_initialized(group_name);
 }
 
 } // namespace c10d::nvshmem_extension
