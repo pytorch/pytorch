@@ -1406,9 +1406,13 @@ class TestReductionsDevice(TestCase):
     @dtypes(torch.bool, torch.double)
     @skipIfMPS
     def test_sum_all(self, device, dtype) -> None:
+        # Keep the Python reference eager instead of tracing thousands of scalar additions.
+        @torch.compiler.disable
+        def python_sum(tensor: torch.Tensor):
+            return sum(tensor.reshape(-1).tolist())
+
         def check_sum_all(tensor: torch.Tensor) -> None:
-            pylist = tensor.reshape(-1).tolist()
-            self.assertEqual(tensor.sum(), sum(pylist))
+            self.assertEqual(tensor.sum(), python_sum(tensor))
 
         if dtype != torch.bool:
             check_sum_all(torch.tensor([1, 2, 3, 4, 5], dtype=dtype, device=device))
