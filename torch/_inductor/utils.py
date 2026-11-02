@@ -3295,7 +3295,42 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
-@functools.cache
+class _CacheKeyedOnConfig(Generic[P, RV]):
+    """functools.cache that also keys on the configs fn reads, so a config.patch
+    between calls takes effect."""
+
+    def __init__(self, fn: Callable[P, RV], read_configs: Callable[[], object]):
+        self._cached = functools.cache(
+            lambda configs, *args, **kwargs: fn(*args, **kwargs)
+        )
+        self._read_configs = read_configs
+        functools.update_wrapper(self, fn)
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
+        return self._cached(self._read_configs(), *args, **kwargs)
+
+    def cache_clear(self) -> None:
+        self._cached.cache_clear()
+
+
+def _cache_keyed_on_config(
+    read_configs: Callable[[], object],
+) -> Callable[[Callable[P, RV]], _CacheKeyedOnConfig[P, RV]]:
+    def decorator(fn: Callable[P, RV]) -> _CacheKeyedOnConfig[P, RV]:
+        return clear_on_fresh_cache(_CacheKeyedOnConfig(fn, read_configs))
+
+    return decorator
+
+
+def _decompose_k_configs() -> tuple[int, int, str]:
+    return (
+        config.triton.decompose_k_threshold,
+        config.triton.num_decompose_k_splits,
+        config.max_autotune_gemm_search_space,
+    )
+
+
+@_cache_keyed_on_config(_decompose_k_configs)
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
 ) -> bool:
@@ -3316,7 +3351,7 @@ def use_decompose_k_choice(
     )
 
 
-@functools.cache
+@_cache_keyed_on_config(lambda: config.rocm.contiguous_threshold)
 def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     """
     Check if we should use the contiguous subgraph transform.
@@ -3338,7 +3373,12 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     )
 
 
-@functools.cache
+@_cache_keyed_on_config(
+    lambda: (
+        config.triton.num_decompose_k_splits,
+        config.max_autotune_gemm_search_space,
+    )
+)
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # To limit compile time
     k_splits_limit = config.triton.num_decompose_k_splits

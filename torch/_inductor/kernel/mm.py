@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -26,7 +28,11 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..codegen.subgraph import (
+    allow_subgraph_choices,
+    SubgraphChoiceCaller,
+    SubgraphTemplate,
+)
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..fx_utils import get_fake_args_kwargs
 from ..ir import (
@@ -673,14 +679,19 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        if use_decompose_k_choice(m, n, k):
+        subgraph_choices = allow_subgraph_choices(kernel_inputs.device_type)
+        offer_decompose_k = subgraph_choices and use_decompose_k_choice(m, n, k)
+        if offer_decompose_k:
             templates_to_use.append(decompose_k_subgraph_template)
         # CUDA drops Triton mm from the default search once decompose_k applies
         # at twice the usual threshold. The exhaustive search still includes it.
-        # HIP keeps Triton mm.
+        # HIP keeps Triton mm, and so does a dynamic K, which decompose_k only
+        # splits when a split provably divides it.
         keep_triton_mm = (
             torch.version.hip is not None
             or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+            or not offer_decompose_k
+            or not sympy.sympify(k).is_number
             or not use_decompose_k_choice(m, n, k, threshold_multiple=2)
         )
         if keep_triton_mm:
@@ -706,7 +717,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                     else:
                         templates_to_use.append(persistent_mm_template)
 
-        templates_to_use.append(mm_contiguous_subgraph_template)
+        if subgraph_choices:
+            templates_to_use.append(mm_contiguous_subgraph_template)
 
     choices.extend(
         V.choices.get_template_configs(
@@ -1063,7 +1075,7 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
 
         # Manually call get_template_configs as use 1-D bias if possible
         # contiguous_addmm calls addmm without alpha and beta.
-        if alpha == 1 and beta == 1:
+        if alpha == 1 and beta == 1 and allow_subgraph_choices(layout.device.type):
             choices.extend(
                 V.choices.get_template_configs(
                     kernel_inputs_aten, [addmm_contiguous_subgraph_template], name

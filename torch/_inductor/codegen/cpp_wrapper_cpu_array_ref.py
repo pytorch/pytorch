@@ -1004,7 +1004,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
 
     def codegen_subgraph_with_flattened_outputs(
-        self, subgraph, outer_inputs, outer_outputs
+        self, subgraph, outer_inputs, outer_flattened_outputs
     ):
         # Used by invoke_subgraph and SubgraphBuffer. The subgraph's outputs are
         # pre-declared as RAIIAtenTensorHandle and codegen_subgraph_suffix
@@ -1016,7 +1016,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # to build.
         self.allow_stack_allocation = False
         return super().codegen_subgraph_with_flattened_outputs(
-            subgraph, outer_inputs, outer_outputs
+            subgraph, outer_inputs, outer_flattened_outputs
         )
 
     def codegen_while_loop(self, while_loop, stack_output=False):
