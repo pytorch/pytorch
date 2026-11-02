@@ -300,14 +300,32 @@ def register_simple(
 def register_inductor(
     op: OpType,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
-    def impl(*a, **kw):
-        a, kw = tree_map(_as_interleaved, (a, kw), is_leaf=is_complex_tensor)
-        out = op(*a, **kw)
-        return tree_map(
-            _as_complex_tensor,
-            out,
-            is_leaf=lambda x: isinstance(x, Tensor) and x.dtype.is_complex,
-        )
+    def impl(*a, out: torch.Tensor | None = None, **kw):
+        a, kw = tree_map(_as_interleaved, (a, kw))
+        ret = op(*a, **kw)
+        ret_flat, ret_spec = tree_flatten(ret)
+        if out is not None:
+            out_flat, out_spec = tree_flatten(out)
+            if ret_spec != out_spec:
+                raise ValueError("Invalid structure for `out`.")
+
+            for o, r in zip(out_flat, ret_flat, strict=True):
+                if not isinstance(o, torch.Tensor):
+                    raise AssertionError("Cannot copy into non-Tensor.")
+                if not isinstance(r, torch.Tensor):
+                    raise AssertionError("Invalid return")
+
+                o.copy_(r)
+
+            return out
+
+        ret_flat = [
+            _as_complex_tensor(r)
+            if isinstance(r, torch.Tensor) and r.dtype.is_complex
+            else r
+            for r in ret_flat
+        ]
+        return tree_unflatten(ret_flat, ret_spec)
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
