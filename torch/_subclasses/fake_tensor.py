@@ -398,6 +398,20 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
             cast(Any, fake_mode).set_item_memo(x, memo)
 
 
+# The SymInt memos of a fake (nonzero_memo, unique_memo,
+# unique_consecutive_memo), which a Python FakeTensor keeps in its
+# SymNumberMemoDescriptors.
+def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return getattr(x, name)
+    return None
+
+
+def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        setattr(x, name, value)
+
+
 def maybe_get_fake_device(x: object) -> torch.device | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.fake_device
