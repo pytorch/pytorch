@@ -5529,17 +5529,27 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertTrue(meta.is_meta)
 
     def test_unsafe_data_ptr_access(self):
-        mode, _ = self._make_mode()
-        self.assertEqual(
-            mode.allow_unsafe_data_ptr_access,
-            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access,
-        )
-        mode.allow_unsafe_data_ptr_access = False
-        fake = torch._C._from_meta_and_device(
-            torch.empty(2, device="meta"), torch.device("cpu"), mode
-        )
+        def make_fake(mode):
+            meta = torch.empty(2, device="meta")
+            return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            strict_mode, _ = self._make_mode()
+        self.assertFalse(strict_mode.allow_unsafe_data_ptr_access)
         with self.assertRaisesRegex(RuntimeError, "data pointer"):
-            fake.data_ptr()
+            make_fake(strict_mode).data_ptr()
+
+        mode, _ = self._make_mode()
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
+        fake = make_fake(mode)
+        fake.data_ptr()
+
+        # Reassigning applies to fakes created afterwards
+        mode.allow_unsafe_data_ptr_access = False
+        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+            make_fake(mode).data_ptr()
+        fake.data_ptr()
 
     def test_fake_dispatch_mode_slot(self):
         _, wrapper = self._make_mode()
@@ -5548,6 +5558,10 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
         torch._C._set_dispatch_mode(wrapper)
         try:
+            self.assertEqual(self._installed(), (wrapper, True))
+            _, other_wrapper = self._make_mode()
+            with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                torch._C._set_dispatch_mode(other_wrapper)
             self.assertEqual(self._installed(), (wrapper, True))
             self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
             self.assertEqual(self._installed(), (None, False))

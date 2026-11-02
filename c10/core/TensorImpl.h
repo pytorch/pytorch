@@ -258,9 +258,11 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
-  // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access, read when
-  // the mode is created; applied to each fake's storage in
-  // set_fake_tensor_mode.
+  // Initialized from
+  // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access when the
+  // mode is created. Like Python's _allow_unsafe_data_ptr_access, it can be
+  // reassigned and applies to fakes created afterwards: set_fake_tensor_mode
+  // applies it to each fake's storage.
   bool allow_unsafe_data_ptr_access_ = true;
 
   FakeTensorMode(
