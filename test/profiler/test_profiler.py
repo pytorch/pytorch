@@ -2578,7 +2578,7 @@ class TestProfilerDevice(TestCase):
                 found_mm = True
             if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
+            if "memcpy" in e.name.lower():
                 found_memcpy = True
         if device_type in ("cuda", "xpu"):
             self.assertTrue(found_gemm)
