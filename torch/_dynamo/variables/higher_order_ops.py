@@ -62,7 +62,12 @@ from ..exc import (
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
-from ..utils import proxy_args_kwargs, set_example_value, unpack_iterable
+from ..utils import (
+    proxy_args_kwargs,
+    set_example_value,
+    specialize_symnode,
+    unpack_iterable,
+)
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -762,6 +767,7 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._subclasses.fake_tensor import maybe_clear_fake_constant
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -827,9 +833,8 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
+                cloned_carry = cast(TensorVariable, carry.clone())
+                maybe_clear_fake_constant(cloned_carry.proxy.node.meta["example_value"])
                 return cloned_carry
 
         # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
@@ -1146,7 +1151,12 @@ def validate_args_and_maybe_create_graph_inputs(
     set_subgraph_inputs: SetSubgraphInputs,
     description: str,
     sub_args_names: Sequence[str] | None = None,
+    overridden_bwd_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> list[Any]:
+    """``overridden_bwd_args_dtypes`` overrides the dtype of forced tensor
+    inputs: the gradients an autograd.Function declares via
+    ``ctx.set_output_grad_dtype``.
+    """
     from . import AutogradFunctionContextVariable
     from .builder import SourcelessBuilder, wrap_fx_proxy_cls
 
@@ -1200,6 +1210,13 @@ def validate_args_and_maybe_create_graph_inputs(
                             "Expected TensorVariable to have an fx node"
                         )
                     example_value = node.meta["example_value"]
+                    if (
+                        overridden_bwd_args_dtypes is not None
+                        and overridden_bwd_args_dtypes[idx] is not None
+                    ):
+                        example_value = example_value.to(
+                            overridden_bwd_args_dtypes[idx]
+                        )
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
@@ -1208,7 +1225,6 @@ def validate_args_and_maybe_create_graph_inputs(
                     new_proxy = tracer.create_graph_input(
                         arg_name, a.python_type(), example_value
                     )
-                    example_value = node.meta.get("example_value", None)
                     a = wrap_fx_proxy_cls(
                         target_cls=type(a),
                         tx=tx,
@@ -1631,6 +1647,7 @@ def get_hop_args(
     sub_kwargs: dict[str, VariableTracker],
     set_subgraph_inputs: SetSubgraphInputs,
     description: str,
+    overridden_bwd_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> list[VariableTracker]:
     sub_args_names = maybe_positional_arg_names(f)
     # User mismatch in the number of args. Will eventually lead to an error.
@@ -1643,6 +1660,7 @@ def get_hop_args(
         set_subgraph_inputs,
         description,
         sub_args_names,
+        overridden_bwd_args_dtypes,
     )
 
     validate_args_and_maybe_create_graph_inputs(
@@ -1734,6 +1752,9 @@ def speculate_subgraph_with_auto_output_flattening(
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
+    # Dtype overrides for forced tensor inputs; see
+    # validate_args_and_maybe_create_graph_inputs.
+    overridden_bwd_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> tuple[
     VariableTracker,  # output: The VT that Dynamo continues tracing with
     torch.fx.Graph,  # graph: The FX graph representing the subgraph computation
@@ -1840,6 +1861,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 sub_kwargs,
                 set_subgraph_inputs,
                 description,
+                overridden_bwd_args_dtypes,
             )
 
             # Special case - if users uses
@@ -2333,7 +2355,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from torch._higher_order_ops import BaseHOP
 
         if isinstance(value, BaseHOP):
-            return BaseHOPVariable(value, source, **kwargs)
+            from .builder import VariableBuilder
+
+            return VariableBuilder.create_internal_base_hop(value, source, **kwargs)
         unimplemented(
             gb_type="unsupported HigherOrderOperator",
             context=str(value),
@@ -2349,6 +2373,16 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx, fn=str)
 
     def call_function(
         self,
@@ -2395,15 +2429,17 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         if self.source is None:
             raise AssertionError("source must not be None")
         call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            torch._dynamo.variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 self.value.__call__.__func__,
                 source=AttrSource(call_source, "__func__"),
             ),
-            torch._dynamo.variables.UserDefinedObjectVariable(
+            VariableBuilder.create_internal_user_defined_object(
                 self.value, source=self.source
             ),
             source=call_source,
@@ -3822,6 +3858,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
+        # noqa: RVT001
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])  # type: ignore[arg-type]
 
 
@@ -4175,12 +4212,16 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-def _guard_dict_keys(vt: VariableTracker) -> None:
-    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+def _guard_flex_gemm_constant(vt: VariableTracker) -> Any:
+    """Specialize static metadata and guard nested option key sets."""
+    vt = vt.realize()
     if isinstance(vt, ConstDictVariable):
         vt.install_dict_keys_match_guard()
-        for value in vt.items.values():
-            _guard_dict_keys(value)
+        return {
+            key.vt.as_python_constant(): _guard_flex_gemm_constant(value)
+            for key, value in vt.items.items()
+        }
+    return specialize_symnode(vt).as_python_constant()
 
 
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
@@ -4223,12 +4264,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
-        # as_python_constant guards the present values only; an option added
-        # later (fast_math, backend, a config knob) must recompile.
-        _guard_dict_keys(args[3])
-        _guard_dict_keys(args[4])
-        fn_kwargs = args[3].as_python_constant()
-        kernel_options = args[4].as_python_constant()
+        # Numeric options can be symbolic under dynamic=True, but are static
+        # HOP metadata. Guard key sets too so newly added options recompile.
+        fn_kwargs = _guard_flex_gemm_constant(args[3])
+        kernel_options = _guard_flex_gemm_constant(args[4])
         if self._HOP_NAME is None:
             raise AssertionError("_HOP_NAME must be set")
         (
@@ -5416,13 +5455,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_node,
             *list(fwd_freevars.keys()),
         )
-        kwargs_for_fn = {
+        kwargs_for_fn: dict[str, list[int] | tuple[torch.dtype | None, ...]] = {
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }
         # Preserve the existing HOP call shape for the common no-mark_dirty case.
         if dirty_idx:
             kwargs_for_fn["dirty_idx"] = dirty_idx
+        # Likewise, only pass gradient dtypes declared via ctx.set_output_grad_dtype.
+        if ctx.output_grad_dtypes is not None:
+            kwargs_for_fn["output_grad_dtypes"] = self.remap_output_grad_dtypes(
+                ctx, fwd_out, fwd_graph_output_vts
+            )
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply
@@ -5451,6 +5495,38 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # type: ignore[arg-type]
         overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
         return fwd_out
+
+    def remap_output_grad_dtypes(
+        self,
+        ctx: "AutogradFunctionContextVariable",
+        fwd_out: VariableTracker,
+        fwd_graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
+    ) -> tuple[torch.dtype | None, ...]:
+        """Map ctx.set_output_grad_dtype declarations to the traced fwd outputs.
+
+        The declarations follow the original forward's outputs (``fwd_out``),
+        but the emitted autograd.Function returns ``fwd_graph_output_vts``:
+        only tensor/symint outputs, flattened, plus any intermediates. Match
+        them by VariableTracker identity, as handle_saved_tensors_wiring does
+        for the backward inputs. Traced outputs with no original counterpart
+        get no gradient and declare None. trace_backward_graph has already
+        validated the declarations.
+        """
+        if ctx.output_grad_dtypes is None:
+            raise AssertionError("Expected ctx.output_grad_dtypes to be set")
+        fwd_out_vts = (
+            fwd_out.items
+            if isinstance(fwd_out, variables.BaseListVariable)
+            else [fwd_out]
+        )
+        fwd_vt_to_grad_dtype = {
+            fwd_vt: grad_dtype
+            for fwd_vt, grad_dtype in zip(fwd_out_vts, ctx.output_grad_dtypes)
+            if fwd_vt.is_tensor()
+        }
+        if not isinstance(fwd_graph_output_vts, (list, tuple)):
+            fwd_graph_output_vts = (fwd_graph_output_vts,)
+        return tuple(fwd_vt_to_grad_dtype.get(vt) for vt in fwd_graph_output_vts)
 
     def prepare_ctx_vt(
         self, tx: "InstructionTranslatorBase", args: Any, kwargs: Any
@@ -5588,7 +5664,35 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     bwd_args.append(ConstantVariable.create(None))
 
+        num_grad_args = len(bwd_args)
+        # Validate ctx.set_output_grad_dtype before it shapes the backward
+        # trace: invalid declarations graph break, so eager raises its error.
+        if ctx.output_grad_dtypes is not None and (
+            len(ctx.output_grad_dtypes) != num_grad_args
+            or any(
+                grad_dtype is not None and not grad_arg.is_tensor()
+                for grad_arg, grad_dtype in zip(bwd_args, ctx.output_grad_dtypes)
+            )
+        ):
+            unimplemented(
+                gb_type="autograd.Function.apply: invalid set_output_grad_dtype",
+                context=f"declarations {ctx.output_grad_dtypes} for "
+                f"{num_grad_args} outputs",
+                explanation="ctx.set_output_grad_dtype must declare one dtype per "
+                "forward output, and None for non-tensor outputs.",
+                hints=[
+                    "Pass one torch.dtype or None per forward output, and None "
+                    "for non-tensor outputs."
+                ],
+            )
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
+        # Gradients declared via ctx.set_output_grad_dtype reach backward in
+        # the declared dtype, not the forward output's dtype.
+        overridden_bwd_args_dtypes = None
+        if ctx.output_grad_dtypes is not None:
+            overridden_bwd_args_dtypes = [None] * (
+                len(bwd_args) - num_grad_args
+            ) + list(ctx.output_grad_dtypes)
 
         def is_strict_for(v: VariableTracker) -> bool:
             if v.is_tensor():
@@ -5619,6 +5723,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         supports_input_mutation=True,
                         supports_aliasing=True,
                         tracer=bwd_tracer,
+                        overridden_bwd_args_dtypes=overridden_bwd_args_dtypes,
                     )
                 )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace as e:
@@ -5642,10 +5747,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
+                    rewritten = autograd_function_backward_rewritten(
+                        self.bwd_fn.__func__
+                    )
+                    fn_vt = SourcelessBuilder.create_internal_user_function(rewritten)
                     bwd_fn = UserMethodVariable(
-                        torch._dynamo.variables.UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        ),
+                        fn_vt,
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -5674,6 +5781,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             supports_input_mutation=True,
                             supports_aliasing=True,
                             tracer=bwd_tracer,
+                            overridden_bwd_args_dtypes=overridden_bwd_args_dtypes,
                         )
                     )
 
@@ -6060,6 +6168,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         args: list[VariableTracker],
     ) -> tuple[VariableTracker, list[VariableTracker]]:
         from . import UserMethodVariable
+        from .builder import VariableBuilder
 
         source = None
         if self.parent_source:
@@ -6077,7 +6186,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                torch._dynamo.variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn.__func__,
                     source=source and AttrSource(source, "__func__"),
                 ),
