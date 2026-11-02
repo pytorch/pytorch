@@ -1408,9 +1408,9 @@ class AOTInductorModelBase {
       AOTIProxyExecutorHandle proxy_executor) {
 #ifdef USE_CUDA
     // The completion event is created and recorded outside run_impl's own
-    // device guard; keep both on the model's device, whatever device the
-    // calling thread is on.
-    AOTICudaGuard device_guard(this->device_idx_);
+    // guard; keep both on the model's device, whatever device the calling
+    // thread is on. The same guard as run_impl, so no extra shim is needed.
+    AOTICudaStreamGuard stream_guard(stream, this->device_idx_);
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
       AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
@@ -1465,7 +1465,7 @@ class AOTInductorModelBase {
       AOTIProxyExecutorHandle proxy_executor,
       bool initialization = false) {
 #ifdef USE_CUDA
-    AOTICudaGuard device_guard(this->device_idx_);
+    AOTICudaStreamGuard stream_guard(stream, this->device_idx_);
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
       AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
