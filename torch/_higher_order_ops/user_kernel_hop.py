@@ -21,6 +21,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
@@ -37,7 +38,6 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.utils import ReInplaceTrigger
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
 
@@ -553,7 +553,7 @@ class UserKernelHOPInfo:
     # clones plus the mutation HOP.
     functional_dense: Callable[..., dict[str, Any]]
     # Counts this DSL's reinplacing decisions.
-    reinplace_trigger: "ReInplaceTrigger"
+    reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
 
@@ -562,8 +562,6 @@ _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
 
 
 def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
-    from torch._dynamo.utils import ReInplaceTrigger
-
     if not isinstance(info.reinplace_trigger, ReInplaceTrigger):
         raise TypeError(f"{info.reinplace_trigger!r} is not a ReInplaceTrigger")
     hops = (info.mutation, info.functional)

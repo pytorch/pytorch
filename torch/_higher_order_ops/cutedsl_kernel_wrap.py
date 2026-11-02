@@ -24,6 +24,7 @@ import sympy
 
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
     functional_hop_dense,
     functional_hop_fake,
@@ -367,6 +368,10 @@ def _may_overlap(a: Tensor, b: Tensor) -> bool:
     )
 
     if a.element_size() == b.element_size():
+        # TODO(zoranzhao): relies on the compute_overlapping_tensors fix in
+        # https://github.com/pytorch/pytorch/pull/202848, which must land first.
+        # Without it, 2-D views whose rows start inside the other's rows, such as
+        # base[:4, :3] and base[1:5, 2:5], are reported disjoint.
         try:
             return bool(compute_overlapping_tensors([a, b]))
         except GuardOnDataDependentSymNode:
@@ -520,10 +525,6 @@ def cutedsl_kernel_wrapper_functional_functionalize(
 register_user_kernel_hop_dispatch(
     cutedsl_kernel_wrapper_mutation, cutedsl_kernel_wrapper_functional
 )
-
-
-# Imported after every definition, as in triton_kernel_wrap.py.
-from torch._dynamo.utils import ReInplaceTrigger
 
 
 register_user_kernel_hop(

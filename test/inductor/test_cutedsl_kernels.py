@@ -25,6 +25,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
 from torch._inductor.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -377,6 +378,8 @@ def _add_kwargs(x, y, out, n=None):
 
 @requires_cutedsl
 class CuteDSLToyKernelTests(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_toy_kernels_plain_cutedsl(self):
         # The toy kernels themselves, through plain CuTeDSL (no PT2): if this fails
         # the environment is broken, not the PT2 integration.
@@ -397,6 +400,8 @@ class CuteDSLToyKernelTests(TestCase):
 @requires_cutedsl
 class CuteDSLHOPTests(TestCase):
     """Direct use of the HOPs, the side table and the eager launch."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_side_table_dedupes_constant_args(self):
         # The table is never reset and every eager launch through the HOP adds its
@@ -1138,6 +1143,8 @@ def forward(self, x_1, y_1):
         def overlapping_columns(x, y):
             # Rows 1 to 3 of column 2 are in both: each row of out starts inside a
             # row of the other, though not inside the first one.
+            # TODO(zoranzhao): refused only with the fix in
+            # https://github.com/pytorch/pytorch/pull/202848 (see _may_overlap).
             base = x.view(10, 100)
             out = base[1:5, 2:5]
             cutedsl_kernel_wrapper_mutation(
