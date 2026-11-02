@@ -176,15 +176,21 @@ class LinearMixedPrecision(nn.Module):
     A linear module with extra checks for mixed precision training.
     """
 
-    def __init__(self, param_dtype, buffer_name="buffer", run_checks=True):
+    def __init__(
+        self,
+        param_dtype,
+        buffer_name="buffer",
+        run_checks=True,
+        buffer_dtype=_BUFFER_ORIG_DTYPE,
+    ):
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False).to(param_dtype)
         # Use a configurable buffer name to avoid all submodules sharing the
         # same buffer name, which may hide prefixed vs. unprefixed name bugs
         self.buffer_name = buffer_name
-        self.register_buffer(buffer_name, torch.randn((1, 2), dtype=_BUFFER_ORIG_DTYPE))
+        self.register_buffer(buffer_name, torch.randn((1, 2), dtype=buffer_dtype))
         self._orig_param_type = param_dtype
-        self._orig_buffer_dtype = _BUFFER_ORIG_DTYPE
+        self._orig_buffer_dtype = buffer_dtype
         self.run_checks = run_checks
 
     def forward(self, tup):
@@ -291,20 +297,39 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
             else default_mp
         )
 
+    def _buffer_orig_dtype(self):
+        capabilities = type(self).get_capabilities()
+        return (
+            _BUFFER_ORIG_DTYPE
+            if capabilities.get(Capability.dtype.fp64, False)
+            else torch.float32
+        )
+
     def _get_simple_nested_model(
-        self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
+        self,
+        param_dtype,
+        run_checks,
+        *fsdp_args,
+        buffer_dtype=_BUFFER_ORIG_DTYPE,
+        **fsdp_kwargs,
     ):
         model = FSDP(
             nn.Sequential(
                 FSDP(
                     LinearMixedPrecision(
-                        param_dtype, buffer_name="buffer0", run_checks=run_checks
+                        param_dtype,
+                        buffer_name="buffer0",
+                        run_checks=run_checks,
+                        buffer_dtype=buffer_dtype,
                     ).to(self._selected_device_type()),
                     *fsdp_args,
                     **fsdp_kwargs,
                 ),
                 LinearMixedPrecision(
-                    param_dtype, buffer_name="buffer1", run_checks=run_checks
+                    param_dtype,
+                    buffer_name="buffer1",
+                    run_checks=run_checks,
+                    buffer_dtype=buffer_dtype,
                 ).to(self._selected_device_type()),
             ),
             *fsdp_args,
@@ -312,10 +337,12 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
         )
         return model
 
-    def _get_simple_model(self, param_dtype, *fsdp_args, **fsdp_kwargs):
+    def _get_simple_model(
+        self, param_dtype, *fsdp_args, buffer_dtype=_BUFFER_ORIG_DTYPE, **fsdp_kwargs
+    ):
         device = self._selected_device_type()
         model = FSDP(
-            LinearMixedPrecision(param_dtype).to(device),
+            LinearMixedPrecision(param_dtype, buffer_dtype=buffer_dtype).to(device),
             *fsdp_args,
             **self._root_fsdp_kwargs(fsdp_kwargs),
         )
@@ -430,9 +457,11 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
         sharding_strategy,
         enable_sharded_grad_scaler,
     ):
+        buffer_dtype = self._buffer_orig_dtype()
         fsdp_models = [
             self._get_simple_model(
                 param_dtype=full_precision_param_dtype,
+                buffer_dtype=buffer_dtype,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
@@ -441,6 +470,7 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
             ),
             self._get_simple_nested_model(
                 param_dtype=full_precision_param_dtype,
+                buffer_dtype=buffer_dtype,
                 run_checks=True,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
@@ -487,7 +517,7 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
                         if mp_config.buffer_dtype is not None:
                             self.assertEqual(buf.dtype, mp_config.buffer_dtype)
                         else:
-                            self.assertEqual(buf.dtype, _BUFFER_ORIG_DTYPE)
+                            self.assertEqual(buf.dtype, buffer_dtype)
                     # p._mp_shard should be freed.
                     if mp_config.param_dtype is not None:
                         self._validate_mp_shard_freed(model)
@@ -509,7 +539,7 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
                         if mp_config.buffer_dtype is not None:
                             self.assertEqual(buf.dtype, mp_config.buffer_dtype)
                         else:
-                            self.assertEqual(buf.dtype, _BUFFER_ORIG_DTYPE)
+                            self.assertEqual(buf.dtype, buffer_dtype)
                     # p._mp_shard should be freed.
                     if mp_config.param_dtype is not None:
                         self._validate_mp_shard_freed(model)
@@ -551,7 +581,7 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
                             if mp_config.buffer_dtype is not None:
                                 self.assertEqual(v.dtype, mp_config.buffer_dtype)
                             else:
-                                self.assertEqual(v.dtype, _BUFFER_ORIG_DTYPE)
+                                self.assertEqual(v.dtype, buffer_dtype)
 
                     # state_dict should be in full precision
                     state_dict = {k: v.clone() for k, v in model.state_dict().items()}
@@ -559,7 +589,7 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
                         # Parameters and buffers are checkpointed in their
                         # original dtypes, which may be different.
                         if name in named_buffers:
-                            self.assertEqual(tensor.dtype, _BUFFER_ORIG_DTYPE)
+                            self.assertEqual(tensor.dtype, buffer_dtype)
                         else:
                             self.assertEqual(
                                 tensor.dtype,
@@ -573,7 +603,7 @@ class TestFSDPMixedPrecision(_FSDPBackendGateMixin, FSDPTestContinuous):
                         if mp_config.buffer_dtype is not None:
                             self.assertEqual(buf.dtype, mp_config.buffer_dtype)
                         else:
-                            self.assertEqual(buf.dtype, _BUFFER_ORIG_DTYPE)
+                            self.assertEqual(buf.dtype, buffer_dtype)
 
 
 class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
@@ -917,6 +947,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         Tests that when model.eval() and FSDP_USE_FULL_PREC_IN_EVAL is set,
         buffers are in the full precision.
         """
+        buffer_dtype = self._buffer_orig_dtype()
         for (
             cast_forward_inputs,
             use_full_prec_in_eval,
@@ -933,6 +964,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model_getter = self._get_simple_nested_model
             fsdp_model = model_getter(
                 param_dtype=torch.float32,
+                buffer_dtype=buffer_dtype,
                 run_checks=False,
                 mixed_precision=mp_config,
             )
@@ -946,7 +978,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             # Add pre-forward hooks
             def verify_eval_buffer_dtype(module, input):
                 expected_dtype = (
-                    _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
+                    buffer_dtype if use_full_prec_in_eval else torch.float16
                 )
                 for buf in module.buffers():
                     self.assertEqual(expected_dtype, buf.dtype)
@@ -971,9 +1003,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             for hook_handle in hook_handles:
                 hook_handle.remove()
 
-            expected_dtype = (
-                _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
-            )
+            expected_dtype = buffer_dtype if use_full_prec_in_eval else torch.float16
             for buf in fsdp_model.buffers():
                 self.assertEqual(expected_dtype, buf.dtype)
 
