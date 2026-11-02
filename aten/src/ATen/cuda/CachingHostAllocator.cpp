@@ -54,10 +54,21 @@ struct CUDACachingHostAllocatorImpl
     // thread allocated first, so skip it. Still create it on first use, as
     // allocate_host_memory does, so that free_block never creates it.
     get_reserve_segment();
+#if defined(USE_ROCM) && ROCM_VERSION >= 70200
+    // Without NumaUser, HIP takes the pages from the NUMA node nearest the
+    // current device, whichever thread allocates. Before ROCm 7.2, NumaUser
+    // fails the allocation where get_mempolicy is blocked (Docker's default
+    // seccomp profile).
+    allocate_host_memory_slowpath(size, ptr, hipHostMallocNumaUser);
+#else
     allocate_host_memory_slowpath(size, ptr);
+#endif
   }
 
-  void allocate_host_memory_slowpath(size_t size, void** ptr) {
+  void allocate_host_memory_slowpath(
+      size_t size,
+      void** ptr,
+      unsigned int flags = cudaHostAllocDefault) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
@@ -83,7 +94,7 @@ struct CUDACachingHostAllocatorImpl
       // Relaxed: a capture on any thread, or on another stream of this
       // thread, would otherwise reject the call and be invalidated.
       at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-      C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      C10_CUDA_CHECK(cudaHostAlloc(ptr, size, flags));
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -152,7 +163,14 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(CUDAEventPool::Event& event) override {
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+    // Relaxed, so that a capture on this thread, or a global-mode capture on
+    // another thread, does not reject the query. Switching modes serializes
+    // threads in the driver, so do it only while a capture is registered with
+    // this allocator (begin_allocate_to_pool).
+    if (C10_UNLIKELY(any_capture_underway())) {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      return event->query();
+    }
     return event->query();
   }
 
