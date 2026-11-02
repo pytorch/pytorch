@@ -241,7 +241,7 @@ LINTRUNNER_CACHE_INFO = (
 LINTRUNNER_BASE_CMD = [
     "uvx",
     "--python",
-    "3.10",
+    "3.11",
     "lintrunner@0.12.7",
 ]
 
@@ -260,13 +260,13 @@ def _check_linter_python_versions():
         except ValueError:
             python_index = -1
         if python_index == -1 or command[python_index + 1 : python_index + 2] != [
-            "3.10"
+            "3.11"
         ]:
             invalid_linters.append(linter["code"])
 
     if invalid_linters:
         raise click.ClickException(
-            "Linters using `uv run --script` must specify `--python 3.10`: "
+            "Linters using `uv run --script` must specify `--python 3.11`: "
             + ", ".join(invalid_linters)
         )
 
