@@ -111,6 +111,8 @@ class RocshmemLibFinder:
 # like the rocSHMEM reduce wrappers do. Triton links this textual IR before the
 # device bitcode and sets its target and datalayout. The wrapper names must contain
 # "rocshmem", or Triton will not link the device bitcode (see requires_rocshmem).
+# TODO: Temporary. Remove once rocSHMEM exports extern "C" alltoall/broadcast APIs
+# that use the default ctx and team, like its reduce wrappers (WRAP_REDUCE_OP).
 _TEAM_WORLD_WRAPPERS_LL = r"""
 @ROCSHMEM_CTX_DEFAULT = external addrspace(1) global { ptr, ptr }
 @ROCSHMEM_TEAM_WORLD = external addrspace(4) constant ptr
