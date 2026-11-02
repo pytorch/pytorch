@@ -490,7 +490,17 @@ class PersistentCache(CacheBase):
                     break
             return hit
 
-        local_cache = self.get_local_cache() if config.autotune_local_cache else {}
+        # TunableOp does its work inside benchmark(): tune records solutions and
+        # reuse validates a borrow. A cached timing skips benchmark() entirely,
+        # so neither happens, and the mode is in neither the choice hash nor the
+        # benchmark cache key -- a timing from a plain run would be served to a
+        # tune or reuse compile, and the reverse. Same reason
+        # CacheabilityValidator._check_tunableop_enabled bypasses the FX cache.
+        # Imported here because tunableop pulls in ir, which imports this module.
+        from torch._inductor import tunableop
+
+        use_local_cache = config.autotune_local_cache and not tunableop.is_enabled()
+        local_cache = self.get_local_cache() if use_local_cache else {}
         if (not check_cache(local_cache)) and (benchmark is not None):
             # re-benchmark everything to try to get consistent numbers from the same machine
             timings = benchmark(choices)

@@ -11979,7 +11979,7 @@ class TestLinalgCudaOnly(TestCase):
             A = torch.randn(64, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             torch.matmul(A, B)
-            after_tuning = len(torch.cuda.tunable.get_results())
+            after_tuning = self._force_nondefault_donor()
 
             # Reuse pass: no tuning, borrow allowed, record the outcome.
             torch.cuda.tunable.tuning_enable(False)
@@ -12009,7 +12009,7 @@ class TestLinalgCudaOnly(TestCase):
             B = torch.randn(K, N, device=device, dtype=dtype)
             A = torch.randn(102400, K, device=device, dtype=dtype)
             torch.matmul(A, B)
-            after_tuning = len(torch.cuda.tunable.get_results())
+            after_tuning = self._force_nondefault_donor()
             self.assertGreater(after_tuning, 0)
 
             torch.cuda.tunable.tuning_enable(False)
@@ -12034,7 +12034,8 @@ class TestLinalgCudaOnly(TestCase):
             A = torch.randn(64, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             torch.matmul(A, B)
-            after_tuning = len(torch.cuda.tunable.get_results())
+            after_tuning = self._force_nondefault_donor()
+            persisted = self._results_file_rows()
 
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable._nearest_match_enable(True)
@@ -12043,7 +12044,10 @@ class TestLinalgCudaOnly(TestCase):
             A2 = torch.randn(32, K, device=device, dtype=dtype)
             torch.matmul(A2, B)
 
-            self.assertEqual(len(torch.cuda.tunable.get_results()), after_tuning)
+            # The verdict is cached in memory so the comparison is not repeated,
+            # but with record_borrowed off it must not reach the file.
+            self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
+            self.assertEqual(self._results_file_rows(), persisted)
 
     @onlyCUDA
     @dtypes(torch.float)
@@ -12133,6 +12137,12 @@ class TestLinalgCudaOnly(TestCase):
                 # FindFastestAmong. The second identical call must hit the
                 # verdict and log nothing.
                 validations = result.stdout.count("finding fastest for")
+                # One from the tune itself. A borrow adds exactly one more and
+                # the repeat must add none. If Default won the tune there is no
+                # donor, so nothing was borrowed and there is nothing to pin --
+                # the subprocess cannot use _force_nondefault_donor.
+                if validations == 1:
+                    self.skipTest("tuning picked Default, so nothing was borrowed")
                 self.assertEqual(validations, 2, result.stdout)
 
     @onlyCUDA
@@ -12170,7 +12180,7 @@ class TestLinalgCudaOnly(TestCase):
             A = torch.randn(64, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             torch.matmul(A, B)
-            after_tuning = len(torch.cuda.tunable.get_results())
+            after_tuning = self._force_nondefault_donor()
             self.assertEqual(get_tunableop_untuned_entry_count(), 0)
 
             torch.cuda.tunable.tuning_enable(False)
@@ -12196,7 +12206,8 @@ class TestLinalgCudaOnly(TestCase):
             A = torch.randn(64, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             torch.matmul(A, B)
-            after_tuning = len(torch.cuda.tunable.get_results())
+            self._force_nondefault_donor()
+            persisted = self._results_file_rows()
 
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable._nearest_match_enable(True)
@@ -12206,7 +12217,8 @@ class TestLinalgCudaOnly(TestCase):
             A2 = torch.randn(32, K, device=device, dtype=dtype)
             torch.matmul(A2, B)
 
-            self.assertEqual(len(torch.cuda.tunable.get_results()), after_tuning)
+            # Nothing persisted, so the shape is still a genuine gap.
+            self.assertEqual(self._results_file_rows(), persisted)
             self.assertGreater(get_tunableop_untuned_entry_count(), 0)
 
     @onlyCUDA
@@ -12226,6 +12238,7 @@ class TestLinalgCudaOnly(TestCase):
             before = {(r[0], r[1]): r[2] for r in torch.cuda.tunable.get_results()}
             donor_solutions = set(before.values())
 
+            self._force_nondefault_donor()
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable._nearest_match_enable(True)
             torch.cuda.tunable._record_borrowed_enable(True)
@@ -12253,7 +12266,7 @@ class TestLinalgCudaOnly(TestCase):
             A = torch.randn(64, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
             torch.matmul(A, B)
-            after_tuning = len(torch.cuda.tunable.get_results())
+            after_tuning = self._force_nondefault_donor()
 
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable._nearest_match_enable(True)
@@ -12284,6 +12297,7 @@ class TestLinalgCudaOnly(TestCase):
 
             filename = torch.cuda.tunable.get_filename()
             # Keep only wildcard rows (param sig contains '*').
+            self._force_nondefault_donor()
             self._rewrite_results_file(
                 filename, lambda row: row if "*" in row[1] else None
             )
@@ -12333,6 +12347,41 @@ class TestLinalgCudaOnly(TestCase):
             torch.matmul(A2, B)
 
             self.assertEqual(len(torch.cuda.tunable.get_results()), before)
+
+    def _results_file_rows(self):
+        # What was actually persisted. get_results() is the in-memory map,
+        # which a borrow may legitimately populate without writing.
+        import csv
+        import os
+        filename = torch.cuda.tunable.get_filename()
+        if not os.path.exists(filename):
+            return []
+        with open(filename) as f:
+            return [r for r in csv.reader(f) if r and r[0] != "Validator"]
+
+    def _force_nondefault_donor(self):
+        """Make every tuned row a usable non-Default solution; skip if none.
+
+        LookupNearest skips Default donors, so a tune that Default happens to
+        win leaves nothing to borrow and a positive borrow test would pass
+        while exercising none of the path. The substitute is taken from this
+        run rather than invented: an unreachable name would be an unusable
+        donor, which is a different case (see the unusable-donor test).
+        Returns the entry count after reloading.
+        """
+        import csv
+        filename = torch.cuda.tunable.get_filename()
+        with open(filename) as f:
+            rows = [r for r in csv.reader(f) if r and r[0] != "Validator"]
+        usable = [r[2] for r in rows if r[2] != "Default"]
+        if not usable:
+            self.skipTest("tuning picked Default, so no donor can be borrowed")
+        self._rewrite_results_file(
+            filename, lambda row: [row[0], row[1], usable[0], row[3]]
+        )
+        torch.cuda.tunable._clear_all()
+        self.assertTrue(torch.cuda.tunable.read_file(filename))
+        return len(torch.cuda.tunable.get_results())
 
     def _rewrite_results_file(self, filename, transform):
         # Rewrite every non-Validator row of a results file through `transform`,
@@ -12422,6 +12471,7 @@ class TestLinalgCudaOnly(TestCase):
                     parts[i + off] = str(int(parts[i + off]) + 8)
                 return [row[0], "_".join(parts), row[2], row[3]]
 
+            self._force_nondefault_donor()
             self._rewrite_results_file(filename, pad_lds)
             torch.cuda.tunable._clear_all()
             self.assertTrue(torch.cuda.tunable.read_file(filename))
@@ -12459,6 +12509,7 @@ class TestLinalgCudaOnly(TestCase):
             with open(filename) as f:
                 before_rows = {(r[0], r[1]) for r in csv.reader(f) if r and r[0] != "Validator"}
 
+            self._force_nondefault_donor()
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable.record_untuned_enable(True)
             torch.cuda.tunable._nearest_match_enable(True)

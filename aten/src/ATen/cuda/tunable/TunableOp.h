@@ -268,10 +268,11 @@ class TunableOp {
             // results file that does not carry these entries.
             mgr.RecordBorrowed(op_sig, concrete_sig, result);
           } else {
-            // Cache the verdict in memory only: Add() does not reach the file
-            // with tuning off and record-borrowed off, so later calls in this
-            // process skip the re-benchmark without persisting anything.
-            mgr.Add(op_sig, concrete_sig, result);
+            // Remember it for this process so the comparison is not repeated,
+            // without persisting. Not Add(): results_ is reachable from
+            // get_results() and write_file(), so this has to honour the
+            // record-borrowed kill switch, which CacheBorrowedInMemory does.
+            mgr.CacheBorrowedInMemory(op_sig, concrete_sig, result);
           }
           return result;
         }

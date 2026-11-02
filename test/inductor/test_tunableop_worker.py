@@ -13,6 +13,8 @@ from torch._inductor import config as inductor_config, tunableop
 from torch._inductor.autotune_process import _TestBenchmarkRequest, _TestTunableOpJob
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfWindows,
     TestCase,
@@ -560,13 +562,13 @@ class BenchmarkJobCallTest(TestCase):
             _CallFakeBmreq(calls, 1.5), tuning=True, nearest_match=True
         )
         self.assertEqual(self._run(job, calls, device=3, filename="w.csv"), 1.5)
-        # Device first, then filename, then flags; warm benchmark, tuning off,
-        # measured benchmark; cudagraphs cleared.
+        # Device first, then filename, then flags; warm benchmark, then tuning
+        # AND borrowing off, then the measured benchmark; cudagraphs cleared.
         self.assertEqual(
             " ".join(c[0] for c in calls),
             "set_device set_filename enable tuning_enable "
             "_nearest_match_enable _record_borrowed_enable benchmark "
-            "tuning_enable benchmark",
+            "tuning_enable _nearest_match_enable benchmark",
         )
         self.assertEqual(calls[0], ("set_device", 3))
         self.assertEqual(calls[1], ("set_filename", "w.csv", False))
@@ -1015,6 +1017,7 @@ class ExternRoutingTest(TestCase):
         tunableop._worker_key = None
 
 
+@instantiate_parametrized_tests
 class WarmMeasureTest(TestCase):
     """_warm_then_measure pays tuning work outside the measured average."""
 
@@ -1038,6 +1041,36 @@ class WarmMeasureTest(TestCase):
         self.assertEqual(job.bmreq.benchmark.call_count, 2)
         self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
         self.assertFalse(job.bmreq.config_cudagraph_benchmarking)
+
+    @parametrize("warm_ok", (True, False))
+    def test_measured_call_runs_with_both_flags_off(self, warm_ok):
+        # The donor search is compile-time-only work, like tuning: left on it
+        # folds a fruitless LookupNearest into every timed repetition. Safe
+        # because it cannot change the kernel -- a borrow that happened was
+        # recorded, so the measured call is an exact hit.
+        job = self._job(nearest_match=True, record_borrowed=True)
+        order: list = []
+        tunable = mock.Mock()
+        tunable.tuning_enable.side_effect = lambda v: order.append(("tuning", v))
+        tunable._nearest_match_enable.side_effect = lambda v: order.append(
+            ("nearest", v)
+        )
+
+        def _benchmark():
+            order.append("benchmark")
+            if not warm_ok and order.count("benchmark") == 1:
+                raise RuntimeError("boom")
+            return 3.0
+
+        job.bmreq.benchmark.side_effect = _benchmark
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", tunable),
+        ):
+            self.assertEqual(job(0, "", {}), 3.0)
+        self.assertEqual(order[-1], "benchmark", order)
+        self.assertIn(("tuning", False), order[:-1])
+        self.assertIn(("nearest", False), order[:-1])
 
     def test_failed_warm_still_measures(self):
         job = self._job()
