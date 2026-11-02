@@ -424,6 +424,18 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
 
+    def test_batched_rows_must_fit_int32(self):
+        # Stage one indexes batched rows as batch * R + row in Int32.
+        x = torch.randn(4, 8, 32, device="cuda")
+        args = (x, {1}, [], [], 8, 128)
+        self.assertEqual(kg._physical_col_view(*args).shape, (4, 8, 32))
+        with mock.patch.object(kg, "_INT32_LIMIT", 32):
+            self.assertIsNone(kg._physical_col_view(*args))
+        trait = T.SumOps(acc=cutlass.Float32)
+        with mock.patch.object(ct, "_INT32_LIMIT", 32):
+            with self.assertRaisesRegex(AssertionError, r"want B \* R < 2\^31"):
+                ct.reduce_batched_col_tile(trait, "rows", x, [torch.float32], 1)
+
     @parametrize(
         "launcher, rank, args",
         [
