@@ -17,7 +17,8 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Min, Mod
+from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
@@ -2431,6 +2432,12 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
+def _bounded_range_spans(dim: Any, threshold: int) -> bool:
+    """Whether dim has a finite upper bound and its range spans threshold."""
+    vr = V.graph.sizevars.shape_env.bound_sympy(sympy.sympify(dim))
+    return vr.upper not in (int_oo, sympy.oo) and vr.lower < threshold <= vr.upper
+
+
 def mm_allow_tf32(
     m: Any,
     n: Any,
@@ -2451,17 +2458,23 @@ def mm_allow_tf32(
         # Match when cuBLAS uses TF32 (reverse engineered on H100, CUDA 12.8;
         # on B200, cuBLAS 12.8/13.0 use TF32 for every M >= 17 whatever N and K).
         # Only fp32 dots read ALLOW_TF32. Backed dynamic dims follow their hint
-        # and get a guard; unbacked dims and AOT mode (no runtime guard check)
-        # need a proof.
+        # and get a guard; unbacked dims, AOT mode (no runtime guard check) and
+        # dims whose bounded range spans a threshold (a guard would narrow a
+        # user's min/max) need a proof.
         fp32_tf32 = (
             dtype == torch.float32
             and torch.cuda.is_available()
             and torch.cuda.is_tf32_supported()
         )
-        size_threshold = sympy.Ge(m, 16)
+        thresholds = [(m, 16)]
         if torch.version.hip or not (fp32_tf32 and using_b200()):
-            size_threshold = sympy.And(size_threshold, sympy.Ge(Min(n, k), 512))
-        if not fp32_tf32 or V.graph.aot_mode:
+            thresholds += [(n, 512), (k, 512)]
+        size_threshold = sympy.And(*(sympy.Ge(d, t) for d, t in thresholds))
+        if (
+            not fp32_tf32
+            or V.graph.aot_mode
+            or any(_bounded_range_spans(d, t) for d, t in thresholds)
+        ):
             return V.graph.sizevars.statically_known_true(size_threshold)
         return bool(V.graph.sizevars.guard_or_false(size_threshold))
     return allow_tf32

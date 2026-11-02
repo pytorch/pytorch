@@ -1826,6 +1826,38 @@ class TestMaxAutotune(TestCase):
         HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
     )
     @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+            "fx_graph_cache": False,
+        }
+    )
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_dynamic_m_bounded_range(self):
+        # A guard would narrow the user's [2, 4096] range, so the gate needs a
+        # proof: no TF32, no ConstraintViolationError, no recompile.
+        torch._dynamo.reset()
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        b = torch.randn(512, 512, device=GPU_TYPE)
+
+        def mark(t, dim):
+            torch._dynamo.mark_dynamic(t, dim, min=2, max=4096)
+
+        cnt, run = self._compile_mm_counting(torch.mm, b, mark)
+        err, codes = run(1024)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", codes[0])
+        self.assertLessEqual(err, 1e-5)
+        for m in (8, 2048):
+            run(m)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
+    )
+    @skipIfRocm
     @config.patch({"max_autotune": False, "fx_graph_cache": False})
     @recover_orig_fp32_precision
     def test_mm_allow_tf32_dynamic_m_default_mode_no_guard(self):

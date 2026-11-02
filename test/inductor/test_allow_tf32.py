@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.utils._sympy.numbers import int_oo
 
 
 class _TensorNode:
@@ -107,13 +108,23 @@ class TestAllowTf32Interface(TestCase):
 @instantiate_parametrized_tests
 class TestAllowTf32DynamicShapes(TestCase):
     def _gate(
-        self, m, *, aot_mode=False, precision="tf32", dtype=torch.float32, tf32=True
+        self,
+        m,
+        *,
+        aot_mode=False,
+        precision="tf32",
+        dtype=torch.float32,
+        tf32=True,
+        m_range=None,
+        b200=False,
     ):
         shape_env = ShapeEnv()
         if m == "unbacked":
             sym_m = shape_env.create_unbacked_symint().node.expr
         else:
             sym_m = shape_env.create_symbol(m, ConstantSource("m"))
+        if m_range is not None:
+            shape_env.constrain_symbol_range(sym_m, *m_range)
         gm = make_fx(lambda: torch.zeros(2, 2))()
         graph = GraphLowering(gm, shape_env=shape_env, aot_mode=aot_mode)
         orig = torch.backends.cuda.matmul.fp32_precision
@@ -123,9 +134,7 @@ class TestAllowTf32DynamicShapes(TestCase):
                 V.set_graph_handler(graph),
                 mock.patch("torch.cuda.is_available", return_value=True),
                 mock.patch("torch.cuda.is_tf32_supported", return_value=tf32),
-                mock.patch(
-                    f"{mm_allow_tf32.__module__}.using_b200", return_value=False
-                ),
+                mock.patch(f"{mm_allow_tf32.__module__}.using_b200", return_value=b200),
             ):
                 dtype_arg = () if dtype is None else (dtype,)
                 result = mm_allow_tf32(sym_m, 512, 512, "cuda", *dtype_arg)
@@ -141,6 +150,24 @@ class TestAllowTf32DynamicShapes(TestCase):
     )
     def test_cuda_gate_guards_backed_dims(self, m, expected, guards):
         self.assertEqual(self._gate(m), (expected, guards))
+
+    @parametrize(
+        "m,m_range,expected,guards",
+        [
+            # A guard would narrow a user's max, so a bounded range spanning
+            # the threshold needs a proof.
+            (1024, (2, 4096), False, []),
+            # A bounded range on one side of the threshold is already decided.
+            (1024, (32, 4096), True, []),
+            (8, (2, 15), False, []),
+            # Unbounded ranges (plain mark_dynamic) follow the hint and get a guard.
+            (1024, (2, int_oo), True, ["m >= 16"]),
+        ],
+    )
+    @parametrize("b200", (False, True))
+    def test_cuda_gate_bounded_range(self, m, m_range, expected, guards, b200):
+        result = self._gate(m, m_range=m_range, b200=b200)
+        self.assertEqual(result, (expected, guards))
 
     def test_cuda_gate_no_guard_without_tf32(self):
         self.assertEqual(self._gate(1024, precision="ieee"), (False, []))
