@@ -170,6 +170,13 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import CppFakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+
+class _WeakrefableList(list[Any]):
+    """A parameter list that finalizers can track without retaining its tensors."""
+
+    __slots__ = ("__weakref__",)
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -974,7 +981,7 @@ def prepare_aot_config(
     buffers_len = len(buffers_flat)
 
     params_buffers = {**params, **buffers}
-    params_buffers_flat = params_flat + buffers_flat
+    params_buffers_flat = _WeakrefableList(itertools.chain(params_flat, buffers_flat))
 
     full_args = [*params_flat, *buffers_flat, *args]
 
@@ -991,9 +998,12 @@ def prepare_aot_config(
         # buffers
         tracing_context.params_flat = params_buffers_flat
         (
-            tracing_context.params_flat_unwrap_subclasses,
+            unwrapped_params,
             tracing_context.params_unwrapped_to_flat_index,
         ) = unwrap_tensor_subclasses_with_indices_to_original(params_buffers_flat)
+        tracing_context.params_flat_unwrap_subclasses = _WeakrefableList(
+            unwrapped_params
+        )
 
     # TODO: Might be nice to hold on to the Dynamo source here in full_args_descs!
     (
