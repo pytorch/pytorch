@@ -5856,6 +5856,149 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                     else:
                         self.assertTrue(t.grad is None)
 
+    @dtypes(torch.float32)
+    @parametrize("lengths", [(5, 7, 9), (7, 7, 7), (7,), (0, 7, 0), (0,)])
+    @parametrize("container", [list, tuple])
+    @parametrize("contiguous", [False, True])
+    def test_as_nested_tensor_jagged_dim(
+        self, device, dtype, lengths, container, contiguous
+    ):
+        tensors = []
+        for length in lengths:
+            t = torch.randn(4, length, device=device, dtype=dtype)
+            if not contiguous:
+                t = t.t().contiguous().t()
+            tensors.append(t.requires_grad_())
+        nt = torch.nested.as_nested_tensor(
+            container(tensors), layout=torch.jagged, jagged_dim=2
+        )
+
+        self.assertEqual(nt.layout, torch.jagged)
+        self.assertEqual(nt._ragged_idx, 2)
+        self.assertEqual(nt.shape[:2], (len(lengths), 4))
+        self.assertIsInstance(nt.shape[2], torch.SymInt)
+        self.assertEqual(nt.values(), torch.cat(tensors, dim=1))
+        offsets = torch.tensor([0, *itertools.accumulate(lengths)], device=device)
+        self.assertEqual(nt.offsets(), offsets)
+        self.assertEqual(nt._min_seqlen, min(lengths))
+        self.assertEqual(nt._max_seqlen, max(lengths))
+        self.assertEqual(nt.unbind(), tuple(tensors))
+        nt.values().square().sum().backward()
+        for t in tensors:
+            self.assertEqual(t.grad, 2 * t)
+
+    @parametrize("jagged_dim", [1, 2, 3])
+    def test_as_nested_tensor_jagged_dim_axes(self, device, jagged_dim):
+        tensors = [torch.randn(2, 3, 4, device=device) for _ in range(2)]
+        nt = torch.nested.as_nested_tensor(
+            tensors, layout=torch.jagged, jagged_dim=jagged_dim
+        )
+        self.assertEqual(nt._ragged_idx, jagged_dim)
+        self.assertEqual(nt.values(), torch.cat(tensors, dim=jagged_dim - 1))
+        length = tensors[0].shape[jagged_dim - 1]
+        self.assertEqual(
+            nt.offsets(), torch.tensor([0, length, 2 * length], device=device)
+        )
+        self.assertEqual(nt.unbind(), tuple(tensors))
+
+    @dtypes(torch.double)
+    @parametrize("to_cpu", [False, True])
+    def test_as_nested_tensor_jagged_dim_conversion(self, device, dtype, to_cpu):
+        src_device, dst_device = (device, "cpu") if to_cpu else ("cpu", device)
+        tensors = [
+            torch.randn(4, length, device=src_device, requires_grad=True)
+            for length in (5, 7, 9)
+        ]
+        nt = torch.nested.as_nested_tensor(
+            tensors, layout=torch.jagged, jagged_dim=2, device=dst_device, dtype=dtype
+        )
+        self.assertEqual(nt._ragged_idx, 2)
+        self.assertEqual(nt.dtype, dtype)
+        self.assertEqual(nt.device, torch.device(dst_device))
+        self.assertEqual(
+            nt.values(), torch.cat(tensors, dim=1).to(device=dst_device, dtype=dtype)
+        )
+        self.assertEqual(nt.offsets(), torch.tensor([0, 5, 12, 21], device=dst_device))
+        self.assertEqual(nt.offsets().dtype, torch.int64)
+        nt.values().square().sum().backward()
+        for t in tensors:
+            self.assertEqual(t.grad, 2 * t)
+
+    @parametrize("lengths", [(5, 7, 9), (7, 7, 7), (7,)])
+    @parametrize("pass_none", [False, True])
+    def test_as_nested_tensor_jagged_dim_inference(self, device, lengths, pass_none):
+        tensors = [torch.randn(4, length, device=device) for length in lengths]
+        kwargs = {"jagged_dim": None} if pass_none else {}
+        nt = torch.nested.as_nested_tensor(tensors, layout=torch.jagged, **kwargs)
+        jagged_dim = 2 if len(set(lengths)) > 1 else 1
+        self.assertEqual(nt._ragged_idx, jagged_dim)
+        self.assertEqual(nt.values(), torch.cat(tensors, dim=jagged_dim - 1))
+        sizes = lengths if jagged_dim == 2 else [4] * len(lengths)
+        self.assertEqual(
+            nt.offsets(), torch.tensor([0, *itertools.accumulate(sizes)], device=device)
+        )
+        self.assertEqual(nt._min_seqlen, min(sizes))
+        self.assertEqual(nt._max_seqlen, max(sizes))
+
+    @parametrize("jagged_dim", [-3, -1, 0, 3])
+    def test_as_nested_tensor_jagged_dim_out_of_range(self, device, jagged_dim):
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim between 1 and 2"):
+            torch.nested.as_nested_tensor(
+                [torch.randn(4, 7, device=device)],
+                layout=torch.jagged,
+                jagged_dim=jagged_dim,
+            )
+
+    @parametrize("jagged_dim", [1.5, "2", True])
+    def test_as_nested_tensor_jagged_dim_type(self, device, jagged_dim):
+        with self.assertRaisesRegex(TypeError, "jagged_dim must be an integer or None"):
+            torch.nested.as_nested_tensor(
+                [torch.randn(4, 7, device=device)],
+                layout=torch.jagged,
+                jagged_dim=jagged_dim,
+            )
+
+    @parametrize(
+        "jagged_dim,shapes",
+        [
+            (1, ((4, 5), (4, 7))),
+            (2, ((4, 7), (5, 7))),
+            (2, ((4, 5), (6, 7))),
+            (2, ((4, 5, 6), (4, 7, 8))),
+        ],
+    )
+    def test_as_nested_tensor_jagged_dim_inconsistent_shapes(
+        self, device, jagged_dim, shapes
+    ):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "All tensors must have the same shape except in the jagged dimension",
+        ):
+            torch.nested.as_nested_tensor(
+                [torch.randn(shape, device=device) for shape in shapes],
+                layout=torch.jagged,
+                jagged_dim=jagged_dim,
+            )
+
+    @parametrize("input_kind", ["list", "tuple", "tensor", "nested"])
+    @parametrize("layout", [None, torch.strided, torch.jagged])
+    def test_as_nested_tensor_jagged_dim_unsupported(self, device, input_kind, layout):
+        if input_kind in ("list", "tuple") and layout == torch.jagged:
+            return
+        tensors = [torch.randn(4, 7, device=device)]
+        if input_kind == "list":
+            ts = tensors
+        elif input_kind == "tuple":
+            ts = tuple(tensors)
+        elif input_kind == "tensor":
+            ts = torch.stack(tensors)
+        else:
+            ts = torch.nested.as_nested_tensor(tensors, layout=layout)
+        with self.assertRaisesRegex(
+            ValueError, "jagged_dim is only supported for a list / tuple of tensors"
+        ):
+            torch.nested.as_nested_tensor(ts, layout=layout, jagged_dim=2)
+
     @xfailIfTorchDynamo
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
