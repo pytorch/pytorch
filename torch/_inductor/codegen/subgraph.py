@@ -57,6 +57,10 @@ def inline_subgraph_to_ir_nodes(
         V.graph.module = original_module
 
 
+class SubgraphCompileError(RuntimeError):
+    """The benchmark module for a subgraph choice failed to compile."""
+
+
 class SubgraphChoiceCaller(ir.ChoiceCaller):
     """
     Represents a Subgraph Autotuning choice, and the subgraph can be any arbitrary
@@ -119,6 +123,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
+        # Failure from a lazy benchmark compile, so it is not retried
+        self._compile_error: str | None = None
         # Cache benchmark request for async autotuning
         self._bmreq: (
             SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest | None
@@ -261,9 +267,26 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         return self._bmreq
 
     def _ensure_compiled(self) -> None:
-        """Ensure the module is compiled. Used for lazy compilation in non-async path."""
-        if self._compiled_module is None:
+        """Ensure the module is compiled. Used for lazy compilation in non-async path.
+
+        A compile failure (e.g. a kernel Triton cannot lower) makes this choice
+        unusable rather than failing the whole compile, matching how template
+        choices that fail to precompile are dropped.
+        """
+        if self._compiled_module is not None:
+            return
+        if self._compile_error is not None:
+            raise SubgraphCompileError(self._compile_error)
+        try:
             self._compiled_module = self._compile_for_benchmarking()
+        except Exception as e:
+            if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
+                raise
+            # Keep only the message: the traceback would pin the failed lowering.
+            self._compile_error = (
+                f"failed to compile benchmark module for {self.name}: {e}"
+            )
+            raise SubgraphCompileError(self._compile_error) from e
 
     def _ensure_benchmark_request(
         self,
