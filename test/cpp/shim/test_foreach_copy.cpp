@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #include <vector>
 
@@ -12,7 +13,7 @@ namespace {
 std::vector<AtenTensorHandle> handles(std::vector<at::Tensor>& tensors) {
   std::vector<AtenTensorHandle> result;
   for (auto& t : tensors) {
-    result.push_back(reinterpret_cast<AtenTensorHandle>(&t));
+    result.push_back(torch::aot_inductor::tensor_pointer_to_tensor_handle(&t));
   }
   return result;
 }
@@ -60,6 +61,12 @@ TEST(AOTIForeachCopyTest, ChecksItsArguments) {
       AOTI_TORCH_FAILURE);
   EXPECT_EQ(
       aoti_torch__foreach_copy_(nullptr, 1, nullptr, 1, 0), AOTI_TORCH_FAILURE);
+  for (int64_t n : {0, -1}) {
+    EXPECT_EQ(
+        aoti_torch__foreach_copy_(
+            dst_handles.data(), n, src_handles.data(), n, 0),
+        AOTI_TORCH_FAILURE);
+  }
   dst[0] = at::empty({3});
   EXPECT_EQ(
       aoti_torch__foreach_copy_(
