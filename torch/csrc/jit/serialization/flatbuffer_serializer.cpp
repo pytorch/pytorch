@@ -637,7 +637,6 @@ flatbuffers::Offset<mobile::serialization::TensorMetadata> FlatbufferSerializer:
             false,
             "Unsupported tensor quantization type in serialization ",
             toString(tensor.qscheme()));
-        break;
     }
 
     qschema_offset = mobile::serialization::CreateQuantizedSchema(

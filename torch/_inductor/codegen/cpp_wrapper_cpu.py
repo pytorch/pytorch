@@ -475,6 +475,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # The C++ wrapper keeps each Triton kernel as an async_compile.triton(...) source
+        # string: its call wrappers and its compile-time autotune block compile from it.
+        return False
+
     @contextlib.contextmanager
     def _target_buf(self, attr: str, buf: IndentedBuffer):
         """Temporarily redirect self.<attr> to a specific buffer."""
@@ -599,6 +604,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
+
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError(
+            "TMA descriptors are not supported by the CPU cpp_wrapper"
+        )
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
@@ -1982,9 +1992,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
         output_handle: str | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
+        _ = tunable_dyn_dims_mask
         # We can do this unconditionally, since we cache this call.
         self.add_device_include(device)
 
@@ -2075,6 +2087,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=extern_kernel.tunable_dyn_dims_mask,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -2144,6 +2157,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=fallback_kernel.tunable_dyn_dims_mask,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2157,6 +2171,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -2173,6 +2188,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             stack_traces=stack_traces,
             profiling_args=profiling_args,
             output_handle=out_name,
+            tunable_dyn_dims_mask=tunable_dyn_dims_mask,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
