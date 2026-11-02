@@ -234,6 +234,24 @@ def _is_init(fn: object) -> bool:
     return callable(fn) and fn.__name__ == "__init__"
 
 
+_ALLOWED_IN_PRE_DISPATCH_GRAPH = "_allowed_in_pre_dispatch_graph"
+
+
+def _mark_allowed_in_pre_dispatch_graph(fn: Callable[..., Any]) -> None:
+    """Set the mark that ``_is_allowed_in_pre_dispatch_graph`` reads."""
+    setattr(fn, _ALLOWED_IN_PRE_DISPATCH_GRAPH, True)
+
+
+def _is_allowed_in_pre_dispatch_graph(fn: object) -> bool:
+    """
+    Whether one of the decorators below marked ``fn``. torch.export.load
+    accepts a tensor subclass or autograd function by name only if a method in
+    its class hierarchy is marked, because export only records those. The mark
+    is read statically, so checking a name from a file runs no code of ``fn``.
+    """
+    return bool(inspect.getattr_static(fn, _ALLOWED_IN_PRE_DISPATCH_GRAPH, False))
+
+
 def mark_subclass_constructor_exportable_experimental(
     constructor_subclass: Callable[_P, None],
 ) -> Callable[_P, None]:
@@ -243,6 +261,9 @@ def mark_subclass_constructor_exportable_experimental(
         1. Implement __init__ method for your subclass (Look at DTensor implementation)
         2. Decorate your __init__ method with _mark_constructor_exportable_experimental
         3. Put torch._dynamo_disable decorator to prevent dynamo from peeking into its impl
+
+    The decorator marks the __init__ it returns. torch.export.load accepts the
+    subclass by name only if an __init__ in its class hierarchy has this mark.
 
     Example:
 
@@ -307,10 +328,7 @@ def mark_subclass_constructor_exportable_experimental(
         )
         return
 
-    # torch.export.load accepts the name of a tensor subclass only if an
-    # __init__ in its class hierarchy has this mark, because export only
-    # records such constructors.
-    wrapper._allowed_in_pre_dispatch_graph = True  # type: ignore[attr-defined]
+    _mark_allowed_in_pre_dispatch_graph(wrapper)
     return wrapper
 
 
@@ -321,6 +339,10 @@ def allow_in_pre_dispatch_graph(func: Callable[_P, _R]) -> Callable[_P, _R]:
         1. For subclasses:
             1. refer to instructions in mark_subclass_constructor_exportable_experimental
         2. Define apply method on your custom autograd function and apply this decorator.
+
+    The decorator marks the apply it returns. torch.export.load accepts the
+    autograd function by name only if an apply in its class hierarchy has this
+    mark.
 
     Example:
 
@@ -400,8 +422,5 @@ def allow_in_pre_dispatch_graph(func: Callable[_P, _R]) -> Callable[_P, _R]:
         )
         return out
 
-    # torch.export.load accepts the name of an autograd function only if an
-    # apply in its class hierarchy has this mark, because export only calls
-    # such functions.
-    wrapper._allowed_in_pre_dispatch_graph = True  # type: ignore[attr-defined]
+    _mark_allowed_in_pre_dispatch_graph(wrapper)
     return wrapper

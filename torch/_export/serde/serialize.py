@@ -29,6 +29,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
+from torch._export.wrappers import _is_allowed_in_pre_dispatch_graph
 from torch._higher_order_ops.flat_apply import func_to_graphable
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
@@ -921,10 +922,7 @@ def _find_flat_apply_func(
         # Export records the class of the object that a marked __init__
         # builds, which can be a subclass of the class that has the mark.
         inits = [vars(c).get("__init__") for c in func.__mro__]
-        if not any(
-            inspect.getattr_static(init, "_allowed_in_pre_dispatch_graph", False)
-            for init in inits
-        ):
+        if not any(_is_allowed_in_pre_dispatch_graph(init) for init in inits):
             raise SerializeError(
                 f"{name} is not a tensor subclass that export builds: no "
                 "__init__ in its class hierarchy is decorated with "
@@ -976,10 +974,7 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
     applies = [
         getattr(vars(c).get("apply"), "__func__", None) for c in function_cls.__mro__
     ]
-    if not any(
-        inspect.getattr_static(apply, "_allowed_in_pre_dispatch_graph", False)
-        for apply in applies
-    ):
+    if not any(_is_allowed_in_pre_dispatch_graph(apply) for apply in applies):
         raise SerializeError(
             f"{name} is not a torch.autograd.Function that export calls: no "
             "apply in its class hierarchy is decorated with "
