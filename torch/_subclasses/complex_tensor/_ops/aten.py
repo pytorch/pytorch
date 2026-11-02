@@ -1126,8 +1126,10 @@ def index_put_impl(
     values: ComplexTensor,
     accumulate: bool = False,
 ) -> ComplexTensor:
-    self_re, self_im = split_complex_arg(self)
     values_re, values_im = split_complex_arg(values)
+    if not self.dtype.is_complex:
+        return aten.index_put(self, indices, values_re, accumulate)
+    self_re, self_im = split_complex_arg(self)
     return ComplexTensor(
         aten.index_put(self_re, indices, values_re, accumulate),
         aten.index_put(self_im, indices, values_im, accumulate),
