@@ -4418,7 +4418,7 @@ class SubgraphTracer(fx.Tracer):
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            summarize_example_value(example_value),
+            LazyString(summarize_example_value, example_value),
             self.debug_level,
             before,
         )
