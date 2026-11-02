@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: cpu inductor"]
+import re
 import sys
 import unittest
 from typing import NamedTuple
@@ -6,10 +7,12 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     IS_WINDOWS,
     slowTest,
@@ -54,7 +57,50 @@ class CppWrapperTemplate:
 
 
 class TestCppWrapper(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
+
+    @config.patch(cpp_wrapper=True)
+    def test_unused_fallback_outputs_freed(self):
+        # Each layer uses only the first output of two multi-output fallbacks:
+        # SDPA through the C shim and a custom op through the dispatcher. The
+        # unused outputs must be freed right after the call instead of staying
+        # alive until the wrapper returns.
+        n_layers = 3
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                for _ in range(n_layers):
+                    x = x + torch.nn.functional.scaled_dot_product_attention(x, x, x)
+                    x = torch.ops.cpp_wrapper_unused_outputs.two(x)[0]
+                return x
+
+        with torch.library._scoped_library(
+            "cpp_wrapper_unused_outputs", "FRAGMENT"
+        ) as lib:
+            lib.define("two(Tensor x) -> (Tensor, Tensor)")
+            lib.impl("two", lambda x: (x.sin(), x.cos()), "CompositeExplicitAutograd")
+            torch.library.register_fake(
+                "cpp_wrapper_unused_outputs::two",
+                lambda x: (torch.empty_like(x), torch.empty_like(x)),
+                lib=lib,
+            )
+
+            x = torch.randn(2, 4, 64, 16)
+            with torch.no_grad():
+                actual, code = run_and_get_cpp_code(torch.compile(Model()), x)
+                self.assertEqual(actual, Model()(x))
+
+        unused = re.findall(
+            r"_scaled_dot_product_flash_attention_for_cpu\(.*&(\w+)_handle\)\);", code
+        ) + re.findall(
+            r"(\w+) = torch::stable::detail::to<AtenTensorHandle>\(dispatch_vars\[1\]\);",
+            code,
+        )
+        self.assertEqual(len(unused), 2 * n_layers)
+        self.assertEqual(
+            [name for name in unused if f"{name}.reset();" not in code], []
+        )
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):

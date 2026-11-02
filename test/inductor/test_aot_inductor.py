@@ -2421,55 +2421,112 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "requires flash attention")
-    def test_sdpa_unused_outputs_freed(self):
-        # The flash attention fallback also returns logsumexp and RNG state,
-        # which are unused in inference. They must be freed right after the
-        # call, otherwise every layer's logsumexp stays alive until the end of
-        # the model and peak memory grows with depth.
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+    @parametrize("op", ["sdpa", "custom_op"])
+    def test_unused_fallback_outputs_freed(self, op):
+        # Each layer uses only the first output of a multi-output fallback:
+        # flash attention through the C shim (logsumexp and RNG state are
+        # unused in inference), or a custom op through the proxy executor. The
+        # unused outputs must be freed right after the call, otherwise every
+        # layer's copy stays alive until the model returns.
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+        if op == "sdpa" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            raise unittest.SkipTest("requires flash attention")
+
+        b, s, d, n_heads = 8, 1024, 64, 8
 
         class Model(torch.nn.Module):
-            def __init__(self, n_layers, n_heads=8, head_dim=8):
+            def __init__(self, n_layers):
                 super().__init__()
-                self.n_heads = n_heads
-                d = n_heads * head_dim
                 self.qkv = torch.nn.ModuleList(
                     torch.nn.Linear(d, 3 * d) for _ in range(n_layers)
                 )
 
             def forward(self, x):
-                b, s, d = x.shape
                 for qkv in self.qkv:
-                    q, k, v = (
-                        qkv(x)
-                        .view(b, s, 3, self.n_heads, -1)
-                        .permute(2, 0, 3, 1, 4)
-                        .unbind(0)
-                    )
-                    attn = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-                    x = x + attn.transpose(1, 2).reshape(b, s, d)
+                    if op == "sdpa":
+                        q, k, v = (
+                            qkv(x)
+                            .view(b, s, 3, n_heads, -1)
+                            .permute(2, 0, 3, 1, 4)
+                            .unbind(0)
+                        )
+                        y = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                        y = y.transpose(1, 2).reshape(b, s, d)
+                    else:
+                        y = torch.ops.aoti_unused_outputs.two(qkv(x))[0][..., :d]
+                    x = x + y
                 return x
 
-        x = torch.randn(8, 1024, 64, device=self.device, dtype=torch.half)
+        if op == "sdpa":
+            # logsumexp, in float32
+            unused_bytes_per_layer = b * n_heads * s * 4
+            unused_regex = (
+                r"_scaled_dot_product_flash_attention\(.*?&\w+_handle, &(\w+)_handle"
+            )
+        else:
+            unused_bytes_per_layer = 4 * b * s * 3 * d * 2
+            unused_regex = r"proxy_executor_call_function\(.*, (\w+)\}\.data\(\)\)\);"
+
+        x = torch.randn(b, s, d, device=self.device, dtype=torch.half)
+        device_module = torch.get_device_module(self.device)
 
         def run_and_get_peak(n_layers):
             model = Model(n_layers).to(self.device).half().eval()
             with torch.no_grad():
-                package_path = AOTIRunnerUtil.compile(model, (x,))
+                package_path, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, model, (x,)
+                )
+                # The dual-wrapper mode emits each call twice, with the same names.
+                unused = set(re.findall(unused_regex, code))
+                self.assertEqual(len(unused), n_layers)
+                self.assertEqual(
+                    [name for name in unused if f"{name}.reset();" not in code], []
+                )
+
                 runner = torch._inductor.aoti_load_package(package_path)
                 runner(x)
-                torch.cuda.synchronize()
-                baseline = torch.cuda.memory_allocated()
-                torch.cuda.reset_peak_memory_stats()
+                device_module.synchronize()
+                baseline = device_module.memory_allocated()
+                device_module.reset_peak_memory_stats()
                 actual = runner(x)
-                torch.cuda.synchronize()
-                peak = torch.cuda.max_memory_allocated() - baseline
+                device_module.synchronize()
+                peak = device_module.max_memory_allocated() - baseline
                 self.assertEqual(actual, model(x), atol=1e-2, rtol=1e-2)
             return peak
 
-        self.assertEqual(run_and_get_peak(n_layers=32), run_and_get_peak(n_layers=2))
+        with torch.library._scoped_library("aoti_unused_outputs", "FRAGMENT") as lib:
+            lib.define("two(Tensor x) -> (Tensor, Tensor)")
+            lib.impl(
+                "two",
+                lambda x: (x.relu(), x.repeat(4, 1, 1)),
+                "CompositeExplicitAutograd",
+            )
+            torch.library.register_fake(
+                "aoti_unused_outputs::two",
+                lambda x: (
+                    torch.empty_like(x),
+                    x.new_empty(4 * x.shape[0], *x.shape[1:]),
+                ),
+                lib=lib,
+            )
+            # Without the frees, each extra layer adds one unused output to the peak.
+            self.assertLess(
+                run_and_get_peak(n_layers=6) - run_and_get_peak(n_layers=2),
+                unused_bytes_per_layer,
+            )
+
+    def test_unused_fallback_output_defines_unbacked_symbol(self):
+        # The unused unique values define the unbacked symbol for their length,
+        # which is read after the call, so they can only be freed after that.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                _, inverse = torch.unique(x, return_inverse=True)
+                return inverse + 1
+
+        x = torch.randint(0, 5, (16,), device=self.device)
+        with dynamo_config.patch(capture_dynamic_output_shape_ops=True):
+            self.check_model(Model(), (x,))
 
     @skipIfNoFBGEMM
     def test_quantized_linear(self):

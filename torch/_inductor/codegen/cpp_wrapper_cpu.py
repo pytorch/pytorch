@@ -2134,16 +2134,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         )
                 self.writeline(f"AtenTensorHandle {output_handle_name};")
                 output_args.append(f"&{output_handle_name}")
-                if name in V.graph.removed_buffers:
-                    # Unused output (e.g. SDPA's logsumexp): free it right away
-                    # instead of holding it until the end of the wrapper.
-                    output_raii_handles.append(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
-                    )
-                else:
-                    output_raii_handles.append(
-                        f"RAIIAtenTensorHandle {name}({output_handle_name});"
-                    )
+                output_raii_handles.append(
+                    f"RAIIAtenTensorHandle {name}({output_handle_name});"
+                )
             elif isinstance(output, int):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"int64_t {output_name} = {output};")
@@ -2466,6 +2459,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def make_free_by_names(self, names_to_del: list[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
+
+    def codegen_free_unused_outputs(self, node: ir.FallbackKernel) -> None:
+        # Every fallback path declares an RAII handle per tensor output, but the
+        # scheduler never schedules a free for outputs it eliminated as dead, so
+        # they would otherwise stay alive until the wrapper returns.
+        unused = [
+            out.get_name()
+            for out in torch.utils._pytree.tree_leaves(node.outputs)
+            if isinstance(out, ir.MultiOutput)
+            and out.get_name() in V.graph.removed_buffers
+        ]
+        if unused:
+            self.writeline(self.make_free_by_names(unused))
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
