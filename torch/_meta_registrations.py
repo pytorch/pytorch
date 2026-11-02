@@ -7285,6 +7285,39 @@ def meta__efficient_attention_backward(
     return grad_query, grad_key, grad_value, grad_bias
 
 
+def _check_scaled_mm_bias(self, mat2, bias, *, skip_empty):
+    if bias is None:
+        return
+    torch._check(
+        bias.numel() == mat2.size(1),
+        lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",
+    )
+    if device_hint(self) not in ("cpu", "xpu"):
+        return
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+    if skip_empty:
+        empty = sym_or(self.size(0) == 0, self.size(1) == 0, mat2.size(1) == 0)
+        broadcastable = bias.dim() <= 2
+        if bias.dim() > 0:
+            broadcastable = sym_and(broadcastable, sym_or(bias.size(-1) == 1, bias.size(-1) == mat2.size(1)))
+        if bias.dim() == 2:
+            broadcastable = sym_and(broadcastable, sym_or(bias.size(0) == 1, bias.size(0) == self.size(0)))
+        torch._check(
+            sym_or(empty, broadcastable),
+            lambda: f"bias shape {bias.shape} should be broadcastable to output shape {(self.size(0), mat2.size(1))} for a nonempty GEMM",
+        )
+    else:
+        from torch.fx.experimental.symbolic_shapes import sym_eq
+
+        output_shape = (self.size(0), mat2.size(1))
+        broadcast_shape = tuple(_broadcast_shapes(output_shape, bias.shape))
+        torch._check(
+            sym_eq(broadcast_shape, output_shape),
+            lambda: f"output with shape {output_shape} doesn't match the broadcast shape {broadcast_shape}",
+        )
+
+
 def _check_scaled_mm_sizes(
     self: torch.Tensor,
     mat2: torch.Tensor,
@@ -7318,6 +7351,7 @@ def _check_scaled_mm_sizes(
         or device_hint(self) == "xpu"
         or device_hint(self) == "cpu"
     ):
+        _check_scaled_mm_bias(self, mat2, bias, skip_empty=device_hint(self) == "xpu")
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -7577,10 +7611,7 @@ def meta_scaled_mm_v2(
         self.size(1) == mat2.size(0),
         lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
     )
-    torch._check(
-        bias is None or bias.numel() == mat2.size(1),
-        lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",  # type: ignore[union-attr]
-    )
+    _check_scaled_mm_bias(self, mat2, bias, skip_empty=True)
 
     _out_dtype = out_dtype if out_dtype is not None else self.dtype
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)

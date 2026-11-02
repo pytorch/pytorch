@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
@@ -270,6 +271,19 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 #else
   return THPUtils_packInt64((int64_t)CUDA_VERSION);
 #endif
+}
+
+PyObject* THCPModule_rowwiseScaledMMUsesCublasLt(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  int device_index;
+  int scalar_scales;
+  if (!PyArg_ParseTuple(args, "ip", &device_index, &scalar_scales)) {
+    return nullptr;
+  }
+  TORCH_CHECK(device_index >= 0 && device_index < c10::cuda::device_count(), "Invalid CUDA device index ", device_index);
+  return PyBool_FromLong(at::cuda::blas::rowwise_scaled_mm_uses_cublaslt(
+      static_cast<c10::DeviceIndex>(device_index), scalar_scales));
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_getHipblasltVersion(PyObject* self, PyObject* noargs) {
@@ -2570,6 +2584,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_getCompiledVersion",
      THCPModule_getCompiledVersion,
      METH_NOARGS,
+     nullptr},
+    {"_cuda_rowwiseScaledMMUsesCublasLt",
+     THCPModule_rowwiseScaledMMUsesCublasLt,
+     METH_VARARGS,
      nullptr},
     {"_cuda_getHipblasltVersion",
      THCPModule_getHipblasltVersion,
