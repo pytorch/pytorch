@@ -256,6 +256,27 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(pivots, expected.pivots)
         self.assertEqual(info, expected.info)
 
+    def test_div_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, dtype=torch.complex128)
+        b = torch.randn(3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.div_(ComplexTensor.from_interleaved(b))
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a / b)
+
+    def test_tril_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, 3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.tril_(-1)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a.tril(-1))
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):

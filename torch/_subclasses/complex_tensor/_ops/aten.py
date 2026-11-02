@@ -230,6 +230,7 @@ INDUCTOR_OPS = [
     aten.linalg_qr,
     aten.linalg_solve_triangular,
     aten.linalg_vector_norm,
+    aten.lu_unpack,
 ]
 
 for inductor_op in INDUCTOR_OPS:
@@ -269,8 +270,10 @@ fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
 def copy_impl(
     self: ComplexTensor, src: ComplexTensor, non_blocking: bool = False
 ) -> ComplexTensor:
-    self_re, self_im = split_complex_arg(self)
     src_re, src_im = split_complex_arg(src)
+    if not self.dtype.is_complex:
+        return aten.copy(self, src_re, non_blocking=non_blocking)
+    self_re, self_im = split_complex_arg(self)
     return ComplexTensor(
         aten.copy(self_re, src_re, non_blocking=non_blocking),
         aten.copy(self_im, src_im, non_blocking=non_blocking),
@@ -307,6 +310,16 @@ def div_impl(
         (num_r / den).to(out_dt),
         (num_i / den).to(out_dt),
     )
+
+
+div__impl = register_binary_linear_inplace(aten.div_, div_impl)
+
+
+@register_complex(aten.tril_)
+def tril__impl(self: ComplexTensor, diagonal: int = 0) -> ComplexTensor:
+    self.re.tril_(diagonal)
+    self.im.tril_(diagonal)
+    return self
 
 
 @register_complex(aten.reciprocal)
