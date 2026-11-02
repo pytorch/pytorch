@@ -36,7 +36,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         return self.rank + 1
 
     def _skip_if_cpu(self):
-        """Return True for the cpu variant; accelerator-only tests return early on it."""
+        """Skip the cpu variant; these tests need an accelerator backend."""
         if self.device_type == "cpu":
             self.skipTest("requires an accelerator")
 
@@ -266,8 +266,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     @skipIfXpu(
-        msg="new_group(backend='xpu:xccl') hangs after a subgroup new_group(): "
-        "https://github.com/intel/torch-xpu-ops/issues/5385"
+        msg="new_group() hangs after a subgroup new_group() under torchcomms: "
+        "https://github.com/intel/torch-xpu-ops/issues/6001"
     )
     def test_new_group_qualified_backend_passes_through(self):
         self._skip_if_cpu()
