@@ -1,17 +1,17 @@
 # Reviewing test changes under `test/`
 
 Tests should be decoupled from specific hardware as much as possible, so that
-generic tests naturally work on all backends, including new backends added in
-the future. Each backend runs only the tests it genuinely needs, reducing
-duplicated execution and maximizing test reuse.
+generic tests naturally work on all accelerators, including new accelerators
+added in the future. Each accelerator runs only the tests it genuinely needs,
+reducing duplicated execution and maximizing test reuse.
 
 ## When the rules apply
 
 **Scenario 1: Test-case refactoring**
 
-A test refactoring may be split across several PRs (even one file or one class
-may span multiple PRs), so the rules below may be too strict; developers may
-explain in PR Comments.
+A refactoring of a test class may be split into multiple PRs, so the
+following rules may be too strict; developers can explain in the PR
+comments.
 
 - Conditions:
   - All changed files are under `test/` or `torch/testing/`.
@@ -29,7 +29,8 @@ explain in PR Comments.
 **Scenario 2: Other**
 
 This is the everyday development case; to reduce impact on developers, apply
-the rules only to files not in the allowlist:
+the rules only to files not listed in
+`tools/linter/adapters/test_linter_allowlist.json`:
 
 - Conditions:
   - The PR also changes files outside `test/` or `torch/testing/`.
@@ -37,7 +38,7 @@ the rules only to files not in the allowlist:
     refactoring.
 - Case 1: the changed file is in `tools/linter/adapters/test_linter_allowlist.json`
   - Rules: none (not yet migrated; skip checking)
-- Case 2: the changed file is not in the allowlist
+- Case 2: the changed file is not in the `tools/linter/adapters/test_linter_allowlist.json`
   - Rules:
     - Rule 1: One responsibility per test class
     - Rule 2: Correct `hw_classification` on every test class
@@ -45,15 +46,16 @@ the rules only to files not in the allowlist:
     - Rule 4: Requirements for `ACCELERATOR` classes
     - Rule 5: Requirements for `CPU`/`CUDA`/`MPS`/`XPU` classes
     - Rule 6: Preserve test coverage
-    - Rule 7: Requirements for the migration allowlist
+    - Rule 7: Requirements for `tools/linter/adapters/test_linter_allowlist.json`
   - Scope: the whole file, not just the modified parts
 
 Notes:
 
 - The rules referenced below are defined in the following sections of this
-document; apply the rules listed for a case to the files named in its Scope.
+  document; apply the rules listed for a case to the files named in its
+  Scope.
 - The scenario is decided by the PR's changed files and its stated purpose
-in the title or description, as specified in the Conditions above.
+  in the title or description, as specified in the `Conditions` above.
 
 ## Rule 1: One responsibility per test class
 
@@ -64,17 +66,21 @@ test must live in the class that matches it.
 A class's responsibility is one of three kinds:
 
 - **Generic**: all tests in the class are independent of any accelerator
-  device; all accelerators share the same logic, and PyTorch itself
-  guarantees its quality
+  device; all accelerators share the same logic, and running them once on
+  a cpu-only machine guarantees their quality.
 - **Accelerator-agnostic**: all tests in the class can run on multiple
-  accelerators, and every accelerator should run them to ensure quality
-- **Accelerator-specific**: all tests in the class belong to one particular
-  device, e.g. `CUDA`, `MPS`, `XPU`, `CPU`
+  accelerators, and every accelerator should run them to ensure quality.
+- **Accelerator-specific**: all tests in the class are only applicable to
+  one particular device, e.g. `CUDA`, `MPS`, `XPU`, `CPU`. Running them on
+  other accelerators will fail.
 
 Notes:
 
-- Splitting a class requires considering both what the tests essentially
-  test and the test names.
+- When splitting a class with mixed responsibilities, decide where each test
+  belongs using both the test name and what the test actually verifies:
+  logic shared by all accelerators (Generic), behavior every accelerator
+  should run (Accelerator-agnostic), or features specific to one accelerator
+  (Accelerator-specific).
 
 ## Rule 2: Correct `hw_classification` on every test class
 
@@ -96,7 +102,7 @@ responsibilities map to HardwareClassification values as follows:
 ## Rule 3: Requirements for `GENERIC` classes
 
 - Test methods take no `device`/`devices` parameter.
-- Nothing in the class may be device-dependent:
+- Any content in this class should be device-independent.
   - No device-related decorators:
     - `@skipCPUIf`, `@skipCUDAIf`, `@skipXPUIf`, `@skipGPUIf`,
       `@skipMPSIf`, `@skipPRIVATEUSE1If`
@@ -110,23 +116,23 @@ responsibilities map to HardwareClassification values as follows:
     - `torch.mps.*`
     - `torch.xpu.*`
     - `torch.mtia.*`
-- Class form:
+- Test class form:
   - May be a plain class
   - May be instantiated via `@instantiate_parametrized_tests` (when the
-    class uses `@parametrize`/`@ops`/`@dtypes`)
+    test class uses `@parametrize`/`@ops`/`@dtypes`)
   - Must never be instantiated via `instantiate_device_type_tests`
 
 ## Rule 4: Requirements for `ACCELERATOR` classes
 
-Behavior that must hold on every accelerator: operator semantics, memory
-profiling, dtype coverage. The class is instantiated for CPU and each
-available accelerator, and every test receives the device under test via its
-`device`/`devices` parameter.
-
-- Every test method takes a `device` or `devices` parameter.
-- The class must be generic across all accelerators:
+- Every test method takes a `device` or `devices` parameter:
+  - Must use that parameter for the test's device-dependent operations
+    (e.g. creating Tensors on it, or mapping it to the corresponding
+    distributed backend and so on).
+  - Merely accepting the parameter is not enough.
+- The test class must be generic across all accelerators:
   - No `@only*` decorators (except `@onlyAccelerator`, which is only for
-    tests that genuinely cannot run on CPU):
+    tests that genuinely cannot run on CPU, e.g. tests of CPU-accelerator
+    interaction):
     - `@onlyCPU`
     - `@onlyCUDA`
     - `@onlyMPS`
@@ -158,8 +164,9 @@ available accelerator, and every test receives the device under test via its
     - `@dtypesIfMPS`
     - `@dtypesIfXPU`
     - `@dtypes`
-- Class form:
-  - Must be instantiated via `instantiate_device_type_tests`
+- Test class form:
+  - Must be instantiated via `instantiate_device_type_tests` (which also
+    expands `@parametrize`/`@ops`/`@dtypes`)
     - `only_for` must not be used
     - `except_for` may be used to exclude unsupported devices
 
@@ -174,25 +181,21 @@ Modifying tests must not reduce their existing coverage without an explicit
 explanation. Any coverage reduction must be documented in the PR description
 with the reason for the change; an undocumented reduction is a finding.
 
-## Rule 7: Requirements for the migration allowlist
+## Rule 7: Requirements for `tools/linter/adapters/test_linter_allowlist.json`
 
 `tools/linter/adapters/test_linter_allowlist.json` is the list of test files
-that do not yet meet these rules.
-
-- **It must only shrink**: only PRs whose explicit purpose is updating this
-  file (e.g. regeneration) may add entries; adding entries in any other PR
-  is not allowed.
-- **Refactorings delete entries**: a test-refactoring PR should delete the
-  corresponding entries from this file (advisory rather than mandatory,
-  because one file may be refactored across several PRs).
+that do not yet meet these rules. A test-refactoring PR should delete the
+corresponding entries from this file (advisory rather than mandatory,
+because one file may be refactored across several PRs).
 
 ## Before approving
 
 Be able to state:
 
 1. which scenario the PR falls into;
-2. the single responsibility of each touched test class and why its
+2. what the single responsibility of each touched test class is and why its
    `hw_classification` matches;
-3. that the class meets the requirements of its classification (Rule
-   3/4/5);
-4. the allowlist changes.
+3. that each touched test class meets the requirements of its classification
+   (Rule 3/4/5);
+4. whether and why `tools/linter/adapters/test_linter_allowlist.json`
+   changed.
