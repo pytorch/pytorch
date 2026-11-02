@@ -1789,6 +1789,10 @@ class InstructionTranslatorBase(
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> None:
+        if self.output.current_tracer.dispatchless_capture_policy is not None:
+            self.output.current_tracer.dispatchless_capture_policy.observe_call(
+                args, kwargs
+            )
         if not isinstance(fn, VariableTracker):
             raise AssertionError("expected isinstance(fn, VariableTracker) to be true")
         if not isinstance(args, list):
@@ -2334,6 +2338,8 @@ class InstructionTranslatorBase(
     def push(self, val: VariableTracker) -> None:
         if not isinstance(val, VariableTracker):
             raise AssertionError(f"push expects VariableTracker, got {typestr(val)}")
+        if self.output.current_tracer.dispatchless_capture_policy is not None:
+            self.output.current_tracer.dispatchless_capture_policy.observe(val)
         if val.source_location is None:
             inst = self.current_instruction
             if inst.positions is not None and inst.positions.lineno is not None:

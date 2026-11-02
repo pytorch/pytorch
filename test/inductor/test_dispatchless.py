@@ -7,7 +7,11 @@ from torch._dynamo.testing import InductorAndRecordGraphs
 from torch._inductor import metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch._library.dispatchless import dispatchless_custom_op, flat_dispatchless_call
+from torch._library.dispatchless import (
+    dispatchless_custom_op,
+    flat_dispatchless_call,
+    flat_dispatchless_graph_call,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
@@ -168,12 +172,15 @@ class DispatchlessTest(TestCase):
             )
         self.assertTrue(backend.inductor_graphs)
         self.assertIn(
-            flat_dispatchless_call,
+            flat_dispatchless_graph_call,
             [node.target for node in backend.graphs[0].graph.nodes],
         )
         for gm in backend.inductor_graphs:
             self.assertNotIn(
                 flat_dispatchless_call, [node.target for node in gm.graph.nodes]
+            )
+            self.assertNotIn(
+                flat_dispatchless_graph_call, [node.target for node in gm.graph.nodes]
             )
 
     def test_fuses_across_operator(self, device):
@@ -191,6 +198,7 @@ class DispatchlessTest(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertTrue(code)
         self.assertNotIn("flat_dispatchless_call(", "\n".join(code))
+        self.assertNotIn("flat_dispatchless_graph_call(", "\n".join(code))
 
     def test_dynamic_shapes_and_nested_calls(self, device):
         @dispatchless_custom_op

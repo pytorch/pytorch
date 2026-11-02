@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
 from typing import Generic, TYPE_CHECKING, TypeVar
@@ -11,8 +12,6 @@ from torch._ops import HigherOrderOperator
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    
-    
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
@@ -47,21 +46,52 @@ def _trace_through_transforms(args) -> bool:
     )
 
 
-def _call_with_tensor_checks(fn, args, kwargs):
+def _unwrap_tensor(tensor):
+    import torch
+
+    functorch = torch._C._functorch
+    while functorch.is_batchedtensor(tensor) or functorch.is_gradtrackingtensor(tensor):
+        tensor = functorch.get_unwrapped(tensor)
+    return tensor
+
+
+class _DispatchlessTensorCheckError(RuntimeError):
+    pass
+
+
+def _check_output_aliases(inputs, result):
+    import torch
+    import torch.utils._pytree as pytree
+
+    inputs = [
+        _unwrap_tensor(value)
+        for value in pytree.tree_leaves(inputs)
+        if isinstance(value, torch.Tensor)
+    ]
+    outputs = []
+    for value in pytree.tree_leaves(result):
+        if isinstance(value, torch.Tensor):
+            tensor = _unwrap_tensor(value)
+            if any(
+                torch._C._is_alias_of(tensor, x) for x in (*inputs, *outputs)
+            ):  # pyrefly: ignore[missing-attribute]
+                raise _DispatchlessTensorCheckError(
+                    "dispatchless_custom_op outputs must not alias inputs or "
+                    "other outputs during tracing; return a clone instead"
+                )
+            outputs.append(tensor)
+
+
+@contextmanager
+def _input_mutation_guard(inputs, *, on_mutation=None):
     import torch
     import torch.utils._pytree as pytree
     from torch._library.utils import zip_schema
     from torch.utils._python_dispatch import TorchDispatchMode
 
-    def unwrap(tensor):
-        functorch = torch._C._functorch
-        while functorch.is_batchedtensor(tensor) or functorch.is_gradtrackingtensor(tensor):
-            tensor = functorch.get_unwrapped(tensor)
-        return tensor
-
     inputs = [
-        unwrap(value)
-        for value in pytree.tree_leaves((args, kwargs))
+        _unwrap_tensor(value)
+        for value in pytree.tree_leaves(inputs)
         if isinstance(value, torch.Tensor)
     ]
 
@@ -74,27 +104,34 @@ def _call_with_tensor_checks(fn, args, kwargs):
                 for info, value in zip_schema(func._schema, args, kwargs):
                     if info.is_write and any(
                         isinstance(tensor, torch.Tensor)
-                        and any(torch._C._is_alias_of(unwrap(tensor)  # pyrefly: ignore[missing-attribute], x) for x in inputs)
+                        and any(
+                            torch._C._is_alias_of(
+                                _unwrap_tensor(tensor), x
+                            )  # pyrefly: ignore[missing-attribute]
+                            for x in inputs
+                        )
                         for tensor in pytree.tree_leaves(value)
                     ):
-                        raise RuntimeError(
+                        message = (
                             "dispatchless_custom_op must not mutate input tensors "
                             f"during tracing: {func} writes to argument {info.name}"
                         )
+                        # Dynamo's fake-node runner wraps exceptions from dispatch
+                        # before the caller can catch them. Its callback raises
+                        # Unsupported here; make_fx uses the error below instead.
+                        if on_mutation is not None:
+                            on_mutation(message)
+                        raise _DispatchlessTensorCheckError(message)
             return func(*args, **kwargs)
 
     with MutationGuard():
+        yield
+
+
+def _call_with_tensor_checks(fn, args, kwargs):
+    with _input_mutation_guard((args, kwargs)):
         result = fn(*args, **kwargs)
-    outputs = []
-    for value in pytree.tree_leaves(result):
-        if isinstance(value, torch.Tensor):
-            tensor = unwrap(value)
-            if any(torch._C._is_alias_of(tensor, x)  # pyrefly: ignore[missing-attribute] for x in (*inputs, *outputs)):
-                raise RuntimeError(
-                    "dispatchless_custom_op outputs must not alias inputs or "
-                    "other outputs during tracing; return a clone instead"
-                )
-            outputs.append(tensor)
+    _check_output_aliases((args, kwargs), result)
     return result
 
 
@@ -129,18 +166,23 @@ class _DispatchlessCustomOp(Generic[_P, _R]):
 def dispatchless_custom_op(fn: Callable[_P, _R]) -> _DispatchlessCustomOp[_P, _R]:
     """Wrap a functional Python function as an experimental dispatchless operator.
 
-    Eager calls invoke ``fn`` directly. ``make_fx`` and Dynamo preserve a flat
-    operator call with pytree inputs and outputs; Inductor traces through its
-    implementation. Tensor dependencies must be explicit arguments, and ``fn``
-    must work with FakeTensor inputs. Registered pytree containers and constants
-    are supported, with a stable output structure for each captured call.
+    Eager calls invoke ``fn`` directly. ``make_fx`` preserves a flat callable
+    operator and requires FakeTensor compatibility. Dynamo requires a traceable
+    Python implementation and captures a guarded graph, which is executed instead
+    of replaying ``fn``. Inductor traces through both operators. Registered pytree
+    containers and constants are supported. Tensor dependencies must be explicit
+    arguments, including tensors used only for metadata during Dynamo capture.
 
     The function must not mutate inputs or Python state, or return tensor aliases.
     These purity requirements are preconditions, not eager runtime checks.
-    Capturing an opaque call diagnoses dispatched input writes and output aliases.
-    These checks are not a proof of purity: Python state, writes outside dispatch,
-    opaque higher-order operator bodies, and storage-less tensor subclasses are
-    not fully checked. Transform trace-through paths retain their native behavior.
+    Dynamo uses scoped side-effect checks, rejects opaque Python capture escape
+    hatches, and diagnoses dispatched input writes and output aliases. It rejects
+    tensor representations for which these checks cannot establish safety.
+    Standalone ``make_fx`` only diagnoses dispatched writes and output aliases;
+    Python state, writes outside dispatch, opaque higher-order operator bodies,
+    and storage-less tensor subclasses are not fully checked there. Both paths
+    trust native operator schemas and implementations. Transform trace-through
+    paths retain their native behavior.
     Schema-marked writes to input aliases are conservatively rejected, including
     metadata-only changes to local views of inputs.
     Autograd follows the backing function. AOTAutograd decomposes the operator
@@ -188,7 +230,9 @@ def _trace_flat_call(
         return result
     if flat_out is None:
         flat_out = _call_with_tensor_checks(_flat_call, node_args, {})
-    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, node_args)
+    proxy_args = pytree.tree_map(
+        mode.tracer.unwrap_proxy, node_args
+    )  # pyrefly: ignore[missing-attribute]
     proxy = mode.tracer.create_proxy(
         "call_function", flat_dispatchless_call, proxy_args, {}
     )
@@ -213,3 +257,51 @@ class _FlatDispatchlessCall(HigherOrderOperator):
 
 
 flat_dispatchless_call = _FlatDispatchlessCall()
+
+
+def _flat_graph_call(body, *flat_args):
+    return body(*flat_args)
+
+
+class _FlatDispatchlessGraphCall(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("flat_dispatchless_graph_call")
+        self.subgraph_indexes = [0]
+
+    def __call__(self, body, *flat_args):
+        from torch.fx import GraphModule
+
+        if not isinstance(body, GraphModule):
+            raise TypeError("flat_dispatchless_graph_call requires a GraphModule body")
+        mode = _proxy_mode_getter()()
+        if mode is None or _trace_through_transforms(flat_args):
+            return body(*flat_args)
+
+        import torch.utils._pytree as pytree
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_handle_decomp,
+            track_tensor_tree,
+        )
+
+        with disable_proxy_modes_tracing():
+            result = maybe_handle_decomp(
+                mode, self, (body, *flat_args), {}
+            )  # pyrefly: ignore[bad-argument-type]
+            if result is not NotImplemented:
+                return result
+            result = body(*flat_args)
+            name = mode.tracer.get_fresh_qualname(
+                "dispatchless_body"
+            )  # pyrefly: ignore[missing-attribute]
+            mode.tracer.root.register_module(
+                name, body
+            )  # pyrefly: ignore[missing-attribute]
+            proxy_args = pytree.tree_map(
+                mode.tracer.unwrap_proxy, (body, *flat_args)
+            )  # pyrefly: ignore[missing-attribute]
+            proxy = mode.tracer.create_proxy("call_function", self, proxy_args, {})
+            return track_tensor_tree(result, proxy, constant=None, tracer=mode.tracer)
+
+
+flat_dispatchless_graph_call = _FlatDispatchlessGraphCall()

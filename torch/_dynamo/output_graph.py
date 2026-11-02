@@ -3988,6 +3988,9 @@ class SubgraphTracer(fx.Tracer):
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
+        self.dispatchless_capture_policy = (
+            parent.dispatchless_capture_policy if parent is not None else None
+        )
         self.source_target = source_target
         self.description = description
         # A dict mapping previously free variables (Proxy objects)
@@ -4536,6 +4539,9 @@ class SubgraphTracer(fx.Tracer):
 
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
     def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
+        # A lifted placeholder no longer exposes the original tensor's scope.
+        if self.dispatchless_capture_policy is not None:
+            self.dispatchless_capture_policy.check_proxy(proxy)
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
         # (A stale cross-tracer cached proxy used to reach this via
