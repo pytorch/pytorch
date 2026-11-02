@@ -371,7 +371,7 @@ class DispatchlessCustomOpVariable(VariableTracker):
         )
         body = torch.fx.GraphModule(tx.output.nn_modules, graph)
         name = tx.output.install_subgraph("dispatchless_body", body)
-        return _call_function_with_auto_output_flattening(
+        result = _call_function_with_auto_output_flattening(
             tx,
             flat_dispatchless_graph_call,
             (make_attr(tx, name), *lifted),
@@ -380,6 +380,9 @@ class DispatchlessCustomOpVariable(VariableTracker):
             body_r,
             graph_outputs,
         )
+        if result is None:
+            raise AssertionError("Dispatchless capture produced no output variable")
+        return result
 
 
 def _is_supported_out_tensor_layout(
