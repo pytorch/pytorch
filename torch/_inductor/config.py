@@ -2329,6 +2329,12 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
+    # Which multiply-adds become FMAs can depend on the block size, so disable this
+    # for results that do not depend on the configs autotuning picks.
+    # emulate_precision_casts also disables it.
+    enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
+
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
