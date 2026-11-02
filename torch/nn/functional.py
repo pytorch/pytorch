@@ -7360,7 +7360,12 @@ def scaled_addmm(
     matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
     ``float32``. The result has the dtype of ``input``; there is no separate
     output dtype. CUDA recipes are supported when their selected implementation
-    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
+    uses cuBLASLt; non-cuBLAS fallbacks are not supported. On ROCm, only rowwise
+    FP8 scaling with ``bfloat16`` input/output is supported, on gfx942/gfx950
+    with ROCm 7.0 or newer. Operands follow the same layout and dtype rules as
+    :func:`scaled_mm`. When ``alpha`` is 0 or a dimension is empty, the matrix
+    product is skipped. With an empty dimension, layout and scale-layout checks
+    may be skipped.
 
     Args:
         input: Matrix accumulated into the scaled matrix product.
