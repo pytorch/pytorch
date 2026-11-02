@@ -40,12 +40,14 @@ if TYPE_CHECKING:
     import weakref
 
     from torch.fx import GraphModule
+    from torch.utils.weak import WeakIdKeyDictionary
 
 
 class CodeContext(TypedDict, total=False):
     bytecode_hook_side_effects: tuple[str, ...]
     dynamism: dict[str, dict[str, tuple[bool, ...]]]
     orig_graphmodule: weakref.ReferenceType[GraphModule]
+    optimizer_tensors: WeakIdKeyDictionary
 
 
 class CodeContextDict:

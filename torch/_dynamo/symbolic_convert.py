@@ -63,6 +63,7 @@ from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 from torch.utils._pytree import tree_leaves
+from torch.utils.weak import WeakIdKeyDictionary
 
 from . import (
     config,
@@ -3711,6 +3712,15 @@ class InstructionTranslatorBase(
             code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
                 orig_graphmodule_maybe
             )
+
+        optimizer_tensors = code_context.get_context(new_code).setdefault(
+            "optimizer_tensors", WeakIdKeyDictionary()
+        )
+        for optimizer, tensors in self.output.optimizer_tensors.items():
+            if optimizer in optimizer_tensors:
+                optimizer_tensors[optimizer].update(tensors)
+            else:
+                optimizer_tensors[optimizer] = tensors
 
         # add resume function to the global scope
         self.output.install_resume_function_global(
