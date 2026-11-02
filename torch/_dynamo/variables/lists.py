@@ -2651,6 +2651,22 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_case_method(tx, "title", args, kwargs)
 
+    def bytearray_replace(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "replace")
+
+    def bytearray_translate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "translate")
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
@@ -2666,6 +2682,8 @@ class ByteArrayVariable(VariableTracker):
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),
+        "replace": Method(bytearray_replace),
+        "translate": Method(bytearray_translate),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
