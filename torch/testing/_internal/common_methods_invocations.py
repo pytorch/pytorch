@@ -12345,10 +12345,6 @@ op_db: list[OpInfo] = [
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
 
-               # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                            dtypes=(torch.int64,)),
-
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
