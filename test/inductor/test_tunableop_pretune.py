@@ -24,8 +24,8 @@ import sympy
 
 import torch
 from torch._inductor import config, ir, select_algorithm as sa, tunableop
-from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -426,8 +426,11 @@ class TestTunableOpPretune(TestCase):
             return mock.Mock(status="timeout", time=None)
 
         def _one_pass():
-            with _ladder(s), mock.patch(
-                "torch._inductor.tunableop.submit", side_effect=_always_timeout
+            with (
+                _ladder(s),
+                mock.patch(
+                    "torch._inductor.tunableop.submit", side_effect=_always_timeout
+                ),
             ):
                 tunableop.maybe_range_pretune(self._mm_winner("mm", s))
 
@@ -454,12 +457,15 @@ class TestTunableOpPretune(TestCase):
             pinned[0] = name
 
         with _ladder(s) as submitted:
-            with mock.patch.multiple(
-                "torch.cuda.tunable",
-                get_filename=lambda: pinned[0],
-                set_filename=_set_filename,
-            ), mock.patch.object(
-                tunableop, "_resolve_and_pin_filename_locked", lambda device: real(0)
+            with (
+                mock.patch.multiple(
+                    "torch.cuda.tunable",
+                    get_filename=lambda: pinned[0],
+                    set_filename=_set_filename,
+                ),
+                mock.patch.object(
+                    tunableop, "_resolve_and_pin_filename_locked", lambda _: real(0)
+                ),
             ):
                 tunableop.maybe_range_pretune(self._mm_winner("mm", s))
                 first = len(submitted)
@@ -550,9 +556,9 @@ class TestTunableOpPretune(TestCase):
             return mock.Mock(status="ok", time=1.0)
 
         def _fake_monotonic():
-            # 0 until the first submission, then a sliver short of the
-            # deadline: too little for a fair trial, so the loop must stop
-            # rather than submit a rung that could only time out.
+            # 0 until the first submission, then a sliver short of the deadline:
+            # too little for a fair trial, so the loop must stop rather than
+            # charge it.
             budget = config.cuda.autotune_tunableop_timeout
             return 0.0 if not timeouts else budget - 1
 
@@ -831,9 +837,8 @@ class TestTunableOpPretune(TestCase):
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
-        # The finalizer sends the extern winner through the ladder, except
-        # on the layout-conflict fallback. Forcing the extern path is not that
-        # case: the metas are right, so the ladder must still run.
+        # The finalizer ladders the extern winner except on the layout-conflict
+        # fallback; force-extern is not that case, so the ladder must still run.
         import torch._inductor.ir as _ir
         from torch._inductor.scheduler import Scheduler, SchedulerNode
 
