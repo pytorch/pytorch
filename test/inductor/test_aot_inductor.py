@@ -3034,16 +3034,26 @@ class AOTInductorTestsTemplate:
         # The two independent kernels form one combo kernel.
         self.assertEqual(len({k.inductor_meta["kernel_name"] for k in kept}), 1)
 
-    def test_autotune_at_compile_time_keeps_a_template_unlaunched(self):
+    @parametrize(
+        "benchmark",
+        ["none", "template_fusion", "multi_kernel_hints", "prologue_after_epilogue"],
+    )
+    def test_autotune_at_compile_time_keeps_a_template_unlaunched(self, benchmark):
         if self.device != GPU_TYPE or not is_big_gpu():
             raise unittest.SkipTest("requires modern GPU to run max-autotune")
 
-        # On zeros, the gather fused into the matmul template reads row 64 of 64.
-        # Template fusion benchmarking launches the fused template on generated
-        # tensors too, before the block, so it is off here.
+        # On zeros, the gather reads row 64 of 64. Without fusion benchmarking the
+        # gather is fused into the matmul template; with it, the fusion is judged
+        # without launching the gather.
         class Model(torch.nn.Module):
             def forward(self, a, b, w, idx):
                 return a @ b + w[idx + 64]
+
+        # The gather fuses into the template as an epilogue first, and the
+        # prologue a * 2 is then judged on the template that holds it.
+        class EpilogueThenPrologue(torch.nn.Module):
+            def forward(self, a, b, w, idx):
+                return ((a * 2) @ b) * w[idx + 64]
 
         example_inputs = (
             torch.randn(64, 32, device=self.device),
@@ -3052,18 +3062,34 @@ class AOTInductorTestsTemplate:
             torch.full((64,), -64, dtype=torch.int64, device=self.device),
         )
         # The fused template has one config, so keeping it loses nothing to warn about.
-        with self.assertNoLogs("torch._inductor.codegen.wrapper", "WARNING"):
+        no_warning = (
+            self.assertNoLogs("torch._inductor.codegen.wrapper", "WARNING")
+            if benchmark == "none"
+            else contextlib.nullcontext()
+        )
+        with no_warning:
             kept = _check_model_keeping_device_asserts_unlaunched(
                 self,
-                Model(),
+                EpilogueThenPrologue()
+                if benchmark == "prologue_after_epilogue"
+                else Model(),
                 example_inputs,
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "TRITON",
-                    "benchmark_template_fusion": False,
+                    "prologue_fusion": True,
+                    "benchmark_template_fusion": benchmark != "none",
+                    "multi_kernel_hints": [64]
+                    if benchmark == "multi_kernel_hints"
+                    else [],
                 },
             )
-        self.assertTrue(any(k.heuristic_type == HeuristicType.TEMPLATE for k in kept))
+        if benchmark == "none":
+            self.assertTrue(
+                any(k.heuristic_type == HeuristicType.TEMPLATE for k in kept)
+            )
+        else:
+            self.assertTrue(kept)
 
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
