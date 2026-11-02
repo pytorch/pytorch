@@ -342,6 +342,22 @@ class TestColTileHost(TestCase):
             kg._col_route_ok(view, nouts, (9, 0)), view.dim() == 2 and nouts == 1
         )
 
+    @parametrize(
+        "shape,nouts,routed",
+        [
+            ((4, 64, 2), 1, True),
+            ((4, 65, 2), 1, False),
+            ((4, 65, 15), 1, False),
+            ((4, 65, 16), 1, True),
+            ((1, 65, 8191), 2, False),
+            ((2, 65, 4096), 2, True),
+        ],
+        name_fn=lambda shape, nouts, routed: "x".join(map(str, shape)) + f"_{nouts}",
+    )
+    def test_route_gate_boundaries(self, shape, nouts, routed):
+        view = torch.empty(shape, device="meta")
+        self.assertEqual(kg._col_route_ok(view, nouts, (10, 0)), routed)
+
     def test_route_gate_keeps_other_architectures_on_general(self):
         x = torch.randn(4, 64, 16, device="cuda")
         real = ct.reduce_batched_col_tile
@@ -407,6 +423,21 @@ class TestColTileHost(TestCase):
             ct.reduce_col_tile(trait, "badvec0", x, torch.float32, vec=0)
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
+
+    @parametrize(
+        "launcher, rank, args",
+        [
+            ("reduce_col_tile", 3, (torch.float32,)),
+            ("reduce_col_tile_2out", 3, ([torch.float32] * 2,)),
+            ("reduce_batched_col_tile", 2, ([torch.float32], 1)),
+        ],
+        name_fn=lambda launcher, rank, args: launcher,
+    )
+    def test_launchers_check_rank(self, launcher, rank, args):
+        x = torch.randn((4,) * rank, device="cuda")
+        fn, trait = getattr(ct, launcher), T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(AssertionError, "want [23]D x"):
+            fn(trait, "badrank", x, *args)
 
 
 instantiate_parametrized_tests(TestKernelColTile)
