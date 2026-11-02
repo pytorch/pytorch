@@ -2999,18 +2999,6 @@ class AotCodeCompiler:
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
                 return consts_asm, "weights.S"
 
-            # This is a usably fast and iterative way to convert binary
-            # to comma separated text with 16 bytes per line. 
-            # for inclusion in a C header file.
-            # n.b.. this file can be multiple megabytes, so don't replace this
-            # with anything that is slow or uses lots of memory copy operations.
-            def _quick_format_array_to_string(data: bytes | bytearray) -> str:
-                return ",\n".join(
-                    str(batch).strip("()") for batch in itertools.batched(data, 16)
-                )
-
-            
-
             def get_zero_consts_asm_code(
                 align_bytes: int,
                 symbol_prefix: str,
@@ -3847,6 +3835,18 @@ end
     def _format_consts_to_cpp(
         consts: bytes | bytearray, align_bytes: int
     ) -> tuple[str, str]:
+
+        # This is a usably fast and iterative way to convert binary
+        # to comma separated text with 16 bytes per line. 
+        # for inclusion in a C header file.
+        # n.b.. this file can be multiple megabytes, so don't replace this
+        # with anything that is slow or uses lots of memory copy operations.
+        def _quick_format_array_to_string(data: bytes | bytearray) -> str:
+            return ",\n".join(
+                str(batch).strip("()") for batch in itertools.batched(data, 16)
+            )
+
+
         consts_size = len(consts)
         asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
 #define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
