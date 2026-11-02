@@ -264,6 +264,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     @parametrize("capacity", (10, 11))
     def test_quack_config_space_includes_device_default(self, capacity):
+        _skip_unless_quack_deps(self)
         from torch._vendor.quack.gemm_config import (
             _default_config_for_cap,
             get_all_configs,
