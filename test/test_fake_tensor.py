@@ -5707,6 +5707,38 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(rebuilt.epoch, 2)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
 
+    def test_cpp_fake_tensor_mode_enter_exit(self):
+        # Like two Python FakeTensorModes, entering either kind of fake mode
+        # suspends the active one until it exits, and re-entering the active
+        # mode is a no-op.
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        cpp_mode = CppFakeTensorMode(FakeTensorConverter())
+        only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
+        # Without a device, a fake mode only lifts CPU tensors while active
+        with patch(
+            "torch._subclasses.fake_tensor._avoid_device_init", return_value=True
+        ):
+            for outer, inner in ((py_mode, cpp_mode), (cpp_mode, py_mode)):
+                outer_installed = (outer, outer is cpp_mode)
+                inner_installed = (inner, inner is cpp_mode)
+                with self.subTest(outer=type(outer).__name__):
+                    with outer:
+                        self.assertEqual(self._installed(), outer_installed)
+                        self.assertTrue(torch._C._only_lift_cpu_tensors())
+                        with inner:
+                            self.assertEqual(self._installed(), inner_installed)
+                        self.assertEqual(self._installed(), outer_installed)
+                        with outer:
+                            self.assertEqual(self._installed(), outer_installed)
+                        self.assertEqual(self._installed(), outer_installed)
+                        self.assertTrue(torch._C._only_lift_cpu_tensors())
+                    self.assertEqual(self._installed(), (None, False))
+                    self.assertEqual(
+                        torch._C._only_lift_cpu_tensors(), only_lift_cpu_tensors
+                    )
+
 
 if __name__ == "__main__":
     run_tests()

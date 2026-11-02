@@ -694,6 +694,19 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     return fake_out
 
 
+def _avoid_device_init() -> bool:
+    if torch.xpu._is_compiled():
+        if torch.cuda._is_compiled():
+            raise AssertionError("Cannot have both xpu and cuda compiled")
+        return not torch.xpu.is_available()
+
+    return not (
+        torch.cuda.is_available()
+        or (hasattr(torch, "hpu") and torch.hpu.is_available())
+        or _is_privateuse1_backend_available()
+    )
+
+
 class CppFakeTensorMode:
     # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
     # which the Python parts of fake dispatch run against. The mode's state
@@ -705,6 +718,10 @@ class CppFakeTensorMode:
         fake_tensor_converter: FakeTensorConverter,
         shape_env: ShapeEnv | None = None,
     ) -> None:
+        # Same as FakeTensorMode.enter_stack
+        self.enter_stack: list[
+            tuple[bool, TorchDispatchMode | CppFakeTensorMode | None, bool | None]
+        ] = []
         self._cpp_mode = torch._C._CppFakeTensorMode(
             fake_tensor_converter, shape_env, self
         )
@@ -714,6 +731,7 @@ class CppFakeTensorMode:
         # Rebuilds a collected wrapper around the same C++ mode, for
         # getCppFakeTensorModePyObj.
         self = cls.__new__(cls)
+        self.enter_stack = []
         self._cpp_mode = cpp_mode
         return self
 
@@ -732,6 +750,50 @@ class CppFakeTensorMode:
     @epoch.setter
     def epoch(self, value: int) -> None:
         self._cpp_mode.epoch = value
+
+    # Same as FakeTensorMode.avoid_device_init
+    @property
+    def avoid_device_init(self) -> bool:
+        return _avoid_device_init()
+
+    # Same as FakeTensorMode.__enter__ and __exit__, with this mode taking the
+    # FAKE dispatch mode slot (see _set_dispatch_mode in
+    # torch/csrc/autograd/init.cpp)
+    def __enter__(self) -> Self:
+        prev_only_lift_cpu_tensors = None
+        if self.avoid_device_init:
+            # See NOTE: [torch.tensor, lift_fresh, and device movement]
+            prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
+            torch._C._set_only_lift_cpu_tensors(True)
+            torch._C._ensureCUDADeviceGuardSet()
+
+        fake_key = torch._C._TorchDispatchModeKey.FAKE
+        maybe_prev_fake_mode = torch._C._unset_dispatch_mode(fake_key)
+        torch._C._set_dispatch_mode(self)
+        if self is not maybe_prev_fake_mode:
+            self.enter_stack.append(
+                (True, maybe_prev_fake_mode, prev_only_lift_cpu_tensors)
+            )
+        else:
+            self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
+            self.enter_stack.pop()
+        )
+        if live:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+            # Re-enable the previous fake mode, if there was one.
+            if maybe_prev_fake_mode is not None:
+                torch._C._set_dispatch_mode(maybe_prev_fake_mode)
+            if maybe_prev_only_lift_cpu_tensors is not None:
+                torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
 
 
 @functools.cache
@@ -2049,7 +2111,9 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: list[tuple[bool, TorchDispatchMode | None, bool | None]] = []
+        self.enter_stack: list[
+            tuple[bool, TorchDispatchMode | CppFakeTensorMode | None, bool | None]
+        ] = []
 
         self.shape_env = shape_env
 
@@ -2100,16 +2164,7 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
-        if torch.xpu._is_compiled():
-            if torch.cuda._is_compiled():
-                raise AssertionError("Cannot have both xpu and cuda compiled")
-            return not torch.xpu.is_available()
-
-        return not (
-            torch.cuda.is_available()
-            or (hasattr(torch, "hpu") and torch.hpu.is_available())
-            or _is_privateuse1_backend_available()
-        )
+        return _avoid_device_init()
 
     @property
     def stack(self) -> str:
