@@ -1988,7 +1988,8 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(res[0].bar, ref[0].bar)
 
     @parametrize("op", ("linear", "module", "matmul"))
-    def test_constructed_subclass_method_descriptor_guard(self, op):
+    @parametrize("property_first", (False, True))
+    def test_constructed_subclass_method_descriptor_guard(self, op, property_first):
         class MySubclass(torch.Tensor):
             def __init__(self, data):
                 super().__init__()
@@ -2008,7 +2009,9 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
                 t = linear(x)
             else:
                 t = x @ weight.T
-            return t.numel(), t.dtype, t.dim(), t.is_complex()
+            if property_first:
+                return t.shape, t.dtype, t.device, t.numel(), t.dim(), t.is_complex()
+            return t.numel(), t.dtype, t.dim(), t.is_complex(), t.shape, t.device
 
         x = torch.randn(2, 4)
         opt_fn = torch.compile(fn, backend="eager")
