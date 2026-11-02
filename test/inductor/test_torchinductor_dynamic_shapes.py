@@ -6,6 +6,7 @@ import operator
 import os
 import sys
 import unittest
+import unittest.mock
 from functools import partial
 
 import torch
@@ -737,6 +738,38 @@ class TestInductorDynamic(DynamicShapesTestCase):
         else:
             if expect_fail:
                 self.fail("expected to fail, but actually passed")
+
+    def test_reduction_numel_provably_one_lowers_to_pointwise(self, device):
+        # (s0 + 127) // 128 is not structurally 1, but it is exactly 1 for
+        # every s0 in [2, 128]. Reduction.create must see that through the
+        # shape env and lower the sum to Pointwise instead of a Reduction
+        # whose rnumel later simplifies to 1 (breaks SIMD scheduler asserts).
+        kinds = []
+        orig_create = torch._inductor.ir.Reduction.create.__func__
+
+        def record_create(cls, *args, **kwargs):
+            r = orig_create(cls, *args, **kwargs)
+            node = r
+            while not isinstance(node, torch._inductor.ir.Loops) and hasattr(
+                node, "data"
+            ):
+                node = node.data
+            kinds.append(type(node).__name__)
+            return r
+
+        def f(x, y):
+            n = (x.shape[0] + 127) // 128
+            return x + y[:n].sum()
+
+        x = torch.randn(64, device=device)
+        y = torch.randn(256, device=device)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=128)
+        with unittest.mock.patch.object(
+            torch._inductor.ir.Reduction, "create", classmethod(record_create)
+        ):
+            actual = torch.compile(f)(x, y)
+        self.assertEqual(actual, f(x, y))
+        self.assertEqual(kinds, ["Pointwise"])
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True

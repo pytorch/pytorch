@@ -2449,6 +2449,35 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    def test_create_block_mask_dynamic_recompile_single_block(self, device):
+        """A reduction whose symbolic size only becomes 1 must lower to pointwise.
+
+        The number of blocks, (s0 + 127) // 128, is symbolic when the
+        automatic-dynamic recompile happens, but the shape env's range for s0
+        ([2, 128]) makes it exactly 1 for seq_len == 128. Reduction.create must
+        use statically_known_equals (not a structural == 1) to see that,
+        otherwise the scheduler later hits a reduction with rnumel == 1 and
+        asserts "expected rnumel1 == 1 and rnumel2 != 1".
+        """
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def attn(q):
+            s = q.shape[2]
+            block_mask = create_block_mask(
+                causal, B=1, H=None, Q_LEN=s, KV_LEN=s, device=q.device
+            )
+            return flex_attention(q, q, q, block_mask=block_mask)
+
+        compiled = torch.compile(attn)
+        # Non-128 first, so that the 128 call goes through the dynamic recompile.
+        for seq_len in (5, 128, 64):
+            q = torch.randn(1, 1, seq_len, 16, device=device)
+            torch.testing.assert_close(compiled(q), attn(q), atol=2e-3, rtol=2e-3)
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_mps  # hardcodes kernel_options={"BACKEND": "TRITON"}
     def test_kv_order_invariance_padded_causal(self, device):
         if device == "cuda" and not PLATFORM_SUPPORTS_BF16:

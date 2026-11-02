@@ -1915,7 +1915,10 @@ class Reduction(Loops):
             reduction_ranges = [sympy.Integer(strict_reduction_rblock)]
             reduction_numel = sympy.Integer(strict_reduction_rblock)
 
-        if reduction_numel == 1 and not strict_reduction:
+        if (
+            V.graph.sizevars.statically_known_equals(reduction_numel, 1)
+            and not strict_reduction
+        ):
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
@@ -2518,7 +2521,7 @@ class ArgReduction(MultiOutputReduction):
                 f"{reduction_type} not supported for zero-dimension tensors!"
             )
 
-        if reduction_numel == 1:
+        if V.graph.sizevars.statically_known_equals(reduction_numel, 1):
 
             def value_fn(index: Sequence[Expr]) -> OpsValue:
                 reduction_index = [sympy.S.Zero for _ in reduction_ranges]
@@ -2832,7 +2835,7 @@ class WelfordReduction(MultiOutputReduction):
             weight = const(0)
             return mean, m2, weight
 
-        if reduction_numel == 1:
+        if V.graph.sizevars.statically_known_equals(reduction_numel, 1):
 
             def copy(
                 loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
