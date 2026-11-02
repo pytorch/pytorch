@@ -5461,14 +5461,21 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     def test_from_meta_and_device(self):
         mode, wrapper = self._make_mode()
-        fake = torch._C._from_meta_and_device(
-            torch.empty(2, 3, device="meta"), torch.device("cpu"), mode
-        )
+        # A plain meta tensor gets a new detached fake on device, as in Python,
+        # and is itself left unchanged
+        meta = torch.empty(2, 3, device="meta", requires_grad=True) * 2
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        self.assertIsNot(fake, meta)
         self.assertTrue(torch._C._is_fake_tensor(fake))
         self.assertEqual(fake.device, torch.device("cpu"))
         self.assertEqual(fake.shape, (2, 3))
+        self.assertTrue(fake.requires_grad)
+        self.assertTrue(fake.is_leaf)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
         self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        self.assertFalse(torch._C._is_fake_tensor(meta))
+        self.assertTrue(meta.is_meta)
+        self.assertIsNotNone(meta.grad_fn)
 
         # A fake of the same mode that reads as meta gets a new detached fake
         # on device, unseen by dispatch modes, and keeps its own device and
@@ -5513,7 +5520,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
             torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
 
-        # allow_meta is checked before the input is modified
+        # allow_meta is enforced
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             strict_mode, _strict_wrapper = self._make_mode()
         meta = torch.empty(2, device="meta")

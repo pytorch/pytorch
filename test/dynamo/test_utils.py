@@ -88,6 +88,11 @@ class TestUtils(TestCase):
         self.assertEqual(
             utils.summarize_example_value(torch.ones(2)), "Tensor(..., size=(2,))"
         )
+        # Without values to show it, int64 is shown too, as in a fake tensor's repr
+        self.assertEqual(
+            utils.summarize_example_value(torch.ones(2, dtype=torch.int64)),
+            "Tensor(..., size=(2,), dtype=torch.int64)",
+        )
         # A non-default dtype and the autograd state are shown, as in a repr
         t = torch.ones(2, dtype=torch.float16, requires_grad=True)
         self.assertEqual(
