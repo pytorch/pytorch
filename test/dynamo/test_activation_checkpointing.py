@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfXpu,
     TEST_CUDA,
+    TEST_XPU
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 from torch.testing._internal.two_tensor import TwoTensor
