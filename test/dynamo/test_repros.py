@@ -4899,9 +4899,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return dest[0] + storage[0]
 
         def fresh(n):
-            storage = torch.arange(float(n))
-            dest = storage[:3]
+            stale_base = torch.arange(5.0)
+            dest = stale_base[:3]
             dest.set_(torch.full((3,), 7.0))
+            storage = torch.arange(float(n))
             return dest, storage
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -4913,13 +4914,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cache_entries = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(cache_entries), 1)
         guard_str = str(cache_entries[0].guard_manager)
-        self.assertNotIn("_base", guard_str)
 
         # A different storage length must not recompile. A spurious duck-sized
         # guard on the stale base's size is what would trip this.
         dest2, storage2 = fresh(6)
         self.assertEqual(opt(dest2, storage2), storage2[0] + 7.0)
         self.assertEqual(cnt.frame_count, 1)
+        self.assertNotIn("_base", guard_str)
 
     def test_set_new_base_stays_aliased(self):
         # After dest.set_(src), dest must alias src, not its old base.
