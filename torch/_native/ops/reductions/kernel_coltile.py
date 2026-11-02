@@ -17,7 +17,7 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
 from .kernel_general import _flat, _INT32_LIMIT, _launch, ReduceBlock
-from .kernel_rowtile import _MULTIROW_ROWS_PER_BLOCK, trait_itree_plan
+from .kernel_rowtile import trait_itree_plan
 from .traits import WARP
 
 
@@ -183,10 +183,12 @@ class _OrderedColReduce:
         C: int,
         nouts: int,
     ) -> None:
-        if plan.shape not in ("multirow", "looped"):
+        if plan.shape != "looped":
             raise ValueError(f"ordered columns do not support {plan.shape=}")
         if plan.vec_linear:
             raise ValueError("ordered columns replay tree vector folds only")
+        if len(plan.batches) != 1:
+            raise ValueError("ordered columns fold a single planner batch")
         self.trait = trait
         self.plan = plan
         self.R = R
@@ -194,11 +196,7 @@ class _OrderedColReduce:
         # 0.66x. Batch counts are runtime, so only new (R, C) pairs compile.
         self.C = C
         self.nouts = nouts
-        self.workers = (
-            1 if plan.shape == "multirow" else min(_ORDERED_WORKER_WARPS, plan.wpr)
-        )
-        multirow = plan.shape == "multirow"
-        self.outputs_per_block = _MULTIROW_ROWS_PER_BLOCK if multirow else WARP
+        self.workers = min(_ORDERED_WORKER_WARPS, plan.wpr)
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
@@ -219,12 +217,8 @@ class _OrderedColReduce:
         self, mIn: cute.Tensor, mOuts: list, in_base: Int64, num_o: Int32, stream
     ):
         self.kernel(mIn, mOuts, in_base, num_o).launch(
-            grid=[cute.ceil_div(num_o, self.outputs_per_block), 1, 1],
-            block=(
-                [self.outputs_per_block, 1, 1]
-                if const_expr(self.plan.shape == "multirow")
-                else [WARP, self.workers, 1]
-            ),
+            grid=[cute.ceil_div(num_o, WARP), 1, 1],
+            block=[WARP, self.workers, 1],
             stream=stream,
         )
 
@@ -265,128 +259,102 @@ class _OrderedColReduce:
         trait, plan = self.trait, self.plan
         op, ident = trait.combine, trait.init()
 
-        if const_expr(plan.shape == "multirow"):
-            output = Int32(bx) * Int32(self.outputs_per_block) + Int32(tx)
-            active = output < num_o
-            safe = output if active else Int32(0)
-            batch, col = safe // Int32(self.C), safe % Int32(self.C)
-            tree = []
-            for load in cutlass.range_constexpr(plan.batches[0][2]):
-                tile._streaming_push(
-                    tree,
-                    self._lane_root(
-                        mIn,
-                        in_base,
-                        batch,
-                        col,
-                        Int32(load * plan.vec),
-                        active,
-                    ),
-                    load,
-                    plan.depth,
-                    op,
-                )
-            final = tree[0]
-        else:
-            lane, worker = Int32(tx), Int32(ty)
-            output = Int32(bx) * Int32(WARP) + lane
-            active = output < num_o
-            safe = output if active else Int32(0)
-            batch, col = safe // Int32(self.C), safe % Int32(self.C)
-            nf = const_expr(trait.nfields)
-            smem = cutlass.utils.SmemAllocator()
-            roots = [
-                smem.allocate_tensor(
-                    trait.fdtypes[f],
-                    cute.make_layout(const_expr(plan.wpr * WARP)),
-                    byte_alignment=8,
-                )
-                for f in range(nf)
-            ]
-            final = ident
-            for b in cutlass.range_constexpr(len(plan.batches)):
-                batch_off, _remaining, loads, warp_chunk = plan.batches[b]
-                for warp in cutlass.range(worker, plan.wpr, self.workers):
-                    load_tree = []
-                    for load in cutlass.range_constexpr(loads):
-                        if const_expr(nf == 1):
-                            lane_roots = cute.make_rmem_tensor(
-                                cute.make_layout(WARP), trait.fdtypes[0]
-                            )
-                            for original_lane in cutlass.range_constexpr(WARP):
-                                lane_roots[original_lane] = self._lane_root(
-                                    mIn,
-                                    in_base,
-                                    batch,
-                                    col,
-                                    Int32(batch_off + load * WARP * plan.vec)
-                                    + warp * Int32(warp_chunk)
-                                    + Int32(original_lane * plan.vec),
-                                    active,
-                                )[0]
-                            load_root = tile._inner_tree_reduce(
-                                [(lane_roots[i],) for i in range(WARP)], op
-                            )
-                        else:
-                            lane_roots = [
-                                cute.make_rmem_tensor(
-                                    cute.make_layout(WARP), trait.fdtypes[f]
-                                )
-                                for f in range(nf)
-                            ]
-                            for original_lane in cutlass.range(
-                                WARP, unroll=_ORDERED_LANE_UNROLL
-                            ):
-                                root = self._lane_root(
-                                    mIn,
-                                    in_base,
-                                    batch,
-                                    col,
-                                    Int32(batch_off + load * WARP * plan.vec)
-                                    + warp * Int32(warp_chunk)
-                                    + Int32(original_lane) * Int32(plan.vec),
-                                    active,
-                                )
-                                for f in cutlass.range_constexpr(nf):
-                                    lane_roots[f][original_lane] = root[f]
-                            load_root = tile._inner_tree_reduce(
-                                [
-                                    tuple(lane_roots[f][i] for f in range(nf))
-                                    for i in range(WARP)
-                                ],
-                                op,
-                            )
-                        tile._streaming_push(load_tree, load_root, load, plan.depth, op)
-                    slot = warp * Int32(WARP) + lane
-                    for f in cutlass.range_constexpr(nf):
-                        roots[f][slot] = load_tree[0][f]
-                cute.arch.barrier()
-                groups = const_expr(plan.wpr // plan.kchunk)
-                if worker == Int32(0):
-                    group_vals = [
-                        tile._inner_tree_reduce(
-                            [
-                                tuple(
-                                    roots[f][(g * plan.kchunk + i) * Int32(WARP) + lane]
-                                    for f in range(nf)
-                                )
-                                for i in range(plan.kchunk)
-                            ],
-                            op,
-                        )
-                        for g in range(groups)
+        lane, worker = Int32(tx), Int32(ty)
+        output = Int32(bx) * Int32(WARP) + lane
+        active = output < num_o
+        safe = output if active else Int32(0)
+        batch, col = safe // Int32(self.C), safe % Int32(self.C)
+        nf = const_expr(trait.nfields)
+        smem = cutlass.utils.SmemAllocator()
+        roots = [
+            smem.allocate_tensor(
+                trait.fdtypes[f],
+                cute.make_layout(const_expr(plan.wpr * WARP)),
+                byte_alignment=8,
+            )
+            for f in range(nf)
+        ]
+        loads, warp_chunk = plan.batches[0][2:]
+        for warp in cutlass.range(worker, plan.wpr, self.workers):
+            load_tree = []
+            for load in cutlass.range_constexpr(loads):
+                if const_expr(nf == 1):
+                    lane_roots = cute.make_rmem_tensor(
+                        cute.make_layout(WARP), trait.fdtypes[0]
+                    )
+                    for original_lane in cutlass.range_constexpr(WARP):
+                        lane_roots[original_lane] = self._lane_root(
+                            mIn,
+                            in_base,
+                            batch,
+                            col,
+                            Int32(load * WARP * plan.vec)
+                            + warp * Int32(warp_chunk)
+                            + Int32(original_lane * plan.vec),
+                            active,
+                        )[0]
+                    load_root = tile._inner_tree_reduce(
+                        [(lane_roots[i],) for i in range(WARP)], op
+                    )
+                else:
+                    lane_roots = [
+                        cute.make_rmem_tensor(cute.make_layout(WARP), trait.fdtypes[f])
+                        for f in range(nf)
                     ]
-                    padding = ident
-                    # Constant identities fold Welford's 0 / 0 count ratio at trace time.
-                    if const_expr(nf > 1):
-                        dynamic_false = lane < Int32(0)
-                        padding = tuple(
-                            group_vals[0][f] if dynamic_false else ident[f]
+                    for original_lane in cutlass.range(
+                        WARP, unroll=_ORDERED_LANE_UNROLL
+                    ):
+                        root = self._lane_root(
+                            mIn,
+                            in_base,
+                            batch,
+                            col,
+                            Int32(load * WARP * plan.vec)
+                            + warp * Int32(warp_chunk)
+                            + Int32(original_lane) * Int32(plan.vec),
+                            active,
+                        )
+                        for f in cutlass.range_constexpr(nf):
+                            lane_roots[f][original_lane] = root[f]
+                    load_root = tile._inner_tree_reduce(
+                        [
+                            tuple(lane_roots[f][i] for f in range(nf))
+                            for i in range(WARP)
+                        ],
+                        op,
+                    )
+                tile._streaming_push(load_tree, load_root, load, plan.depth, op)
+            slot = warp * Int32(WARP) + lane
+            for f in cutlass.range_constexpr(nf):
+                roots[f][slot] = load_tree[0][f]
+        cute.arch.barrier()
+        groups = const_expr(plan.wpr // plan.kchunk)
+        final = ident
+        if worker == Int32(0):
+            group_vals = [
+                tile._inner_tree_reduce(
+                    [
+                        tuple(
+                            roots[f][(g * plan.kchunk + i) * Int32(WARP) + lane]
                             for f in range(nf)
                         )
-                    group_vals.extend([padding] * (WARP - groups))
-                    final = op(final, tile._inner_tree_reduce(group_vals, op))
-                cute.arch.barrier()
+                        for i in range(plan.kchunk)
+                    ],
+                    op,
+                )
+                for g in range(groups)
+            ]
+            padding = ident
+            # Constant identities fold Welford's 0 / 0 count ratio at trace time.
+            if const_expr(nf > 1):
+                dynamic_false = lane < Int32(0)
+                padding = tuple(
+                    group_vals[0][f] if dynamic_false else ident[f]
+                    for f in range(nf)
+                )
+            group_vals.extend([padding] * (WARP - groups))
+            # The indexed tree seeds its fold with the identity, so -0 sums become +0.
+            final = op(ident, tile._inner_tree_reduce(group_vals, op))
 
         projected = trait.project(final, trait.acc(self.R))
         if (Int32(ty) == Int32(0)) & active:
@@ -419,17 +387,23 @@ def reduce_ordered_col(
     else:
         return None
     # The last block's Int32 output index must not wrap past the outputs.
-    last = B * C + _MULTIROW_ROWS_PER_BLOCK
+    last = B * C + WARP
     if x.stride(-1) != 1 or C < WARP or last >= _INT32_LIMIT:
         return None
     plan = trait_itree_plan(
         trait, R, B * C, x.element_size(), stage=False, device=x.device
     )
     # Linear vector folds change the DAG, and this kernel replays tree folds only.
-    if plan is None or plan.shape not in ("multirow", "looped") or plan.vec_linear:
+    if plan is None or plan.shape != "looped" or plan.vec_linear:
         return None
     # Leaves fold plan.vec wide; a plan whose tiles load narrower would move bits.
     if plan.tms[0].vec != plan.vec:
+        return None
+    # Single-field traits replay all 32 lanes' leaves statically. Multi-field traits roll
+    # lanes but replay a static lane tree per load, which compiles about as slowly (1.3 s
+    # against 1.5 s at fp32 R = 8192). Cap both so long looped rows keep the indexed
+    # tree's compile time. Plans past one planner batch always exceed the cap.
+    if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
     op = _OrderedColReduce(trait, plan, R, C, nouts)
     outs = [
