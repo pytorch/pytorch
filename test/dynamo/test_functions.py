@@ -6038,6 +6038,61 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    @parametrize("attr", ["custom_attr", "__closure__"])
+    @parametrize("use_dict", [False, True])
+    def test_lru_cache_wrapper_setattr(self, attr, use_dict):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        def fn(x, wrapper, alias):
+            if use_dict:
+                wrapper.__dict__[attr] = x + 1
+            else:
+                setattr(wrapper, attr, x + 1)
+            return getattr(alias, attr) * 2
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        for value in (1.0, 2.0):
+            x = torch.tensor(value)
+            self.assertEqual(opt_fn(x, cached_fn, cached_fn), (x + 1) * 2)
+            self.assertEqual(getattr(cached_fn, attr), x + 1)
+            self.assertNotIn(attr, cached_fn.__wrapped__.__dict__)
+        self.assertEqual(backend.frame_count, 1)
+
+    def test_lru_cache_wrapper_setattr_none(self):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        def fn(x):
+            cached_fn.__closure__ = None
+            return x + 1
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1)),
+            torch.full((1,), 2.0),
+        )
+        self.assertIn("__closure__", cached_fn.__dict__)
+        self.assertIsNone(cached_fn.__closure__)
+
+    def test_lru_cache_wrapper_delattr(self):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        def fn(x, wrapper):
+            del wrapper.custom_attr
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (1.0, 2.0):
+            cached_fn.custom_attr = value
+            x = torch.tensor(value)
+            self.assertEqual(opt_fn(x, cached_fn), x + 1)
+            self.assertFalse(hasattr(cached_fn, "custom_attr"))
+
     def test_wrapper_user_function_hasattr(self):
         # WrapperUserFunctionVariable (e.g. lru_cache-wrapped fn) passed to a
         # decorator that calls functools.wraps at tracing time should not graph
