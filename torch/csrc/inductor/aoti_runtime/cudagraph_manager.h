@@ -53,8 +53,10 @@ inline void delete_cuda_mem_pool(void* ptr) {
 // Runs a capturable part of a model instance eagerly or as CUDA graphs, one
 // graph per input layout (dtypes, sizes, strides). The graphs share one
 // memory pool, so replays run one at a time; each copies the inputs in and
-// clones the outputs out. A key whose capture fails runs eagerly from then on,
-// and after kMaxCaptureFailures failures in a row, so do new keys.
+// clones the outputs out. A key whose region fails to capture runs eagerly
+// from then on, and after kMaxCaptureFailures such failures in a row, so do new
+// keys. A key whose capture fails to set up, e.g. out of memory, retries
+// later.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
@@ -113,7 +115,8 @@ class CudaGraphManager {
   // capture, e.g. constants, at the same addresses, so call reset() before
   // replacing or freeing any of it. run(), reset() and the destructor may
   // delete the pool, which the shim forbids while the calling thread has a
-  // capture open, or while any thread has a global-mode capture open.
+  // capture open, or while any thread has a global-mode capture open. Eager
+  // calls don't hold the manager's lock. A failed call leaves every slot null.
   template <typename Fn>
   void run(
       Fn&& fn,
@@ -122,45 +125,51 @@ class CudaGraphManager {
       AtenTensorHandle* outputs,
       size_t num_outputs,
       cudaStream_t stream) {
+    std::fill(outputs, outputs + num_outputs, nullptr);
     // A null stream means the legacy default stream of the current device.
     AOTICudaGuard device_guard(device_index_);
     AOTI_RUNTIME_CHECK(
         !is_stream_capturing(stream),
         "CudaGraphManager can't run inside a CUDA graph capture");
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     auto key = make_key(inputs, num_inputs);
     auto it = graphs_.find(key);
     if (it == graphs_.end()) {
-      if (uncapturable_.count(key) > 0) {
-        run_eagerly(fn, inputs, outputs, num_outputs, stream);
-        return;
-      }
-      if (graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
+      bool eager = uncapturable_.count(key) > 0;
+      if (!eager &&
+          graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
         warn_max_graphs();
-        run_eagerly(fn, inputs, outputs, num_outputs, stream);
-        return;
+        eager = true;
       }
-      if (capture_failures_ >= kMaxCaptureFailures) {
-        run_eagerly(fn, inputs, outputs, num_outputs, stream);
-        return;
+      eager = eager || capture_failures_ >= kMaxCaptureFailures;
+      bool warming_up = false;
+      if (!eager) {
+        if (warmup_counts_.size() >= kMaxWarmupKeys &&
+            warmup_counts_.count(key) == 0) {
+          warmup_counts_.clear();
+        }
+        warming_up = warmup_counts_[key] < options_.warmup_calls ||
+            (options_.warmup_calls > 0 &&
+             warm_threads_.count(thread_token()) == 0);
+        eager = warming_up;
       }
-      if (warmup_counts_.size() >= kMaxWarmupKeys &&
-          warmup_counts_.count(key) == 0) {
-        warmup_counts_.clear();
-      }
-      int64_t& warmups = warmup_counts_[key];
-      bool thread_warm =
-          options_.warmup_calls == 0 || warm_threads_.count(thread_token()) > 0;
-      if (warmups < options_.warmup_calls || !thread_warm) {
+      if (eager) {
+        lock.unlock();
         run_eagerly(fn, inputs, outputs, num_outputs, stream);
-        ++warmups;
+        lock.lock();
+        if (warming_up) {
+          ++warmup_counts_[key];
+        }
+        mark_thread_warm();
         return;
       }
       warmup_counts_.erase(key);
       std::unique_ptr<Graph> graph;
+      bool region_failed = false;
       try {
-        graph = capture(fn, inputs, num_inputs, num_outputs, stream);
+        graph =
+            capture(fn, inputs, num_inputs, num_outputs, stream, region_failed);
       } catch (const std::exception& e) {
         // A failed capture ran nothing, so run eagerly; an error here is the
         // caller's. Without graphs, the pool only holds the failed capture's
@@ -168,8 +177,11 @@ class CudaGraphManager {
         if (graphs_.empty()) {
           release_pool();
         }
+        lock.unlock();
         run_eagerly(fn, inputs, outputs, num_outputs, stream);
-        mark_uncapturable(std::move(key), e.what());
+        lock.lock();
+        mark_thread_warm();
+        capture_failed(std::move(key), e.what(), region_failed);
         return;
       }
       capture_failures_ = 0;
@@ -197,9 +209,11 @@ class CudaGraphManager {
 
   // Caps the keys and threads remembered for warm-up, so one-off shapes or
   // threads can't grow the manager without bound. Failed captures are bounded
-  // by kMaxCaptureFailures per successful one.
+  // by kMaxCaptureFailures per successful one, and a key whose capture fails
+  // to set up runs eagerly kSetupFailureBackoff more times before retrying.
   static constexpr size_t kMaxWarmupKeys = 1024;
   static constexpr int kMaxCaptureFailures = 8;
+  static constexpr int64_t kSetupFailureBackoff = 16;
 
  private:
   static constexpr size_t kNoOutput = std::numeric_limits<size_t>::max();
@@ -417,7 +431,6 @@ class CudaGraphManager {
       AtenTensorHandle* outputs,
       size_t num_outputs,
       cudaStream_t stream) {
-    std::fill(outputs, outputs + num_outputs, nullptr);
     try {
       fn(inputs, outputs, stream);
       // Each slot gets its own handle, as after a replay.
@@ -432,28 +445,40 @@ class CudaGraphManager {
       delete_outputs(outputs, num_outputs);
       throw;
     }
-    // Only a call that succeeded did the thread's lazy setup.
+  }
+
+  // Only a call that succeeded did the thread's lazy setup.
+  void mark_thread_warm() {
     if (warm_threads_.size() >= kMaxWarmupKeys) {
       warm_threads_.clear();
     }
     warm_threads_.insert(thread_token());
   }
 
-  void mark_uncapturable(std::vector<int64_t> key, const char* error) {
-    uncapturable_.insert(std::move(key));
-    ++capture_failures_;
+  void capture_failed(
+      std::vector<int64_t> key,
+      const char* error,
+      bool region_failed) {
+    if (!region_failed) {
+      warmup_counts_[key] = -kSetupFailureBackoff;
+    } else if (!uncapturable_.insert(std::move(key)).second) {
+      return; // Another thread failed to capture it meanwhile.
+    } else {
+      ++capture_failures_;
+    }
+    bool& warned =
+        region_failed ? warned_capture_failure_ : warned_setup_failure_;
     std::string msg;
-    if (capture_failures_ == kMaxCaptureFailures) {
+    if (region_failed && capture_failures_ == kMaxCaptureFailures) {
       msg = "AOTInductor CUDA graphs: capturing failed " +
           std::to_string(kMaxCaptureFailures) +
           " times in a row, so calls with new input shapes run eagerly too";
-    } else if (!warned_capture_failure_) {
-      warned_capture_failure_ = true;
+    } else if (!warned) {
+      warned = true;
       std::string reason(error);
-      msg =
-          "AOTInductor CUDA graphs: capturing failed, so calls with these "
-          "input shapes run eagerly: " +
-          reason.substr(0, reason.find('\n'));
+      msg = std::string("AOTInductor CUDA graphs: capturing failed, so ") +
+          (region_failed ? "calls with these input shapes run" : "this runs") +
+          " eagerly: " + reason.substr(0, reason.find('\n'));
     } else {
       return;
     }
@@ -552,7 +577,8 @@ class CudaGraphManager {
       AtenTensorHandle* inputs,
       size_t num_inputs,
       size_t num_outputs,
-      cudaStream_t stream) {
+      cudaStream_t stream,
+      bool& region_failed) {
     // A pool can't take a capture once every graph captured into it is gone.
     if (graphs_.empty()) {
       release_pool();
@@ -575,9 +601,7 @@ class CudaGraphManager {
     std::vector<AtenTensorHandle> raw_outputs(num_outputs, nullptr);
     {
       AOTICudaStreamGuard stream_guard(capture_stream_, device_index_);
-      // Allocated outside the capture: under cudaMallocAsync, a capture's
-      // allocations become graph memory nodes, which copies outside the graph
-      // can't safely write.
+      // Allocated outside the capture, for copies outside the graph to write.
       std::vector<AtenTensorHandle> input_handles;
       input_handles.reserve(num_inputs);
       std::vector<int32_t> dtypes;
@@ -586,14 +610,16 @@ class CudaGraphManager {
         int64_t extent = storage_extent(layout);
         int64_t stride = 1;
         AtenTensorHandle buffer = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
-            1,
-            &extent,
-            &stride,
-            layout.dtype,
-            aoti_torch_device_type_cuda(),
-            device_index_,
-            &buffer));
+        check_shim(
+            aoti_torch_empty_strided(
+                1,
+                &extent,
+                &stride,
+                layout.dtype,
+                aoti_torch_device_type_cuda(),
+                device_index_,
+                &buffer),
+            "aoti_torch_empty_strided");
         graph->input_buffers.emplace_back(buffer);
         AtenTensorHandle view = nullptr;
         AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
@@ -621,6 +647,7 @@ class CudaGraphManager {
       } catch (...) {
         // A capture must end before its graph is deleted. The region's error is
         // the one to report.
+        region_failed = true;
         if (capturing) {
           (void)aoti_torch_cuda_graph_capture_end(graph_handle);
         }
@@ -651,7 +678,6 @@ class CudaGraphManager {
         "outputs");
     AOTICudaStreamGuard stream_guard(stream, device_index_);
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(stream, last_replay_, 0));
-    std::fill(outputs, outputs + num_outputs, nullptr);
     try {
       copy_inputs(graph, inputs);
       AOTI_TORCH_ERROR_CODE_CHECK(
@@ -692,6 +718,7 @@ class CudaGraphManager {
   std::mutex mutex_;
   bool warned_max_graphs_ = false;
   bool warned_capture_failure_ = false;
+  bool warned_setup_failure_ = false;
   int capture_failures_ = 0;
   std::map<std::vector<int64_t>, int64_t> warmup_counts_;
   std::set<std::vector<int64_t>> uncapturable_;
