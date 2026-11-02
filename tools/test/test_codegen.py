@@ -11,6 +11,7 @@ from tools.autograd import gen_autograd_functions, load_derivatives
 from tools.pyi.gen_pyi import generate_type_hints
 
 from torchgen import dest
+from torchgen.aoti.fallback_ops import inductor_fallback_ops
 from torchgen.api.python import PythonSignatureGroup, signature
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
@@ -25,6 +26,11 @@ from torchgen.gen import (
     LineLoader,
     static_dispatch,
 )
+from torchgen.gen_aoti_c_shim import (
+    _get_earliest_torch_version_for_op_variant,
+    declaration_definition_cache,
+    gen_declaration_and_definition,
+)
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -37,6 +43,82 @@ from torchgen.model import (
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target
+
+
+class TestAOTIShimVersions(unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        declaration_definition_cache.clear()
+        self.addCleanup(declaration_definition_cache.clear)
+
+    def test_histogram_backend_version(self) -> None:
+        schema = FunctionSchema.parse("histogram(Tensor self) -> Tensor")
+        for op in ["aten.histogram.bin_ct", "aten._histogramdd_from_bin_cts.default"]:
+            for device in ["cpu", "cuda"]:
+                with self.subTest(op=op, device=device):
+                    declaration_definition_cache.clear()
+                    declaration, definition = gen_declaration_and_definition(
+                        schema, device, "at::histogram", inductor_fallback_ops[op]
+                    )
+                    self.assertEqual(
+                        "#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0"
+                        in declaration,
+                        device == "cuda",
+                    )
+                    self.assertNotIn("#if", definition)
+                    self.assertIn(f"aoti_torch_{device}_histogram", definition)
+
+    def test_global_and_variant_versions(self) -> None:
+        schema = FunctionSchema.parse("op(Tensor self, int x=0) -> Tensor")
+        metadata = {
+            "since": "TORCH_VERSION_2_10_0",
+            "since_cuda": "TORCH_VERSION_2_15_0",
+            "v2": {
+                "new_args": ["x"],
+                "since": "TORCH_VERSION_2_12_0",
+                "since_cuda": "TORCH_VERSION_2_16_0",
+            },
+        }
+        for device, versions in [
+            ("cpu", ["2_10_0", "2_12_0"]),
+            ("cuda", ["2_15_0", "2_16_0"]),
+        ]:
+            with self.subTest(device=device):
+                declaration, _ = gen_declaration_and_definition(
+                    schema, device, "at::op", metadata
+                )
+                for version in versions:
+                    self.assertIn(
+                        f"#if TORCH_FEATURE_VERSION >= TORCH_VERSION_{version}",
+                        declaration,
+                    )
+                self.assertIn(f"aoti_torch_{device}_op_v2", declaration)
+                self.assertEqual(declaration.count("#if"), 2)
+
+    def test_backend_does_not_gate_other_variants(self) -> None:
+        metadata: dict[str, str | dict[str, list[str] | str]] = {
+            "since_cuda": "TORCH_VERSION_2_16_0",
+            "v2": {"new_args": ["x"]},
+        }
+        self.assertIsNone(
+            _get_earliest_torch_version_for_op_variant(metadata, 1, "cpu")
+        )
+        self.assertIsNone(
+            _get_earliest_torch_version_for_op_variant(metadata, 2, "cuda")
+        )
+        self.assertIsNone(_get_earliest_torch_version_for_op_variant({}, 1, "cuda"))
+
+    def test_invalid_backend_version(self) -> None:
+        cases: list[dict[str, str | dict[str, list[str] | str]]] = [
+            {"since_cdua": "TORCH_VERSION_2_16_0"},
+            {"since_cuda": "2.16"},
+            {"v2": {"new_args": ["x"], "since_cdua": "TORCH_VERSION_2_16_0"}},
+        ]
+        for metadata in cases:
+            with self.subTest(metadata=metadata), self.assertRaises(AssertionError):
+                _get_earliest_torch_version_for_op_variant(
+                    metadata, 2 if "v2" in metadata else 1, "cpu"
+                )
 
 
 class TestGenPyi(unittest.TestCase):

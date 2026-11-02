@@ -85,8 +85,10 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
     std::optional<Device> common_device = input.device();
     for (const auto dim : c10::irange(N)) {
         const Tensor& dim_bins = bins[dim];
-        const TensorArg bins_arg(dim_bins, "bins", 0);
-        c10::impl::check_and_update_common_device(common_device, dim_bins, checked_from, "bins");
+        const auto bins_name = dim_bins.scalar_type() == input.scalar_type() && dim_bins.dim() == 1
+                ? "bins" : c10::str("bins[", dim, "]");
+        const TensorArg bins_arg(dim_bins, bins_name.c_str(), 0);
+        c10::impl::check_and_update_common_device(common_device, dim_bins, checked_from, bins_name.c_str());
         checkScalarType(checked_from, bins_arg, input.scalar_type());
         checkDim(checked_from, bins_arg, 1);
 

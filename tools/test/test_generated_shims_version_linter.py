@@ -30,14 +30,14 @@ aten_shimified_ops = {
         self.assertEqual(set(parsed), {"inductor_fallback_ops", "aten_shimified_ops"})
         # Same op key in both dicts should not interfere
         self.assertEqual(
-            parsed["inductor_fallback_ops"]["aten.foo.default"][1][0], None
+            parsed["inductor_fallback_ops"][("aten.foo.default", None)][1][0], None
         )
         self.assertEqual(
-            parsed["aten_shimified_ops"]["aten.foo.default"][1][0],
+            parsed["aten_shimified_ops"][("aten.foo.default", None)][1][0],
             "TORCH_VERSION_2_10_0",
         )
         self.assertEqual(
-            parsed["inductor_fallback_ops"]["aten.bar.default"][1][0],
+            parsed["inductor_fallback_ops"][("aten.bar.default", None)][1][0],
             "TORCH_VERSION_2_12_0",
         )
 
@@ -52,7 +52,7 @@ inductor_fallback_ops = {
 aten_shimified_ops = {}
 """
         parsed = parse_fallback_ops(src)
-        per_op = parsed["inductor_fallback_ops"]["aten.baz.default"]
+        per_op = parsed["inductor_fallback_ops"][("aten.baz.default", None)]
         # v1 ungated (no top-level since)
         self.assertEqual(per_op[1][0], None)
         # v2 + v3 carry their own since
@@ -221,6 +221,44 @@ aten_shimified_ops = {
         self.assertEqual(msgs[0].name, "op-version-modified")
         self.assertIn("TORCH_VERSION_2_10_0", msgs[0].description)
         self.assertIn("TORCH_VERSION_2_11_0", msgs[0].description)
+
+    def test_backend_version(self):
+        base = 'inductor_fallback_ops = {"aten.histogram.bin_ct": {}}'
+        for device, version, error in [
+            ("cuda", "TORCH_VERSION_2_16_0", None),
+            ("cuda", "TORCH_VERSION_2_15_0", "wrong-version-on-new-op"),
+            ("cuda", "2.16", "malformed-version"),
+            ("cdua", "TORCH_VERSION_2_16_0", "unknown-backend"),
+        ]:
+            with self.subTest(device=device, version=version):
+                current = f'inductor_fallback_ops = {{"aten.histogram.bin_ct": {{"since_{device}": "{version}"}}}}'
+                msgs = self._check(current, base, current_version=(2, 16, 0))
+                self.assertEqual(
+                    [msg.name for msg in msgs], [] if error is None else [error]
+                )
+
+    def test_backend_version_immutable(self):
+        base = 'inductor_fallback_ops = {"aten.foo.default": {"since_cuda": "TORCH_VERSION_2_16_0"}}'
+        for current in [
+            base.replace("2_16_0", "2_17_0"),
+            'inductor_fallback_ops = {"aten.foo.default": {}}',
+        ]:
+            with self.subTest(current=current):
+                msgs = self._check(current, base, current_version=(2, 17, 0))
+                self.assertEqual([msg.name for msg in msgs], ["op-version-modified"])
+        self.assertEqual(self._check(base, base), [])
+
+    def test_variant_backend_version(self):
+        base = 'inductor_fallback_ops = {"aten.foo.default": {"v2": {"new_args": ["x"], "since": "TORCH_VERSION_2_12_0"}}}'
+        current = base.replace(
+            '"new_args": ["x"]',
+            '"new_args": ["x"], "since_cuda": "TORCH_VERSION_2_16_0"',
+        )
+        self.assertEqual(self._check(current, base, current_version=(2, 16, 0)), [])
+        msgs = self._check(
+            current.replace("2_16_0", "2_15_0"), base, current_version=(2, 16, 0)
+        )
+        self.assertEqual([msg.name for msg in msgs], ["wrong-version-on-new-op"])
 
 
 if __name__ == "__main__":

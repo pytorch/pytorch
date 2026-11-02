@@ -1014,6 +1014,7 @@ class TestReductionsDevice(TestCase):
             indexed = a.gather(1, indices.unsqueeze(1)).squeeze(1)
             self.assertEqual(values, indexed)
 
+
     @expectedFailureMeta  # mode only supports CPU and CUDA device type
     @onlyNativeDeviceTypes
     @skipIfMPS
@@ -1400,6 +1401,7 @@ class TestReductionsDevice(TestCase):
                 reduce_dims = list(combinations(dim_sequences[len(shape)], i))
                 for reduce_dim in reduce_dims:
                     helper(self, shape, reduce_dim, device, dtype)
+
 
     @dtypes(torch.bool, torch.double)
     @skipIfMPS
@@ -2204,6 +2206,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(x.argmin(dim=None).item(), 0)
         self.assertEqual(x.argmin(dim=0).item(), 0)
         self.assertEqual(x.argmin(dim=0, keepdim=True), torch.tensor(0, dtype=torch.int64))
+
 
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
@@ -3405,8 +3408,7 @@ class TestReductionsDevice(TestCase):
         x = torch.randn(8, dtype=dtype, device=device)
         # Mismatched out dtype should raise
         out_wrong = torch.empty(4, dtype=torch.int64, device=device)
-        msg = ("Expected tensor for 'hist' to have scalar type" if self.device_type in ("cpu", "mps") else
-               "torch.histogram: input tensor and hist tensor should have the same dtype")
+        msg = r"Expected tensor for 'hist' to have scalar type.*torch\.histc"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_wrong)
         # Safe widening (float32 in, float64 out) should also raise — histc
@@ -3761,6 +3763,118 @@ class TestReductionsDevice(TestCase):
         result_compiled = foo_compile()
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
+
+class TestReductionsOnCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # TODO: kill map2_ (and similar) uses and update to compare with NumPy
+    # only works on CPU since this uses map2_, which is only supported on CPU
+    def _testCSelection(self, torchfn, mathfn):
+        # Two tensors
+        size = (100, 100)
+        a = torch.rand(*size)
+        b = torch.rand(*size)
+        c = torchfn(a, b)
+        expected_c = torch.zeros(*size)
+        expected_c.map2_(a, b, lambda _, a, b: mathfn(a, b))
+        self.assertEqual(expected_c, c, atol=0, rtol=0)
+
+    def test_max_elementwise(self):
+        self._testCSelection(torch.max, max)
+
+    def test_min_elementwise(self):
+        self._testCSelection(torch.min, min)
+
+    # TODO: update this and tests that use it to handle device properly
+    def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
+        shape = (3, 4, 5)
+        reduced_shape = fn(torch.ones(shape)).shape
+
+        def _test_out(dtype, other_dtype):
+            out = torch.ones(reduced_shape, dtype=dtype)
+            result = fn(x, out=out)
+            self.assertIs(out.dtype, result.dtype)
+            self.assertEqual(fn(x.to(dtype)), result, exact_dtype=False)
+            result = fn(x, out=out, dtype=dtype)
+            self.assertIs(out.dtype, result.dtype)
+            self.assertEqual(fn(x.to(dtype)), result, exact_dtype=False)
+            # 'out' is favored over dtype, check error
+            self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
+
+        for dtype in [dtype for dtype in get_all_math_dtypes('cpu') if dtype != torch.float16]:
+            x = torch.ones(shape, dtype=dtype)
+            expected_dtype = dtype if dtype.is_floating_point or dtype.is_complex else torch.int64
+            self.assertIs(expected_dtype, fn(x).dtype)
+            self.assertEqual(fn(x.to(expected_dtype)), fn(x))
+
+            if dtype.is_floating_point:
+                other_dtype = torch.float32 if dtype == torch.float64 else torch.float64
+            elif dtype.is_complex:
+                other_dtype = torch.complex64 if dtype == torch.complex128 else torch.complex128
+            else:
+                other_dtype = torch.int32 if dtype != torch.int32 else torch.int16
+            self.assertIs(other_dtype, fn(x, dtype=other_dtype).dtype)
+            self.assertEqual(fn(x.to(other_dtype)), fn(x, dtype=other_dtype), exact_dtype=False)
+
+            # test mixed int/float/complex
+            if dtype.is_floating_point:
+                mixed_dtypes = [torch.int32, torch.complex64]
+            elif dtype.is_complex:
+                mixed_dtypes = [torch.int32, torch.float32]
+            else:
+                mixed_dtypes = [torch.float32, torch.complex64]
+
+            for mixed_dtype in mixed_dtypes:
+                self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
+                self.assertEqual(fn(x.to(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
+
+                if has_out:
+                    _test_out(dtype, other_dtype)
+                    _test_out(dtype, mixed_dtype)
+
+    def test_sum_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, 0, **kwargs))
+
+    def test_prod_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, **kwargs), False)
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, 0, **kwargs))
+
+    def test_cumsum_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumsum(x, 0, **kwargs))
+
+    def test_cumprod_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
+
+    # TODO: make work on CUDA, too
+    def test_accreal_type(self) -> None:
+        x = torch.ones(2, 3, 4)
+        self.assertIsInstance(x.double().sum().item(), float)
+        self.assertIsInstance(x.float().sum().item(), float)
+        self.assertIsInstance(x.long().sum().item(), int)
+        self.assertIsInstance(x.int().sum().item(), int)
+        self.assertIsInstance(x.short().sum().item(), int)
+        self.assertIsInstance(x.char().sum().item(), int)
+        self.assertIsInstance(x.byte().sum().item(), int)
+
+    def test_nansum_complex(self):
+        for dtype in complex_types():
+            x = torch.randn((3, 3, 3), dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "nansum on CPU does not support complex inputs"):
+                torch.nansum(x)
+
+    # CUDA histc uses AT_DISPATCH_ALL_TYPES (no half/bfloat16), so this
+    # low-precision coverage only exists on CPU
+    def test_histc_lowp(self):
+        for dtype in (torch.bfloat16, torch.half):
+            actual = torch.histc(
+                torch.tensor([1, 2, 1], dtype=dtype), bins=4, min=0, max=3)
+            self.assertEqual(torch.tensor([0, 2, 1, 0], dtype=dtype), actual)
+            self.assertEqual(actual.dtype, dtype)
+
+
+class TestHistogramDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
@@ -4117,7 +4231,7 @@ class TestReductionsDevice(TestCase):
         actual_nd, _ = torch.histogramdd(input_nd, [edges, edges])
         self.assertEqual(actual_nd, torch.diag(actual))
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyCUDA
     @dtypes(torch.float32, torch.float64)
     def test_histogram_repeated_edges_and_weights(self, device, dtype):
         input = torch.tensor([-1., 0., 0.5, 1., float("nan")], device=device, dtype=dtype)
@@ -4131,15 +4245,21 @@ class TestReductionsDevice(TestCase):
                     expected, _ = torch.histogram(input.cpu(), edges.cpu(), weight=weights.cpu(), density=density)
                     self.assertEqual(actual.cpu(), expected)
 
+    @onlyOn(["cpu", "cuda"])
+    @parametrize("bad_dim", [0, 1, 2])
+    @parametrize("invalid_kind", ["dtype", "rank"])
+    def test_histogramdd_bin_error_dimension(self, device, bad_dim, invalid_kind):
+        values = torch.zeros(2, 3, device=device)
+        edges = [torch.linspace(0., 1., 4, device=device) for _ in range(3)]
+        edges[bad_dim] = edges[bad_dim].double() if invalid_kind == "dtype" else edges[bad_dim].reshape(2, 2)
+        message = rf"bins\[{bad_dim}\].*torch\.histogramdd"
+        with self.assertRaisesRegex(RuntimeError, message):
+            torch.histogramdd(values, edges)
+
     @onlyCUDA
     def test_histogram_cuda_errors(self, device):
         values = torch.tensor([0., 1., 2.], device=device)
         edges = torch.tensor([-1., 1., 3.], device=device)
-        cpu_weights = torch.ones(3)
-        with self.assertRaisesRegex(RuntimeError, "same device"):
-            torch.histogram(values, edges, weight=cpu_weights)
-        with self.assertRaisesRegex(RuntimeError, "same device"):
-            torch.histogramdd(values[:, None], [edges], weight=cpu_weights)
         for dtype in [torch.int64, torch.float16, torch.bfloat16]:
             with self.assertRaisesRegex(RuntimeError, "not implemented"):
                 torch.histogram(values.to(dtype), edges.to(dtype))
@@ -4230,6 +4350,8 @@ class TestReductionsDevice(TestCase):
         (9, 1, "counts", False, True, 257),
         (1, 6144, "edges", False, False, 1000000),
         (1, 6145, "counts", True, True, 1000000),
+        (1, 12288, "edges", False, False, 1000000),
+        (1, 12289, "counts", False, False, 1000000),
         (1, 7, "inferred", False, False, 0),
         (3, 7, "inferred", True, True, 0),
     ])
@@ -4350,7 +4472,7 @@ class TestReductionsDevice(TestCase):
         expected, _ = op(values.cpu(), cpu_edges)
         self.assertEqual(actual.cpu(), expected)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyCUDA
     @dtypes(torch.float32, torch.float64)
     @parametrize("weighted", [False, True])
     def test_histogram_warp_groups(self, device, dtype, weighted):
@@ -4369,7 +4491,7 @@ class TestReductionsDevice(TestCase):
                     expected, _ = op(input.cpu(), cpu_edges, weight=None if weights is None else weights.cpu())
                     self.assertEqual(actual.cpu(), expected)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyCUDA
     @dtypes(torch.float32, torch.float64)
     def test_histogram_changing_contention(self, device, dtype):
         size = 200000
@@ -4449,6 +4571,7 @@ class TestReductionsDevice(TestCase):
     @parametrize("bin_count, num_samples", [
         (512, 4097), (2048, 257), (4096, 4097), (8192, 65537),
         (6143, 1000000), (6144, 1000000), (6145, 1000000),
+        (12287, 1000000), (12288, 1000000), (12289, 1000000),
         (-1, 1000000), (0, 1000000), (1, 1000000),
     ])
     def test_histogram_shared_memory_boundary(self, device, dtype, dimensions, weighted, bin_kind, bin_count, num_samples):
@@ -4488,7 +4611,7 @@ class TestReductionsDevice(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same device"):
             op(values, bins, weight=weights, **kwargs)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyCUDA
     @dtypes(torch.float32, torch.float64)
     def test_histogram_weighted_warp_special_values(self, device, dtype):
         values = torch.zeros(4097, device=device, dtype=dtype)
@@ -4500,7 +4623,7 @@ class TestReductionsDevice(TestCase):
                 expected, _ = torch.histogram(values.cpu(), edges.cpu(), weight=weights.cpu())
                 self.assertEqual(actual.cpu(), expected)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyCUDA
     @dtypes(torch.float32)
     @largeTensorTest("9GB")
     def test_histogram_large_input_stride(self, device, dtype):
@@ -4521,117 +4644,8 @@ class TestReductionsDevice(TestCase):
         actual, _ = torch.histogram(input, 2, range=(-2., 2.), weight=values)
         self.assertEqual(actual, values)
 
-
-class TestReductionsOnCPU(TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    # TODO: kill map2_ (and similar) uses and update to compare with NumPy
-    # only works on CPU since this uses map2_, which is only supported on CPU
-    def _testCSelection(self, torchfn, mathfn):
-        # Two tensors
-        size = (100, 100)
-        a = torch.rand(*size)
-        b = torch.rand(*size)
-        c = torchfn(a, b)
-        expected_c = torch.zeros(*size)
-        expected_c.map2_(a, b, lambda _, a, b: mathfn(a, b))
-        self.assertEqual(expected_c, c, atol=0, rtol=0)
-
-    def test_max_elementwise(self):
-        self._testCSelection(torch.max, max)
-
-    def test_min_elementwise(self):
-        self._testCSelection(torch.min, min)
-
-    # TODO: update this and tests that use it to handle device properly
-    def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
-        shape = (3, 4, 5)
-        reduced_shape = fn(torch.ones(shape)).shape
-
-        def _test_out(dtype, other_dtype):
-            out = torch.ones(reduced_shape, dtype=dtype)
-            result = fn(x, out=out)
-            self.assertIs(out.dtype, result.dtype)
-            self.assertEqual(fn(x.to(dtype)), result, exact_dtype=False)
-            result = fn(x, out=out, dtype=dtype)
-            self.assertIs(out.dtype, result.dtype)
-            self.assertEqual(fn(x.to(dtype)), result, exact_dtype=False)
-            # 'out' is favored over dtype, check error
-            self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
-
-        for dtype in [dtype for dtype in get_all_math_dtypes('cpu') if dtype != torch.float16]:
-            x = torch.ones(shape, dtype=dtype)
-            expected_dtype = dtype if dtype.is_floating_point or dtype.is_complex else torch.int64
-            self.assertIs(expected_dtype, fn(x).dtype)
-            self.assertEqual(fn(x.to(expected_dtype)), fn(x))
-
-            if dtype.is_floating_point:
-                other_dtype = torch.float32 if dtype == torch.float64 else torch.float64
-            elif dtype.is_complex:
-                other_dtype = torch.complex64 if dtype == torch.complex128 else torch.complex128
-            else:
-                other_dtype = torch.int32 if dtype != torch.int32 else torch.int16
-            self.assertIs(other_dtype, fn(x, dtype=other_dtype).dtype)
-            self.assertEqual(fn(x.to(other_dtype)), fn(x, dtype=other_dtype), exact_dtype=False)
-
-            # test mixed int/float/complex
-            if dtype.is_floating_point:
-                mixed_dtypes = [torch.int32, torch.complex64]
-            elif dtype.is_complex:
-                mixed_dtypes = [torch.int32, torch.float32]
-            else:
-                mixed_dtypes = [torch.float32, torch.complex64]
-
-            for mixed_dtype in mixed_dtypes:
-                self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
-                self.assertEqual(fn(x.to(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
-
-                if has_out:
-                    _test_out(dtype, other_dtype)
-                    _test_out(dtype, mixed_dtype)
-
-    def test_sum_integer_upcast(self):
-        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
-        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, 0, **kwargs))
-
-    def test_prod_integer_upcast(self):
-        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, **kwargs), False)
-        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, 0, **kwargs))
-
-    def test_cumsum_integer_upcast(self):
-        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumsum(x, 0, **kwargs))
-
-    def test_cumprod_integer_upcast(self):
-        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
-
-    # TODO: make work on CUDA, too
-    def test_accreal_type(self) -> None:
-        x = torch.ones(2, 3, 4)
-        self.assertIsInstance(x.double().sum().item(), float)
-        self.assertIsInstance(x.float().sum().item(), float)
-        self.assertIsInstance(x.long().sum().item(), int)
-        self.assertIsInstance(x.int().sum().item(), int)
-        self.assertIsInstance(x.short().sum().item(), int)
-        self.assertIsInstance(x.char().sum().item(), int)
-        self.assertIsInstance(x.byte().sum().item(), int)
-
-    def test_nansum_complex(self):
-        for dtype in complex_types():
-            x = torch.randn((3, 3, 3), dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "nansum on CPU does not support complex inputs"):
-                torch.nansum(x)
-
-    # CUDA histc uses AT_DISPATCH_ALL_TYPES (no half/bfloat16), so this
-    # low-precision coverage only exists on CPU
-    def test_histc_lowp(self):
-        for dtype in (torch.bfloat16, torch.half):
-            actual = torch.histc(
-                torch.tensor([1, 2, 1], dtype=dtype), bins=4, min=0, max=3)
-            self.assertEqual(torch.tensor([0, 2, 1, 0], dtype=dtype), actual)
-            self.assertEqual(actual.dtype, dtype)
-
-
 instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestHistogramDevice, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()

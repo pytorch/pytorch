@@ -34,7 +34,7 @@ constexpr int histogram_threads = 256;
 constexpr int histogram_blocks_per_sm = 4;
 constexpr int histogram_shared_bins_per_sample = 8;
 constexpr int histogram_inline_dimensions = 8;
-#if defined(__CUDACC__) && !defined(USE_ROCM) && CUDART_VERSION >= 11070
+#if !defined(USE_ROCM)
 constexpr bool histogram_inline_parameters = true;
 #else
 constexpr bool histogram_inline_parameters = false;
@@ -108,7 +108,7 @@ __global__ C10_LAUNCH_BOUNDS_1(histogram_threads) void histogramdd_cuda_kernel(
     const scalar_t* weight,
     index_t weight_stride,
     // Dynamic indexing must read kernel parameters without a per-thread local copy.
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700 && !defined(USE_ROCM) && CUDART_VERSION >= 11070
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700 && !defined(USE_ROCM)
     __grid_constant__
 #endif
     const std::conditional_t<inline_bin_edges, HistogramBinEdges<scalar_t>, const scalar_t*> edges,
@@ -260,7 +260,14 @@ void histogramdd_out_cuda_template(
       const int blocks = static_cast<int>(std::min<int64_t>(
           (num_samples - 1) / histogram_threads + 1, properties->multiProcessorCount * histogram_blocks_per_sm));
       const auto stream = at::cuda::getCurrentCUDAStream();
-      const auto shared_bytes = histogram.numel() * sizeof(scalar_t);
+#if !defined(USE_ROCM)
+      const bool use_integer_counts = !weights.defined() && (dimensions == 1 || use_inline_edges) &&
+          properties->major >= 8 && num_samples <= std::numeric_limits<int32_t>::max();
+#else
+      constexpr bool use_integer_counts = false;
+#endif
+      const auto output_bytes = histogram.numel() * sizeof(scalar_t);
+      const auto shared_bytes = use_integer_counts ? histogram.numel() * sizeof(int32_t) : output_bytes;
       size_t shared_limit = properties->sharedMemPerBlock;
 #if !defined(USE_ROCM)
       const size_t shared_per_block = properties->sharedMemPerMultiprocessor / histogram_blocks_per_sm;
@@ -272,16 +279,20 @@ void histogramdd_out_cuda_template(
           shared_limit,
           properties->sharedMemPerMultiprocessor / histogram_blocks_per_sm);
       const int64_t samples_per_block = (num_samples - 1) / blocks + 1;
+      // Preserve single-pass replica counts to avoid extra initialization and merging.
+      const auto replica_bytes = num_samples <= int64_t(blocks) * histogram_threads
+          ? output_bytes : shared_bytes;
       int replicas = 1;
       while (replicas * 2 <= histogram_threads / properties->warpSize &&
-             shared_bytes * replicas * 2 <= replica_budget &&
+             replica_bytes * replicas * 2 <= replica_budget &&
              (num_samples <= int64_t(blocks) * histogram_threads ||
               (histogram.numel() * replicas * 2 - 1) / histogram_shared_bins_per_sample < samples_per_block)) {
         replicas *= 2;
       }
       // Amortize shared histogram initialization and merging over the samples,
       // including the replicas. Keep the regular grid to preserve parallelism.
-      const bool use_shared = shared_bytes * replicas <= shared_limit &&
+      // Limit merging large floating-point outputs even when integer counters fit.
+      const bool use_shared = output_bytes <= shared_limit && shared_bytes * replicas <= shared_limit &&
           (histogram.numel() * replicas - 1) / histogram_shared_bins_per_sample < samples_per_block;
       const scalar_t* weight_data = weights.defined() ? weights.const_data_ptr<scalar_t>() : nullptr;
       const int64_t weight_stride = weights.defined() ? weights.stride(0) : 0;
@@ -313,7 +324,7 @@ void histogramdd_out_cuda_template(
             };
 #if !defined(USE_ROCM)
             if constexpr (!weighted && (one_dimensional || inline_bin_edges)) {
-              if (properties->major >= 8 && num_samples <= std::numeric_limits<int32_t>::max()) {
+              if (use_integer_counts) {
                 shared_launch.template operator()<true>();
                 return;
               }

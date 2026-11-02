@@ -302,6 +302,7 @@ _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
 def _get_earliest_torch_version_for_op_variant(
     op_metadata: dict[str, str | dict[str, list[str] | str]],
     op_version: int,
+    device: str,
 ) -> str | None:
     """
     Return the TORCH_VERSION_X_Y_Z macro string at which the given op variant became
@@ -313,18 +314,31 @@ def _get_earliest_torch_version_for_op_variant(
     op_version is the integer extracted from a "vN" key in `op_metadata`. The base op
     has op_version == 1 and reads from a top-level "since" key; later variants read
     "since" from their own dict-form entry {"new_args": [...], "since": "..."}.
+    A "since_<device>" key overrides "since" for that backend only.
     """
-    if op_version == 1:
-        since = op_metadata.get("since")
-    else:
-        variant = op_metadata.get(f"v{op_version}")
-        since = variant.get("since") if isinstance(variant, dict) else None
+    variant = op_metadata if op_version == 1 else op_metadata.get(f"v{op_version}")
+    if not isinstance(variant, dict):
+        return None
+    for key, value in variant.items():
+        if key != "since" and not key.startswith("since_"):
+            continue
+        if key != "since" and key.removeprefix("since_") not in {
+            "cpu",
+            "cuda",
+            "mps",
+            "xpu",
+            "aten",
+        }:
+            raise AssertionError(f"Unknown backend in version key {key!r}")
+        if not isinstance(value, str) or not _TORCH_VERSION_PATTERN.match(value):
+            raise AssertionError(
+                f"`{key}` value {value!r} is not of the form TORCH_VERSION_X_Y_Z"
+            )
+    since = variant.get(f"since_{device}", variant.get("since"))
     if since is None:
         return None
-    if not isinstance(since, str) or not _TORCH_VERSION_PATTERN.match(since):
-        raise AssertionError(
-            f"`since` value {since!r} is not of the form TORCH_VERSION_X_Y_Z"
-        )
+    if not isinstance(since, str):
+        raise AssertionError(f"Expected a string version, got {since!r}")
     return since
 
 
@@ -346,7 +360,7 @@ def gen_declaration_and_definition(
     indexed_op_metadata: dict[int, list[str]] = {1: []}
     for ver_str, payload in sorted(op_metadata.items()):
         # since will get processed later per op
-        if ver_str == "since":
+        if ver_str == "since" or ver_str.startswith("since_"):
             continue
         if not ver_str.startswith("v"):
             raise AssertionError(
@@ -424,7 +438,7 @@ def gen_declaration_and_definition(
         )
         skipped_args.update(new_args)
         decl = f"AOTI_TORCH_EXPORT {declaration};"
-        since = _get_earliest_torch_version_for_op_variant(op_metadata, ver_id)
+        since = _get_earliest_torch_version_for_op_variant(op_metadata, ver_id, device)
         if since is not None:
             decl = (
                 f"#if TORCH_FEATURE_VERSION >= {since}\n"
