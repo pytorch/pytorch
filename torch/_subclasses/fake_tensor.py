@@ -379,23 +379,73 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
             torch._C._set_real_tensor(x, real)
 
 
+# The item memo of a fake. A C++ fake keeps it on the C++ tensor, which drops it
+# once the tensor is mutated; the epoch check is done here, as in
+# SymNumberMemoDescriptor.__get__.
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
-    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            return cast(Any, fake_mode).get_item_memo(x)
-    return None
+    if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
+    fake_mode = torch._C._maybe_get_fake_mode(x)
+    if fake_mode is None or (record := torch._C._get_fake_item_memo(x)) is None:
+        return None
+    memo, epoch = record
+    # Backed SymFloats are stable across retracing epochs
+    if isinstance(memo, SymFloat) and memo.node.hint is not None:
+        return memo
+    return memo if epoch == fake_mode.epoch else None
 
 
 def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
+        fake_mode = torch._C._maybe_get_fake_mode(x)
         if fake_mode is not None:
-            cast(Any, fake_mode).set_item_memo(x, memo)
+            torch._C._set_fake_item_memo(x, memo, fake_mode.epoch)
+
+
+# The SymInt memos of a fake (nonzero_memo, unique_memo,
+# unique_consecutive_memo). A Python FakeTensor keeps them in its
+# SymNumberMemoDescriptors. A C++ fake keeps them on the C++ tensor, outside
+# its __dict__ (which torch.save would pickle as tensor state), and like the
+# descriptor drops a memo once the tensor is mutated or fake_mode's epoch
+# changes; a shallow copy such as set_data drops it too.
+def _check_sym_memo_name(name: str) -> None:
+    # A Python FakeTensor raises on an unknown memo name through getattr, so do
+    # the same for a C++ fake instead of silently missing the memo. item_memo
+    # has its own helpers and nested_int_memo never invalidates.
+    desc = FakeTensor.__dict__.get(name)
+    if (
+        not isinstance(desc, SymNumberMemoDescriptor)
+        or desc._is_nested_int
+        or name == "item_memo"
+    ):
+        raise AttributeError(f"{name!r} is not a SymInt memo of FakeTensor")
+
+
+def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return getattr(x, name)
+    if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
+    _check_sym_memo_name(name)
+    fake_mode = torch._C._maybe_get_fake_mode(x)
+    if fake_mode is None:
+        return None
+    return torch._C._get_fake_sym_memo(x, name, fake_mode.epoch)
+
+
+def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        setattr(x, name, value)
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        _check_sym_memo_name(name)
+        fake_mode = torch._C._maybe_get_fake_mode(x)
+        if fake_mode is None:
+            return
+        torch._C._set_fake_sym_memo(x, name, value, fake_mode.epoch)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
@@ -434,9 +484,11 @@ def maybe_clear_fake_constant(x: object) -> None:
 
 
 def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
-    # The real tensor's dispatch keys recorded on a fake.
+    # The real tensor's dispatch keys recorded on a Python or C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.dispatch_keys
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_dispatch_keys(x)
     return None
 
 
@@ -640,6 +692,46 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
     dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
     return fake_out
+
+
+class CppFakeTensorMode:
+    # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
+    # which the Python parts of fake dispatch run against. The mode's state
+    # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
+    # equivalent. See Note [C++ FakeTensorMode Python wrapper lifetime] in
+    # torch/csrc/FakeTensorMode.cpp.
+    def __init__(
+        self,
+        fake_tensor_converter: FakeTensorConverter,
+        shape_env: ShapeEnv | None = None,
+    ) -> None:
+        self._cpp_mode = torch._C._CppFakeTensorMode(
+            fake_tensor_converter, shape_env, self
+        )
+
+    @classmethod
+    def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:
+        # Rebuilds a collected wrapper around the same C++ mode, for
+        # getCppFakeTensorModePyObj.
+        self = cls.__new__(cls)
+        self._cpp_mode = cpp_mode
+        return self
+
+    @property
+    def fake_tensor_converter(self) -> FakeTensorConverter:
+        return self._cpp_mode.fake_tensor_converter
+
+    @property
+    def shape_env(self) -> ShapeEnv | None:
+        return self._cpp_mode.shape_env
+
+    @property
+    def epoch(self) -> int:
+        return self._cpp_mode.epoch
+
+    @epoch.setter
+    def epoch(self, value: int) -> None:
+        self._cpp_mode.epoch = value
 
 
 @functools.cache
@@ -1052,7 +1144,9 @@ def in_kernel_invocation_manager(
     if meta_in_tls != prev_in_kernel:
         raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
 
-    with torch._C._DisableTorchDispatch():
+    # _InKernelInvocation makes C++ fakes report meta here too, see Note
+    # [C++ in_kernel_invocation].
+    with torch._C._DisableTorchDispatch(), torch._C._InKernelInvocation():
         fake_mode.in_kernel_invocation = True
         # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
         # `Dense` turned on (because it's implied by `Meta`)
