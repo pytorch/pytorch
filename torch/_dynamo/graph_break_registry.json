@@ -3885,6 +3885,76 @@
       ]
     }
   ],
+  "GB2048": [
+    {
+      "Gb_type": "Hidden dispatchless tensor dependency",
+      "Context": "str(proxy.node)",
+      "Explanation": "dispatchless_custom_op requires tensor dependencies to be explicit arguments, including metadata-only reads.",
+      "Hints": [
+        "Pass the captured tensor as an argument to the operator."
+      ]
+    }
+  ],
+  "GB2169": [
+    {
+      "Gb_type": "Unsafe dispatchless capture escape hatch",
+      "Context": "str(name)",
+      "Explanation": "dispatchless_custom_op requires guarded Dynamo tracing; opaque Python calls and disabled side-effect checks are not supported.",
+      "Hints": [
+        "Use a Dynamo-traceable Python helper instead."
+      ]
+    }
+  ],
+  "GB0698": [
+    {
+      "Gb_type": "Impure dispatchless custom operator",
+      "Context": "message",
+      "Explanation": "message",
+      "Hints": [
+        "Return fresh tensors without mutating inputs."
+      ]
+    }
+  ],
+  "GB5961": [
+    {
+      "Gb_type": "Unsupported dispatchless tensor representation",
+      "Context": "str(type(value))",
+      "Explanation": "dispatchless_custom_op cannot establish mutation and alias safety for this tensor representation.",
+      "Hints": [
+        "Use ordinary dense tensors for guarded capture."
+      ]
+    }
+  ],
+  "GB9085": [
+    {
+      "Gb_type": "Unsourced dispatchless custom operator",
+      "Context": "str(self.value)",
+      "Explanation": "Guarded dispatchless capture requires a source for the backing function.",
+      "Hints": [
+        "Define the dispatchless operator outside the compiled region."
+      ]
+    }
+  ],
+  "GB4425": [
+    {
+      "Gb_type": "Unsupported dispatchless custom operator input",
+      "Context": "Input type: {arg.python_type()}",
+      "Explanation": "Dispatchless custom operators require graphable pytree leaves.",
+      "Hints": [
+        "Register container types with torch.utils._pytree."
+      ]
+    }
+  ],
+  "GB0753": [
+    {
+      "Gb_type": "Unsupported dispatchless custom operator output",
+      "Context": "str(output.python_type())",
+      "Explanation": "Dispatchless custom operators require graphable pytree leaves.",
+      "Hints": [
+        "Register container types with torch.utils._pytree."
+      ]
+    }
+  ],
   "GB9561": [
     {
       "Gb_type": "sq_inplace_repeat_impl not implemented",
