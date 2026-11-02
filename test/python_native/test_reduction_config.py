@@ -30,6 +30,7 @@ from torch._native.ops.reductions import (
     kernel_coltile as ct,
     kernel_general as kg,
     kernel_rowtile as rt,
+    traits as T,
 )
 
 
@@ -427,6 +428,16 @@ class TestReductionConfig(TestCase):
         self.assertFalse(kg._ragged_rows_ok((9, 0), dtype, N, 16, nfields))
         self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 8, nfields))
         self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 16, nfields, 64))
+
+    def test_b200_ragged_rows_start_late_traits_later(self):
+        """Keep absmax, absmin and general-p norms off ragged rows at N = 255."""
+        late = (T.AbsMaxOps(), T.AbsMinOps(), T.NormOps(3), T.NormOps(0.5))
+        early = (T.AMaxOps(), T.NormOps(1), T.NormOps(2), T.SumOps())
+        self.assertEqual({kg._ragged_row_min_n(t) for t in late}, {1023})
+        self.assertEqual({kg._ragged_row_min_n(t) for t in early}, {255})
+        for N, routed in ((255, False), (1023, True)):
+            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, 1, min_n=1023)
+            self.assertEqual(ok, routed)
 
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "CuTeDSL requires Hopper or later")
