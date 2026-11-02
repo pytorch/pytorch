@@ -116,6 +116,7 @@ class SymNode:
         self.pytype = pytype
         self._optimized_summation = optimized_summation
         self._expr_ver = -1
+        self._expr_range_ver = -1
         self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
@@ -233,10 +234,17 @@ class SymNode:
         ver = self.shape_env._replacements_version_counter
         if ver == 0:
             return self._expr
-        if self._expr_cache is not None and ver == self._expr_ver:
+        # replace() also depends on value ranges; see ShapeEnv._find.
+        range_ver = self.shape_env._var_to_range_version_counter
+        if (
+            self._expr_cache is not None
+            and ver == self._expr_ver
+            and range_ver == self._expr_range_ver
+        ):
             return self._expr_cache
         result = self.shape_env.replace(self._expr)
         self._expr_ver = ver
+        self._expr_range_ver = range_ver
         self._expr_cache = result
         return result
 
@@ -1538,14 +1546,12 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         shape_env = self.shape_env
         cache = None
         cache_key = None
-        if shape_env is not None:
-            cache = shape_env._symop_cache
-            cache_key = (
-                method,
-                self._expr,
-                other._expr,
-                shape_env._replacements_version_counter,
-            )
+        cache_version = None
+        # mod picks Mod or PythonMod from value ranges, so it isn't memoized.
+        if shape_env is not None and method != "mod":
+            cache = shape_env._get_symop_cache()
+            cache_version = shape_env._symop_cache_version
+            cache_key = (method, self._expr, other._expr)
             cached = cache.get(cache_key)
             if cached is not None:
                 out, pytype, optimized_summation = cached
@@ -1663,7 +1669,15 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )
-        if cache is not None:
+        # Computing out can itself change replacements: self.expr and
+        # other.expr call replace(), and _find may store a more resolved
+        # replacement. Don't cache a result built from replacements that
+        # have since changed.
+        if (
+            cache is not None
+            and shape_env is not None
+            and shape_env._replacements_version_counter == cache_version
+        ):
             cache[cache_key] = (out, pytype, optimized_summation)
         return result
 
