@@ -1691,6 +1691,20 @@ bool isValidDLPackCapsule(PyObject* data) {
       PyCapsule_IsValid(data, at::DLPackTraits<DLManagedTensor>::capsule);
 }
 
+// False if tensor_frombuffer can't read 'obj' correctly. A buffer can refuse at
+// runtime (a GPU array's does), and tensor_frombuffer doesn't ask for strides:
+// a conforming exporter refuses, but others return the data without them.
+bool is_contiguous_buffer(PyObject* obj) {
+  Py_buffer view;
+  if (PyObject_GetBuffer(obj, &view, PyBUF_STRIDES) < 0) {
+    PyErr_Clear();
+    return false;
+  }
+  bool contiguous = PyBuffer_IsContiguous(&view, 'C') != 0;
+  PyBuffer_Release(&view);
+  return contiguous;
+}
+
 // Infers a ScalarType from a buffer-protocol object's declared format.
 // Only native byte order is supported because tensor_frombuffer reinterprets
 // bytes without byte-swapping; unsupported/ambiguous formats raise, asking for
@@ -1958,10 +1972,11 @@ Tensor asarray(
 
   // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
   // buffer protocol so dtype, device, and shape come from the producer.
+  bool use_buffer = PyObject_CheckBuffer(obj) != 0;
   if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
     // Resolved outside the try so a broken install propagates instead of
     // silently falling back.
-    auto from_dlpack =
+    py::object from_dlpack =
         py::module::import("torch").attr("utils").attr("dlpack").attr(
             "from_dlpack");
     // Without copy=False, the producer is allowed to export a copy.
@@ -1971,13 +1986,15 @@ Tensor asarray(
       tensor = from_dlpack(py::handle(obj), py::arg("copy") = copy_arg)
                    .cast<Tensor>();
     } catch (const py::error_already_set& e) {
-      if (!e.matches(PyExc_Exception)) {
+      // copy=False asks for the producer's array, which no other path returns.
+      if (force_alias || !e.matches(PyExc_Exception)) {
         throw;
       }
-      // Only buffers and, with NumPy, __cuda_array_interface__ objects have
-      // another path (below, and in internal_new_from_data); anything else
+      // Only readable buffers and, with NumPy, __cuda_array_interface__ objects
+      // have another path (below, and in internal_new_from_data); anything else
       // would reach the same from_dlpack call in internal_new_from_data.
-      bool has_other_path = PyObject_CheckBuffer(obj) != 0;
+      use_buffer = is_contiguous_buffer(obj);
+      bool has_other_path = use_buffer;
 #ifdef USE_NUMPY
       has_other_path = has_other_path ||
           PyObject_HasAttrString(obj, "__cuda_array_interface__");
@@ -1989,7 +2006,7 @@ Tensor asarray(
   }
 
   // Check whether 'obj' implements the buffer protocol
-  if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
+  if (!tensor.defined() && use_buffer) {
     // When no dtype is given, infer it from the buffer's declared format
     ScalarType buffer_dtype =
         dtype.has_value() ? *dtype : scalar_type_from_buffer_format(obj);
@@ -2048,8 +2065,8 @@ Tensor asarray(
     }
   } else {
     // Undefined tensor means neither DLPack nor the buffer protocol produced
-    // one. Last case is a sequence, in which case we must copy (copy can't be
-    // false).
+    // one. Last cases are a sequence, in which case we must copy (copy can't be
+    // false), and a __cuda_array_interface__ object, which copy_numpy copies.
     TORCH_CHECK_VALUE(
         !force_alias, "can't alias arbitrary sequence into a tensor.");
 
@@ -2063,7 +2080,7 @@ Tensor asarray(
         device,
         obj,
         /* copy_variables = */ false,
-        /* copy_numpy = */ false,
+        /* copy_numpy = */ force_copy,
         /* type_inference = */ !dtype.has_value());
     tensor.set_requires_grad(return_requires_grad);
   }
