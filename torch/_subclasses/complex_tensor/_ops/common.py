@@ -363,7 +363,7 @@ def _inductor_impl(op: OpOverload) -> Callable[..., Any]:
         for out, name in zip(outs, out_names, strict=True):
             if out is not (ret := kwargs[name]):
                 if out.shape != ret.shape:
-                    raise ValueError("Invalid output tensor shape.")
+                    out.resize_(ret.shape)
                 out.copy_(ret)
         return outs[0] if len(outs) == 1 else tuple(outs)
 
