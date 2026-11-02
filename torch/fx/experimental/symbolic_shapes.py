@@ -4260,8 +4260,10 @@ class ShapeEnv:
         # numel and contiguity for every fake tensor recomputes the same
         # products and comparisons over and over: on one model over 99% of a
         # few hundred thousand ops were repeats of about two thousand distinct
-        # computations. Memoize on (op, lhs expr, rhs expr); _get_symop_cache
-        # empties the memo whenever replacements change. mod isn't memoized
+        # computations. Memoize on (op, lhs.expr, rhs.expr), the operands
+        # resolved through replace(), so a hit never depends on outdated
+        # replacements or ranges. _get_symop_cache empties the memo whenever
+        # replacements change, only to bound its size. mod isn't memoized
         # because it picks Mod or PythonMod from the operands' value ranges.
         #
         # What is cached is the result sympy expression. Every call site still
