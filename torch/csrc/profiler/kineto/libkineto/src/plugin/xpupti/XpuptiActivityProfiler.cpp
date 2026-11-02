@@ -12,6 +12,7 @@
 #include "TypedMetadata.h"
 #include "TypedMetadataJson.h"
 #include "XpuptiActivityApi.h"
+#include "XpuptiProfilerMacros.h"
 #include "XpuptiScopeProfilerSession.h"
 
 #include <algorithm>
@@ -104,6 +105,9 @@ std::unique_ptr<libkineto::IActivityProfilerSession> XPUActivityProfiler::
   if (!config.gpuTracingEnabled()) {
     return nullptr;
   }
+  XPUPTI_CALL(
+      ptiViewGPULocalAvailable(),
+      /*error_message=*/"Failed to enable Kineto Profiler on XPU.");
   return std::make_unique<XpuptiScopeProfilerSession>(
       XpuptiActivityApi::singleton(), name(), config, activity_types);
 }

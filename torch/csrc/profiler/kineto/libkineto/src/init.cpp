@@ -25,7 +25,6 @@
 #ifdef HAS_XPUPTI
 #include "plugin/xpupti/XpuptiActivityApi.h"
 #include "plugin/xpupti/XpuptiActivityProfiler.h"
-#include "plugin/xpupti/XpuptiProfilerMacros.h"
 #include "plugin/xpupti/XpuptiScopeProfilerConfig.h"
 #endif
 #include "libkineto.h"
@@ -104,10 +103,9 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 
 #ifdef HAS_XPUPTI
   if (!cpuOnly) {
+    // PTI is first touched when a trace that allows GPU tracing configures
+    // the profiler, so a process that only profiles the CPU never starts it.
     api.registerProfilerFactory([]() -> std::unique_ptr<IActivityProfiler> {
-      XPUPTI_CALL(
-          ptiViewGPULocalAvailable(),
-          /*error_message=*/"Failed to enable Kineto Profiler on XPU.");
       XpuptiScopeProfilerConfig::registerFactory();
       return std::make_unique<XPUActivityProfiler>();
     });
