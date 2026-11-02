@@ -985,6 +985,26 @@ class TestExport(TestCase):
 
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_vmap_export_dynamic_shapes(self) -> None:
+        # The recorded views get symbolic sizes from x, and a symbolic stride
+        # and storage offset from the slice of y.
+        class VmapOverColumns(torch.nn.Module):
+            def forward(self, x, y):
+                f = torch.vmap(lambda col: col * 2 + 1, in_dims=1)
+                return f(x), f(y[1:])
+
+        inp = (torch.randn(5, 4), torch.randn(4, 6))
+        dynamic_shapes = ({0: Dim("s")}, {1: Dim("t")})
+        graph = torch.export.export(
+            VmapOverColumns(), inp, dynamic_shapes=dynamic_shapes
+        ).graph
+        self._check_functorch_fake_views(graph, num_batched=2)
+        ep = export(VmapOverColumns(), inp, dynamic_shapes=dynamic_shapes)
+        for args in (inp, (torch.randn(7, 4), torch.randn(4, 9))):
+            self.assertEqual(ep.module()(*args), VmapOverColumns()(*args))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
     def test_jvp_in_vmap_export(self) -> None:
         class JvpInVmap(torch.nn.Module):
             def forward(self, x, t):
@@ -1052,6 +1072,41 @@ class TestExport(TestCase):
         for node in ep.graph.output_node().args[0]:
             self.assertNotIn(0, node.meta["val"].stride(), node.name)
         self.assertEqual(ep.module()(xs), ScanInVmap()(xs))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_cond_in_vmap_strict_export(self) -> None:
+        # The placeholders of the branches are batched values. They are
+        # recorded as fake views, except under real tensor propagation, where
+        # they keep the wrapper that carries the real tensor.
+        class CondInVmap(torch.nn.Module):
+            def forward(self, x, flag):
+                def branches(row):
+                    return torch.cond(flag.sum() > 0, torch.sin, torch.cos, (row,))
+
+                return torch.vmap(branches)(x)
+
+        inp = (torch.randn(3, 4), torch.ones(2))
+        functorch = torch._C._functorch
+        for real in (False, True):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=real):
+                ep = torch.export.export(CondInVmap(), inp, strict=True)
+            placeholders = [
+                node
+                for name in ("true_graph_0", "false_graph_0")
+                for node in getattr(ep.graph_module, name).graph.find_nodes(
+                    op="placeholder"
+                )
+            ]
+            self.assertEqual(len(placeholders), 2)
+            for node in placeholders:
+                val = node.meta["val"]
+                if real:
+                    self.assertIsNotNone(functorch.get_unwrapped(val).real_tensor)
+                else:
+                    self.assertTrue(is_fake_tensor(val), node.name)
+            for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
+                self.assertEqual(ep.module()(*args), CondInVmap()(*args))
 
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
