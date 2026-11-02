@@ -371,10 +371,28 @@ def _same_storage(a: Tensor, b: Tensor) -> bool:
     return StorageWeakRef(a_storage) == StorageWeakRef(b_storage)
 
 
+def _rows_disjoint(a: Tensor, b: Tensor) -> bool:
+    """Whether two views of one storage, both 2-D with stride 1 in dim 1 and one
+    stride s in dim 0, are disjoint. With x the view with the lower storage offset,
+    y the other and d the distance between their offsets: one is empty, their
+    element ranges do not meet, or each row of y lies in the gap after a row of x
+    (s > 0, d % s >= x.size(1) and d % s + y.size(1) <= s)."""
+    if a.numel() == 0 or b.numel() == 0:
+        return True
+    x, y = (b, a) if a.storage_offset() > b.storage_offset() else (a, b)
+    s, d = x.stride(0), y.storage_offset() - x.storage_offset()
+    if (x.size(0) - 1) * s + x.size(1) <= d:
+        return True
+    if s == 0:
+        return False
+    return d % s >= x.size(1) and d % s + y.size(1) <= s
+
+
 def _may_overlap(a: Tensor, b: Tensor) -> bool:
     """Whether two tensors may share memory: the same tensor, or two on one storage
     that compute_overlapping_tensors, which reinplacing uses too, does not find
-    disjoint. It guards on the symbolic sizes it compares, and a size it cannot guard
+    disjoint (with _rows_disjoint agreeing for 2-D views with contiguous rows of one
+    stride). It guards on the symbolic sizes it compares, and a size it cannot guard
     on (an unbacked one) counts as an overlap. It counts offsets and strides in
     elements, so views of one storage with different element sizes are compared by
     their byte ranges instead, without guards (statically_known_true)."""
@@ -389,12 +407,17 @@ def _may_overlap(a: Tensor, b: Tensor) -> bool:
     )
 
     if a.element_size() == b.element_size():
-        # TODO(zoranzhao): relies on the compute_overlapping_tensors fix in
-        # https://github.com/pytorch/pytorch/pull/202848, which must land first.
-        # Without it, 2-D views whose rows start inside the other's rows, such as
-        # base[:4, :3] and base[1:5, 2:5], are reported disjoint.
         try:
-            return bool(compute_overlapping_tensors([a, b]))
+            if compute_overlapping_tensors([a, b]):
+                return True
+            # TODO(zoranzhao): remove this check and _rows_disjoint once
+            # https://github.com/pytorch/pytorch/pull/202848 lands. Until then,
+            # compute_overlapping_tensors reports 2-D views whose rows start inside
+            # the other's rows, such as base[:4, :3] and base[1:5, 2:5], as disjoint.
+            rows = a.dim() == b.dim() == 2 and a.stride(1) == b.stride(1) == 1
+            if rows and a.stride(0) == b.stride(0):
+                return not _rows_disjoint(a, b)
+            return False
         except GuardOnDataDependentSymNode:
             return True
 
@@ -855,7 +878,7 @@ register_user_kernel_hop(
             hop_kwargs["kernel_idx"], hop_kwargs["constant_args_idx"], kwargs
         ),
         get_kernel_name=lambda hop_kwargs: get_kernel(hop_kwargs["kernel_idx"]).name,
-        functional_dense=cutedsl_kernel_wrapper_functional_dense,
+        get_layout_constraint=lambda: "needs_fixed_stride_order",
         reinplace_trigger=ReInplaceTrigger.CUTEDSL_OPS,
         serializable=False,
     )
