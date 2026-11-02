@@ -62,7 +62,9 @@ namespace {
 // the reuse pass, 0 forces the feature off for the whole process, 1 defers to
 // the pass as well, and check_env warns on anything else. NEAREST_MATCH_ENABLED
 // governs borrowing, RECORD_BORROWED_ENABLED governs recording a borrow, in
-// memory as well as in the results file. Both are kept out of the user-facing
+// memory as well as in the results file -- and, since a borrow that records
+// nothing leaves runtime on Default while the pass measured the donor, it
+// disables borrowing too. Both are kept out of the user-facing
 // table in README.md: the mechanism they govern has no public entry point yet,
 // and documenting them there would promise a contract before there is a feature
 // to attach it to. Add them when it goes public.
@@ -203,10 +205,10 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
 
 ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     const std::string& params_signature) {
-  // No runtime-flag gate here. TunableOp dispatch resolves shapes through
-  // Lookup and never reaches this, so calling it is itself the opt-in; the
-  // reuse pass is the only caller and already decides whether borrowing
-  // applies. The env kill switch is honoured regardless of the caller.
+  // No runtime-flag gate here: calling it is the opt-in. Dispatch reaches this
+  // only with tuning disabled, no exact match, and IsNearestMatchEnabled() set
+  // -- which is normally the reuse pass, since borrowing costs a benchmark.
+  // The env kill switch is honoured regardless of the caller.
   if (NearestMatchDisabledByEnv()) {
     return ResultEntry::Null();
   }
@@ -356,6 +358,21 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
+}
+
+void TuningResultsManager::CacheBorrowedInMemory(const std::string& op_signature,
+    const std::string& params_signature,
+    ResultEntry entry) {
+  // Same kill switch as RecordBorrowed, applied here rather than at the call
+  // site so it holds for every caller. Skipping only the file write would
+  // leave the verdict in results_, where get_results() reports it and a later
+  // write_file() persists it -- the switch would not be a switch.
+  if (RecordBorrowedDisabledByEnv()) {
+    return;
+  }
+  std::scoped_lock l{lock_};
+  auto& km = results_[op_signature];
+  AddImpl(op_signature, params_signature, std::move(entry), km);
 }
 
 void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
@@ -851,6 +868,14 @@ bool TuningContext::IsNearestMatchEnabled() const {
   // Same kill switch LookupNearest itself applies, so the pass's own check and
   // the enforcement point cannot disagree. The member is the reuse pass's policy.
   if (NearestMatchDisabledByEnv()) {
+    return false;
+  }
+  // Borrowing without recording is worse than not borrowing: the pass measures
+  // the borrowed kernel and reports that time, but with nothing written the
+  // deployed process misses the shape and runs Default, so the decision rests
+  // on a measurement runtime cannot reproduce. Checked here so it holds for
+  // every caller, not only one that thinks to ask.
+  if (RecordBorrowedDisabledByEnv()) {
     return false;
   }
   return nearest_match_enable_;

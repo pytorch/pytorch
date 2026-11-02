@@ -16,6 +16,7 @@ from __future__ import annotations
 import atexit
 import copy
 import logging
+import math
 import os
 import threading
 import time
@@ -131,6 +132,19 @@ def is_enabled() -> bool:
     return is_tune_mode() or is_reuse_mode()
 
 
+def is_tunableop_gemm(choice_name: str) -> bool:
+    """Whether an extern choice may be routed to the TunableOp worker.
+
+    Routing is the wider of the two sets: it exists to contain a hipBLASLt
+    abort or hang in the worker rather than the compile, which is worth doing
+    for every GEMM TunableOp can tune. The ladder set is narrower -- see
+    _TUNABLEOP_LADDER_CHOICES -- because rebuilding metas is not safe for all
+    of them. Matched by choice name string so a double import of the kernel
+    modules cannot break the match.
+    """
+    return choice_name in _TUNABLEOP_ROUTING_CHOICES
+
+
 class BenchmarkJob:
     """One GEMM benchmark, executed in the TunableOp worker.
 
@@ -145,7 +159,9 @@ class BenchmarkJob:
         bmreq: Any,
         tuning: bool,
         nearest_match: bool = False,
+        record_borrowed: bool = False,
         dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
+        measure: bool = True,
     ) -> None:
         self.bmreq = bmreq
         self.tuning = tuning
@@ -154,6 +170,56 @@ class BenchmarkJob:
         # settings it cannot be snapshotted -- the caller passes it explicitly
         # and __call__ re-enters it around the benchmark.
         self.dyn_dims_mask = dyn_dims_mask
+        self.record_borrowed = record_borrowed
+        # False for tune-only jobs (the ladder): the caller discards the time
+        # and only needs the tuning side effect, so skip the second benchmark
+        # and halve the worker cost per bucket.
+        self.measure = measure
+
+    def _warm_then_measure(self) -> float:
+        """Warm, then measure.
+
+        The first call is where TunableOp does its compile-time-only work, and
+        folding that into the average reports it as the kernel's cost: on a
+        3072x1894x242432 addmm it took aten from 3.5 ms to 7.45 ms and lost the
+        autotune race to a 4.71 ms triton kernel, while the solution just recorded
+        ran in 2.9 ms.
+        """
+        try:
+            measured = self.bmreq.benchmark()
+            warm_ok = True
+        except Exception:  # a failed warm must still yield a timing
+            log.warning(
+                "TunableOp warm-up failed; measuring the untuned kernel instead",
+                exc_info=True,
+            )
+            measured = None
+            warm_ok = False
+        if not self.measure:
+            # Tune-only job (the ladder discards times): the warm already
+            # performed the tuning side effect; skip the second benchmark.
+            # A failed warm re-raises instead of reporting inf: the exception
+            # crosses the pipe and submit() restarts the worker, since a warm
+            # failure may leave a sticky fault (e.g. an illegal address)
+            # behind. Reporting inf would skip that restart and leave the
+            # poisoned worker serving every later bucket.
+            if measured is None:
+                raise RuntimeError("TunableOp tune-only warm-up failed")
+            return measured
+        # Neither flag reaches the measured call: tuning would re-run FindFastest
+        # and nearest match the donor search, both compile-time-only costs this
+        # split exists to keep out of the timing. Turning borrowing off cannot
+        # change which kernel is measured -- a borrow that happened was recorded,
+        # so this call is an exact hit, and with no donor the warm ran the
+        # default too. IsNearestMatchEnabled() rules out borrowed-but-unrecorded.
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable._nearest_match_enable(False)
+        if not warm_ok:
+            log.warning(
+                "TunableOp warm-up failed and no borrow was validated; "
+                "measuring the default kernel instead"
+            )
+        return self.bmreq.benchmark()
 
     def __call__(self, device: int, filename: str, settings: dict[str, Any]) -> float:
         tunable = torch.cuda.tunable
@@ -166,12 +232,16 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
+        # The write path is gated on it, so without this a validated borrow is
+        # thrown away.
+        tunable._record_borrowed_enable(self.record_borrowed)
         for name, value in settings.items():
             getattr(tunable, name)(value)
         # TunableOp cannot tune under CUDA-graph capture, and benchmark_run_fn
         # captures if either flag is set. Cleared where every job passes.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
+
         # Thread-local in the setting process, so it does not cross the pipe.
         mask = self.dyn_dims_mask
         try:
@@ -179,8 +249,8 @@ class BenchmarkJob:
                 with tunable.dynamic_dims_mask(
                     M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
                 ):
-                    return self.bmreq.benchmark()
-            return self.bmreq.benchmark()
+                    return self._warm_then_measure()
+            return self._warm_then_measure()
         finally:
             # The worker outlives this job, so without this it sits idle
             # holding what the benchmark allocated. The context stays either way.
@@ -492,7 +562,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
             worker = _get_worker_locked((device, filename))
             try:
                 worker.put(stamped)
-                return Outcome(worker.get(timeout=timeout), "ok")
+                value = worker.get(timeout=timeout)
             except (TimeoutError, EOFError) as e:
                 # running is cleared only by a real pipe fault; a job that
                 # itself raises TimeoutError leaves it set and must be filed as
@@ -525,6 +595,12 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     except Exception:  # lock/restart machinery itself failed
         _warn_fault_once("error", "the worker machinery failed")
         return Outcome(None, "error")
+    # inf is what a benchmark returns when it declines to run the op, and
+    # select_algorithm drops an inf candidate silently rather than reporting it.
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        log.warning("TunableOp benchmark returned %r; treating as a fault", value)
+        return Outcome(None, "error")
+    return Outcome(float(value), "ok")
 
 
 # Tuned ladder BUCKETS, keyed per bucket so a run that stops part-way leaves
@@ -554,7 +630,7 @@ _TUNABLEOP_MIN_BUCKET_BUDGET = 60.0
 # ExternKernelChoice names the ladder covers. bias_addmm rewrites its own bias
 # (inp[0]) first, so the rebuilt meta is not what aten gets; addmm_dtype is
 # ROCm-only, hard-erroring on the CUDA cublasLt path (cuda/Blas.cpp).
-_TUNABLEOP_GEMM_CHOICES = frozenset(
+_TUNABLEOP_LADDER_CHOICES = frozenset(
     [
         "mm",
         "mm_dtype",
@@ -567,6 +643,12 @@ _TUNABLEOP_GEMM_CHOICES = frozenset(
         *(["addmm_dtype"] if torch.version.hip is not None else []),
     ]
 )
+
+# Routing adds bias_addmm: the ladder cannot rebuild its meta, but running it
+# in the worker still keeps a hipBLASLt fault out of the compile. addmm_dtype
+# stays excluded off ROCm for the same reason it is above -- routing it would
+# run it with TunableOp enabled, which is what hard-errors there.
+_TUNABLEOP_ROUTING_CHOICES = _TUNABLEOP_LADDER_CHOICES | frozenset(["bias_addmm"])
 
 # Smallest dim worth its own tuning job. Applied to the dim, not to the symbol:
 # for an expression dim the smallest symbol values already yield substantial GEMMs.
@@ -721,8 +803,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
-        # Nothing submitted, not even the traced shape: only max-autotune or a
-        # later run with PYTORCH_TUNABLEOP_ENABLED covers it (see the mode doc).
+        # No ladder entries, but the traced shape is still covered: autotune
+        # routes this GEMM's aten candidate through the worker (see
+        # ExternKernelCaller.benchmark), which tunes it at the traced shape.
         return
     # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
     # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
@@ -730,7 +813,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if winner.layout.device.type != "cuda":
         return
     choice_name = winner.choice.name
-    if choice_name not in _TUNABLEOP_GEMM_CHOICES:
+    if choice_name not in _TUNABLEOP_LADDER_CHOICES:
         return
     if winner.bmreq is None:
         return
@@ -1000,7 +1083,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         # The whole remaining budget: a slot below the 15-40s cold-start cost
         # would make the restart cold, time out and be killed again. The floor
         # above keeps a truncated rung from being charged as a fault.
-        outcome = submit(BenchmarkJob(bmreq, tuning=True), timeout=remaining)
+        outcome = submit(
+            BenchmarkJob(bmreq, tuning=True, measure=False), timeout=remaining
+        )
         # The only record of what a bucket costs when it succeeds.
         log.debug(
             "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d wall=%.2fs status=%s",
@@ -1025,3 +1110,22 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
                 i + 1,
                 len(bmreqs),
             )
+
+
+def queue_range_pretune(winner: ExternKernelCaller) -> None:
+    """Hold an extern winner until the graph's layouts are decided.
+
+    The select_algorithm hooks fire while lowering, before finalize() runs, so
+    an operand that is still flexible would be read at placeholder strides.
+    """
+    if is_tune_mode() and config.cuda.autotune_tunableop_ladder:
+        V.graph.pending_tunableop_ladder.append(winner)
+
+
+def run_queued_pretunes(graph: Any) -> None:
+    """Ladder the graph's queued winners, now that layouts are final."""
+    pending, graph.pending_tunableop_ladder = graph.pending_tunableop_ladder, []
+    for winner in pending:
+        # An operand still flexible here means finalize() left it undecided;
+        # maybe_range_pretune turns that away rather than guess at its strides.
+        maybe_range_pretune(winner)
