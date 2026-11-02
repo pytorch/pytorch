@@ -359,7 +359,13 @@ def _inductor_impl(op: OpOverload) -> Callable[..., Any]:
     def impl(*args: Any, **kwargs: Any) -> Any:
         outs = [kwargs[name] for name in out_names]
         args, kwargs = tree_map(_as_interleaved, (args, kwargs))
-        ret = op(*args, **kwargs)
+        # `__torch_dispatch__` runs with the Conjugate/Negative fallbacks excluded, but
+        # native kernels may create conj/neg views internally and rely on them.
+        with (
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.Conjugate, False),
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.Negative, False),
+        ):
+            ret = op(*args, **kwargs)
         if not out_names:
             return tree_map(_as_complex_tensor, ret)
 
