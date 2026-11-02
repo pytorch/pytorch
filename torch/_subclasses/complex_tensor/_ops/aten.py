@@ -188,9 +188,9 @@ def resize__impl(
     # storage, so they would overlap once resized.
     if self._re.untyped_storage()._cdata == self._im.untyped_storage()._cdata:
         aten.set_.source_Tensor(self._im, self._im.clone())
-    re = aten.resize_(self._re, size, memory_format=memory_format)
-    aten.resize_(self._im, size, memory_format=memory_format)
-    _set_wrapper_metadata(self, re)
+    self._re = aten.resize_(aten.alias(self._re), size, memory_format=memory_format)
+    self._im = aten.resize_(aten.alias(self._im), size, memory_format=memory_format)
+    _set_wrapper_metadata(self, self._re)
     return self
 
 
@@ -1135,14 +1135,11 @@ def index_put_impl(
     values: ComplexTensor,
     accumulate: bool = False,
 ) -> ComplexTensor:
-    if accumulate and self.dtype != values.dtype:
-        raise RuntimeError("`index_put` requires the source and destination dtypes match")
-    values_re, values_im = split_complex_arg(values)
-    if not self.dtype.is_complex:
-        warnings.warn(
-            "Casting complex values to real discards the imaginary part", UserWarning
+    if self.dtype != values.dtype:
+        raise RuntimeError(
+            "`index_put` requires the source and destination dtypes match"
         )
-        return aten.index_put(self, indices, values_re, accumulate)
+    values_re, values_im = split_complex_arg(values)
     self_re, self_im = split_complex_arg(self)
     return ComplexTensor(
         aten.index_put(self_re, indices, values_re, accumulate),
