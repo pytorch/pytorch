@@ -35,6 +35,16 @@ from torch.testing._internal.common_utils import (
 )
 
 
+def _flydsl_mxfp8_wgrad_e2e(fn):
+    fn = inductor_config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )(fn)
+    fn = unittest.skipIf(torch.version.hip is None, "requires ROCm")(fn)
+    return unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")(fn)
+
+
 class _CacheParam:
     def __init__(self, key="param"):
         self.key = key
@@ -782,22 +792,8 @@ class TestFlyDSLTemplate(TestCase):
             self.skipTest("FlyDSL runtime unavailable")
         import flydsl.compiler as flyc
         import flydsl.expr as fx
-        import jinja2
 
-        from torch._inductor.kernel.mm_common import load_kernel_template
-
-        namespace = dict(
-            torch=torch, flyc=flyc, fx=fx, GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCD=8
-        )
-        source = jinja2.Template(load_kernel_template("flydsl_mxfp8_wgrad")).render(
-            gen_defines=lambda: "",
-            def_kernel=lambda *names: (
-                f"def kernel_main({','.join(names)}, output, stream):"
-            ),
-            get_output=lambda: "output",
-            kernel_name="kernel",
-        )
-        exec(compile(source, "<flydsl wgrad precompile test>", "exec"), namespace)
+        namespace = self._exec_mxfp8_wgrad_template(torch=torch, flyc=flyc, fx=fx)
         shapes = {
             "mat1": (256, 512),
             "mat2": (512, 384),
@@ -2219,12 +2215,10 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_mxfp8_wgrad_launch_checks(self):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
-        import importlib
-
-        module = importlib.import_module(
-            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
-            "mxfp8_wgrad_gfx950"
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            mxfp8_wgrad_gfx950 as module,
         )
+
         n, k, g = 7168, 2048, 8
         param = module.make_mxfp8_wgrad_param(n, k, g, sc_pair=True)
 
@@ -2256,20 +2250,7 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_mxfp8_wgrad_template_rejects_mismatched_operands(self):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
-        import jinja2
-
-        from torch._inductor.kernel.mm_common import load_kernel_template
-
-        source = jinja2.Template(load_kernel_template("flydsl_mxfp8_wgrad")).render(
-            gen_defines=lambda: "",
-            def_kernel=lambda *names: (
-                f"def kernel_main({','.join(names)}, output, stream):"
-            ),
-            get_output=lambda: "output",
-            kernel_name="kernel",
-        )
-        namespace = dict(GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCD=8)
-        exec(compile(source, "<flydsl wgrad operands test>", "exec"), namespace)
+        namespace = self._exec_mxfp8_wgrad_template()
         namespace["launch_mxfp8_wgrad_gfx950"] = launch = mock.Mock()
         n, k, m = 256, 384, 512
         output = torch.empty(2, n, k)
@@ -2320,27 +2301,13 @@ class TestFlyDSLTemplate(TestCase):
         partitioned = make_mxfp8_wgrad_param(1408, 2048, 8, sc_pair=True, num_xcd=4)
         self.assertEqual(partitioned.xcd_count, 4)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        flydsl_enable_autotuning=False,
-    )
+    @_flydsl_mxfp8_wgrad_e2e
     @parametrize(
         "group_sizes,n,k",
-        (
-            ([128, 256, 0, 384], 256, 384),
-            ([32, 96, 224, 160], 1408, 2048),
-        ),
+        (([128, 256, 0, 384], 256, 384), ([32, 96, 224, 160], 1408, 2048)),
     )
     def test_flydsl_mxfp8_wgrad_e2e(self, group_sizes, n, k):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
-            self.skipTest("requires gfx950")
-
-        from torch._inductor.utils import run_and_get_code
+        self._require_flydsl_gfx950()
 
         a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
             group_sizes, n, k
@@ -2355,20 +2322,9 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("mxfp8_wgrad_gfx950", code)
         self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        flydsl_enable_autotuning=False,
-    )
+    @_flydsl_mxfp8_wgrad_e2e
     def test_flydsl_mxfp8_wgrad_offs_view_e2e(self):
-        from torch._inductor.utils import run_and_get_code
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
-            self.skipTest("requires gfx950")
+        self._require_flydsl_gfx950()
 
         a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
             [128, 256, 0, 384], 256, 384
@@ -2384,20 +2340,11 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("mxfp8_wgrad_gfx950", code)
         self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        flydsl_enable_autotuning=False,
-    )
+    @_flydsl_mxfp8_wgrad_e2e
     def test_flydsl_mxfp8_wgrad_dynamic_m_e2e(self):
         from torch._inductor.graph import GraphLowering
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
-            self.skipTest("requires gfx950")
+        self._require_flydsl_gfx950()
 
         def fn(a, b, a_scale, b_scale, offs):
             return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
@@ -2418,20 +2365,11 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(len(codes), 2)
         self.assertIn("mxfp8_wgrad_gfx950", codes[1])
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        flydsl_enable_autotuning=False,
-    )
+    @_flydsl_mxfp8_wgrad_e2e
     @parametrize("n,k", ((256, 384), (1408, 2048)))
     def test_flydsl_mxfp8_wgrad_nan_stays_in_its_group(self, n, k):
         """NaN in neighbouring groups' tokens or in padding stays out."""
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
-            self.skipTest("requires gfx950")
+        self._require_flydsl_gfx950()
 
         # Groups end at 512 and M is padded to 640, so offs[-1] < M.
         group_sizes = [32, 96, 224, 160, 0]
@@ -2466,10 +2404,7 @@ class TestFlyDSLTemplate(TestCase):
         import subprocess
         import sys
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
-            self.skipTest("requires gfx950")
+        self._require_flydsl_gfx950()
 
         script = """
 import sys, torch
@@ -2510,6 +2445,30 @@ print("completed")
             self.assertNotEqual(proc.returncode, 0, f"offsets {bad} did not trap")
             self.assertNotIn("completed", proc.stdout)
 
+    def _require_flydsl_gfx950(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+    @staticmethod
+    def _exec_mxfp8_wgrad_template(**namespace):
+        import jinja2
+
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        source = jinja2.Template(load_kernel_template("flydsl_mxfp8_wgrad")).render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: (
+                f"def kernel_main({','.join(names)}, output, stream):"
+            ),
+            get_output=lambda: "output",
+            kernel_name="kernel",
+        )
+        namespace.update(GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCD=8)
+        exec(compile(source, "<flydsl wgrad template>", "exec"), namespace)
+        return namespace
+
     @classmethod
     def _make_mxfp8_wgrad_inputs(cls, group_sizes, n, k, device="cuda"):
         offs = torch.tensor(group_sizes, device=device, dtype=torch.int32).cumsum(0)
@@ -2521,12 +2480,11 @@ print("completed")
         b_t, b_scale, b_scale_f32 = cls._mxfp8_quantize(
             torch.randn(k, m, device=device) * 0.5
         )
-        a_deq = (a.float().reshape(n, m // 32, 32) * a_scale_f32.unsqueeze(-1)).reshape(
-            n, m
-        )
-        b_deq = (
-            b_t.float().reshape(k, m // 32, 32) * b_scale_f32.unsqueeze(-1)
-        ).reshape(k, m)
+
+        def deq(q, s):
+            return (q.float().reshape(-1, m // 32, 32) * s.unsqueeze(-1)).reshape(-1, m)
+
+        a_deq, b_deq = deq(a, a_scale_f32), deq(b_t, b_scale_f32)
         reference = torch.empty(len(group_sizes), n, k, device=device)
         start = 0
         for group, end in enumerate(offs.tolist()):

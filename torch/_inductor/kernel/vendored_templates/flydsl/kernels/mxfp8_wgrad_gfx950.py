@@ -45,6 +45,7 @@ ORDER_MODES = ("id", "idsel", "lpt")
 _IDSEL_MIN_BLOCKS = 1024
 _XCD_COUNT = 8  # full MI355X; partitioned parts pass their count as num_xcd
 _SUPERTILE_TARGET = 4
+_ATTRS = {"rocdl.waves_per_eu": 1, "rocdl.flat_work_group_size": "256,256"}
 
 
 def _divisors(value: int) -> list[int]:
@@ -119,10 +120,7 @@ class _WindowedG2S(G2SLoader):
 
     def load(self, lds_dst, k_offset, k_col):
         for step in range_constexpr(self.n_load_steps):
-            dst = self._lds_dst_at(lds_dst, step)
-            fx.copy(
-                self.g2lds_atom, self._src(step, k_col), dst, soffset=fx.Int32(k_offset)
-            )
+            self.load_one(lds_dst, k_offset, step, k_col)
 
     def load_one(self, lds_dst, k_offset, step, k_col):
         dst = self._lds_dst_at(lds_dst, step)
@@ -209,10 +207,8 @@ def _compile(
     W2A = 2 * (N_TILES_A + N_TILES_B) + N_SC_OPS
     W1B = 2 * (N_TILES_A + N_TILES_B) + N_SC_OPS
     W2B = 2 * (N_TILES_A + N_TILES_B)
-
     LDS_BLOCK_R = BLOCK_R // 2  # each wave-dim half owns 128 rows
     LDS_BLOCK_C = BLOCK_C // 2
-
     a_lds_size = LDS_BLOCK_R * BLOCK_M
     b_lds_size = LDS_BLOCK_C * BLOCK_M
 
@@ -241,7 +237,6 @@ def _compile(
             for i in range(E)
         ]
         starts = [ArithValue(fx.Int32(0))] + ends[:-1]
-
         if ORDER == "idsel":
             g = slot
             m_start = ArithValue(fx.Int32(0))
@@ -299,14 +294,12 @@ def _compile(
         # One e8m0 per 32 tokens, 4 per i32: a scale row is m_row/128 i32.
         sc_i32_row = ArithValue(m_row) // fx.Int32(BLOCK_M)
         sc_e8_row = ArithValue(m_row) // fx.Int32(SCALE_BLOCK)
-
         bid = ArithValue(fx.block_idx.x)
         slot = bid // fx.Int32(TILES_PER_GROUP)
         tile = bid % fx.Int32(TILES_PER_GROUP)
         row_tile, col_tile = tile_coordinates(tile)
         r_base = row_tile * fx.Int32(BLOCK_R)
         c_base = col_tile * fx.Int32(BLOCK_C)
-
         offs_rsrc = buffer_ops.create_buffer_resource(
             OFFS, max_size=False, num_records_bytes=E * 4
         )
@@ -335,12 +328,10 @@ def _compile(
         a_next0, a_next1 = lds.A_lds_next_0, lds.A_lds_next_1
         b_cur0, b_cur1 = lds.B_lds_cur_0, lds.B_lds_cur_1
         b_next0, b_next1 = lds.B_lds_next_0, lds.B_lds_next_1
-
         lane_id = fx.thread_idx.x % 64
         wave_id = _uniform(fx.thread_idx.x // 64)
         wave_i = wave_id // 2
         wave_j = wave_id % 2
-
         m_lane = lane_id % fx.Int32(16)
         k_grp = lane_id // fx.Int32(16)
         kshift = k_grp * fx.Int32(8)
@@ -348,12 +339,10 @@ def _compile(
         mask_ff = fx.Int32(0xFF)
         bcast = fx.Int32(0x01010101)
         zero_i32 = fx.Int32(0)
-
         A0_gl = r_base * m_row + lo0
         A1_gl = (r_base + fx.Int32(LDS_BLOCK_R)) * m_row + lo0
         B0_gl = c_base * m_row + lo0
         B1_gl = (c_base + fx.Int32(LDS_BLOCK_C)) * m_row + lo0
-
         gA = make_fp8_buffer_tensor(A, F8_IR_t)
         gB = make_fp8_buffer_tensor(B, F8_IR_t)
         a_div = fx.logical_divide(gA, fx.make_layout(1, 1))
@@ -374,31 +363,24 @@ def _compile(
         sb_rsrc = buffer_ops.create_buffer_resource(
             B_scale, max_size=False, num_records_bytes=sb_bytes
         )
-
-        gl_off_a = compute_global_swizzle(
+        gl_off = compute_global_swizzle(
             lane_id, wave_id, m_row, N_LDS_ROUNDS, preshuffled=False
         )
-        gl_off_b = compute_global_swizzle(
-            lane_id, wave_id, m_row, N_LDS_ROUNDS, preshuffled=False
-        )
-
         gl_cols = _global_swizzle_cols(lane_id, wave_id, N_LDS_ROUNDS)
         a_g2s = _WindowedG2S(
-            a_div, gl_off_a, gl_cols, head, span, N_TILES_A, F8_IR_t, wave_id
+            a_div, gl_off, gl_cols, head, span, N_TILES_A, F8_IR_t, wave_id
         )
         b_g2s = _WindowedG2S(
-            b_div, gl_off_b, gl_cols, head, span, N_TILES_B, F8_IR_t, wave_id
+            b_div, gl_off, gl_cols, head, span, N_TILES_B, F8_IR_t, wave_id
         )
         a_s2r = S2RLoader(wave_i, N_TILES_A)
         b_s2r = S2RLoader(wave_j, N_TILES_B)
-
         # Each lane loads one scale row (4 tiles x 16 rows per half) for both
         # K-steps; ds_bpermute then hands each tile its scales.
         sa0_base = r_base + wave_i * fx.Int32(N_TILES_A * 16)
         sa1_base = r_base + fx.Int32(LDS_BLOCK_R) + wave_i * fx.Int32(N_TILES_A * 16)
         sb0_base = c_base + wave_j * fx.Int32(N_TILES_B * 16)
         sb1_base = c_base + fx.Int32(LDS_BLOCK_C) + wave_j * fx.Int32(N_TILES_B * 16)
-
         sc_vbase = [
             (_rs, (_base + lane_id) * sc_i32_row + m_start_i32)
             for _rs, _base in (
@@ -482,7 +464,6 @@ def _compile(
         b_g2s.load(b_next0, B0_gl + 1 * BLOCK_M, k_col1)
         b_g2s.load(b_next1, B1_gl + 1 * BLOCK_M, k_col1)
         a_g2s.load(a_next1, A1_gl + 1 * BLOCK_M, k_col1)
-
         wait_barrier((3 * N_TILES_A) + (4 * N_TILES_B))
         a0 = a_s2r.load(a_cur0)
         wait_barrier((3 * N_TILES_A) + (3 * N_TILES_B))
@@ -509,44 +490,24 @@ def _compile(
             # loads, which co-issue in the MFMA shadow.
             swz = _lds_swizzle(s2r)
             rt = []
+            mfmas = iter(range_constexpr(N_ACCUMS))
 
-            def M(i, j):
-                c[i * N_TILES_B + j] = _mfma_scale_agpr(
-                    a[i], b[j], sa[i], sb[j], c[i * N_TILES_B + j]
-                )
+            def M(count):
+                for _ in range_constexpr(count):
+                    idx = next(mfmas)
+                    i, j = idx // N_TILES_B, idx % N_TILES_B
+                    c[idx] = _mfma_scale_agpr(a[i], b[j], sa[i], sb[j], c[idx])
 
-            M(0, 0)
-            M(0, 1)
-            g2s.load_one(lds_dst, k_off, 0, k_col)
-            d0 = s2r.load_one(lds_src, swz[0][0])
-            M(0, 2)
-            d1 = s2r.load_one(lds_src, swz[0][1])
-            rt.append(pack_i32x4_i32x8(d0, d1))
-            M(0, 3)
-            g2s.load_one(lds_dst, k_off, 1, k_col)
-            d0 = s2r.load_one(lds_src, swz[1][0])
-            M(1, 0)
-            M(1, 1)
-            d1 = s2r.load_one(lds_src, swz[1][1])
-            rt.append(pack_i32x4_i32x8(d0, d1))
-            M(1, 2)
-            M(1, 3)
-            g2s.load_one(lds_dst, k_off, 2, k_col)
-            d0 = s2r.load_one(lds_src, swz[2][0])
-            M(2, 0)
-            M(2, 1)
-            d1 = s2r.load_one(lds_src, swz[2][1])
-            rt.append(pack_i32x4_i32x8(d0, d1))
-            M(2, 2)
-            M(2, 3)
-            g2s.load_one(lds_dst, k_off, 3, k_col)
-            d0 = s2r.load_one(lds_src, swz[3][0])
-            M(3, 0)
-            M(3, 1)
-            d1 = s2r.load_one(lds_src, swz[3][1])
-            rt.append(pack_i32x4_i32x8(d0, d1))
-            M(3, 2)
-            M(3, 3)
+            # MFMAs 0-1, then per tile: g2s, s2r lo, MFMAs, s2r hi, MFMAs, with
+            # one MFMA per gap for tile 0 and two after.
+            M(2)
+            for t in range_constexpr(N_TILES_A):
+                g2s.load_one(lds_dst, k_off, t, k_col)
+                d0 = s2r.load_one(lds_src, swz[t][0])
+                M((1, 2, 2, 2)[t])
+                d1 = s2r.load_one(lds_src, swz[t][1])
+                rt.append(pack_i32x4_i32x8(d0, d1))
+                M((1, 2, 2, 2)[t])
             return c, rt
 
         _R = arith._to_raw
@@ -580,33 +541,14 @@ def _compile(
         bufs0 = (a_cur0, a_cur1, a_next0, a_next1, b_cur0, b_cur1, b_next0, b_next1)
 
         def _pack(a0, b0, accs, chunk):
-            c00, c01, c10, c11 = accs
-            return (
-                [_R(x) for x in a0]
-                + [_R(x) for x in b0]
-                + [_R(x) for x in c00]
-                + [_R(x) for x in c01]
-                + [_R(x) for x in c10]
-                + [_R(x) for x in c11]
-                + [_R(x) for x in chunk]
-            )
+            return [_R(x) for part in (a0, b0, *accs, chunk) for x in part]
 
         def _unpack(state):
-            o = 0
-            a0 = list(state[o : o + NA])
-            o += NA
-            b0 = list(state[o : o + NB])
-            o += NB
-            c00 = list(state[o : o + N_ACCUMS])
-            o += N_ACCUMS
-            c01 = list(state[o : o + N_ACCUMS])
-            o += N_ACCUMS
-            c10 = list(state[o : o + N_ACCUMS])
-            o += N_ACCUMS
-            c11 = list(state[o : o + N_ACCUMS])
-            o += N_ACCUMS
-            chunk = list(state[o : o + N_CHUNK])
-            o += N_CHUNK
+            parts, o = [], 0
+            for size in (NA, NB, N_ACCUMS, N_ACCUMS, N_ACCUMS, N_ACCUMS, N_CHUNK):
+                parts.append(list(state[o : o + size]))
+                o += size
+            a0, b0, c00, c01, c10, c11, chunk = parts
             return a0, b0, (c00, c01, c10, c11), chunk
 
         init_state = _pack(a0, b0, (c00, c01, c10, c11), chunk)
@@ -628,7 +570,6 @@ def _compile(
         # Drain the final two prefetched K-steps.
         t0 = K_eff - fx.Int32(2)
         t1 = K_eff - fx.Int32(1)
-
         wait_barrier((2 * N_TILES_A) + (2 * N_TILES_B))
         sa0, sa1, sb0, sb1 = use_chunk(chunk, 0, t0)
         b1 = b_s2r.load(b_cur1)
@@ -708,36 +649,13 @@ def _compile(
         stream: fx.Stream,
     ):
         kernel_wgrad(
-            A,
-            B,
-            OUT,
-            A_scale,
-            B_scale,
-            OFFS,
-            out_r,
-            out_c,
-            m_row,
-            value_attrs={
-                "rocdl.waves_per_eu": 1,
-                "rocdl.flat_work_group_size": "256,256",
-            },
+            A, B, OUT, A_scale, B_scale, OFFS, out_r, out_c, m_row, value_attrs=_ATTRS
         ).launch(grid=(n_blocks, 1, 1), block=(256, 1, 1), stream=stream)
 
     return launch_wgrad
 
 
-@functools.lru_cache(maxsize=None)
-def cached_launch(
-    R: int,
-    C: int,
-    E: int,
-    sc_pair: bool,
-    order: str,
-    xcd_count: int,
-    group_r: int,
-    group_c: int,
-):
-    return _compile(R, C, E, sc_pair, order, xcd_count, group_r, group_c)
+cached_launch = functools.lru_cache(maxsize=None)(_compile)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -752,16 +670,7 @@ class MXFP8WgradParam:
     group_c: int
 
     def key(self) -> tuple[int, int, int, bool, str, int, int, int]:
-        return (
-            self.n,
-            self.k,
-            self.group_count,
-            self.sc_pair,
-            self.order,
-            self.xcd_count,
-            self.group_r,
-            self.group_c,
-        )
+        return dataclasses.astuple(self)
 
     def __cache_signature__(self) -> tuple[int, int, int, bool, str, int, int, int]:
         return self.key()
