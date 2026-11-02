@@ -551,16 +551,6 @@ def _consolidate_safetensors_files(
     fqn_to_file_mapping: dict[str, str],
     num_threads: int,
 ) -> dict[str, _OutputFileData]:
-    output_files_data: dict[str, _OutputFileData] = {}
-    # Create multiple output files based on the provided mapping
-    for fqn, filename in fqn_to_file_mapping.items():
-        output_path = os.path.join(output_dir, filename)
-
-        if output_path not in output_files_data:
-            output_files_data[output_path] = _OutputFileData(fqn_data={fqn: _FqnData()})
-        else:
-            output_files_data[output_path].fqn_data[fqn] = _FqnData()
-
     # Find all safetensors files in the input directory
     safetensors_files = glob.glob(os.path.join(input_dir, f"*{SUFFIX}"))
 
@@ -572,6 +562,29 @@ def _consolidate_safetensors_files(
             input_files_data[safetensor_file] = _InputFileData(
                 metadata_size=size, metadata=metadata
             )
+
+    # Names with no saved tensor would get an empty dtype, which readers reject
+    input_fqns = {fqn for data in input_files_data.values() for fqn in data.metadata}
+    skipped_fqns = sorted(fqn_to_file_mapping.keys() - input_fqns)
+    if skipped_fqns:
+        logger.warning(
+            "Skipping %d tensors in fqn_to_index_mapping that were not saved: %s",
+            len(skipped_fqns),
+            skipped_fqns[:20],
+        )
+
+    output_files_data: dict[str, _OutputFileData] = {}
+    # Create multiple output files based on the provided mapping
+    for fqn, filename in fqn_to_file_mapping.items():
+        if fqn not in input_fqns:
+            continue
+        output_path = os.path.join(output_dir, filename)
+
+        if output_path not in output_files_data:
+            output_files_data[output_path] = _OutputFileData(fqn_data={fqn: _FqnData()})
+        else:
+            output_files_data[output_path].fqn_data[fqn] = _FqnData()
+
     # Step 1: Parse metadata to determine tensor shapes and types
     _parse_input_metadata(input_files_data, output_files_data)
 
