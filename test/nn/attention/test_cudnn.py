@@ -1,5 +1,6 @@
 # Owner(s): ["module: sdpa"]
 
+import itertools
 import os
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTIO
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    parametrize,
     run_tests,
     TestCase,
 )
@@ -32,15 +34,38 @@ def _cudnn_python_available() -> bool:
         return False
     if not torch.backends.cuda.is_cudnn_sdp_python_available():
         return False
+    # Only a missing dependency means unavailable: any other failure to import
+    # an installed provider must fail the tests rather than skip them.
     try:
-        import cudnn.torch as provider
-    except Exception:
+        import cudnn.torch  # noqa: F401
+    except ImportError:
         return False
-    if not hasattr(provider, _cudnn._INSTALL_FN):
+    try:
+        _cudnn._check_frontend_version(_PROVIDER)
+    except RuntimeError:
         return False
     q = torch.empty(_SHAPE, device="cuda", dtype=torch.bfloat16)
     params = torch.backends.cuda.SDPAParams(q, q, q, None, 0.0, True, False)
     return torch.backends.cuda.can_use_cudnn_attention(params, False)
+
+
+def _varlen_cudnn_supported(device) -> bool:
+    # varlen_attn selects cuDNN only on SM90 and SM100.
+    return torch.cuda.get_device_capability(device)[0] in (9, 10)
+
+
+def _varlen_inputs(device):
+    torch.manual_seed(0)
+    lens = torch.tensor([128, 256], device=device)
+    cu_seq = F.pad(lens.cumsum(0), (1, 0)).to(torch.int32)
+    total, max_len = int(cu_seq[-1]), int(lens.max())
+    q, k, v = (
+        torch.randn(
+            total, 4, 64, device=device, dtype=torch.bfloat16, requires_grad=True
+        )
+        for _ in range(3)
+    )
+    return q, k, v, cu_seq, max_len
 
 
 def _fake_install(live, tag):
@@ -89,12 +114,17 @@ def _counting_install(calls):
     return install
 
 
-def _use_provider(test, install):
-    """Serve ``cudnn.torch`` from a stand-in module, switch off, until ``test`` ends."""
+def _use_provider(test, install, version=_cudnn._MIN_FRONTEND_VERSION):
+    """Serve ``cudnn.torch`` from a stand-in module, switch off, until ``test`` ends.
+
+    The stand-in's parent package ``cudnn`` reports ``version``.
+    """
+    package = types.ModuleType("cudnn")
+    package.__version__ = version
     module = types.ModuleType(_PROVIDER)
     if install is not None:
         setattr(module, _cudnn._INSTALL_FN, install)
-    patcher = mock.patch.dict(sys.modules, {_PROVIDER: module})
+    patcher = mock.patch.dict(sys.modules, {"cudnn": package, _PROVIDER: module})
     patcher.start()
     test.addCleanup(patcher.stop)
     saved = _cudnn._ACTIVE_HANDLE
@@ -128,10 +158,14 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         _cudnn.disable()
 
     def test_old_provider_names_the_required_version(self):
-        _use_provider(self, None)
-        with self.assertRaisesRegex(RuntimeError, "nvidia-cudnn-frontend>="):
+        # 1.32 has install_sdpa_overrides(), but its varlen overrides ignore the
+        # backend varlen_attn selected.
+        _use_provider(self, _fake_install(self.live, "cudnn"), version="1.32.1")
+        required = f"nvidia-cudnn-frontend>={_cudnn._MIN_FRONTEND_VERSION}"
+        with self.assertRaisesRegex(RuntimeError, f"{required}.*1.32.1"):
             _cudnn.enable()
         self.assertFalse(_cudnn.is_enabled())
+        self.assertEqual(self.live, [])
 
     def test_install_without_a_handle_is_rejected(self):
         _use_provider(self, lambda: None)
@@ -216,7 +250,8 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         probe = "import torch; print(torch.backends.cuda.cudnn_sdp_python_enabled())"
         with tempfile.TemporaryDirectory() as root:
             os.makedirs(os.path.join(root, "cudnn", "torch"))
-            open(os.path.join(root, "cudnn", "__init__.py"), "w").close()
+            with open(os.path.join(root, "cudnn", "__init__.py"), "w") as f:
+                f.write(f"__version__ = {_cudnn._MIN_FRONTEND_VERSION!r}\n")
             with open(os.path.join(root, "cudnn", "torch", "__init__.py"), "w") as f:
                 f.write(provider)
             path = os.pathsep.join(filter(None, (root, os.environ.get("PYTHONPATH"))))
@@ -301,6 +336,138 @@ class TestCuDNNPythonSDPA(TestCase):
         with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
             F.scaled_dot_product_attention(q, q, q, is_causal=True)
         self.assertEqual(provider.calls["fwd"], fwd0)
+
+    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    def test_varlen_follows_the_selected_backend(self, device):
+        # The provider serves the varlen calls that selected cuDNN and leaves
+        # the ones that selected flash to torch.
+        import cudnn.torch as provider
+
+        from torch.nn.attention.varlen import varlen_attn
+
+        if not _varlen_cudnn_supported(device):
+            self.skipTest("varlen_attn selects cuDNN only on SM90 and SM100")
+        q, k, v, cu_seq, max_len = _varlen_inputs(device)
+        grad = torch.randn_like(q)
+
+        def run(backend):
+            with sdpa_kernel(backend):
+                out = varlen_attn(
+                    q, k, v, cu_seq, cu_seq, max_len, max_len, window_size=(-1, 0)
+                )
+            return (out, *torch.autograd.grad(out, (q, k, v), grad))
+
+        for backend, served in (
+            (SDPBackend.CUDNN_ATTENTION, 1),
+            (SDPBackend.FLASH_ATTENTION, 0),
+        ):
+            with self.subTest(backend=backend):
+                expected = run(backend)
+                torch.backends.cuda.enable_cudnn_sdp_python(True)
+                fwd0, bwd0 = provider.calls["fwd"], provider.calls["bwd"]
+                got = run(backend)
+                fwd, bwd = provider.calls["fwd"] - fwd0, provider.calls["bwd"] - bwd0
+                torch.backends.cuda.enable_cudnn_sdp_python(False)
+                self.assertEqual((fwd, bwd), (served, served))
+                for g, e in zip(got, expected):
+                    self.assertEqual(g, e, atol=3e-2, rtol=3e-2)
+
+    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    def test_varlen_out_follows_the_selected_backend(self, device):
+        import cudnn.torch as provider
+
+        from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
+
+        if not _varlen_cudnn_supported(device):
+            self.skipTest("varlen_attn selects cuDNN only on SM90 and SM100")
+        q, k, v, cu_seq, max_len = _varlen_inputs(device)
+        args = (q, k, v, cu_seq, cu_seq, max_len, max_len)
+        torch.backends.cuda.enable_cudnn_sdp_python(True)
+        for backend, served in (
+            (SDPBackend.CUDNN_ATTENTION, 1),
+            (SDPBackend.FLASH_ATTENTION, 0),
+        ):
+            with self.subTest(backend=backend), torch.no_grad(), sdpa_kernel(backend):
+                out = torch.empty_like(q)
+                fwd0 = provider.calls["fwd"]
+                varlen_attn_out(out, *args, window_size=(-1, 0))
+                self.assertEqual(provider.calls["fwd"] - fwd0, served)
+                expected = varlen_attn(*args, window_size=(-1, 0))
+                self.assertEqual(out, expected, atol=3e-2, rtol=3e-2)
+
+    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @parametrize("layout", ["bhsd", "bshd"])
+    @parametrize("is_causal", [False, True])
+    def test_compiled_matches_eager(self, device, layout, is_causal):
+        # The provider replaces the CUDA kernels but not the ATen meta
+        # functions, which tracing uses; Inductor checks the provider's outputs
+        # against the traced shapes and strides, forward and backward.
+        import cudnn.torch as provider
+
+        torch.manual_seed(0)
+        b, h, s, d = _SHAPE
+        shape = (b, h, s, d) if layout == "bhsd" else (b, s, h, d)
+
+        def make():
+            t = torch.randn(shape, device=device, dtype=torch.bfloat16)
+            return (t if layout == "bhsd" else t.transpose(1, 2)).requires_grad_(True)
+
+        q, k, v = make(), make(), make()
+        grad = torch.randn(_SHAPE, device=device, dtype=torch.bfloat16)
+
+        def sdpa(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
+
+        torch.backends.cuda.enable_cudnn_sdp_python(True)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            eager = sdpa(q, k, v)
+        eager = (eager, *torch.autograd.grad(eager, (q, k, v), grad))
+
+        fwd0, bwd0 = provider.calls["fwd"], provider.calls["bwd"]
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            compiled = torch.compile(sdpa, fullgraph=True)(q, k, v)
+        compiled = (compiled, *torch.autograd.grad(compiled, (q, k, v), grad))
+        fwd, bwd = provider.calls["fwd"] - fwd0, provider.calls["bwd"] - bwd0
+        self.assertEqual((fwd, bwd), (1, 1))
+        for got, want in zip(compiled, eager):
+            self.assertEqual(got.stride(), want.stride())
+            self.assertEqual(got, want, atol=2e-2, rtol=2e-2)
+
+    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    def test_outputs_match_the_aten_meta_function(self, device):
+        # Every query layout: the provider's outputs must have the shapes,
+        # strides and dtypes that the retained ATen meta function reports.
+        import cudnn.torch as provider
+
+        op = torch.ops.aten._scaled_dot_product_cudnn_attention
+        torch.backends.cuda.enable_cudnn_sdp_python(True)
+        for order in itertools.permutations(range(3)):
+            with self.subTest(order=order):
+                dims = [_SHAPE[i] for i in order] + [_SHAPE[3]]
+                inverse = [order.index(i) for i in range(3)] + [3]
+                q, k, v = (
+                    torch.randn(dims, device=device, dtype=torch.bfloat16).permute(
+                        inverse
+                    )
+                    for _ in range(3)
+                )
+                meta_qkv = (
+                    torch.empty_strided(
+                        t.shape, t.stride(), dtype=t.dtype, device="meta"
+                    )
+                    for t in (q, k, v)
+                )
+                fwd0 = provider.calls["fwd"]
+                got = op(q, k, v, None, True, is_causal=True)
+                self.assertEqual(provider.calls["fwd"], fwd0 + 1)
+                want = op(*meta_qkv, None, True, is_causal=True)
+                for i, (g, w) in enumerate(zip(got, want)):
+                    if isinstance(g, torch.Tensor):
+                        self.assertEqual(
+                            (g.shape, g.stride(), g.dtype),
+                            (w.shape, w.stride(), w.dtype),
+                            msg=f"output {i}",
+                        )
 
     @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
     def test_env_var_enables_the_real_provider_at_import(self, device):
