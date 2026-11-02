@@ -213,6 +213,8 @@ TORCH_API
 void validate_scaled_grouped_mm_v2_inputs(
     const Tensor& mat_a,
     const Tensor& mat_b,
+    ArrayRef<int64_t> recipe_a,
+    ArrayRef<int64_t> recipe_b,
     at::OptionalTensorRef offs,
     at::OptionalTensorRef bias,
     ArrayRef<int64_t> contraction_dim,
