@@ -29,6 +29,18 @@ namespace KINETO_NAMESPACE {
 
 using namespace libkineto;
 
+// CUPTI 13.0+ reports versions using major/minor/patch encoding.
+inline constexpr uint32_t kCuptiVersion13_4 = 130400;
+// CUDA driver versions use 1000 * major + 10 * minor.
+inline constexpr int kCudaDriverVersion13_4 = 13040;
+
+inline bool cudaEventDeviceTimestampsSupported(
+    uint32_t cuptiVersion,
+    int driverVersion) {
+  return cuptiVersion >= kCuptiVersion13_4 &&
+      driverVersion >= kCudaDriverVersion13_4;
+}
+
 inline bool isEnvVarSetToOne(const char* name) {
   const auto* value = std::getenv(name);
   return value != nullptr && std::string_view{value} == "1";
@@ -91,6 +103,7 @@ class CuptiActivityApi {
   std::atomic<uint32_t> tracingEnabled_{0};
   std::atomic<uint32_t> tearingDown_{0};
   std::atomic<bool> externalCorrelationEnabled_{false};
+  std::atomic<bool> cudaEventActivityEnabled_{false};
 
   int processActivitiesForBuffer(
       uint8_t* buf,
