@@ -9889,6 +9889,25 @@ def forward(self, primals_1, tangents_1):
         compiled_f(a, b)
         self.assertEqual(a, a_ref * 2)
 
+    @xfailIfTorchDynamo
+    def test_synthetic_base_storage_mismatch_reports_indices_without_set_(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+        compiled_f = aot_function(f, nop)
+        compiled_f(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, r"input indices \[1\]") as ctx:
+            compiled_f(a, torch.randn(6))
+        self.assertNotIn("set_()", str(ctx.exception))
+
     def test_synthetic_base_no_codegen_when_not_needed(self):
         with capture_codegen_source("synthetic_base_wrapper") as captured:
 

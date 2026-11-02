@@ -4714,8 +4714,11 @@ class TestLiveViewBase(TestCase):
         # storage is fresh even though it is a real view.
         inner = torch.randn(4)
         wrapped = TwoTensor(inner, inner.clone())
-        child = wrapped[:2]
-        self.assertIs(_live_view_base(child), child._base)
+        with torch._C._DisableTorchDispatch():
+            child = wrapped[:2]
+        self.assertIs(type(child), torch.Tensor)
+        self.assertIs(child._base, wrapped)
+        self.assertIs(_live_view_base(child), wrapped)
 
     def test_live_view_base_keeps_sparse_compressed_values(self):
         base = torch.randn(4, 4).to_sparse_csr()
@@ -4724,13 +4727,8 @@ class TestLiveViewBase(TestCase):
         self.assertIs(_live_view_base(values), values._base)
 
     def test_live_view_base_skips_non_traceable_wrapper_subclass(self):
-        # Documented boundary. The exemption is keyed on the traceable
-        # protocol, not on "is any tensor subclass": there is no cheap
-        # predicate for the latter, and type(t) is not torch.Tensor would also
-        # exempt _make_subclass tensors, which do share their base's storage and
-        # would then hide genuinely stale bases. So a non-traceable wrapper
-        # subclass is still subject to the storage test. Pinning the predicate
-        # here keeps that choice deliberate rather than accidental.
+        # Non-traceable wrappers do not get the traceable protocol exemption:
+        # their views still use storage identity to reject a stale base.
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         class _NonTraceableWrapper(torch.Tensor):
@@ -4742,6 +4740,15 @@ class TestLiveViewBase(TestCase):
             _NonTraceableWrapper, torch.randn(4).size()
         )
         self.assertFalse(is_traceable_wrapper_subclass(wrapped))
+        with torch._C._DisableTorchDispatch():
+            child = wrapped[:2]
+        self.assertIs(type(child), torch.Tensor)
+        self.assertIs(child._base, wrapped)
+        self.assertIs(_live_view_base(child), wrapped)
+
+        child.set_(torch.randn(2))
+        self.assertIs(child._base, wrapped)
+        self.assertIsNone(_live_view_base(child))
 
 
 if __name__ == "__main__":

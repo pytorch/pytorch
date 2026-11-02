@@ -4871,6 +4871,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
                 self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
 
+    def test_synthetic_base_rebound_between_calls_raises(self):
+        def fn(a, b):
+            b[0] = 10.0
+            return a[0].clone()
+
+        x = torch.arange(5, dtype=torch.float32)
+        a = x[:3]
+        b = x
+        compiled = torch.compile(fn, backend="aot_eager")
+        self.assertEqual(compiled(a, b), torch.tensor(10.0))
+
+        a.set_(torch.full((3,), 7.0))
+        # With no live base left, the fallback takes input 0's new storage;
+        # input 1 is the member that no longer aliases that synthetic base.
+        with self.assertRaisesRegex(RuntimeError, r"input indices \[1\]"):
+            compiled(a, b)
+
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not
         # fakify it or build a symbolic context from it. Before this change both

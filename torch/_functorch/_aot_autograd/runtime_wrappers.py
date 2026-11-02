@@ -2067,6 +2067,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 
         with buf.indent():
             buf.writeline(f"_bases = [None] * {num_bases}")
+            buf.writeline("_member_cdata = [None] * len(args)")
             for base_idx in sorted(base_groups):
                 group = base_groups[base_idx]
                 first_orig = group[0]
@@ -2074,7 +2075,14 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 buf.writeline("_b = None")
                 buf.writeline(f"for _i in [{indices_str}]:")
                 with buf.indent():
-                    buf.writeline("_b = _plain_live_view_base(args[_i])")
+                    buf.writeline(
+                        "_member_cdata[_i] = args[_i].untyped_storage()._cdata"
+                    )
+                buf.writeline(f"for _i in [{indices_str}]:")
+                with buf.indent():
+                    buf.writeline(
+                        "_b = _plain_live_view_base(args[_i], _member_cdata[_i])"
+                    )
                     buf.writeline("if _b is not None:")
                     with buf.indent():
                         buf.writeline("break")
@@ -2084,23 +2092,23 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
-                # The base is recomputed on every call while the guards that
-                # admitted this graph do not watch view-ness, so a group member
-                # rebound by set_() between compile and this call can come back
-                # with no live base and still pass them. The graph would then
-                # replay the other members' views onto a storage they no longer
-                # alias. Catch it here rather than silently producing that.
-                buf.writeline(f"for _i in [{indices_str}]:")
+                # Direct AOT callers have no Dynamo guard/recompile path, and
+                # Dynamo guards need not retain every member's storage identity.
+                # Check this shared runtime boundary rather than silently running
+                # a graph specialized for a different set of aliases.
+                buf.writeline("_b_cdata = _b.untyped_storage()._cdata")
+                buf.writeline(
+                    f"_bad_indices = [_i for _i in [{indices_str}] "
+                    "if _member_cdata[_i] != _b_cdata]"
+                )
+                buf.writeline("if _bad_indices:")
                 with buf.indent():
                     buf.writeline(
-                        "if args[_i].untyped_storage()._cdata != _b.untyped_storage()._cdata:"
+                        "raise RuntimeError("
+                        "f\"synthetic base group members at input indices {_bad_indices} "
+                        "no longer share storage with the synthetic base; "
+                        "input storage aliasing changed after compilation\")"
                     )
-                    with buf.indent():
-                        buf.writeline(
-                            "raise RuntimeError("
-                            "'synthetic base group member no longer shares storage with the base; "
-                            "an input was rebound by set_() after this graph was compiled')"
-                        )
                 buf.writeline(f"_bases[{base_idx}] = _b")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
