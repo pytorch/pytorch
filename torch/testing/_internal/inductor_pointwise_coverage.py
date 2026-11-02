@@ -79,6 +79,21 @@ def record_class_fixtures(test_class, directory):
     test_class.tearDownClass = wrap("tearDownClass")
 
 
+def write_manifest(directory, test_class, configuration):
+    cases = []
+    if test_class is not None:
+        record_class_fixtures(test_class, directory)
+        cases = [
+            case
+            for method in unittest.defaultTestLoader.getTestCaseNames(test_class)
+            if (case := coverage_case(method)) is not None
+        ]
+    write_event(
+        directory,
+        {"kind": "manifest", "configuration": configuration, "cases": cases},
+    )
+
+
 @dataclass
 class CoverageRecord:
     case: dict
