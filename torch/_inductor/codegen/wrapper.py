@@ -2412,6 +2412,8 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: dict[
             tuple[Any, ...], tuple[str, Any, dict[str, Any]]
         ] = {}
+        # The names of the user kernels of both kinds (see _new_user_kernel_name).
+        self.user_defined_kernel_names: OrderedSet[str] = OrderedSet()
         # User CuTeDSL kernels: cache key -> name, and name -> the launcher object
         # the generated Python module is loaded with.
         self.user_defined_cutedsl_kernel_cache: dict[tuple[Any, ...], str] = {}
@@ -4763,6 +4765,22 @@ class PythonWrapperCodegen(CodeGen):
 
         return TritonKernel
 
+    def _new_user_kernel_name(self, prefix: str, index: int) -> str:
+        """Name a new user kernel ``{prefix}_{index}``, skipping to the next index while
+        the name is taken: user Triton kernels and CuTeDSL launchers count ``index``
+        apart, but are globals of one module."""
+        while True:
+            name = f"{prefix}_{index}"
+            # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
+            # when the generated call site is inside a class body.
+            # See https://github.com/pytorch/pytorch/issues/170398
+            if name.startswith("__") and not name.endswith("__"):
+                name = name[1:]
+            if name not in self.user_defined_kernel_names:
+                self.user_defined_kernel_names.add(name)
+                return name
+            index += 1
+
     def define_user_defined_triton_kernel(
         self,
         kernel,
@@ -5058,12 +5076,8 @@ class PythonWrapperCodegen(CodeGen):
                 extra_launcher_call_args,
             )
 
-        name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
-        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
-        # when the generated call site is inside a class body.
-        # See https://github.com/pytorch/pytorch/issues/170398
-        if name.startswith("__") and not name.endswith("__"):
-            name = name[1:]
+        index = len(self.user_defined_kernel_cache)
+        name = self._new_user_kernel_name(original_name, index)
 
         subs_name = name if config.triton.unique_user_kernel_names else original_name
         inductor_meta["kernel_name"] = name
@@ -5162,7 +5176,8 @@ class PythonWrapperCodegen(CodeGen):
         )
         if cache_key in self.user_defined_cutedsl_kernel_cache:
             return self.user_defined_cutedsl_kernel_cache[cache_key]
-        name = f"cutedsl_{kernel.name}_{len(self.user_defined_cutedsl_kernel_cache)}"
+        index = len(self.user_defined_cutedsl_kernel_cache)
+        name = self._new_user_kernel_name(f"cutedsl_{kernel.name}", index)
         self.user_defined_cutedsl_launchers[name] = CuteDSLKernelLauncher(
             kernel.fn, arg_names, constant_args
         )
@@ -6909,6 +6924,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        self.user_defined_kernel_names = root.user_defined_kernel_names
         # and user-defined CuTeDSL kernels, whose launchers the main module binds
         self.user_defined_cutedsl_kernel_cache = root.user_defined_cutedsl_kernel_cache
         self.user_defined_cutedsl_launchers = root.user_defined_cutedsl_launchers
