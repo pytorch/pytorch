@@ -5,12 +5,14 @@ import logging
 from typing import TYPE_CHECKING, TypedDict
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
+    emulate_lowp_output_cast,
     fallback_handler,
     lowerings as L,
     register_lowering,
@@ -42,6 +44,16 @@ log = logging.getLogger(__name__)
 
 
 aten = torch.ops.aten
+
+
+def _conv_template_allow_tf32(device_type: str | None) -> bool:
+    if device_type is None:
+        return False
+    try:
+        iface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    return bool(iface.conv_allow_tf32())
 
 
 @SymbolicGridFn
@@ -563,9 +575,12 @@ def convolution(
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
             # we should not add bias when the output channel is 0
             return result
-        return L[aten.add](
+        result = L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
+        # The peeled add is not user-visible, so the conv's declared rounded
+        # output must be reproduced for fused consumers (see #201296).
+        return emulate_lowp_output_cast(result)
 
     x.realize()
     weight.realize()
@@ -610,6 +625,7 @@ def convolution(
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
+    allow_tf32 = _conv_template_allow_tf32(device_type)
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
         choices = [
@@ -684,7 +700,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=unroll,
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                    ALLOW_TF32=allow_tf32,
                     num_stages=cfg.num_stages,
                     num_warps=num_warps,
                     **cfg.kwargs,
@@ -707,7 +723,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=unroll,
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                    ALLOW_TF32=allow_tf32,
                     num_stages=cfg.num_stages,
                     num_warps=num_warps,
                     **cfg.kwargs,
@@ -749,13 +765,13 @@ def convolution(
                 DILATION_H=dilation[0],
                 DILATION_W=dilation[1],
                 GROUPS=groups,
-                ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                ALLOW_TF32=allow_tf32,
                 num_stages=cfg.num_stages,
                 num_warps=cfg.num_warps,
                 **cfg.kwargs,
             )
 
-    if use_ck_conv_template(layout):
+    if use_ck_conv_template(layout) and not transposed:
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
@@ -1104,6 +1120,7 @@ def convolution_backward_lowering(
 
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
+    allow_tf32 = _conv_template_allow_tf32(device_type)
 
     has_triton_dw_choices = False
     dw = None
@@ -1123,9 +1140,10 @@ def convolution_backward_lowering(
             stride_order = ir.get_stride_order(guard(peek.stride))
             input = ir.ExternKernel.require_stride_order(input, stride_order)  # type: ignore[assignment]
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
-        # dw's memory format also depends on weight's strides
-        ir.freeze_storage_layout(weight)
-        layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
+        # dw is a fresh buffer that the aten (out=) and triton kernels write in any
+        # layout, so weight's provisional strides may steer it without a freeze
+        with ir.allow_layout_analysis():
+            layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
 
         args_w = [input, grad_out]
 
@@ -1157,7 +1175,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,
@@ -1182,9 +1200,10 @@ def convolution_backward_lowering(
             stride_order = ir.get_stride_order(guard(peek.stride))
             grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_stride_order(weight, stride_order)  # type: ignore[assignment]
-        # dx's memory format also depends on input's strides
-        ir.freeze_storage_layout(input)
-        layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
+        # dx is a fresh buffer that the aten (out=) and triton kernels write in any
+        # layout, so input's provisional strides may steer it without a freeze
+        with ir.allow_layout_analysis():
+            layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
 
         args_x = [grad_out, weight]
 
@@ -1217,7 +1236,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,

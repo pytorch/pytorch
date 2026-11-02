@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <c10/util/irange.h>
 
 // Permute-free all-to-all for Ulysses-style sequence parallelism.
 //
@@ -43,12 +44,12 @@ __device__ inline void copy_bytes_vec16_aligned(
        vec_idx += static_cast<size_t>(kUnroll) * stride) {
     at::native::memory::Vec<16> chunk[kUnroll];
 #pragma unroll 4
-    for (int u = 0; u < kUnroll; ++u) {
+    for (const auto u : c10::irange(kUnroll)) {
       const size_t i = vec_idx + static_cast<size_t>(u) * stride;
       chunk[u] = at::native::memory::ld_vec<16>(src + i * 16);
     }
 #pragma unroll 4
-    for (int u = 0; u < kUnroll; ++u) {
+    for (const auto u : c10::irange(kUnroll)) {
       const size_t i = vec_idx + static_cast<size_t>(u) * stride;
       at::native::memory::st_vec<16>(dst + i * 16, chunk[u]);
     }
@@ -180,7 +181,7 @@ void nccl_all_to_all_nd(
         "ncclDevCommCreate failed in nccl_all_to_all_nd");
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
-  ncclDevComm& devcomm = devcomm_opt->get();
+  ncclDevComm devcomm = devcomm_opt->get();
 
   const int my_rank = devcomm.rank;
   const int p = devcomm.nRanks;
