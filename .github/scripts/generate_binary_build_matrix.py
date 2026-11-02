@@ -117,10 +117,9 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "intel-cmplr-lib-ur==2026.2.0 | "
         "intel-cmplr-lic-rt==2026.2.0 | "
         "intel-sycl-rt==2026.2.0 | "
-        # oneccl 2022.2.0 switched its transport dependency from impi-rt to
-        # libfabric>=2.6, which is not published on PyPI yet.
-        "oneccl-devel==2022.2.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2022.2.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl-devel==2022.2.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.2.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "modified-libfabric==2.6.13; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         # onemkl-license 2026.2.0 ships a win_amd64 wheel only; the Linux mkl
         # wheel dropped its onemkl-license requirement in 2026.2.
         "onemkl-license==2026.2.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
