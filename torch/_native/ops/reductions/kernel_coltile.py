@@ -1,4 +1,5 @@
-# Column-reduction driver for tile.TileReduce, with launch policy and plan cache.
+# Column-reduction driver for tile.TileReduce, with launch policy and plan cache, plus the
+# PartialColumns stage-two kernel.
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 
@@ -45,7 +46,7 @@ class ColConfig(NamedTuple):
     vec: int
     partial_layout: str
     combine_columns: int = 0
-    unroll: int = 4
+    unroll: int = tile._ROLL_UNROLL
 
 
 def select_col_config(
@@ -84,6 +85,9 @@ class PartialColumns:
     """Combine partition-major states while coalescing adjacent column loads."""
 
     def __init__(self, trait, tile_columns, nouts):
+        # The tuned widths; each tiles the 128-thread block exactly.
+        if tile_columns not in (8, 16, 32):
+            raise ValueError(f"combine_columns must be 8, 16 or 32, got {tile_columns}")
         self.trait = trait
         self.tile_columns = tile_columns
         self.threads = 128
@@ -289,10 +293,10 @@ def _reduce_col_tile(
         raise ValueError(f"unknown partial layout {cfg.partial_layout!r}")
     pc = cfg.partial_layout == "partition"
     width = cfg.combine_columns
-    if width not in (0, 8, 16, 32):
-        raise ValueError(f"combine_columns must be 0, 8, 16 or 32, got {width}")
     if width and not pc:
         raise ValueError("combine_columns reads partition-major partials")
+    # Build the tiled combine first so an invalid width raises before stage one launches.
+    tiled = PartialColumns(trait, width, nouts) if width else None
     op = tile.TileReduce(
         trait,
         torch2cute[kernel_x.dtype],
@@ -376,8 +380,7 @@ def _reduce_col_tile(
     if single:
         return tuple(outs)
 
-    if width:
-        op2 = PartialColumns(trait, width, nouts)
+    if tiled is not None:
         pdt = tuple(pp.dtype for pp in parts)
         key2 = (
             "coltile2t",
@@ -385,9 +388,9 @@ def _reduce_col_tile(
             tuple(out_dtypes[:nouts]),
             pdt,
             str(x.device),
-        ) + op2.cache_sig
+        ) + tiled.cache_sig
         build2 = lambda: _compile(  # noqa: E731
-            op2,
+            tiled,
             [
                 _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
                 for pp in parts

@@ -316,10 +316,10 @@ def _physical_col_view(
 # B200 CUDA-graph timings of the batched column kernel against the general kernel, for
 # sum and var_mean at 16 and 512 MiB: R <= 64 wins at every C (4-33x). Longer R needs
 # C >= 16 (sum 1.3x or better), and two outputs also need B * C >= 8192 kept outputs;
-# below that, general is up to 4x faster. The other traits were measured on the stack's
-# later column tuning; the gate accepts their regressions on 8-16 MiB inputs at its
-# boundaries (0.82-0.86x one-output at R = 1024, C = 16, B * C = 4096; fp16 var_mean
-# 0.70x at B * C = 8192), which run 1.1-3.1x at 512 MiB.
+# below that, general is up to 4x faster. For fp16 sum, amax, argmax, aminmax, max.dim
+# and fp16 var_mean, the gate accepts regressions on 8-16 MiB inputs at its boundaries
+# (0.82-0.86x one-output at R = 1024, C = 16, B * C = 4096; fp16 var_mean 0.70x at
+# B * C = 8192), which run 1.1-3.1x at 512 MiB.
 # Only B200 is measured, so other architectures keep the general kernel for these routes.
 _BATCHED_COL_CCS = ((10, 0),)
 _BATCHED_COL_SHORT_R = 64
