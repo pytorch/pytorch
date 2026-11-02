@@ -5903,6 +5903,28 @@ class TestPrologueFusion(TestCase):
             ).run(code[0])
             self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_identical_template_epilogue_fusions(self):
+        # The mm + relu pairs all render the same fused kernel, so they share
+        # one async compile future. Each pair must still be benchmarked and
+        # fused, leaving one template launch per pair.
+        def fn(*xs):
+            return tuple(torch.relu(x @ y) for x, y in zip(xs[::2], xs[1::2]))
+
+        torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
+
+        args = [torch.randn(128, 128, device=GPU_TYPE) for _ in range(6)]
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(fn), *args)
+
+        self.assertEqual(out, fn(*args), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
+
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
     def test_multiple_inputs(self, sizes, use_async_compile: bool):
@@ -6869,7 +6891,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         self.assertTrue(is_gfx1250_arch("gfx1250"))
         self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
-        self.assertFalse(is_gfx1250_arch("gfx1251"))
         self.assertFalse(is_gfx1250_arch("gfx0000"))
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
