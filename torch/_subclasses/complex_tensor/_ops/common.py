@@ -4,7 +4,7 @@ from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
-from torch._decomp import get_decompositions
+from torch._decomp import decomposition_table
 from torch._ops import OpOverload, OpOverloadPacket
 from torch._refs import is_complex as _is_complex
 from torch.types import Number
@@ -124,7 +124,11 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
-DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
+DECOMPOSITIONS = {
+    op: fn
+    for op, fn in decomposition_table.items()
+    if isinstance(op, OpOverload) and op.namespace == "aten"
+}
 
 
 def lookup_complex(
