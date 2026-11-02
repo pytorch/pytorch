@@ -7296,6 +7296,8 @@ def scaled_mm(
     with ``SWIZZLE_MNxK4`` on both inputs. It requires cuBLASLt 13.8.1 or later
     (bundled with CUDA 13.4) on SM10.x/SM11.x, and supports bfloat16, float16, and
     float32 outputs. Bias requires bfloat16 or float16 output with matching dtype.
+    ``use_fast_accum`` is forwarded to cuBLASLt for MNxK4.
+    MNxK4 requires row-major ``mat_a`` and column-major ``mat_b``.
     Scales are contiguous ``float8_e8m0fnu`` tensors with 16-byte-aligned data pointers.
     For block size ``B`` (32 or 128) and outer extent ``O`` (M for A, N for B),
     the physical row-major byte order is ``[ceil(K / (4 * B)), round_up(O, 4), 4]``:
@@ -7314,7 +7316,9 @@ def scaled_mm(
         output_dtype: dtype used for the output tensor
         contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
             dimensions are also accepted).
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: Request tensor-core fast accumulation for supported recipes.
+            Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
+            MNxK4 forwards the flag to cuBLASLt.
     """
 
     scale_a = _expand_single_value(scale_a)
@@ -7491,9 +7495,13 @@ def scaled_grouped_mm(
     Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
-    For TensorWise scaling, each float32 scale contains either a single value shared by all groups
-    or one value per group in a contiguous 1D tensor. Both inputs must use the same scale layout.
-    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
+    When ``scale_recipe_a`` and ``scale_recipe_b`` are each the single recipe ``TensorWise``,
+    each float32 scale contains either a single value shared by all groups
+    or one value per group in a contiguous 1D tensor. Each input may use either scale layout.
+    Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    At most 1024 groups are supported.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored
+    except ``SWIZZLE_MNxK4``, which is rejected.
     It supports bfloat16, float16, and float32 outputs.
 
     Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
@@ -7514,7 +7522,8 @@ def scaled_grouped_mm(
     group's flattened scale buffer in offset order. Each group starts at a 16-byte
     boundary, and per-group M/N need not be multiples of four. It requires
     cuBLASLt 13.8.1 or later (bundled with CUDA 13.4) on SM10.x/SM11.x and accepts
-    bfloat16, float16, and float32 outputs.
+    bfloat16, float16, and float32 outputs. ``use_fast_accum`` is forwarded to cuBLASLt
+    for MNxK4.
 
     Other recipes require bfloat16 output.
 
@@ -7527,10 +7536,13 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: output dtype; cuBLASLt recipes accept bfloat16, float16, or float32,
-          other recipes require bfloat16
+        output_dtype: output dtype; the cuBLASLt recipes described above (including ``TensorWise``
+          alone on both inputs) accept bfloat16, float16, or float32; other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: Request tensor-core fast accumulation for supported recipes.
+            Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
+            MNxK4 forwards the flag to cuBLASLt.
+            recipes and CUDA RowWise scaling. MSLK recipes and ROCm ignore this flag.
     """
 
     scale_a = _expand_single_value(scale_a)
