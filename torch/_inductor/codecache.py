@@ -3010,27 +3010,6 @@ class AotCodeCompiler:
                 )
 
             
-            # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
-            def format_consts_to_cpp(
-                consts: bytes | bytearray, align_bytes: int
-            ) -> tuple[str, str]:
-                consts_size = len(consts)
-                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
-#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
-#else\t\n\
-#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
-#endif\t\n\
-\t\n\
-ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
-                const_cpp = asan_attr
-                const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += (
-                    f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
-                )
-                const_cpp+= _quick_format_array_to_string(consts)
-                const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
-                return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
                 align_bytes: int,
@@ -3088,7 +3067,7 @@ end
                         ALIGN_BYTES, symbol_prefix
                     )
                 else:
-                    consts_code, code_ext = format_consts_to_cpp(consts, ALIGN_BYTES)
+                    consts_code, code_ext = AotCodeCompiler._format_consts_to_cpp(consts, ALIGN_BYTES)
 
             _, consts_s = write(
                 consts_code,
@@ -3861,6 +3840,31 @@ end
             return generated_files
 
         return output_so
+
+    @staticmethod
+    # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
+    # This is no longer an inner function to allow testing
+    def _format_consts_to_cpp(
+        consts: bytes | bytearray, align_bytes: int
+    ) -> tuple[str, str]:
+        consts_size = len(consts)
+        asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+        const_cpp = asan_attr
+        const_cpp += f"alignas({align_bytes}) extern "
+        const_cpp += (
+            f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
+        )
+        const_cpp+= _quick_format_array_to_string(consts)
+        const_cpp += "};\t\n"
+        const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
+        return const_cpp, "weights.cpp"
+
 
 
 _libgomp: CDLL | None = None
