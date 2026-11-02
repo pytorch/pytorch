@@ -476,7 +476,9 @@ def set_head_dim_values(
         "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
 
-    chunks = exact_power_of_2_split(qk_head_dim_static) if torch.xpu.is_available() else None
+    chunks = (
+        exact_power_of_2_split(qk_head_dim_static) if torch.xpu.is_available() else None
+    )
     kernel_options.setdefault("USE_HEAD_DIM_TILING", chunks is not None)
     if chunks is None:
         kernel_options["USE_HEAD_DIM_TILING"] = False
