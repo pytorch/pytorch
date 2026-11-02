@@ -308,21 +308,18 @@ static py::object pyobject_dispatch_schema_aware_arg(
         type->expect<c10::OptionalType>()->getElementType(), std::move(value));
   }
   if (type->kind() == c10::TypeKind::ScalarTypeType) {
-    return py::reinterpret_borrow<py::object>(
-        reinterpret_cast<PyObject*>(
-            torch::getTHPDtype(static_cast<c10::ScalarType>(value.toInt()))));
+    return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+        torch::getTHPDtype(static_cast<c10::ScalarType>(value.toInt()))));
   }
   if (type->kind() == c10::TypeKind::LayoutType) {
-    return py::reinterpret_borrow<py::object>(
-        reinterpret_cast<PyObject*>(
-            torch::getTHPLayout(static_cast<c10::Layout>(value.toInt()))));
+    return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+        torch::getTHPLayout(static_cast<c10::Layout>(value.toInt()))));
   }
   if (type->kind() == c10::TypeKind::MemoryFormatType) {
     return py::cast(static_cast<c10::MemoryFormat>(value.toInt()));
   }
   if (type->kind() == c10::TypeKind::ListType) {
-    const auto& element_type =
-        type->expect<c10::ListType>()->getElementType();
+    const auto& element_type = type->expect<c10::ListType>()->getElementType();
     if (element_type->kind() == c10::TypeKind::ScalarTypeType ||
         element_type->kind() == c10::TypeKind::LayoutType ||
         element_type->kind() == c10::TypeKind::MemoryFormatType) {
@@ -435,8 +432,7 @@ static PyObjectDispatchSchemaCache make_pyobject_dispatch_schema_cache(
         cached.cache_default = true;
       } else {
         const auto kind = type->kind();
-        if (kind == c10::TypeKind::BoolType ||
-            kind == c10::TypeKind::IntType ||
+        if (kind == c10::TypeKind::BoolType || kind == c10::TypeKind::IntType ||
             kind == c10::TypeKind::SymIntType ||
             kind == c10::TypeKind::FloatType) {
           try {
@@ -516,8 +512,7 @@ static PyObject* pyobject_dispatch_normalize_arg(
         PyErr_Clear();
         return nullptr;
       }
-      if (cached.list_N &&
-          PyList_GET_SIZE(list.ptr()) != *cached.list_N) {
+      if (cached.list_N && PyList_GET_SIZE(list.ptr()) != *cached.list_N) {
         return nullptr;
       }
       for (Py_ssize_t j = 0; j < PyList_GET_SIZE(list.ptr()); ++j) {
@@ -601,8 +596,7 @@ static bool pyobject_dispatch_try_normalize_args(
   bool ordered_kwargs = static_cast<size_t>(nargs + nkwargs) <= first_kwonly;
   for (Py_ssize_t j = 0; ordered_kwargs && j < nkwargs; ++j) {
     PyObject* actual = PyTuple_GET_ITEM(kwnames, j);
-    PyObject* expected =
-        cache.args[static_cast<size_t>(nargs + j)].name.ptr();
+    PyObject* expected = cache.args[static_cast<size_t>(nargs + j)].name.ptr();
     const int comparison =
         (actual == expected) ? 0 : PyUnicode_Compare(actual, expected);
     if (comparison != 0) {
@@ -780,14 +774,12 @@ static PyObject* pyobject_dispatch_normalize_return(
         type->expect<c10::OptionalType>()->getElementType(), value);
   }
   if (type->kind() == c10::TypeKind::ListType) {
-    const auto& element_type =
-        type->expect<c10::ListType>()->getElementType();
+    const auto& element_type = type->expect<c10::ListType>()->getElementType();
     const auto element_kind = element_type->kind();
     if (element_kind == c10::TypeKind::TensorType ||
         (element_kind == c10::TypeKind::OptionalType &&
-         element_type->expect<c10::OptionalType>()
-                 ->getElementType()
-                 ->kind() == c10::TypeKind::TensorType)) {
+         element_type->expect<c10::OptionalType>()->getElementType()->kind() ==
+             c10::TypeKind::TensorType)) {
       auto list = py::reinterpret_steal<py::object>(PySequence_List(value));
       if (!list) {
         return nullptr;
@@ -874,10 +866,8 @@ static void pyobject_dispatch_collect_overloaded_tensors(
     PyObject* value,
     std::vector<PyObject*>& overloaded_args) {
   if (THPVariable_Check(value)) {
-    if (THPVariable_Unpack(value)
-            .unsafeGetTensorImpl()
-            ->key_set()
-            .has(c10::DispatchKey::Python)) {
+    if (THPVariable_Unpack(value).unsafeGetTensorImpl()->key_set().has(
+            c10::DispatchKey::Python)) {
       torch::append_overloaded_tensor(&overloaded_args, value);
     }
     return;
@@ -917,8 +907,9 @@ struct PyObjectDispatchRecordScope {
       const auto& schema_args = schema.arguments();
       try {
         for (const auto i : c10::irange(schema_args.size())) {
-          inputs.emplace_back(torch::jit::toIValue(
-              py::handle(op_args[i]), schema_args[i].real_type()));
+          inputs.emplace_back(
+              torch::jit::toIValue(
+                  py::handle(op_args[i]), schema_args[i].real_type()));
         }
       } catch (const std::exception&) {
         inputs.clear();
@@ -954,8 +945,8 @@ static PyObject* pyobject_dispatch_call_python_key(
     return nullptr;
   }
 
-  auto py_args = py::reinterpret_steal<py::object>(
-      PyTuple_New(nargs - op_args_start));
+  auto py_args =
+      py::reinterpret_steal<py::object>(PyTuple_New(nargs - op_args_start));
   TORCH_CHECK_PYTHON(py_args.ptr() != nullptr);
   for (Py_ssize_t i = op_args_start; i < nargs; ++i) {
     PyTuple_SET_ITEM(py_args.ptr(), i - op_args_start, Py_NewRef(args[i]));
@@ -1006,9 +997,7 @@ static PyObject* pyobject_dispatch_with_keyset(
       std::optional<PyObjectDispatchRecordScope> record_scope;
       if (record) {
         record_scope.emplace(
-            self->schema_cache,
-            self->handle->schema(),
-            args + op_args_start);
+            self->schema_cache, self->handle->schema(), args + op_args_start);
       }
 #endif
       PyObject* result = pyobject_dispatch_call_python_key(
@@ -1487,8 +1476,9 @@ void initDispatchBindings(PyObject* module) {
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            if (func.is(py::module::import("torch.library")
-                            .attr("fallthrough_kernel"))) {
+            if (func.is(
+                    py::module::import("torch.library")
+                        .attr("fallthrough_kernel"))) {
               lib.impl(
                   name,
                   torch::dispatch(dispatch, CppFunction::makeFallthrough()),
@@ -1551,16 +1541,18 @@ void initDispatchBindings(PyObject* module) {
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            if (func.is(py::module::import("torch.library")
-                            .attr("fallthrough_kernel"))) {
+            if (func.is(
+                    py::module::import("torch.library")
+                        .attr("fallthrough_kernel"))) {
               lib.fallback(
                   torch::dispatch(dispatch, CppFunction::makeFallthrough()));
             } else {
-              lib.fallback(torch::dispatch(
-                  dispatch,
-                  CppFunction::makeFromBoxedFunctor(
-                      std::make_unique<PythonKernelHolder>(
-                          func, dispatch, with_keyset, /*with_op*/ true))));
+              lib.fallback(
+                  torch::dispatch(
+                      dispatch,
+                      CppFunction::makeFromBoxedFunctor(
+                          std::make_unique<PythonKernelHolder>(
+                              func, dispatch, with_keyset, /*with_op*/ true))));
             }
             END_HANDLE_TH_ERRORS_PYBIND
           },
@@ -1906,16 +1898,20 @@ void initDispatchBindings(PyObject* module) {
           [](c10::DispatchKeySet self, c10::DispatchKeySet other) {
             return self.raw_repr() == other.raw_repr();
           })
-      .def(py::pickle(
-          [](const c10::DispatchKeySet&
-                 obj) { // __getstate__ : creates tuple of state
-            return py::make_tuple(obj.raw_repr());
-          },
-          [](const py::tuple& t) { // __setstate__ : restores state from tuple
-            TORCH_CHECK(
-                t.size() == 1, "__setstate__ expected tuple with one element");
-            return c10::DispatchKeySet::from_raw_repr(t[0].cast<uint64_t>());
-          }))
+      .def(
+          py::pickle(
+              [](const c10::DispatchKeySet&
+                     obj) { // __getstate__ : creates tuple of state
+                return py::make_tuple(obj.raw_repr());
+              },
+              [](const py::tuple&
+                     t) { // __setstate__ : restores state from tuple
+                TORCH_CHECK(
+                    t.size() == 1,
+                    "__setstate__ expected tuple with one element");
+                return c10::DispatchKeySet::from_raw_repr(
+                    t[0].cast<uint64_t>());
+              }))
       .def_static("from_raw_repr", &c10::DispatchKeySet::from_raw_repr);
 
   m.attr("_dispatch_autogradother_backends") =
@@ -2111,8 +2107,9 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_get_nested_int", [](int64_t data, int64_t coeff) {
-    return c10::SymInt(c10::SymNode(
-        c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
+    return c10::SymInt(
+        c10::SymNode(
+            c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {

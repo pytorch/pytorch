@@ -8,6 +8,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 class PyObjectDispatchReturnsTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_custom_op_normalizes_tensor_list_and_mixed_returns(self) -> None:
         @torch.library.custom_op(
             "_pyobject_dispatch_returns::tensor_list", mutates_args=()
@@ -15,9 +17,7 @@ class PyObjectDispatchReturnsTest(unittest.TestCase):
         def tensor_list(x: torch.Tensor) -> list[torch.Tensor]:
             return cast(list[torch.Tensor], (x.clone(), x + 1))
 
-        @torch.library.custom_op(
-            "_pyobject_dispatch_returns::mixed", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_returns::mixed", mutates_args=())
         def mixed(x: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]:
             return (tensor_list(x), x.clone())
 
@@ -53,15 +53,11 @@ class PyObjectDispatchReturnsTest(unittest.TestCase):
     def test_custom_op_normalizes_scalar_and_void_returns(self) -> None:
         calls = []
 
-        @torch.library.custom_op(
-            "_pyobject_dispatch_returns::scalar", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_returns::scalar", mutates_args=())
         def scalar(x: torch.Tensor) -> float:
             return float(x.numel())
 
-        @torch.library.custom_op(
-            "_pyobject_dispatch_returns::void", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_returns::void", mutates_args=())
         def void(x: torch.Tensor) -> None:
             calls.append(x.numel())
 
@@ -71,7 +67,7 @@ class PyObjectDispatchReturnsTest(unittest.TestCase):
         self.assertEqual(calls, [2])
 
     def test_library_op_normalizes_optional_and_multiple_returns(self) -> None:
-        lib = torch.library.Library("_pyobject_dispatch_returns_library", "DEF")
+        lib = torch.library.Library("_pyobject_dispatch_returns_library", "DEF")  # noqa: SCOPED_LIBRARY
         self.addCleanup(lib._destroy)
         lib.define("optional_some(Tensor x) -> Tensor?")
         lib.define("optional_none(Tensor x) -> Tensor?")
@@ -102,7 +98,7 @@ class PyObjectDispatchReturnsTest(unittest.TestCase):
         torch.testing.assert_close(second, x + 1)
 
     def test_invalid_void_return_reports_schema_mismatch(self) -> None:
-        lib = torch.library.Library("_pyobject_dispatch_invalid_returns", "DEF")
+        lib = torch.library.Library("_pyobject_dispatch_invalid_returns", "DEF")  # noqa: SCOPED_LIBRARY
         self.addCleanup(lib._destroy)
         lib.define("void(Tensor x) -> ()")
         lib.impl("void", lambda x: x, "CPU")
@@ -115,10 +111,10 @@ class PyObjectDispatchReturnsTest(unittest.TestCase):
 
 
 class PyObjectDispatchArgumentsTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_custom_op_accepts_keywords_without_keyword_only_args(self) -> None:
-        @torch.library.custom_op(
-            "_pyobject_dispatch_no_kwonly::scale", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_no_kwonly::scale", mutates_args=())
         def scale(x: torch.Tensor, multiplier: float = 2.0) -> torch.Tensor:
             return x * multiplier
 
@@ -130,9 +126,7 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
         torch.testing.assert_close(scale(x=x), x * 2)
 
         keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
-        torch.testing.assert_close(
-            op.redispatch(keyset, x=x, multiplier=5.0), x * 5
-        )
+        torch.testing.assert_close(op.redispatch(keyset, x=x, multiplier=5.0), x * 5)
 
     def test_custom_op_accepts_keyword_only_defaults(self) -> None:
         @torch.library.custom_op(
@@ -153,7 +147,7 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
         torch.testing.assert_close(scale(x=x, bias=x), x * 3)
 
     def test_kwargs_defaults_tensor_lists_and_scalars(self) -> None:
-        lib = torch.library.Library("_pyobject_dispatch_args", "DEF")
+        lib = torch.library.Library("_pyobject_dispatch_args", "DEF")  # noqa: SCOPED_LIBRARY
         self.addCleanup(lib._destroy)
         lib.define(
             "weighted(Tensor[] tensors, float[] weights, float scale=1.0, "
@@ -184,23 +178,19 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
         self.assertIsNone(received[-1][3])
 
         keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
-        result = op.redispatch(
-            keyset, weights=(0.5, 0.5), tensors=(x, x * 3), bias=x
-        )
+        result = op.redispatch(keyset, weights=(0.5, 0.5), tensors=(x, x * 3), bias=x)
         torch.testing.assert_close(result, x * 3)
         self.assertIs(received[-1][3], x)
 
         op._enable_pyobj_dispatch(False)
-        torch.testing.assert_close(
-            op(weights=(0.5, 0.5), tensors=(x, x * 3)), x * 2
-        )
+        torch.testing.assert_close(op(weights=(0.5, 0.5), tensors=(x, x * 3)), x * 2)
         op._enable_pyobj_dispatch(True)
 
         with self.assertRaises((RuntimeError, TypeError)):
             op((x,), (1.0,), unknown=x)
 
     def test_ordered_symints_and_out_of_order_scalar_kwargs(self) -> None:
-        lib = torch.library.Library("_pyobject_dispatch_scalar_args", "DEF")
+        lib = torch.library.Library("_pyobject_dispatch_scalar_args", "DEF")  # noqa: SCOPED_LIBRARY
         self.addCleanup(lib._destroy)
         lib.define(
             "combine(Tensor x, SymInt n, float scale, bool negate, "
@@ -244,7 +234,7 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
             op(x=x, n=1 << 80, scale=1.0, negate=False)
 
     def test_string_device_argument_is_normalized(self) -> None:
-        lib = torch.library.Library("_pyobject_dispatch_device_arg", "DEF")
+        lib = torch.library.Library("_pyobject_dispatch_device_arg", "DEF")  # noqa: SCOPED_LIBRARY
         self.addCleanup(lib._destroy)
         lib.define("factory(Device device) -> Tensor")
         received = []
@@ -261,7 +251,7 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
         self.assertIsInstance(received[0], torch.device)
 
     def test_dtype_and_device_kwargs_are_normalized(self) -> None:
-        lib = torch.library.Library("_pyobject_dispatch_type_args", "DEF")
+        lib = torch.library.Library("_pyobject_dispatch_type_args", "DEF")  # noqa: SCOPED_LIBRARY
         self.addCleanup(lib._destroy)
         lib.define("cast(Tensor x, *, ScalarType dtype, Device device) -> Tensor")
         received = []
@@ -282,6 +272,8 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
 
 
 class PyObjectDispatchPythonKeyTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_mode_normalizes_tensor_list_return(self) -> None:
         @torch.library.custom_op(
             "_pyobject_dispatch_python_key::list_return", mutates_args=()
@@ -306,9 +298,7 @@ class PyObjectDispatchPythonKeyTest(unittest.TestCase):
         self.assertEqual(calls, [op])
 
     def test_torch_dispatch_mode_intercepts_custom_op(self) -> None:
-        @torch.library.custom_op(
-            "_pyobject_dispatch_python_key::mode", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_python_key::mode", mutates_args=())
         def custom(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -401,10 +391,10 @@ class PyObjectDispatchPythonKeyTest(unittest.TestCase):
 
 
 class PyObjectDispatchProfileTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pyobj_dispatched_op_appears_in_profiler(self) -> None:
-        @torch.library.custom_op(
-            "_pyobject_dispatch_profile::visible", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_profile::visible", mutates_args=())
         def visible(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -419,10 +409,10 @@ class PyObjectDispatchProfileTest(unittest.TestCase):
 
 
 class PyObjectDispatchCachedDefaultsTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_omitted_scalar_defaults_use_cached_values(self) -> None:
-        @torch.library.custom_op(
-            "_pyobject_dispatch_defaults::scaled", mutates_args=()
-        )
+        @torch.library.custom_op("_pyobject_dispatch_defaults::scaled", mutates_args=())
         def scaled(
             x: torch.Tensor,
             scale: float = 2.0,
@@ -440,9 +430,11 @@ class PyObjectDispatchCachedDefaultsTest(unittest.TestCase):
         x = torch.ones(2)
         for _ in range(3):
             torch.testing.assert_close(scaled(x), torch.full((2,), 7.0))
-        torch.testing.assert_close(
-            scaled(x, count=1, other=x), torch.full((2,), 4.0)
-        )
+        torch.testing.assert_close(scaled(x, count=1, other=x), torch.full((2,), 4.0))
         torch.testing.assert_close(
             scaled(x=x, flag=False, scale=1.0), torch.full((2,), 3.0)
         )
+
+
+if __name__ == "__main__":
+    run_tests()
