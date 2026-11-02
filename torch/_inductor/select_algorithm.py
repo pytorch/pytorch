@@ -674,6 +674,8 @@ class TritonTemplateKernel(TritonKernel):
         self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
+        # Input args given a device-side TMA descriptor under HOST_SIDE_TMA.
+        self.device_tma_descriptor_args = OrderedSet[str]()
         self.call_sizes = call_sizes
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
@@ -1239,19 +1241,33 @@ class TritonTemplateKernel(TritonKernel):
             dim_order = list(range(ndim))
 
         host_side = self.meta.get("HOST_SIDE_TMA", False)
-        if host_side and input_name is not None:
+        arg_name = (
+            self.args.input_buffers.get(node.get_name(), input_name)
+            if input_name is not None
+            else None
+        )
+        if host_side and arg_name is not None:
             # The host launcher needs static dims, so a dynamic input falls back
-            # to a device-side descriptor.
-            host_side = all(
+            # to a device-side descriptor. def_kernel merges operands that view
+            # one buffer into a single arg, and the launcher would hand that arg
+            # to all of them as a TensorDescriptor, so they must all fall back.
+            device_args = self.device_tma_descriptor_args
+            if arg_name in device_args or not all(
                 isinstance(e, (int, sympy.Integer))
                 for e in (*size, *self.get_stride_and_maybe_freeze_layout(node))
-            )
+            ):
+                if arg_name in self.host_tma_descriptor_args:
+                    raise NotImplementedError(
+                        f"host-side TMA cannot share arg {arg_name} with a "
+                        "device-side descriptor for a dynamic view"
+                    )
+                device_args.add(arg_name)
+                host_side = False
         if host_side:
-            if input_name is None:
+            if arg_name is None:
                 raise NotImplementedError(
                     "host-side TMA descriptors for template outputs are not supported"
                 )
-            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
             # Read dims off the IR node rather than via self.size()/self.stride():
             # those wrap the result in tl.full(...) under int64 indexing, which is
             # kernel-side syntax the host launcher cannot resolve.

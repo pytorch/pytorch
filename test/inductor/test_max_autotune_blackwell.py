@@ -351,6 +351,36 @@ class TestMaxAutotuneBlackwell(TestCase):
 
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_host_side_tma_aliased_dynamic_operand(self):
+        # Both operands view x, so def_kernel passes them as one arg. A is
+        # dynamic, so B must also take a device-side descriptor: the launcher
+        # can't pass the shared arg as a host TensorDescriptor to only one.
+        x = torch.randint(-2, 3, (256, 64)).to(torch.float16).to(GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def mm(x):
+            return x @ x[:64].t()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm), x)
+        torch.testing.assert_close(c_actual, mm(x), atol=0, rtol=0)
+        FileCheck().check_not("host_tma_descriptor_args").run(code[0])
+        FileCheck().check("tl.make_tensor_descriptor(base=A").check(
+            "tl.make_tensor_descriptor(base=B"
+        ).run(code[0])
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",

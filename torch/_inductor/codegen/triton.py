@@ -3204,12 +3204,17 @@ class TMACompatibilityChecker:
         offset = sizevars.remove_precomputed_replacements(
             sympy.sympify(constant_offset)
         )
+        # Constant requirements were already decided by the hint check. Mod
+        # requires a non-negative dividend, so the offset's alignment is checked
+        # on its magnitude; strides are required to be non-negative.
         requirements = [sympy.Eq(strides[-1], 1)]
+        requirements += [sympy.Ge(st, 0) for st in strides[:-1] if st.free_symbols]
         if V.graph.get_current_device_or_throw().type != "cpu":
             element_size = self.dtype.itemsize
             requirements += [
                 sympy.Eq(Mod(expr * element_size, 16), 0)
-                for expr in (*strides[:-1], offset)
+                for expr in (*strides[:-1], sympy.Abs(offset))
+                if expr.free_symbols
             ]
         requirements = [r for r in requirements if r.free_symbols]
         if V.graph.aot_mode:
@@ -3282,6 +3287,18 @@ class TMACompatibilityChecker:
         if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
             log.debug(
                 "%s tensor descriptors require innermost stride to be 1. Strides are: %s",
+                self.failed_debug_prefix,
+                strides,
+            )
+            return False
+
+        # Tensor descriptor strides are unsigned. A flipped view has a negative
+        # stride, which a precomputed size can hide from the checks below.
+        if self.force and not all(
+            V.graph.sizevars.statically_known_geq(stride, 0) for stride in strides[:-1]
+        ):
+            log.debug(
+                "%s tensor descriptors require non-negative strides. Strides are: %s",
                 self.failed_debug_prefix,
                 strides,
             )

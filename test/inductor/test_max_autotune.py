@@ -607,6 +607,65 @@ class TestMaxAutotune(TestCase):
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    def test_max_autotune_persistent_tma_static_rejection_guards_nothing(self):
+        # An unaligned dynamic K fails before b's static N=257 rejects TMA for
+        # every input. Guarding the K failure would only recompile an aligned K
+        # into the same non-TMA graph.
+        cnt = CompileCounterWithBackend("inductor")
+        fn = torch.compile(lambda a, b: a @ b, backend=cnt)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.native_matmul": False,
+                "triton.tlx_mode": None,
+            }
+        ):
+            for k in (513, 512):
+                a = torch.randint(-2, 3, (256, k), device=GPU_TYPE).half()
+                b = torch.randint(-2, 3, (k, 257), device=GPU_TYPE).half()
+                torch._dynamo.mark_dynamic(a, 1)
+                torch._dynamo.mark_dynamic(b, 0)
+                self.assertEqual(fn(a, b), a @ b, atol=0, rtol=0)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    def test_max_autotune_persistent_tma_epilogue_load_negative_stride(self):
+        # c.flip(0) has stride -N, hidden in a precomputed size when N is
+        # dynamic. A tensor descriptor can't take a negative stride, so the
+        # forced epilogue load must fall back to a plain load.
+        def f(a, b, c):
+            return a @ b.t() + c.flip(0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": False,
+                "triton.enable_tma_load_for_template_epilogue": True,
+                "triton.transpose_discontiguous_tensor_descriptor": False,
+                "benchmark_epilogue_fusion": False,
+                "triton.native_matmul": False,
+                "triton.tlx_mode": None,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            a = torch.randint(-2, 3, (512, 256), device=GPU_TYPE).half()
+            b = torch.randint(-2, 3, (64, 256), device=GPU_TYPE).half()
+            c = torch.randint(-2, 3, (512, 64), device=GPU_TYPE).half()
+            torch._dynamo.mark_dynamic(b, 0)
+            torch._dynamo.mark_dynamic(c, 1)
+            self.assertEqual(torch.compile(f)(a, b, c), f(a, b, c), atol=0, rtol=0)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     def test_max_autotune_persistent_tma_rejection_guards_only_failure(self):
         # An aligned K passes before an unaligned N rejects TMA. Only the N
         # requirement may be guarded: a later unaligned K gets the same non-TMA

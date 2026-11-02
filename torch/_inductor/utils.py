@@ -2399,9 +2399,10 @@ def can_use_tma(
     Sizes are never specialized; only these requirements are checked. With
     ``add_guards=True``, a requirement that depends on a dynamic size is decided
     from the example inputs. Requirements that held are guarded only once TMA is
-    accepted; if one fails, only that failure is guarded, so an input on
-    the other side of it recompiles (an aligned size after an unaligned one gets
-    TMA on the recompile). Under AOTI, where those guards are not checked at
+    accepted. If TMA is rejected only by requirements on dynamic sizes, it is
+    guarded that one of them still fails, so an input meeting all of them
+    recompiles (an aligned size after an unaligned one gets TMA); a static
+    failure rejects TMA for every input and guards nothing. Under AOTI, where those guards are not checked at
     runtime, a requirement must instead be statically provable. With
     ``add_guards=False``, requirements are decided from size hints and nothing
     is guarded.
@@ -2410,10 +2411,11 @@ def can_use_tma(
 
     from .virtualized import V
 
-    # Requirements that held on the hints, guarded only once TMA is accepted.
-    # Guarding each as it passed would leave guards behind when a later
-    # requirement rejects TMA, recompiling inputs that get the same graph.
+    # Requirements decided on the hints, guarded only once the outcome is known.
+    # Guarding each as it is checked would leave guards behind that don't
+    # decide the result, recompiling inputs that get the same graph.
     held: list[sympy.Basic] = []
+    failed: list[sympy.Basic] = []
 
     def _holds(requirement: sympy.Basic) -> bool:
         sizevars = V.graph.sizevars
@@ -2425,8 +2427,16 @@ def can_use_tma(
             for s in requirement.free_symbols
         }
         if not sizevars.statically_known_true(requirement.xreplace(hints)):
-            # Guards the failure, so an input that meets it recompiles.
-            return add_guards and sizevars.guard_or_false(requirement)
+            if (
+                not add_guards
+                or not requirement.free_symbols
+                or free_unbacked_symbols(requirement)
+            ):
+                return False
+            # Fails on the hints but depends on backed sizes: keep checking, as
+            # a later static failure would reject TMA for every input anyway.
+            failed.append(requirement)
+            return True
         if add_guards and requirement.free_symbols:
             held.append(requirement)
         return True
@@ -2524,6 +2534,11 @@ def can_use_tma(
         and all(_is_tma_compatible_matrix(m) for m in matrices)
         and _is_tma_compatible_layout(output_layout)
     ):
+        return False
+    if failed:
+        # Only dynamic requirements reject TMA: guard that one still fails, so
+        # an input meeting all of them recompiles and gets TMA.
+        V.graph.sizevars.guard_or_false(sympy.Or(*(sympy.Not(r) for r in failed)))
         return False
     # Guarded one by one rather than as a single And, so later static checks
     # (e.g. statically_known_multiple_of) still see each fact.
