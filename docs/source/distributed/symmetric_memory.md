@@ -58,12 +58,19 @@ compiler to select a Symmetric Memory fusion when applicable.
 (symmetric-memory-stream-ordering)=
 ### Stream ordering
 
-Built-in CUDA-backend barriers, signal operations, and collectives serialize
-their signal-pad use across streams for each process group and device. This
-serialization also participates in CUDA graph capture. It does not cover
-NVSHMEM operations, `ncclPutSignal`/`ncclWaitSignal`, or custom kernels that use
-a raw signal-pad tensor. Issue those uncovered operations for a group from one
-stream, or explicitly order their streams.
+Built-in CUDA-backend barriers, signal operations, and collectives, and the
+NCCL backend's `barrier`, `reduce_scatter_offset`, and `all_to_all_nd`, run in
+issue order across streams for each process group and device: they share the
+group's signal pad or the barriers of its NCCL device communicator. Under CUDA
+graph capture, the operations of the capture in progress are ordered among
+themselves, and eager operations stay ordered when a capture runs between
+them. Captured operations are not ordered against eager ones, and a graph
+replay is not ordered against eager operations or other replays; order
+replays yourself. The serialization does not cover NVSHMEM operations,
+operations built on NCCL's own signal APIs (`ncclSignal`, `ncclPutSignal`,
+`ncclWaitSignal`), such as the NCCL backend's `put_signal` and `wait_signal`,
+or custom kernels that use a raw signal-pad tensor. Issue those uncovered
+operations for a group from one stream, or explicitly order their streams.
 
 ## Why Symmetric Memory?
 
