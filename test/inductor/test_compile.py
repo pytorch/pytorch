@@ -23,7 +23,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU
 
 
 _IS_MACOS = sys.platform.startswith("darwin")
@@ -102,14 +102,16 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(
+        torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+    )
     @config.patch(cpp_wrapper=True)
     def test_compiled_conv_rejects_mixed_input_weight_devices(self):
         mod = torch.nn.Conv2d(3, 3, kernel_size=3, padding=1).eval()
         inp = torch.randn(1, 3, 8, 8)
         mod_opt = torch.compile(mod, backend="inductor")
 
-        mod.to("cuda")
+        mod.to(GPU_TYPE)
         with self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device"
         ):
@@ -394,7 +396,6 @@ class TestStandaloneInductor(TestCase):
         os.environ,
         {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0+PTX"},
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_multi_arch_gencode_options(self):
         from torch._inductor.codegen.cuda import compile_utils
 
@@ -416,7 +417,6 @@ class TestStandaloneInductor(TestCase):
         os.environ,
         {"TORCH_CUDA_ARCH_LIST": "9.0;9.0a;10.0"},
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_multi_arch_gencode_options_suffix_arch(self):
         from torch._inductor.codegen.cuda import compile_utils
 
@@ -432,7 +432,6 @@ class TestStandaloneInductor(TestCase):
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_target_arch_preserves_suffix(self, _):
         from torch._inductor.codegen.cuda import compile_utils
 
@@ -447,7 +446,6 @@ class TestStandaloneInductor(TestCase):
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
     def test_aoti_cuda_fatbin_command_uses_nvcc_for_extra_archs(self, _):
         with tempfile.TemporaryDirectory() as tmp_dir:
             raw_cubin = os.path.join(tmp_dir, "kernel.cubin")
@@ -469,13 +467,17 @@ class TestStandaloneInductor(TestCase):
         self.assertIn("arch=compute_86,code=sm_86", cmd)
         self.assertNotIn("arch=compute_100a,code=sm_100a", cmd)
 
+    @mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx900,gfx90a,gfx942"})
+    # Keeps get_rocm_target_archs() from appending the live GPU arch.
+    @mock.patch("torch.cuda.is_available", return_value=False)
     @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0"})
     @mock.patch(
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
         return_value="100a",
     )
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
-    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(self, _):
+    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(
+        self, _nvcc_arch, _cuda_available
+    ):
         build_option = BuildOptionsBase(compiler="c++")
         with tempfile.TemporaryDirectory() as tmp_dir:
             cmake_path = os.path.join(tmp_dir, "CMakeLists.txt")
@@ -490,27 +492,49 @@ class TestStandaloneInductor(TestCase):
             with open(cmake_path) as f:
                 cmake_contents = f.read()
 
-        self.assertNotIn("compute_70", cmake_contents)
-        self.assertNotIn("compute_100a", cmake_contents)
-        self.assertIn("-gencode arch=compute_80,code=sm_80", cmake_contents)
-        self.assertIn("-gencode arch=compute_86,code=sm_86", cmake_contents)
-        self.assertIn("-gencode arch=compute_90,code=sm_90", cmake_contents)
+        if torch.version.hip is not None:
+            from torch._inductor.rocm_multiarch_utils import get_rocm_target_archs
 
-    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+            # ROCm links a prebuilt multi-arch bundle built for get_rocm_target_archs(),
+            # so the generated CMake project carries no GPU toolchain.
+            self.assertNotIn("enable_language(CUDA)", cmake_contents)
+            self.assertNotIn("-gencode", cmake_contents)
+            self.assertNotIn("embed_gpu_kernel", cmake_contents)
+            self.assertEqual(get_rocm_target_archs(), ["gfx900", "gfx90a", "gfx942"])
+        else:
+            self.assertNotIn("compute_70", cmake_contents)
+            self.assertNotIn("compute_100a", cmake_contents)
+            self.assertIn("-gencode arch=compute_80,code=sm_80", cmake_contents)
+            self.assertIn("-gencode arch=compute_86,code=sm_86", cmake_contents)
+            self.assertIn("-gencode arch=compute_90,code=sm_90", cmake_contents)
+
     def test_aoti_cuda_save_kernel_recompiles_for_target_arch(self):
         from torch._inductor.runtime.triton_heuristics import (
             CachingAutotuner,
             TritonCompileResult,
         )
 
+        is_rocm = torch.version.hip is not None
         autotuner = object.__new__(CachingAutotuner)
         autotuner.inductor_meta = {"kernel_name": "triton_kernel"}
         autotuner.triton_meta = {}
-        autotuner.device_props = types.SimpleNamespace(type="cuda", cc=100)
+        autotuner.device_props = types.SimpleNamespace(
+            type="hip" if is_rocm else "cuda",
+            cc="gfx90a" if is_rocm else 100,
+        )
 
+        current_asm = (
+            {
+                "hsaco": b"current hsaco",
+                "amdgcn": "current amdgcn",
+                "llir": "current llvm ir",
+            }
+            if is_rocm
+            else {"cubin": b"current cubin", "ptx": "current ptx"}
+        )
         current_binary = types.SimpleNamespace(
             metadata=types.SimpleNamespace(name="kernel", num_warps=1, shared=0),
-            asm={"cubin": b"current cubin", "ptx": "current ptx"},
+            asm=current_asm,
         )
         target_binary = types.SimpleNamespace(
             metadata=types.SimpleNamespace(name="kernel", num_warps=1, shared=0),
@@ -527,6 +551,33 @@ class TestStandaloneInductor(TestCase):
             global_scratch=None,
             profile_scratch=None,
         )
+
+        if is_rocm:
+            for multi_arch, asm_key, expected_asm_type in (
+                (True, "llir", "ll"),
+                (False, "amdgcn", "amdgcn"),
+            ):
+                with (
+                    self.subTest(emit_multi_arch_kernel=multi_arch),
+                    config.patch({"aot_inductor.emit_multi_arch_kernel": multi_arch}),
+                    mock.patch.object(
+                        CachingAutotuner, "_precompile_config"
+                    ) as precompile_config,
+                    mock.patch(
+                        "torch._inductor.codecache.CudaKernelParamCache.set"
+                    ) as cache_set,
+                ):
+                    autotuner.save_gpu_kernel("stream", launcher)
+                    precompile_config.assert_not_called()
+                    _, params, binary, bin_type, asm, asm_type = (
+                        cache_set.call_args.args
+                    )
+                    self.assertIsNone(params["cuda_arch"])
+                    self.assertEqual(binary, b"current hsaco")
+                    self.assertEqual(bin_type, "hsaco")
+                    self.assertEqual(asm, current_asm[asm_key])
+                    self.assertEqual(asm_type, expected_asm_type)
+            return
 
         with (
             config.patch(

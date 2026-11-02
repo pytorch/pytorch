@@ -14,7 +14,12 @@ concurrency:
 permissions: read-all
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   linux-manylinux-2_28-py3-cpu-s390x-build:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: linux-manylinux-2_28-py3-cpu-s390x
     uses: ./.github/workflows/_s390x-build.yml

@@ -1094,15 +1094,15 @@ void sdpa(
       enable_dropout);
   auto& partition =
       sdpa_forward::find_or_create_graph_partition(logical_params);
-  l_inputs = std::move(logical_params.get_input());
-  l_outputs = std::move(logical_params.get_output());
+  l_inputs = logical_params.get_input();
+  l_outputs = logical_params.get_output();
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
   std::vector<dnnl::graph::tensor> outputs = {
-      {l_outputs[0], eng, attention.data_ptr()},
+      {l_outputs[0], eng, attention.mutable_data_ptr()},
   };
   if (compute_logsumexp) {
-    outputs.emplace_back(l_outputs[1], eng, logsumexp.data_ptr());
+    outputs.emplace_back(l_outputs[1], eng, logsumexp.mutable_data_ptr());
   }
 
   size_t i = 0;
@@ -1110,7 +1110,8 @@ void sdpa(
   inputs.reserve(l_inputs.size());
 
 #define ADD_INPUT(variable) \
-  inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
+  inputs.emplace_back(      \
+      l_inputs[i++], eng, const_cast<void*>(variable.const_data_ptr()))
 
   ADD_INPUT(query_aligned);
   ADD_INPUT(key_aligned);
@@ -1221,14 +1222,14 @@ void sdpa_backward(
       enable_dropout);
   auto& partition =
       sdpa_backward::find_or_create_backward_graph_partition(logical_params);
-  l_inputs = std::move(logical_params.get_input());
-  l_outputs = std::move(logical_params.get_output());
+  l_inputs = logical_params.get_input();
+  l_outputs = logical_params.get_output();
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
   std::vector<dnnl::graph::tensor> outputs = {
-      {l_outputs[0], eng, grad_query.data_ptr()},
-      {l_outputs[1], eng, grad_key.data_ptr()},
-      {l_outputs[2], eng, grad_value.data_ptr()},
+      {l_outputs[0], eng, grad_query.mutable_data_ptr()},
+      {l_outputs[1], eng, grad_key.mutable_data_ptr()},
+      {l_outputs[2], eng, grad_value.mutable_data_ptr()},
   };
 
   size_t i = 0;
@@ -1236,7 +1237,8 @@ void sdpa_backward(
   inputs.reserve(l_inputs.size());
 
 #define ADD_INPUT(variable) \
-  inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
+  inputs.emplace_back(      \
+      l_inputs[i++], eng, const_cast<void*>(variable.const_data_ptr()))
 
   ADD_INPUT(grad_out_aligned);
   ADD_INPUT(query_aligned);

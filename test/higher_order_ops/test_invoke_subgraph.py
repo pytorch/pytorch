@@ -47,8 +47,10 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     HardwareClassification,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TestCase,
@@ -79,6 +81,92 @@ def _aot_eager_with_runtime_epilogue():
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_make_fx_traced_subgraph_joint(self):
+        # A subgraph captured by make_fx records its output meta["val"] below
+        # autograd, so requires_grad is False there even though the region does
+        # need a gradient. get_output_metadata must not take that at face value:
+        # if it does, the backward is built with zero tangents and tracing the
+        # joint dies with "outs_to_grad length (1) != tangents length (0)".
+        from torch._functorch.aot_autograd import aot_export_joint_simple
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def gn(x, y):
+            return (torch.sigmoid(torch.matmul(x, y)),)
+
+        subgraph = make_fx(gn)(
+            torch.randn(4, 4, requires_grad=True),
+            torch.randn(4, 4, requires_grad=True),
+        )
+
+        hop = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            return hop(subgraph, "subgraph_0", x, y)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        joint = aot_export_joint_simple(fn, (x, y), trace_joint=True)
+
+        # The region stays a HOP in both halves of the joint (fw call + bw
+        # recompute), rather than being dropped for lack of tangents.
+        num_hops = len([n for n in joint.graph.nodes if n.target is hop])
+        self.assertEqual(num_hops, 2)
+
+    def test_exported_passthrough_subgraph_joint(self):
+        # An output that is a placeholder carries the example input's
+        # requires_grad=True in meta["val"] while computed outputs carry False,
+        # so a mix of True and False must not be trusted either.
+        from torch._functorch.aot_autograd import aot_export_joint_simple
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return (x, x.sin())
+
+        subgraph = torch.export.export(
+            M(), (torch.randn(4, 4, requires_grad=True),)
+        ).module()
+
+        hop = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x):
+            return hop(subgraph, "subgraph_0", x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        joint = aot_export_joint_simple(fn, (x,), trace_joint=True)
+        num_hops = len([n for n in joint.graph.nodes if n.target is hop])
+        self.assertEqual(num_hops, 2)
+
+    def test_graph_module_pickle_roundtrip(self):
+        # Unpickling re-traces the GraphModule with Proxy operands (the path the
+        # FX/AOTAutograd caches load through). The region must come back as an
+        # invoke_subgraph call, not inlined.
+        import pickle
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def gn(x, y):
+            return (torch.sigmoid(torch.matmul(x, y)),)
+
+        subgraph = make_fx(gn)(torch.randn(4, 4), torch.randn(4, 4))
+        hop = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            (out,) = hop(subgraph, "subgraph_0", x, y)
+            return out
+
+        gm = make_fx(fn)(torch.randn(4, 4), torch.randn(4, 4))
+        reloaded = pickle.loads(pickle.dumps(gm))
+
+        def count_hops(g):
+            return len([n for n in g.graph.nodes if n.target is hop])
+
+        self.assertEqual(count_hops(gm), 1)
+        self.assertEqual(count_hops(reloaded), 1)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        self.assertEqual(gm(x, y), reloaded(x, y))
 
     def test_simple(self):
         def gn(x, y):
@@ -1414,6 +1502,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
+    @skipIfCppFakeTensor("exercises the Python FakeTensor dispatch cache")
     def test_input_mutation_mutiple_times_fake_tensor_cache_hit(self):
         @nested_compile_region
         def gn(x, y):
@@ -2842,9 +2931,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
 
         if not TEST_WITH_CROSSREF:
-            self.assertExpectedInline(
-                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                """\
+            cpp_expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[s77, 16]", primals_2: "Sym(s77)"):
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_1
@@ -2880,12 +2967,15 @@ class GraphModule(torch.nn.Module):
     class partitioned_fw_subgraph_0_0(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]"):
             cos: "f32[s77, 16]" = torch.ops.aten.cos.default(primals_1)
-            return (cos, primals_1, primals_0)""",
+            return (cos, primals_1, primals_0)"""
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                expectedIfCppFakeTensor(
+                    cpp_expected, cpp_expected.replace("add_15", "add")
+                ),
                 ignore_empty_lines=True,
             )
-            self.assertExpectedInline(
-                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                """\
+            bw_cpp_expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "Sym(s77)", getitem_17: "Sym(s77)", getitem_19: "Sym(s77)", getitem_21: "Sym(s77)", getitem_23: "Sym(s77)", getitem_16: "f32[s77, 16]", getitem_18: "f32[s77, 16]", getitem_20: "f32[s77, 16]", getitem_22: "f32[s77, 16]", cos: "f32[s77, 16]", tangents_1: "f32[]"):
         expand: "f32[s77, 16]" = torch.ops.aten.expand.default(tangents_1, [primals_2, 16]);  tangents_1 = primals_2 = None
@@ -2914,8 +3004,16 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul)""",
+            mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul_10)"""
+            python_expected = (
+                bw_cpp_expected.replace("add_16", "add_1")
+                .replace("mul_10", "mul")
+                .replace("mul_9", "mul")
+            )
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                expectedIfCppFakeTensor(bw_cpp_expected, python_expected),
                 ignore_empty_lines=True,
             )
 
@@ -3583,6 +3681,125 @@ class TestInvokeSubgraphReuse(TestCase):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
 
         self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_nan_constant(self):
+        # nan != nan under IEEE eq; the reuse check must compare constants
+        # bitwise so a nan constant input still allows subgraph reuse.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x):
+            a = gn(x, float("nan"))
+            b = gn(x, float("nan"))
+            return torch.stack([a, b])
+
+        x = torch.randn(8)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_constant(self):
+        # -0.0 == 0.0 under IEEE eq, but a subgraph traced with 0.0 baked in
+        # must not be reused for -0.0 (reciprocal flips sign of inf).
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x):
+            a = gn(x, 0.0)
+            b = gn(x, -0.0)
+            return torch.stack([a, b])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    def test_subgraph_reuse_nan_arg(self):
+        # Constants passed as arguments have sources, so reuse goes through
+        # the snapshotted EQUALS_MATCH/CONSTANT_MATCH eval_fn path.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.randn(8)
+        n = float("nan")
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, n, n)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_arg(self):
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, 0.0, -0.0)
+        self.assertEqual(res, fn(x, 0.0, -0.0))
+
+    def test_subgraph_no_reuse_neg_zero_complex_arg(self):
+        @nested_compile_region
+        def gn(x, c: complex):
+            return (x * c).real.reciprocal()
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.ones(8)
+        c1, c2 = complex(0.0, 1.0), complex(-0.0, 1.0)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, c1, c2)
+        self.assertEqual(res, fn(x, c1, c2))
+
+    def test_subgraph_no_reuse_neg_zero_dict_key(self):
+        @nested_compile_region
+        def gn(x, d):
+            (k,) = d.keys()
+            return (x * k).reciprocal()
+
+        def fn(x, d1, d2):
+            return torch.stack([gn(x, d1), gn(x, d2)])
+
+        x = torch.ones(8)
+        d1, d2 = {0.0: None}, {-0.0: None}
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, d1, d2)
+
+        self.assertEqual(count(), 2)
+        self.assertEqual(res, fn(x, d1, d2))
+
+    def test_subgraph_reuse_nan_dict_key(self):
+        @nested_compile_region
+        def gn(x, d):
+            (k,) = d.keys()
+            return x * k
+
+        def fn(x, d1, d2):
+            return torch.stack([gn(x, d1), gn(x, d2)])
+
+        x = torch.ones(8)
+        d1, d2 = {float("nan"): None}, {float("nan"): None}
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, d1, d2)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
 
     def test_subgraph_reuse_different_shapes(self):
         @nested_compile_region

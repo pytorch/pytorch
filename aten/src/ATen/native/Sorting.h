@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/macros/Export.h>
 #include <cstdint>
 
 namespace at {
@@ -23,6 +24,6 @@ using topk_fn = void(*)(const TensorBase&, const TensorBase&, const TensorBase&,
 DECLARE_DISPATCH(sort_fn, sort_stub)
 DECLARE_DISPATCH(topk_fn, topk_stub)
 
-void _fill_indices(const TensorBase &indices, int64_t dim);
+TORCH_API void _fill_indices(const TensorBase &indices, int64_t dim);
 
 } // namespace at::native

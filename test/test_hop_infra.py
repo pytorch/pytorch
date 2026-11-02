@@ -129,13 +129,17 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
         )
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            is_fake_tensor,
+            maybe_get_fake_mode,
+        )
 
         mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
-        self.assertIsInstance(fake_output, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_output))
 
         out = triton_kernel_wrapper_functional(
             kernel_idx=0,
@@ -147,8 +151,8 @@ class TestHOPInfra(TestCase):
         )
 
         self.assertEqual(set(out.keys()), {"out_ptr"})
-        self.assertIsInstance(out["out_ptr"], FakeTensor)
-        self.assertIs(out["out_ptr"].fake_mode, mode)
+        self.assertTrue(is_fake_tensor(out["out_ptr"]))
+        self.assertIs(maybe_get_fake_mode(out["out_ptr"]), mode)
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
@@ -156,13 +160,13 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
         )
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 
         mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
-        self.assertIsInstance(fake_output, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_output))
 
         out = triton_kernel_wrapper_mutation(
             kernel_idx=0,
@@ -173,6 +177,26 @@ class TestHOPInfra(TestCase):
         )
 
         self.assertIsNone(out)
+
+    def test_kernel_side_table_instances_are_independent(self):
+        # Each user-kernel DSL owns a KernelSideTable; their index spaces and
+        # constant args must not leak into each other.
+        from torch._higher_order_ops.user_kernel_hop import KernelSideTable
+
+        a, b = KernelSideTable(), KernelSideTable()
+        k0, k1 = object(), object()
+        self.assertEqual(a.add_kernel(k0), 0)
+        self.assertEqual(a.add_kernel(k0), 0)
+        self.assertEqual(b.add_kernel(k1), 0)
+        self.assertIs(a.get_kernel(0), k0)
+        self.assertIs(b.get_kernel(0), k1)
+        self.assertEqual(a.add_constant_args({"x": 1}), 0)
+        self.assertEqual(b.add_constant_args({"y": 2}), 0)
+        self.assertEqual(a.get_constant_args(0), {"x": 1})
+        b.reset_table()
+        self.assertIs(a.get_kernel(0), k0)
+        with self.assertRaises(AssertionError):
+            b.get_kernel(0)
 
 
 if __name__ == "__main__":
