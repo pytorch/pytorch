@@ -23,6 +23,7 @@ from .kernel_general import (
     _launch,
     ReduceBlock,
 )
+from .kernel_rowtile import _MULTIROW_ROWS_PER_BLOCK
 from .traits import WARP, welford_nouts
 
 
@@ -206,7 +207,8 @@ class PartialColumns:
         identity = trait.init()
         acc = identity
         for p in cutlass.range(group, partitions, self.groups):
-            offset = Int64(p) * Int64(columns) + Int64(safe_col)
+            # select_col_config caps outputs * npar below 2^31.
+            offset = p * columns + safe_col
             acc = combine(acc, tuple(fdtypes[f](ins[f][offset]) for f in range(nf)))
         smem = cutlass.utils.SmemAllocator()
         partials = [
@@ -297,8 +299,9 @@ class _OrderedColReduce:
         if plan.shape != "split" and (partition_begin, self.partition_count) != (0, 1):
             raise ValueError("only split plans have ordered-column partitions")
         # Each worker traverses an original warp tree, even with fewer column lanes.
-        self.workers = 1 if plan.shape == "multirow" else min(worker_warps, plan.wpr)
-        self.outputs_per_block = 128 if plan.shape == "multirow" else tile_columns
+        multirow = plan.shape == "multirow"
+        self.workers = 1 if multirow else min(worker_warps, plan.wpr)
+        self.outputs_per_block = _MULTIROW_ROWS_PER_BLOCK if multirow else tile_columns
         # A ragged final split partition still needs address clamps.
         ragged_tail = (
             plan.shape == "split"
@@ -655,7 +658,8 @@ def reduce_ordered_col(
     else:
         return None
     # The last block's Int32 output index must not wrap past the outputs.
-    if x.stride(-1) != 1 or C < WARP or B * C + 128 >= _INT32_LIMIT:
+    last = B * C + _MULTIROW_ROWS_PER_BLOCK
+    if x.stride(-1) != 1 or C < WARP or last >= _INT32_LIMIT:
         return None
     if column_pack not in (None, 1, 2, 4):
         raise ValueError("column_pack must be one of 1, 2, 4")
@@ -1033,10 +1037,7 @@ def _reduce_col_tile(
         ) + tiled.cache_sig
         build2 = lambda: _compile(  # noqa: E731
             tiled,
-            [
-                _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
-                for pp in parts
-            ],
+            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym(),)) for pp in parts],
             [
                 _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
                 for out in kernel_outs
