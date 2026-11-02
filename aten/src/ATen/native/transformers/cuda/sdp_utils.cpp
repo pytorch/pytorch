@@ -611,6 +611,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
 bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     sdp_params const& params,
     bool debug) {
+#if USE_ROCM
+  return true;
+#else
   // Flash Attention will raise an error in the backward pass if the head_dim
   // is unsupported on SM86-SM89 or SM120-SM121.
   using sm86 = SMVersion<8, 6>;
@@ -642,6 +645,7 @@ bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     return false;
   }
   return true;
+#endif
 }
 
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
@@ -1000,6 +1004,13 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
           ".",
           dprops->minor,
           " gpu.");
+    }
+    return false;
+  }
+  if (dprops->major == 10 && dprops->minor == 7 &&
+      at::detail::getCUDAHooks().versionRuntimeCuDNN() < 92500) {
+    if (debug) {
+      TORCH_WARN("cuDNN SDPA on SM 10.7 requires cuDNN 9.25.0 or newer.");
     }
     return false;
   }

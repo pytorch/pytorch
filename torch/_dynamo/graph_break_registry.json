@@ -104,6 +104,16 @@
       ]
     }
   ],
+  "GB5828": [
+    {
+      "Gb_type": "repr() on object without a known value",
+      "Context": "{fn.__name__}() on {self}",
+      "Explanation": "Dynamo cannot compute {fn.__name__}() of {self.python_type_name()} because the underlying Python object is not known at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0005": [
     {
       "Gb_type": "Attempted to a str() method implemented in C/C++",
@@ -1179,6 +1189,17 @@
       "Hints": []
     }
   ],
+  "GB8974": [
+    {
+      "Gb_type": "synchronize with no accelerator available",
+      "Context": "device={device}",
+      "Explanation": "torch.accelerator.current_device_index() failed while resolving an index-less device for synchronize, so the index cannot be baked into the graph.",
+      "Hints": [
+        "Pass an explicit device index to synchronize.",
+        "Make an accelerator visible to the process."
+      ]
+    }
+  ],
   "GB0072": [
     {
       "Gb_type": "Inplace op on input tensor",
@@ -1433,6 +1454,16 @@
       "Explanation": "observed_exn_gb_explanation",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9131": [
+    {
+      "Gb_type": "Skipped function wrapper __dict__ access",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model the copied dictionary of this function wrapper.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -1813,6 +1844,16 @@
       ]
     }
   ],
+  "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -2043,6 +2084,16 @@
       "Context": "call_method {self} resize_as_ {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.resize_as_()`.",
       "Hints": []
+    }
+  ],
+  "GB9613": [
+    {
+      "Gb_type": "current_stream device mismatch",
+      "Context": "requested={requested_type}, tracking={tracked_type}",
+      "Explanation": "Dynamo stream mismatch: Requested '{requested_type}' stream, but SymbolicStreamState is tracking '{tracked_type}'. Dynamo only tracks streams of the default accelerator (plus stream contexts entered during tracing). Please ensure you are using the default accelerator.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB9186": [
@@ -3630,6 +3681,16 @@
       "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
       "Hints": [
         "Write the repr method in Python"
+      ]
+    }
+  ],
+  "GB8395": [
+    {
+      "Gb_type": "mapping proxy of class with pending attribute mutation",
+      "Context": "class: {vt.value}",
+      "Explanation": "The class __dict__ does not reflect class attributes set earlier in the traced code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

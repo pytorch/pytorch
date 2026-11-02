@@ -62,7 +62,12 @@ from ..exc import (
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
-from ..utils import proxy_args_kwargs, set_example_value, unpack_iterable
+from ..utils import (
+    proxy_args_kwargs,
+    set_example_value,
+    specialize_symnode,
+    unpack_iterable,
+)
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -762,6 +767,7 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._subclasses.fake_tensor import maybe_clear_fake_constant
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -827,9 +833,8 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
+                cloned_carry = cast(TensorVariable, carry.clone())
+                maybe_clear_fake_constant(cloned_carry.proxy.node.meta["example_value"])
                 return cloned_carry
 
         # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
@@ -2350,7 +2355,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from torch._higher_order_ops import BaseHOP
 
         if isinstance(value, BaseHOP):
-            return BaseHOPVariable(value, source, **kwargs)
+            from .builder import VariableBuilder
+
+            return VariableBuilder.create_internal_base_hop(value, source, **kwargs)
         unimplemented(
             gb_type="unsupported HigherOrderOperator",
             context=str(value),
@@ -2366,6 +2373,16 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx, fn=str)
 
     def call_function(
         self,
@@ -2412,15 +2429,17 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         if self.source is None:
             raise AssertionError("source must not be None")
         call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            torch._dynamo.variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 self.value.__call__.__func__,
                 source=AttrSource(call_source, "__func__"),
             ),
-            torch._dynamo.variables.UserDefinedObjectVariable(
+            VariableBuilder.create_internal_user_defined_object(
                 self.value, source=self.source
             ),
             source=call_source,
@@ -3745,8 +3764,7 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     == ctor_info
                 ):
                     return proxy
-        # Installs TYPE_MATCH guards on the underlying strings without realizing.
-        vt.python_type()
+        vt._ensure_type_guard()
         return tx.output.synthetic_graph_input(
             OpaqueStr, (value,), ctor_arg_sources=(vt.source if is_lazy else vt,)
         ).as_proxy()
@@ -3882,6 +3900,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
+        # noqa: RVT001
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])  # type: ignore[arg-type]
 
 
@@ -4235,12 +4254,16 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-def _guard_dict_keys(vt: VariableTracker) -> None:
-    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+def _guard_flex_gemm_constant(vt: VariableTracker) -> Any:
+    """Specialize static metadata and guard nested option key sets."""
+    vt = vt.realize()
     if isinstance(vt, ConstDictVariable):
         vt.install_dict_keys_match_guard()
-        for value in vt.items.values():
-            _guard_dict_keys(value)
+        return {
+            key.vt.as_python_constant(): _guard_flex_gemm_constant(value)
+            for key, value in vt.items.items()
+        }
+    return specialize_symnode(vt).as_python_constant()
 
 
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
@@ -4283,12 +4306,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
-        # as_python_constant guards the present values only; an option added
-        # later (fast_math, backend, a config knob) must recompile.
-        _guard_dict_keys(args[3])
-        _guard_dict_keys(args[4])
-        fn_kwargs = args[3].as_python_constant()
-        kernel_options = args[4].as_python_constant()
+        # Numeric options can be symbolic under dynamic=True, but are static
+        # HOP metadata. Guard key sets too so newly added options recompile.
+        fn_kwargs = _guard_flex_gemm_constant(args[3])
+        kernel_options = _guard_flex_gemm_constant(args[4])
         if self._HOP_NAME is None:
             raise AssertionError("_HOP_NAME must be set")
         (
@@ -5768,10 +5789,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
+                    rewritten = autograd_function_backward_rewritten(
+                        self.bwd_fn.__func__
+                    )
+                    fn_vt = SourcelessBuilder.create_internal_user_function(rewritten)
                     bwd_fn = UserMethodVariable(
-                        torch._dynamo.variables.UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        ),
+                        fn_vt,
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -6187,6 +6210,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         args: list[VariableTracker],
     ) -> tuple[VariableTracker, list[VariableTracker]]:
         from . import UserMethodVariable
+        from .builder import VariableBuilder
 
         source = None
         if self.parent_source:
@@ -6204,7 +6228,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                torch._dynamo.variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn.__func__,
                     source=source and AttrSource(source, "__func__"),
                 ),
