@@ -264,8 +264,24 @@ class _FromTorchTensor(torch.autograd.Function):
             check_tensor_meta(input, check_shape_stride=check_shape_stride)
             # TODO: See if we need to make this run_check logic
             # have a corresponding backward.
+            my_coordinate = device_mesh.get_coordinate()
             for idx, placement in enumerate(placements):
-                if placement.is_replicate():
+                if type(placement) is Shard:
+                    dim = placement.dim
+                    mesh_dim_size = device_mesh.size(mesh_dim=idx)
+                    mesh_dim_rank = my_coordinate[idx]  # type: ignore[index]
+                    expected_size, _ = Shard.local_shard_size_and_offset(
+                        tensor_shape[dim], mesh_dim_size, mesh_dim_rank
+                    )
+                    actual_size = input.size(dim)
+                    if actual_size != expected_size:
+                        raise RuntimeError(
+                            f"Local tensor size on shard dim {dim} is {actual_size}, "
+                            f"but DTensor Shard expects size {expected_size} for "
+                            f"rank {mesh_dim_rank} (global size {tensor_shape[dim]}, "
+                            f"mesh size {mesh_dim_size})"
+                        )
+                elif placement.is_replicate():
                     # broadcast rank 0 tensor to all ranks
                     # only broadcast if run_check is True
                     input = input.contiguous()
