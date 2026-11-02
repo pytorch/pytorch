@@ -459,7 +459,7 @@ class TestOrderedColRoute(TestCase):
         [
             (1, (16, 128, 128), (10, 0), True),
             (1, (16, 128, 127), (10, 0), False),
-            (1, (16, 64, 128), (10, 0), False),
+            (1, (16, 127, 128), (10, 0), False),
             (2, (128, 128, 128), (10, 0), True),
             (2, (127, 128, 128), (10, 0), False),
             (3, (256, 128, 128), (10, 0), True),
@@ -488,14 +488,18 @@ class TestOrderedColDevice(TestCase):
         "op,dtype,shape",
         [
             ("sum", torch.float32, (2, 128, 33)),
-            ("sum", torch.float32, (2, 20, 33)),
-            ("sum", torch.float32, (9000, 32)),
+            ("sum", torch.float32, (8000, 32)),
+            ("sum", torch.float16, (2, 3000, 32)),
+            ("sum", torch.bfloat16, (2, 3000, 32)),
+            ("mean", torch.float32, (2, 3000, 32)),
             ("argmax", torch.float32, (4, 2048, 64)),
             ("var_mean", torch.bfloat16, (2, 2048, 40)),
-            ("argmax", torch.float32, (9000, 32)),
-            ("var_mean", torch.float32, (2, 9000, 32)),
+            ("argmax", torch.float32, (8000, 32)),
+            ("var_mean", torch.float32, (2, 8000, 32)),
         ],
-        name_fn=lambda op, dtype, shape: f"{op}_{len(shape)}d_{shape[-2]}",
+        name_fn=lambda op, dtype, shape: (
+            f"{op}_{str(dtype)[6:]}_{len(shape)}d_{shape[-2]}"
+        ),
     )
     def test_direct_plan_matches_the_indexed_tree(self, device, op, dtype, shape):
         """Preserve each row's inner-tree DAG across plan shapes, fields, and ranks."""
@@ -505,6 +509,7 @@ class TestOrderedColDevice(TestCase):
         kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
         trait, outputs = {
             "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
+            "mean": (T.MeanOps(acc=cutlass.Float32), [torch.float32]),
             "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
             "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
         }[op]
@@ -525,6 +530,41 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(reference)
         for a, b in zip(got, reference, strict=True):
             self.assertEqual(a.flatten().view(torch.uint8), b.view(torch.uint8))
+
+    @parametrize("pattern", ["negative_zero", "ties"])
+    def test_special_values_match_the_indexed_tree(self, device, pattern):
+        """Keep signed-zero sums and argmax ties bitwise equal to the indexed tree."""
+        rows, columns = 2048, 32
+        if pattern == "negative_zero":
+            x = torch.full((rows, columns), -0.0, device=device)
+            trait, outputs = T.SumOps(), [torch.float32]
+        else:
+            x = torch.ones(rows, columns, device=device)
+            trait, outputs = T.ArgMaxOps(), [torch.int64]
+        key = f"special_{pattern}"
+        got = ct.reduce_ordered_col(trait, key, x, outputs, 1)
+        reference = kg._try_indexed_itree(
+            trait,
+            key + "_reference",
+            x,
+            [(rows, columns)],
+            [(columns, 1)],
+            columns,
+            rows,
+            outputs,
+            1,
+        )
+        self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
+
+    @parametrize("op", ["sum", "argmax"])
+    @parametrize("rows,served", [(8192, True), (8193, False), (16384, False)])
+    def test_replay_is_bounded(self, device, op, rows, served):
+        """Decline looped plans whose static replay passes MAX_UNROLL."""
+        x = torch.randn(rows, 32, device=device)
+        trait = T.SumOps() if op == "sum" else T.ArgMaxOps()
+        output = torch.float32 if op == "sum" else torch.int64
+        got = ct.reduce_ordered_col(trait, "bounded_" + op, x, [output], 1)
+        self.assertEqual(got is not None, served)
 
     def test_batch_sizes_share_one_kernel(self, device):
         trait = T.SumOps(acc=cutlass.Float32)
