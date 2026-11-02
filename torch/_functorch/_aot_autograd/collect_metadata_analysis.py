@@ -281,7 +281,8 @@ def run_functionalized_fw_and_collect_metadata(
                     + "\n".join(mismatches)
                     + "\nPrefer `with torch.autocast(...)` so dtype is restored before "
                     "the graph exits, or avoid calling torch.set_autocast_dtype inside "
-                    "the compiled region."
+                    "the compiled region. If you hit this under torch.compile while "
+                    "using an autocast context manager, please file a bug."
                 )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
