@@ -3011,10 +3011,18 @@ class cuda(cutlass):
 
     # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
-    # autotuning and records the solutions, including a range of sizes of the
-    # dynamic dim; "reuse" instead borrows the nearest recorded shape, benchmarks
-    # it against the default kernel, and records the winner. Run as separate
-    # passes: "tune" builds the results file, "reuse" consumes it.
+    # autotuning and records the solutions; with autotune_tunableop_ladder it
+    # also tunes a range of sizes of each GEMM's dynamic dim, the traced shape
+    # among them. A GEMM it skips (ladder off, static, several dynamic symbols,
+    # dynamic K, a non-dense operand, an operand still flexible at lowering, an
+    # unsupported choice, a CPU winner, an unbacked dim with no user hint, the
+    # layout-conflict fallback) is covered only with PYTORCH_TUNABLEOP_ENABLED
+    # set, by max-autotune benchmarking the aten choice here or a later run.
+    # Tuning happens while lowering, so a warm FxGraphCache or AOTAutogradCache
+    # hit tunes nothing at all: a tune pass needs a cold cache, or
+    # force_disable_caches. "reuse" instead borrows the nearest
+    # recorded shape, benchmarks it against the default, and records the
+    # winner. Run as separate passes: "tune" writes, "reuse" reads.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
@@ -3022,9 +3030,18 @@ class cuda(cutlass):
 
     # Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning
     # can hang, which subprocess isolation alone does not fix, so the wait is
-    # bounded.
+    # bounded. Set below about a minute only the traced shape is tuned: a rung
+    # needs a slice big enough to be a fair trial rather than a timeout.
     autotune_tunableop_timeout: float = float(
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_TIMEOUT", "900")
+    )
+
+    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic
+    # dim. It gives runtime a chance of an exact hit on a size the compile never
+    # saw, and is nearly all of the tuning cost. Off, Inductor submits nothing:
+    # only PYTORCH_TUNABLEOP_ENABLED covers it, via max-autotune or a later run.
+    autotune_tunableop_ladder: bool = (
+        os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_LADDER", "1") == "1"
     )
 
 
