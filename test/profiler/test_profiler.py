@@ -2372,8 +2372,8 @@ with open(sys.argv[1], "w") as f:
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
-    # The child deadlocks once the parent has initialized Kineto's XPU profiler,
-    # which the first profiling session does on any XPU build.
+    # The child deadlocks once the parent has run an XPU profiling session,
+    # which earlier tests in this file do on XPU builds.
     @unittest.skipIf(
         TEST_XPU,
         "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",

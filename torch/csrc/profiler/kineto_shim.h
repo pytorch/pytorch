@@ -115,7 +115,8 @@ using ActivityFilter = std::unordered_map<
 using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 
 // Whether this process has a device that Kineto could trace. A PrivateUse1
-// backend counts once it has registered its own name.
+// backend counts once it has registered its own name. Asking can initialize a
+// device driver; for CUDA it calls cudaGetDeviceCount.
 bool isDevicePresent();
 
 TORCH_API void prepareTrace(
