@@ -2,7 +2,7 @@
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -160,7 +160,7 @@ flex_decoding_template = TritonTemplate(
 
 
 def get_split_k(
-    B: int, H: int, Mk: int, device: torch.device, block_n: Optional[int] = None
+    B: int, H: int, Mk: int, device: torch.device, block_n: int | None = None
 ) -> int:
     interface = get_interface_for_device(device)
     num_SM = interface.get_multi_processor_count(device)
