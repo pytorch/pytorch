@@ -351,24 +351,22 @@ TEST(OutputJsonTest, HardwareCountersUseDedicatedGpuCounterTrack) {
 }
 
 TEST(OutputJsonTest, MissingDirectoryReportsWriteError) {
-  const auto traceFile =
-      libkineto::test::createTempTraceFile("OutputJsonTest.", ".json");
-  const std::string path = traceFile.path() + ".missing/trace.json";
+  const std::string bogusPath = "/kineto-test-nonexistent-dir/trace.json";
 
-  TestableChromeTraceLogger logger(path);
+  TestableChromeTraceLogger logger(bogusPath);
   logger.handleTraceStart({}, "");
   logger.finalizeTrace(/*endTime=*/300);
 
   const auto error = logger.writeError();
   ASSERT_TRUE(error.has_value());
-  EXPECT_NE(error->find(path), std::string::npos) << *error;
+  EXPECT_NE(error->find(bogusPath), std::string::npos) << *error;
 }
 
 // A failed save must raise and leave the trace intact for a retry.
 TEST(OutputJsonTest, FailedSaveRaisesAndCanBeRetried) {
   const auto traceFile =
       libkineto::test::createTempTraceFile("OutputJsonTest.", ".json");
-  const std::string missingDirPath = traceFile.path() + ".missing/trace.json";
+  const std::string bogusPath = "/kineto-test-nonexistent-dir/trace.json";
 
   Config cfg;
   auto memLogger = std::make_unique<MemoryTraceLogger>(cfg);
@@ -389,10 +387,10 @@ TEST(OutputJsonTest, FailedSaveRaisesAndCanBeRetried) {
   ActivityTrace trace(std::move(memLogger), factory);
 
   try {
-    trace.save(missingDirPath);
+    trace.save(bogusPath);
     FAIL() << "save to a missing directory did not throw";
   } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string(e.what()).find(missingDirPath), std::string::npos)
+    EXPECT_NE(std::string(e.what()).find(bogusPath), std::string::npos)
         << e.what();
   }
 
