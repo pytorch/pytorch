@@ -715,6 +715,11 @@ class TestTransformersAccelerator(NNTestCase):
                 device=device,
             )
             x = torch.randn(8, 32, 96, device=device, dtype=torch.float16) * 238.15560380049612
+            if torch.device(device).type == "cuda":
+                q = x.view(8, 32, 16, 6).transpose(1, 2)
+                fused = (SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION)
+                if torch._fused_sdp_choice(q, q, q) not in [b.value for b in fused]:
+                    self.skipTest("no fused SDPA backend, so the MHA fast path falls back to fp16 bmm/softmax")
             with torch.no_grad():
                 torch.backends.mha.set_fastpath_enabled(True)
                 mha.eval()
