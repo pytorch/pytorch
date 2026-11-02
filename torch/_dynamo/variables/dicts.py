@@ -1078,10 +1078,38 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
+    def odict_pop(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not kwargs:
+            return self.dict_pop(tx, args, {})
+        from .builder import SourcelessBuilder
+
+        fn = SourcelessBuilder.create(tx, polyfills.odict_pop)
+        return fn.call_function(tx, [self, *args], kwargs)
+
+    def odict_setdefault(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not kwargs:
+            return self.dict_setdefault(tx, args, {})
+        from .builder import SourcelessBuilder
+
+        fn = SourcelessBuilder.create(tx, polyfills.odict_setdefault)
+        return fn.call_function(tx, [self, *args], kwargs)
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
+        "pop": Method(odict_pop),
+        "setdefault": Method(odict_setdefault),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
