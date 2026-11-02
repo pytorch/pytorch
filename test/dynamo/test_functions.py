@@ -6077,6 +6077,42 @@ class GraphModule(torch.nn.Module):
         self.assertIn("__closure__", cached_fn.__dict__)
         self.assertIsNone(cached_fn.__closure__)
 
+    @parametrize("global_first", [False, True])
+    @parametrize("replace_global", [False, True])
+    def test_lru_cache_wrapper_mixed_scope_alias(self, global_first, replace_global):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        @functools.lru_cache
+        def other_fn():
+            return 1
+
+        cached_fn.tag = 1
+        other_fn.tag = 1
+
+        def fn(x, wrapper):
+            if global_first:
+                return x + inline_lru_cache_fn_with_default_args.tag + wrapper.tag
+            return x + wrapper.tag + inline_lru_cache_fn_with_default_args.tag
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(10)
+        with patch.dict(globals(), inline_lru_cache_fn_with_default_args=cached_fn):
+            self.assertEqual(opt_fn(x, cached_fn), torch.tensor(12))
+            self.assertEqual(backend.frame_count, 1)
+            if replace_global:
+                globals()["inline_lru_cache_fn_with_default_args"] = other_fn
+                other_fn.tag = 2
+                wrapper = cached_fn
+            else:
+                other_fn.tag = 2
+                wrapper = other_fn
+            self.assertEqual(fn(x, wrapper), torch.tensor(13))
+            self.assertEqual(opt_fn(x, wrapper), torch.tensor(13))
+            self.assertEqual(backend.frame_count, 2)
+
     def test_lru_cache_wrapper_delattr(self):
         @functools.lru_cache
         def cached_fn():

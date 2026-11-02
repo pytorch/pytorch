@@ -1154,7 +1154,11 @@ class VariableBuilder:
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                is_from_attr_proxy_source(self.source)
+                (
+                    isinstance(result, WrapperUserFunctionVariable)
+                    and result.source is not None
+                )
+                or is_from_attr_proxy_source(self.source)
                 or isinstance(self.source, MappingProxyMappingSource)
                 or (
                     result.source is not None
@@ -1168,7 +1172,7 @@ class VariableBuilder:
                     raise AssertionError("Tracked alias must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
                 # the tracker still requires both sources to resolve to the same
-                # object (a base module, or the mapping behind a mappingproxy), so
+                # object (a wrapper, base module, or mapping behind a mappingproxy), so
                 # pin each source to its compile-time object.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
