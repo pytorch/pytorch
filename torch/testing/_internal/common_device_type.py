@@ -23,6 +23,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
     _get_torch_rocm_version,
+    IS_MIG,
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
@@ -2455,6 +2456,23 @@ def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm st
     def dec_fn(fn):
         reason = f"skipCUDAIfRocm: {msg}"
         return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
+
+# Skips a test on CUDA when the device is a MIG slice, which has a fraction of a
+# full GPU's SMs and memory.
+def skipCUDAIfMIG(func=None, *, msg="test doesn't work on a MIG slice"):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if self.device_type == "cuda" and IS_MIG:
+                raise unittest.SkipTest(f"skipCUDAIfMIG: {msg}")
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
 
     if func:
         return dec_fn(func)

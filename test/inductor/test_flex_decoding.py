@@ -26,7 +26,6 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
-    IS_MIG,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
     with_tf32_off,
@@ -42,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
+    skipCUDAIfMIG,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -58,11 +58,6 @@ if IS_WINDOWS and IS_CI:
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-
-# Launching the 256-row decode kernel can need GBs of free device memory (it spills,
-# https://github.com/pytorch/pytorch/issues/203041), and fails with
-# CUDA_ERROR_OUT_OF_MEMORY on MIG slices such as an A100 1g.5gb.
-skip_on_mig = unittest.skipIf(IS_MIG, "BLOCK_M=256 launch OOMs on MIG slices")
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -2276,10 +2271,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             # capped at 32, the largest power of two dividing 96 (a 64-position tile won't fit).
             (64, 16, (96, 128), None, 64),
             # Pinned BLOCK_Ms the old check rejected: 256 rows / 8 heads = 32 positions.
-            common_utils.subtest((32, 4, 128, 256, 256), decorators=[skip_on_mig]),
+            # The pinned 256-row kernel spills (#203041), and launching it runs out of
+            # memory on MIG slices.
+            common_utils.subtest((32, 4, 128, 256, 256), decorators=[skipCUDAIfMIG]),
             # Q = 16 is a multiple of the default tile but not of the pinned one: SAFE_M_BOUNDARY
             # must follow the pinned BLOCK_M, or rows past Q_LEN overwrite the next head's.
-            common_utils.subtest((16, 4, 128, 256, 256), decorators=[skip_on_mig]),
+            common_utils.subtest((16, 4, 128, 256, 256), decorators=[skipCUDAIfMIG]),
         ],
     )
     def test_gqa_block_m_fits_sparse_q_block(
