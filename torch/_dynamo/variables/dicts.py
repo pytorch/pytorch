@@ -80,7 +80,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .hashable import HashableTracker, is_hashable
+from .hashable import guard_key_collisions, HashableTracker, is_hashable
 from .object_protocol import (
     _is_method_type,
     generic_getitem,
@@ -197,6 +197,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         ) -> "HashableTracker":
             return key if isinstance(key, Hashable) else Hashable(key)
 
+        keys = {id(key): make_hashable(key) for key in items}
+        if keys:
+            guard_key_collisions(keys.values())
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
         self.items: dict[HashableTracker, VariableTracker]
@@ -204,7 +207,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             items, collections.OrderedDict
         ):
             # Normalizing tracker keys must preserve both orders without hashing twice.
-            keys = {id(key): make_hashable(key) for key in items}
             storage = cast(dict[object, VariableTracker], items)
             self.items = collections.OrderedDict(
                 (keys[id(key)], value) for key, value in dict.items(storage)
@@ -212,7 +214,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             for key in items:
                 self.items.move_to_end(keys[id(key)])
         else:
-            self.items = storage_cls({make_hashable(x): v for x, v in items.items()})
+            self.items = storage_cls({keys[id(x)]: v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -289,6 +291,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not is_hashable(vt):
             return False
         key = HashableTracker(vt)
+        guard_key_collisions(self.items, (key,))
         return key in self.items and not isinstance(
             self.items[key], variables.DeletedVariable
         )
@@ -311,6 +314,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 return self._tree_map_fallback(
                     tx, tree_map_fn, map_fn, rest, tree_map_kwargs
                 )
+            guard_key_collisions(self.items, candidate.items)
             other_dicts.append(candidate)
 
         new_items_hashed = type(self.items)()
@@ -363,6 +367,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 return self._tree_map_with_path_fallback(
                     tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
                 )
+            guard_key_collisions(self.items, candidate.items)
             other_dicts.append(candidate)
 
         new_items_hashed = type(self.items)()
@@ -485,6 +490,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         key = HashableTracker(arg)
+        guard_key_collisions(self.items, (key,))
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"  # type: ignore[attr-defined]
             unimplemented(
@@ -500,6 +506,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
         key = HashableTracker(arg)
+        guard_key_collisions(self.items, (key,))
         if key not in self.items:
             return None
         return self.items[key]
@@ -607,7 +614,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> HashableTracker:
         _guard_nan_key(key)
         try:
-            return HashableTracker(key)
+            hashed = HashableTracker(key)
+            guard_key_collisions(self.items, (hashed,))
+            return hashed
         except ObservedTypeError:
             if sys.version_info < (3, 14):
                 raise
@@ -654,8 +663,12 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         from . import DictBuiltinVariable
 
-        temp_dict_vt = DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        temp_dict_vt = cast(
+            ConstDictVariable,
+            DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs),
+        )
         tx.output.side_effects.mutation(self)
+        guard_key_collisions(self.items, temp_dict_vt.items)
         self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
         return ConstantVariable.create(None)
 
@@ -673,9 +686,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         return DictItemsVariable.create(self)
 
     def dict_keys(
@@ -684,9 +695,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         return DictKeysVariable.create(self)
 
     def dict_values(
@@ -695,9 +704,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         return DictValuesVariable.create(self)
 
     def _new_dict(
@@ -752,6 +759,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(args[0])
             key = HashableTracker(args[0])
+            guard_key_collisions(self.items, (key,))
         else:
             key = self._lookup_key(tx, args[0])
         # A __dict__ deletion marker is already absent; do not record another
@@ -844,8 +852,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # correctness.
                 other.install_dict_order_guard(tx)
                 if isinstance(other, NNModuleHooksDictVariable):
-                    for key in other.items:
-                        key.vt.realize()
+                    other.install_key_escape_guard()
+                guard_key_collisions(self.items, other.items)
                 self.items.update(other.items)
             elif (
                 isinstance(
@@ -856,7 +864,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             ):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
-                    self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
+                    value = generic_getitem(tx, other, key)
+                    hashed = HashableTracker(key)
+                    guard_key_collisions(self.items, (hashed,))
+                    self.items[hashed] = value
             else:
                 for idx, item in enumerate(unpack_iterable(tx, other)):
                     pair = unpack_iterable(tx, item)
@@ -869,7 +880,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                                 f"#{idx} has length {len(pair)}; 2 is required"
                             ],
                         )
-                    self.items[HashableTracker(pair[0])] = pair[1]
+                    hashed = HashableTracker(pair[0])
+                    guard_key_collisions(self.items, (hashed,))
+                    self.items[hashed] = pair[1]
         for k, v in kwargs.items():
             self.items[HashableTracker(VariableTracker.build(tx, k))] = v
         return ConstantVariable.create(None)
@@ -908,6 +921,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             if isinstance(self, OrderedDictVariable):
                 # OrderedDict.setdefault looks up, then hashes again to insert.
                 key = HashableTracker(args[0])
+                guard_key_collisions(self.items, (key,))
             self.items[key] = x
             return x
 
@@ -987,6 +1001,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
             hkey = HashableTracker(key)
+            guard_key_collisions(self.items, (hkey,))
         else:
             hkey = self._lookup_key(tx, key)
         tx.output.side_effects.mutation(self)
@@ -1416,9 +1431,8 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
         return super().call_obj_hasattr(tx, name)
 
 
-class NNModuleHooksDictVariable(OrderedDictVariable):
+class NNModuleHooksDictVariable(ConstDictVariable):
     # Defer hook-ID guards so equivalent modules can reuse normal hook dispatch.
-    # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
     global_flags_name: str | None = None
 
     def is_python_constant(self) -> bool:
@@ -1443,11 +1457,16 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
 
     def _new_dict(
         self, items: dict[HashableTracker, VariableTracker]
-    ) -> "OrderedDictVariable":
+    ) -> "ConstDictVariable":
         # A detached copy uses stored hashes for lookups, so its keys must be guarded.
         for key in items:
             key.vt.realize()
-        return OrderedDictVariable(items, mutation_type=ValueMutationNew())
+        cls = (
+            OrderedDictVariable
+            if isinstance(self, OrderedDictVariable)
+            else ConstDictVariable
+        )
+        return cls(items, mutation_type=ValueMutationNew())
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
@@ -1478,8 +1497,7 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
                     stored_key.vt.python_type()
                 if self.global_flags_name is not None:
                     self.install_dict_keys_match_guard()
-                # Normal hook dispatch tests an ID against the same module's
-                # kwargs/always-call flags. Guard that relationship, not the ID.
+                # Normal dispatch guards flag membership without specializing IDs.
                 install_guard(
                     source.base.base.make_guard(
                         functools.partial(
@@ -1497,7 +1515,11 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         return super().sq_contains_impl(tx, item)
 
 
-class NNModuleGlobalHookFlagsDictVariable(NNModuleHooksDictVariable):
+class NNModuleHooksOrderedDictVariable(NNModuleHooksDictVariable, OrderedDictVariable):
+    pass
+
+
+class NNModuleGlobalHookFlagsDictVariable(NNModuleHooksOrderedDictVariable):
     def __init__(
         self,
         items: dict[VariableTracker, VariableTracker]
@@ -1856,10 +1878,12 @@ class DictItemsVariable(DictViewVariable):
 
     @property
     def set_items(self) -> set["HashableTracker"]:
-        return {
+        items = [
             HashableTracker(variables.TupleVariable([k.vt, v]))
             for k, v in self.view_items
-        }
+        ]
+        guard_key_collisions(items)
+        return set(items)
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:

@@ -425,7 +425,7 @@ if torch.backends.mps.is_available():
             },
             "test_reference_numerics_small": {
                 # MPS bug: cancellation for small arguments
-                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), (torch.complex64,)),
+                "sinc": (torch.complex64,),
                 # NumPy deviates from C99 for atan(+-1j)
                 "_refs.atan": (torch.complex64,),
                 # NumPy reference computes int8/uint8 in float16
