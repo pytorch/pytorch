@@ -210,9 +210,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
   // this is CuDNN 7.6 only, see PyTorch 1.2 for older CuDNN.
   ctc_loss_desc.setEx(
       CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_SOFTMAX, CUDNN_PROPAGATE_NAN);
-  // Same as in _cudnn_ctc_loss_tensor: the descriptor below carries the
-  // tensor's own strides, so hand cuDNN a packed copy (#202338). This is a
-  // no-op when log_probs is already contiguous.
+  // cuDNN expects contiguous log_probs (#202338).
   const Tensor log_probs_c = log_probs_t.contiguous();
   TensorDescriptor log_probs_desc{log_probs_c};
   // See _cudnn_ctc_loss_tensor for why the gradient starts from zeros.
@@ -313,18 +311,12 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       CUDNN_LOSS_NORMALIZATION_SOFTMAX,
       CUDNN_PROPAGATE_NAN,
       255);
-  // The descriptor below carries the tensor's own strides, but cuDNN returned
-  // a wrong, run-to-run varying loss for a strided log_probs such as
-  // log_softmax(1).permute(2, 0, 1) (#202338), so hand it a packed copy.
-  // This is a no-op when log_probs is already contiguous.
+  // cuDNN expects contiguous log_probs (#202338).
   const Tensor log_probs_c = log_probs_t.contiguous();
   TensorDescriptor log_probs_desc{log_probs_c};
-  // cuDNN leaves parts of the gradient unwritten: the frames t >=
-  // input_lengths[b], on which the loss does not depend, and the whole
-  // gradient of a sample it skips, such as one whose target cannot be
-  // aligned to its input length. With empty_like those entries held
-  // whatever was in memory (#202338); the native kernel returns zero there,
-  // so start from zeros.
+  // The loss does not depend on the frames at or past input_lengths[b], so
+  // their gradient is zero, and cuDNN does not write them (nor the gradient
+  // of a sample it skips); the buffer has to start from zeros (#202338).
   Tensor grad = at::zeros_like(log_probs_c, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
 

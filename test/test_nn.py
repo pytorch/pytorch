@@ -17432,9 +17432,8 @@ class TestNNCUDA(NNTestCase):
 
     @staticmethod
     def _plant_sentinel(log_probs):
-        # The accelerated path takes its gradient buffer from empty_like, so
-        # put a sentinel in blocks it is likely to reuse: an unwritten
-        # gradient then shows up as 12345 instead of leftover zeros.
+        # Freed GPU memory is usually zero, so an unwritten gradient would
+        # pass the zero check by luck; fill likely-reused blocks with 12345.
         blocks = [torch.full(log_probs.shape, 12345., device=log_probs.device) for _ in range(3)]
         del blocks
 
