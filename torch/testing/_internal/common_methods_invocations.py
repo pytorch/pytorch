@@ -35,7 +35,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_CUBLASLT_MNK4, PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
@@ -9976,6 +9976,27 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                 )
             )
 
+
+        if PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            for recipe, block_size in ((ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)):
+                scale1 = torch.ones(16 * math.ceil(M / 4) * math.ceil(K / (4 * block_size)),
+                                    device=device, dtype=torch.float8_e8m0fnu)
+                scale2 = torch.ones(16 * math.ceil(N / 4) * math.ceil(K / (4 * block_size)),
+                                    device=device, dtype=torch.float8_e8m0fnu)
+                samples.append(
+                    SampleInput(
+                        mat1,
+                        mat2,
+                        [scale1],
+                        [recipe],
+                        [SwizzleType.SWIZZLE_MNxK4],
+                        [scale2],
+                        [recipe],
+                        [SwizzleType.SWIZZLE_MNxK4],
+                        None,  # bias
+                        torch.bfloat16,  # out_dtype
+                    )
+                )
 
     yield from samples
 
