@@ -169,8 +169,7 @@ class BenchmarkJob:
         for name, value in settings.items():
             getattr(tunable, name)(value)
         # TunableOp cannot tune under CUDA-graph capture, and benchmark_run_fn
-        # captures if either flag is set. Cleared here, the one place every
-        # job passes through.
+        # captures if either flag is set. Cleared where every job passes.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
         # Thread-local in the setting process, so it does not cross the pipe.
@@ -529,8 +528,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
 
 
 # Tuned ladder BUCKETS, keyed per bucket so a run that stops part-way leaves
-# the rest for the next one. Without it a model with N identical layers
-# resubmits every bucket N times. Cleared with fresh_cache.
+# the rest for the next one, instead of N layers resubmitting every bucket.
 class _PretunedGemms:
     def __init__(self) -> None:
         self.seen: OrderedSet[Any] = OrderedSet()
@@ -680,9 +678,8 @@ def _meta_at(node: Any, sym_val: int, s: sympy.Symbol) -> TensorMeta:
     sizes = [_eval_at(sz, sym_val, s) for sz in n.get_size()]
     traced = V.graph.sizevars.optimization_hints(get_strides_with_layout_constraints(n))
     if any(st == 0 for st in traced):
-        # A broadcast operand -- only the exempt bias reaches here, the density
-        # guard rejects the rest. Its stride-0 dims tie, so the inferred order
-        # is arbitrary; fall back to natural contiguous.
+        # A broadcast operand (only the exempt bias reaches here): its stride-0
+        # dims tie, so the inferred order is arbitrary -- use natural contiguous.
         strides = [int(x) for x in ir.FlexibleLayout.contiguous_strides(sizes)]
     else:
         order = ir.get_stride_order(traced)
@@ -724,9 +721,8 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
-        # Nothing submitted, not even the traced shape: that is covered only
-        # by max-autotune benchmarking the aten choice, or a later run, with
-        # PYTORCH_TUNABLEOP_ENABLED set (see config.autotune_tunableop_mode).
+        # Nothing submitted, not even the traced shape: only max-autotune or a
+        # later run with PYTORCH_TUNABLEOP_ENABLED covers it (see the mode doc).
         return
     # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
     # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
