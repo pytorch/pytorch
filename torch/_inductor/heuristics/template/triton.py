@@ -2431,7 +2431,9 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
+def mm_allow_tf32(
+    m: Any, n: Any, k: Any, device_type: str | None, dtype: torch.dtype
+) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
     allow_tf32 = False
     if isinstance(device_type, str):
@@ -2443,17 +2445,24 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
             allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda" and allow_tf32:
         # CUDA applies a shape threshold on top of the backend flag.
-        # Based on reverse engineering H100 CUDA 12.8 behavior. Backed dynamic
-        # dims follow their hint and get a guard, so a later shape on the other
-        # side of the threshold recompiles. Unbacked dims fall back to no TF32.
-        # AOT mode never checks the guard at runtime, so it needs a proof.
-        # Known limitation: the guard narrows the dim's range, so a ranged
-        # mark_dynamic (min/max) spanning the threshold raises
-        # ConstraintViolationError.
+        # Based on reverse engineering H100 CUDA 12.8 behavior. For fp32 inputs,
+        # backed dynamic dims follow their hint and get a guard, so a later
+        # shape on the other side of the threshold recompiles. Unbacked dims
+        # fall back to no TF32. AOT mode never checks the guard at runtime, so
+        # it needs a proof (standalone_compile can also skip the guard, so the
+        # decision there is hint-only). Other dtypes ignore ALLOW_TF32, so they
+        # keep the guard-free proof. Known limitation: the guard narrows the
+        # dim's range, so a ranged mark_dynamic (min/max) spanning the
+        # threshold raises ConstraintViolationError.
         size_threshold = sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-        if V.graph.aot_mode:
+        fp32_tf32 = (
+            dtype == torch.float32
+            and torch.cuda.is_available()
+            and torch.cuda.is_tf32_supported()
+        )
+        if not fp32_tf32 or V.graph.aot_mode:
             return V.graph.sizevars.statically_known_true(size_threshold)
-        return V.graph.sizevars.guard_or_false(size_threshold)
+        return bool(V.graph.sizevars.guard_or_false(size_threshold))
     return allow_tf32
 
 
@@ -2499,8 +2508,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
+        dtype = kernel_inputs.mat1mat2()[0].get_dtype()
         extra_kwargs = {
-            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
+            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type, dtype),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
