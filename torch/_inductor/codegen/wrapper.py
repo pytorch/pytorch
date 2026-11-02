@@ -1134,6 +1134,22 @@ class WrapperLine:
 
 
 @dataclasses.dataclass
+class ProfilerMarkerLine(WrapperLine):
+    marker: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        # No `_is_profiler_enabled` guard: that Python flag stays False for
+        # on-demand (Kineto daemon) sessions, while _RecordFunctionFast checks
+        # the native profiler state and does nothing when no profiler is active.
+        code.writeline(
+            f"with torch._C._profiler._RecordFunctionFast({self.marker!r}): pass"
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_profiler_marker
+
+
+@dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     graph: GraphLowering
@@ -6042,9 +6058,15 @@ class PythonWrapperCodegen(CodeGen):
         debug_handle: int | None = None,
     ):
         if debug_handle is not None:
-            self.writeline(
+            self.make_comment(
                 f"{self.comment} [Provenance debug handles] {kernel_name}:{debug_handle}"
             )
+            if config.trace.provenance_profiler_markers and not V.graph.cpp_wrapper:
+                self.writeline(
+                    ProfilerMarkerLine(
+                        f"inductor_provenance:{kernel_name}:{debug_handle}"
+                    )
+                )
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         if old.get_dtype() != new.get_dtype():
