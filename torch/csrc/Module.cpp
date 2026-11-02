@@ -53,7 +53,6 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -2949,6 +2948,10 @@ Call this whenever a new thread is created in order to propagate values from
           py::init([](const py::object& converter,
                       const py::object& shape_env,
                       const py::object& wrapper) {
+            TORCH_CHECK(!converter.is_none(), "Expected a FakeTensorConverter");
+            TORCH_CHECK(
+                !wrapper.is_none(),
+                "Expected the CppFakeTensorMode that owns this mode as wrapper");
             std::shared_ptr<c10::SafePyObject> shape_env_obj;
             if (!shape_env.is_none()) {
               shape_env_obj = std::make_shared<c10::SafePyObject>(
@@ -2961,7 +2964,6 @@ Call this whenever a new thread is created in order to propagate values from
                 std::make_shared<c10::SafePyObject>(
                     converter.inc_ref().ptr(), getPyInterpreter()),
                 functorch_config.attr("fake_tensor_allow_meta").cast<bool>());
-            TORCH_CHECK(!wrapper.is_none(), "Expected a Python wrapper");
             PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
             if (weakref == nullptr) {
               throw py::error_already_set();
@@ -2973,7 +2975,7 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("converter"),
           py::arg("shape_env"),
           py::arg("wrapper"))
-      .def_readonly("allow_meta", &c10::FakeTensorMode::allow_meta_);
+      .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_);
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
