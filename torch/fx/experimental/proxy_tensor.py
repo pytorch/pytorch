@@ -43,6 +43,10 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
+from torch._functorch.predispatch import (
+    _functorch_predispatch_functions,
+    _jvp_predispatch_functions,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
@@ -2186,18 +2190,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
 )
-
-
-from torch._functorch.predispatch import (
-    _functorch_predispatch_functions,
-    _jvp_predispatch_functions,
-)
-from torch.fx.node import _side_effectful_functions
-
-
-# predispatch.py says why these calls must stay where they are. They are
-# registered here because predispatch.py loads before torch.fx.
-_side_effectful_functions.update(_functorch_predispatch_functions)
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
