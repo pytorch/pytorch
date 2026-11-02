@@ -238,10 +238,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
-        # Guards on a sourced dict are installed lazily. Materializing it bakes
-        # its keys into the trace, e.g. an empty input dict is vacuously a
-        # python constant, so guard on them here.
-        self.install_dict_keys_match_guard()
+        # Materialization bakes lazy keys and their order into the trace.
+        self.install_dict_order_guard()
         return {
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
@@ -249,6 +247,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
+        self.install_dict_order_guard(tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "{...}")
@@ -259,7 +258,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
-        self.install_dict_keys_match_guard()
+        self.install_dict_order_guard()
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
@@ -286,6 +285,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -337,6 +337,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -482,8 +483,20 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 break
 
     def install_dict_keys_match_guard(self) -> None:
-        if self.source:
+        if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+
+    def install_dict_order_guard(
+        self,
+        tx: "InstructionTranslatorBase | None" = None,
+    ) -> None:
+        if self.source and not is_constant_source(self.source):
+            if tx is None:
+                from ..symbolic_convert import InstructionTranslator
+
+                tx = InstructionTranslator.current_tx()
+            self.install_dict_keys_match_guard()
+            tx.output.guard_on_key_order.add(self.source)
 
     def install_dict_contains_guard(
         self,
@@ -584,9 +597,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
-        if self.source and not is_constant_source(self.source):
-            self.install_dict_keys_match_guard()
-            tx.output.guard_on_key_order.add(self.source)
+        self.install_dict_order_guard(tx)
         return DictIterator.create(self.items)
 
     def tp_init_impl(
@@ -616,9 +627,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         return DictItemsVariable.create(self)
 
     def dict_keys(
@@ -627,9 +636,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         return DictKeysVariable.create(self)
 
     def dict_values(
@@ -638,9 +645,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         return DictValuesVariable.create(self)
 
     def _new_dict(
@@ -860,15 +865,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # dict.__reversed__: reverse insertion-order key iterator.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
-        reversed_keys: list[VariableTracker] = [
-            k.vt for k in reversed(list(self.items.keys()))
-        ]
-        return variables.ListIteratorVariable(
-            reversed_keys, mutation_type=ValueMutationNew()
-        )
+        self.install_dict_order_guard(tx)
+        return DictKeysVariable.create(self).dict_view_reversed(tx, args, kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
@@ -888,7 +886,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        self.install_dict_keys_match_guard()
+        self.install_dict_order_guard(tx)
         return [x.vt for x in self.items]
 
     def nb_or_impl(

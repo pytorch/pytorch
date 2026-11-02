@@ -5458,6 +5458,16 @@
       ]
     }
   ],
+  "GB5295": [
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
   "GB9277": [
     {
       "Gb_type": "unsupported function.__get__ call",
