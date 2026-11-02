@@ -86,19 +86,18 @@ class TestColumnConfig(TestCase):
         "dtype,key,rows,columns,partials,full_tiles,expected",
         [
             (torch.float32, "sum", 8192, 4096, 1, False, None),
-            (torch.float16, "sum", 8192, 4096, 1, True, (0, 32, 1)),
-            (torch.float32, "sum", 65536, 1024, 8, True, (0, 16, 1)),
-            (torch.float32, "sum", 32768, 257, 4, True, (16, 16, 1)),
-            (torch.float32, "sum", 131072, 257, 16, True, (16, 32, 1)),
-            (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16, 1)),
-            (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 16, 2)),
-            (torch.bfloat16, "mean", 262144, 4096, 16, True, (0, 8, 4)),
+            (torch.float16, "sum", 8192, 4096, 1, True, (0, 32)),
+            (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
+            (torch.float32, "sum", 32768, 257, 4, True, (16, 16)),
+            (torch.float32, "sum", 131072, 257, 16, True, (16, 32)),
+            (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
+            (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
         ],
     )
     def test_b200_ordered_column_mappings(
         self, dtype, key, rows, columns, partials, full_tiles, expected
     ):
-        """Pin B200 ordered column widths and packs, independent of SM107 guards."""
+        """Pin B200 ordered column widths."""
         # Single-field float outputs may be the input dtype or fp32.
         for output in {dtype, dtype if key == "amax" else torch.float32}:
             with self.subTest(output=output):
@@ -117,10 +116,8 @@ class TestColumnConfig(TestCase):
                 if expected is None:
                     self.assertIsNone(cfg)
                     continue
-                min_blocks, tile_columns, column_pack = expected
-                want = ct.OrderedColConfig(
-                    min_blocks, tile_columns=tile_columns, column_pack=column_pack
-                )
+                min_blocks, tile_columns = expected
+                want = ct.OrderedColConfig(min_blocks, tile_columns=tile_columns)
                 self.assertEqual(cfg, want._replace(full_tiles=True))
 
 
@@ -211,6 +208,7 @@ class TestColumnCombine(TestCase):
         self.assertFalse(any(k[:2] == ("coltile", "tiled_layout") for k in ct._CACHE))
 
     def test_column_unroll_reaches_stage_one(self, device):
+        """Pass the config's unroll through to the stage-one tile."""
         x = torch.randn((257, 260), device=device)
         cfg = ct.ColConfig("test_unroll", 64, 7, 4, "column", 0, 2)
         trait = T.SumOps(acc=cutlass.Float32)
@@ -219,7 +217,12 @@ class TestColumnCombine(TestCase):
         with patch.object(ct, "select_col_config", return_value=cfg), stage as built:
             got = ct._reduce_col_tile(*args)[0]
         self.assertEqual(built.call_args_list[0].kwargs["unroll"], 2)
-        self.assertEqual(got, x.sum(0), atol=1e-4, rtol=1e-4)
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            expected = x.sum(0)
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
     @parametrize("columns,served", [(256, True), (4095, True), (16, False)])
     def test_inner_tree_order_hands_off(self, device, columns, served):
@@ -239,7 +242,12 @@ class TestColumnCombine(TestCase):
         with patch.object(ct, "select_col_config", return_value=cfg), ordered:
             got = ct._reduce_col_tile(*args)[0]
         self.assertEqual([r is not None for r in results], [served])
-        self.assertEqual(got, x.sum(0), atol=1e-4, rtol=1e-4)
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            expected = x.sum(0)
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
 
 instantiate_parametrized_tests(TestColumnConfig)
