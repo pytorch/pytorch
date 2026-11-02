@@ -343,6 +343,22 @@ class TestColTileHost(TestCase):
             kg._col_route_ok(view, nouts, (9, 0)), view.dim() == 2 and nouts == 1
         )
 
+    @parametrize(
+        "shape,nouts,routed",
+        [
+            ((4, 64, 2), 1, True),
+            ((4, 65, 2), 1, False),
+            ((4, 65, 15), 1, False),
+            ((4, 65, 16), 1, True),
+            ((1, 65, 8191), 2, False),
+            ((2, 65, 4096), 2, True),
+        ],
+        name_fn=lambda shape, nouts, routed: "x".join(map(str, shape)) + f"_{nouts}",
+    )
+    def test_route_gate_boundaries(self, shape, nouts, routed):
+        view = torch.empty(shape, device="meta")
+        self.assertEqual(kg._col_route_ok(view, nouts, (10, 0)), routed)
+
     def test_route_gate_keeps_other_architectures_on_general(self):
         x = torch.randn(4, 64, 16, device="cuda")
         real = ct.reduce_batched_col_tile
@@ -409,6 +425,21 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
 
+    @parametrize(
+        "launcher, rank, args",
+        [
+            ("reduce_col_tile", 3, (torch.float32,)),
+            ("reduce_col_tile_2out", 3, ([torch.float32] * 2,)),
+            ("reduce_batched_col_tile", 2, ([torch.float32], 1)),
+        ],
+        name_fn=lambda launcher, rank, args: launcher,
+    )
+    def test_launchers_check_rank(self, launcher, rank, args):
+        x = torch.randn((4,) * rank, device="cuda")
+        fn, trait = getattr(ct, launcher), T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(AssertionError, "want [23]D x"):
+            fn(trait, "badrank", x, *args)
+
 
 class TestOrderedColHost(TestCase):
     @parametrize(
@@ -429,7 +460,7 @@ class TestOrderedColHost(TestCase):
         default = rt._ITREE_ARCH["default"]
         with mock.patch.object(rt, "_itree_arch", return_value=default):
             plan = rt.trait_itree_plan(trait, 32768, 132, 4, stage=False)
-        kwargs = dict(R=32768, C=132, B=1, nouts=1)
+        kwargs = dict(R=32768, C=132, nouts=1)
         kwargs.update(updates)
         with self.assertRaises(ValueError):
             ct._OrderedColReduce(trait, plan, **kwargs)
@@ -437,33 +468,67 @@ class TestOrderedColHost(TestCase):
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
-    @parametrize("plan", ["direct", "split"])
-    def test_plan_matches_the_indexed_tree(self, device, plan):
-        """Preserve each row's inner-tree DAG with and without ordered column partials."""
-        shape = (2, 128, 33) if plan == "direct" else (100003, 32)
-        x = torch.randn(shape, device=device)
+    @parametrize(
+        "op,dtype,shape,split",
+        [
+            ("sum", torch.float32, (2, 128, 33), False),
+            ("sum", torch.float32, (2, 20, 33), False),
+            ("sum", torch.float32, (9000, 32), False),
+            ("argmax", torch.float32, (4, 2048, 64), False),
+            ("var_mean", torch.bfloat16, (2, 2048, 40), False),
+            ("sum", torch.float32, (100003, 32), True),
+        ],
+        name_fn=lambda op, dtype, shape, split: f"{op}_{len(shape)}d_{shape[-2]}",
+    )
+    def test_plan_matches_the_indexed_tree(self, device, op, dtype, shape, split):
+        """Preserve each row's inner-tree DAG across plans, fields, ranks, and partials."""
+        x = torch.randn(shape, device=device).to(dtype)
         rows, columns = x.shape[-2:]
-        kept = [(columns, 1)] + ([(x.shape[0], rows * columns)] if x.dim() == 3 else [])
-        trait = T.SumOps(acc=cutlass.Float32)
+        batches = x.numel() // (rows * columns)
+        kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
+        trait, outputs = {
+            "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
+            "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
+            "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
+        }[op]
+        nouts = len(outputs)
         got = ct.reduce_ordered_col(
-            trait, f"ordered_{plan}", x, [torch.float32], 1, allow_split=plan == "split"
+            trait, f"ordered_{op}", x, outputs, nouts, allow_split=split
         )
         reference = kg._try_indexed_itree(
             trait,
-            f"ordered_{plan}_reference",
+            f"ordered_{op}_reference",
             x,
             [(rows, columns)],
             kept,
-            x.numel() // rows,
+            batches * columns,
             rows,
-            [torch.float32],
-            1,
+            outputs,
+            nouts,
         )
         self.assertIsNotNone(got)
         self.assertIsNotNone(reference)
-        self.assertEqual(
-            got[0].flatten().view(torch.uint8), reference[0].view(torch.uint8)
-        )
+        for a, b in zip(got, reference, strict=True):
+            self.assertEqual(a.flatten().view(torch.uint8), b.view(torch.uint8))
+
+    def test_batch_sizes_share_one_kernel(self, device):
+        trait = T.SumOps(acc=cutlass.Float32)
+        for batches in (2, 3):
+            x = torch.randn(batches, 128, 33, device=device)
+            got = ct.reduce_ordered_col(trait, "ordered_reuse", x, [torch.float32], 1)
+            self.assertEqual(got[0], x.sum(dim=1), atol=1e-4, rtol=1e-4)
+        keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "ordered_reuse")]
+        self.assertEqual(len(keys), 1)
+
+    def test_inner_tree_middle_axis_routes_to_ordered_columns(self, device):
+        x = torch.randn(2, 128, 33, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        real = ct.reduce_ordered_col
+        with mock.patch.object(ct, "reduce_ordered_col", wraps=real) as served:
+            got = kg.reduce_dim(trait, "route", x, 1, torch.float32, order="inner_tree")
+        served.assert_called_once()
+        expected = real(trait, "route_direct", x, [torch.float32], 1)[0]
+        self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
 
     @parametrize(
         "op,dtype,rows,columns,pack,workers,width,offset",
