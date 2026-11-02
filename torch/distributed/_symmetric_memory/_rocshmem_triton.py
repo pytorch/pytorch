@@ -6,6 +6,7 @@ integration in _nvshmem_triton.py.  It is only imported on ROCm builds
 (i.e. when ``torch.version.hip is not None``).
 """
 
+import functools
 import hashlib
 import importlib.util
 import logging
@@ -153,6 +154,7 @@ attributes #0 = { convergent mustprogress nounwind }
 """
 
 
+@functools.cache
 def _get_team_world_wrappers_path() -> str:
     # Every @requires_rocshmem kernel hashes this file on each compile, so it must
     # outlive the process that wrote it (e.g. forked children). Use a content-named
