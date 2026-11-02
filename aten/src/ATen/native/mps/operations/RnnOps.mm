@@ -155,6 +155,8 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool train,
                                                                                bool bidirectional,
                                                                                bool batch_first) {
+  // z_state: activated input, forget, cell and output gates, [layers * directions, seq_len, batch, 4 * hidden].
+  // cell_state_fwd: hidden (0) and cell (1) with initial states, [layers * directions, 2, seq_len + 1, batch, hidden].
   auto x = (batch_first ? input.transpose(0, 1) : input).contiguous();
   const auto seq_len = x.size(0), batch = x.size(1), hidden = hx[0].size(2);
   const int64_t directions = bidirectional ? 2 : 1, stride = has_biases ? 4 : 2;
@@ -163,8 +165,8 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
   grad_y = grad_y.defined() ? (batch_first ? grad_y.transpose(0, 1) : grad_y)
                             : at::zeros({seq_len, batch, directions * hidden}, input.options());
   auto grad_h = grad_hy_opt.value_or(Tensor()), grad_c = grad_cy_opt.value_or(Tensor());
-  grad_h = grad_h.defined() ? grad_h.contiguous().clone() : at::zeros(hx[0].sizes(), input.options());
-  grad_c = grad_c.defined() ? grad_c.contiguous().clone() : at::zeros(hx[1].sizes(), input.options());
+  grad_h = grad_h.defined() ? grad_h.clone(MemoryFormat::Contiguous) : at::zeros(hx[0].sizes(), input.options());
+  grad_c = grad_c.defined() ? grad_c.clone(MemoryFormat::Contiguous) : at::zeros(hx[1].sizes(), input.options());
   std::vector<Tensor> grad_params(params.size());
   auto pso = lib.getPipelineStateForFunc("lstm_cell_backward_" + scalarToMetalTypeString(input));
   for (int64_t layer = num_layers - 1; layer >= 0; --layer) {
@@ -174,12 +176,12 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
       const auto index = layer * directions + direction, param = index * stride;
       auto dy = grad_y.narrow(-1, direction * hidden, hidden);
       dy = direction ? dy.flip({0}).contiguous() : dy.contiguous();
-      const auto h = cell_state_fwd[index][0], c = cell_state_fwd[index][1], z = z_state[index];
+      const auto h = cell_state_fwd[index][0], c = cell_state_fwd[index][1], gates = z_state[index];
       auto dh = grad_h[index], dc = grad_c[index];
-      auto dg = at::empty(z.sizes(), input.options());
+      auto dg = at::empty(gates.sizes(), input.options());
       const auto recurrent_weight = params[param + 1].contiguous();
       for (int64_t step = seq_len - 1; step >= 0; --step) {
-        lstm_cell(pso, dc, z[step], c[step], c[step + 1], dy[step], dh, dc, dg[step]);
+        lstm_cell(pso, dc, gates[step], c[step], c[step + 1], dy[step], dh, dc, dg[step]);
         lstm_mm(dh, dg[step], recurrent_weight);
       }
       auto dg_flat = dg.view({seq_len * batch, 4 * hidden});
@@ -189,7 +191,9 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
       }
       grad_params[param] = dg_flat.t().mm(layer_input.reshape({seq_len * batch, layer_input.size(2)}));
       auto grad_input_flat = grad_input.view({seq_len * batch, layer_input.size(2)});
-      at::addmm_out(grad_input_flat, grad_input_flat, dg_flat, params[param], direction ? 1 : 0);
+      // grad_input starts at zero, so the first direction doesn't need to read it.
+      const auto beta = direction ? 1 : 0;
+      at::addmm_out(grad_input_flat, grad_input_flat, dg_flat, params[param], beta);
       if (has_biases) {
         grad_params[param + 2] = dg_flat.sum(0);
         grad_params[param + 3] = grad_params[param + 2];
@@ -200,7 +204,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
     }
     grad_y = std::move(grad_input);
   }
-  return {batch_first ? grad_y.transpose(0, 1).contiguous() : grad_y,
+  return {batch_first ? grad_y.transpose(0, 1).contiguous() : std::move(grad_y),
           {std::move(grad_h), std::move(grad_c)},
           std::move(grad_params)};
 }
