@@ -520,13 +520,13 @@ def flex_gemm_scaled_mm(
                 torch.ops.aten._scaled_grouped_mm_v2.default(
                     args[0],
                     args[1],
-                    [args[2]],
+                    list(args[2:scale_a_end]),
                     list(recipe_a),
                     list(swizzle_a),
-                    [args[3]],
+                    list(args[scale_a_end:-1]),
                     list(recipe_b),
                     list(swizzle_b),
-                    args[4],
+                    args[-1],
                     None,
                     output_dtype,
                     [],
@@ -562,10 +562,10 @@ def flex_gemm_scaled_mm(
 def validate_scaled_grouped_mm(
     mat_a, mat_b, scale_a, scale_b, offs, output_dtype, format_name
 ):
-    """Validate the public MXFP8 grouped contract before backend layout adaptation."""
-    if format_name != "mxfp8_e4m3" or output_dtype not in (None, torch.bfloat16):
+    """Validate the public block-scaled grouped contract before layout adaptation."""
+    if output_dtype not in (None, torch.bfloat16):
         raise NotImplementedError(
-            "FlexGEMM scaled_grouped_mm supports MXFP8 with BF16 output only"
+            "FlexGEMM scaled_grouped_mm supports BF16 output only"
         )
     if mat_a.ndim != 2 or mat_b.ndim not in (2, 3):
         raise NotImplementedError(
@@ -590,9 +590,16 @@ def validate_scaled_grouped_mm(
         raise NotImplementedError(
             "FlexGEMM scaled_grouped_mm requires row-major A and column-major B"
         )
-    if mat_a.shape[-1] != mat_b.shape[-2] or mat_a.shape[-1] % 32:
+    nvfp4 = format_name == "nvfp4"
+    if nvfp4 and mat_b.ndim != 3:
         raise NotImplementedError(
-            "FlexGEMM scaled_grouped_mm requires matching K divisible by 32"
+            "FlexGEMM NVFP4 scaled_grouped_mm supports grouped-M only"
+        )
+    k_alignment = 16 if nvfp4 else 32
+    if mat_a.shape[-1] != mat_b.shape[-2] or mat_a.shape[-1] % k_alignment:
+        raise NotImplementedError(
+            "FlexGEMM scaled_grouped_mm requires matching storage K divisible "
+            f"by {k_alignment}"
         )
     if mat_b.shape[-1] % 16 or (
         mat_a.shape[-1] != 0 and (mat_a.stride(-2) % 16 or mat_b.stride(-1) % 16)
@@ -616,8 +623,11 @@ def validate_scaled_grouped_mm(
             "FlexGEMM scaled_grouped_mm blocked scale rows must cover the operand rows"
         )
     if mat_b.ndim == 3:
+        scale_tile_k = 32 if nvfp4 else 128
         expected_b = (
-            ((mat_b.shape[-1] + 127) // 128) * ((mat_b.shape[-2] + 127) // 128) * 512
+            ((mat_b.shape[-1] + 127) // 128)
+            * ((mat_b.shape[-2] + scale_tile_k - 1) // scale_tile_k)
+            * 512
         )
         if mat_b.shape[0] != offs.numel() or scale_b.shape != (
             offs.numel(),

@@ -437,11 +437,9 @@ def gemm_epilogue(
         if cu_seqlens_m is not None:
             SFB = SFB.view(
                 b.shape[0],
-                ceildiv(b.shape[-1], 128),
-                ceildiv(b.shape[-2], 128),
-                32,
-                4,
-                4,
+                *quack_blockscaled_scale_view(
+                    SFB[0], b.shape[-1], b.shape[-2], blockscaled_format
+                ).shape,
             )
         elif cu_seqlens_k is None:
             SFA = quack_blockscaled_scale_view(
