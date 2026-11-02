@@ -278,4 +278,6 @@ struct rocprofAsyncRow : public rocprofBase {
   // kernel dispatch operation.
   RocLogger::RuntimeInternalApi internalApi{RocLogger::RuntimeInternalNone};
   size_t internalBytes{0};
+  // The API call was split into several dispatches.
+  bool internalSplit{false};
 };

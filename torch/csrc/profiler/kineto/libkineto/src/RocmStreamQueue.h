@@ -245,9 +245,7 @@ inline void classifyRuntimeInternalDispatches(std::vector<rocprofBase*>& rows) {
   if (memsetByCorrelation.empty() && copyByCorrelation.empty()) {
     return;
   }
-  // The runtime can split one fill or copy into several dispatches (unaligned
-  // head and tail, one per 3D slice); only the first carries the API's bytes.
-  std::unordered_set<uint64_t> sized;
+  std::unordered_map<uint64_t, std::vector<rocprofAsyncRow*>> dispatches;
   for (auto* item : rows) {
     if (item->type != ROCTRACER_ACTIVITY_ASYNC) {
       continue;
@@ -260,19 +258,24 @@ inline void classifyRuntimeInternalDispatches(std::vector<rocprofBase*>& rows) {
     const auto copyIt = copyByCorrelation.find(async->id);
     if (copyIt != copyByCorrelation.end()) {
       async->internalApi = RocLogger::RuntimeInternalMemcpy;
-      if (sized.insert(async->id).second) {
-        async->internalBytes = copyIt->second->size;
-      }
       async->op =
           copyOperationFromApi(copyIt->second->kind, copyIt->second->cid);
-      continue;
-    }
-    const auto memsetIt = memsetByCorrelation.find(async->id);
-    if (memsetIt != memsetByCorrelation.end()) {
+      dispatches[async->id].push_back(async);
+    } else if (memsetByCorrelation.count(async->id)) {
       async->internalApi = RocLogger::RuntimeInternalMemset;
-      if (sized.insert(async->id).second) {
-        async->internalBytes = memsetIt->second;
-      }
+      dispatches[async->id].push_back(async);
+    }
+  }
+  // The runtime can split one fill or copy into several dispatches (unaligned
+  // head and tail, one per 3D slice).  The first carries the API's bytes; no
+  // dispatch of a split call gets a bandwidth, since none moved all of them.
+  for (auto& [id, split] : dispatches) {
+    const auto copyIt = copyByCorrelation.find(id);
+    split.front()->internalBytes = copyIt != copyByCorrelation.end()
+        ? copyIt->second->size
+        : memsetByCorrelation.at(id);
+    for (auto* async : split) {
+      async->internalSplit = split.size() > 1;
     }
   }
 }

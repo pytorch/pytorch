@@ -5570,7 +5570,8 @@ class TestMetadataJsonFormatCUDA(TestCase):
     def test_all_kernel_events_have_dims(self):
         # Every kernel-typed event must carry launch dimensions, including
         # dispatches the runtime issued on a user's behalf.  (Events for
-        # runtime memsets must not be kernel-typed at all.)
+        # eagerly issued runtime memsets must not be kernel-typed at all;
+        # memset nodes replayed from a graph are still reported as kernels.)
         x = torch.randn(64, 64, device="cuda")
         self._assert_kernel_dims(
             self._profile_gpu_activities(lambda: torch.mm(x, x), ("kernel",))

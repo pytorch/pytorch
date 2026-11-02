@@ -169,10 +169,12 @@ inline void GpuActivity::visitTypedMetadata(
       visitor.visit(
           RocmMetadataFields::kBytes,
           static_cast<uint64_t>(gpuActivity.internalBytes));
-      addBandwidthTypedMetadata(
-          visitor,
-          gpuActivity.internalBytes,
-          gpuActivity.end - gpuActivity.begin);
+      if (!gpuActivity.internalSplit) {
+        addBandwidthTypedMetadata(
+            visitor,
+            gpuActivity.internalBytes,
+            gpuActivity.end - gpuActivity.begin);
+      }
     }
     return;
   }

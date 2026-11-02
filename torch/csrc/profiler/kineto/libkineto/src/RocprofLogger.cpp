@@ -95,6 +95,14 @@ auto extract_copy_args =
   return 0;
 };
 
+// Number of workgroups covering a global work size, rounding up for a
+// partial last workgroup.
+uint32_t workgroupCount(uint32_t global, uint32_t local) {
+  return local > 0
+      ? static_cast<uint32_t>((uint64_t{global} + local - 1) / local)
+      : 0;
+}
+
 // extract kernel args
 struct kernel_args {
   // const char *stream;
@@ -811,6 +819,19 @@ void RocprofLogger::api_callback(
             1 /*max_deref*/
             ,
             &args);
+        // These APIs take the grid as a global work size; report workgroups
+        // like every other launch API and the dispatch record.
+        if (record.operation ==
+                ROCPROFILER_HIP_RUNTIME_API_ID_hipExtModuleLaunchKernel ||
+            record.operation ==
+                ROCPROFILER_HIP_RUNTIME_API_ID_hipHccModuleLaunchKernel) {
+          args.workgroupSize.x =
+              workgroupCount(args.workgroupSize.x, args.gridSize.x);
+          args.workgroupSize.y =
+              workgroupCount(args.workgroupSize.y, args.gridSize.y);
+          args.workgroupSize.z =
+              workgroupCount(args.workgroupSize.z, args.gridSize.z);
+        }
 
         rocprofKernelRow* row = new rocprofKernelRow(
             record.correlation_id.internal,
@@ -1029,17 +1050,13 @@ void RocprofLogger::buffer_callback(
         // ground truth for what executed, and it covers kernels that were
         // never dispatched through a HIP launch API (graph replays, and
         // runtime-internal fill kernels).  The SDK reports grid_size as the
-        // global work size (CUPTI reports the number of workgroups), so
-        // divide by the workgroup size, rounding up for a partial last
-        // workgroup.
-        const auto divdim = [](uint32_t global, uint32_t local) -> uint32_t {
-          return local > 0
-              ? static_cast<uint32_t>((uint64_t{global} + local - 1) / local)
-              : 0;
-        };
-        row->gridX = divdim(dispatch.grid_size.x, dispatch.workgroup_size.x);
-        row->gridY = divdim(dispatch.grid_size.y, dispatch.workgroup_size.y);
-        row->gridZ = divdim(dispatch.grid_size.z, dispatch.workgroup_size.z);
+        // global work size (CUPTI reports the number of workgroups).
+        row->gridX =
+            workgroupCount(dispatch.grid_size.x, dispatch.workgroup_size.x);
+        row->gridY =
+            workgroupCount(dispatch.grid_size.y, dispatch.workgroup_size.y);
+        row->gridZ =
+            workgroupCount(dispatch.grid_size.z, dispatch.workgroup_size.z);
         row->workgroupX = dispatch.workgroup_size.x;
         row->workgroupY = dispatch.workgroup_size.y;
         row->workgroupZ = dispatch.workgroup_size.z;

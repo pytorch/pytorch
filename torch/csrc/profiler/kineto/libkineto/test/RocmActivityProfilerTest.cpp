@@ -1131,22 +1131,35 @@ TEST(RocmRuntimeInternalDispatchTest, ClassifiesFillAndCopyDispatches) {
       2,
       20,
       stream);
-  // The runtime splits each call into two dispatches; correlation 3 is a
-  // user kernel.
+  rocprofMemsetRow wholeFill(
+      4,
+      RUNTIME_DOMAIN,
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync,
+      0,
+      0,
+      1,
+      2,
+      1024,
+      stream);
+  // The runtime splits the first two calls into two dispatches each and
+  // issues one dispatch for the last; correlation 3 is a user kernel.
   auto copyHead = makeDispatch(1);
   auto copyTail = makeDispatch(1);
   auto fillHead = makeDispatch(2);
   auto fillTail = makeDispatch(2);
   auto kernel = makeDispatch(3);
+  auto wholeFillDispatch = makeDispatch(4);
   const auto userOp = kernel->op;
   std::vector<rocprofBase*> rows{
       &copy,
       &fill,
+      &wholeFill,
       copyHead.get(),
       copyTail.get(),
       fillHead.get(),
       fillTail.get(),
-      kernel.get()};
+      kernel.get(),
+      wholeFillDispatch.get()};
 
   detail::classifyRuntimeInternalDispatches(rows);
 
@@ -1166,6 +1179,14 @@ TEST(RocmRuntimeInternalDispatchTest, ClassifiesFillAndCopyDispatches) {
   EXPECT_EQ(copyTail->internalBytes, 0u);
   EXPECT_EQ(fillHead->internalBytes, 20u);
   EXPECT_EQ(fillTail->internalBytes, 0u);
+  // A split call reports no bandwidth on any of its dispatches.
+  for (const auto* row :
+       {copyHead.get(), copyTail.get(), fillHead.get(), fillTail.get()}) {
+    EXPECT_TRUE(row->internalSplit);
+  }
+  EXPECT_EQ(wholeFillDispatch->internalApi, RocLogger::RuntimeInternalMemset);
+  EXPECT_EQ(wholeFillDispatch->internalBytes, 1024u);
+  EXPECT_FALSE(wholeFillDispatch->internalSplit);
   EXPECT_EQ(kernel->internalApi, RocLogger::RuntimeInternalNone);
   EXPECT_EQ(kernel->op, userOp);
   EXPECT_EQ(
