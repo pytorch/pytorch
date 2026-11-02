@@ -678,6 +678,22 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(eager_result, x * 2 + y + 1.0)
 
+    @xfailIfNoAcceleratorTriton
+    def test_clobber_constraint(self):
+        def fn(x):
+            return inline_asm_elementwise(
+                x,
+                asm_str="v_mov_b32 v1, $1\nv_mov_b32 $0, v1"
+                if torch.version.hip
+                else "mov.f32 $0, $1;",
+                constraints="=v,v,~{v1}" if torch.version.hip else "=f,f,~{memory}",
+                dtype=torch.float32,
+            )
+
+        x = torch.randn(100, device="cuda", dtype=torch.float32)
+        self.assertEqual(fn(x), x)
+        self.assertEqual(torch.compile(fn, backend="inductor")(x), x)
+
     def test_output_strides_mixed_inputs(self):
         """Verify fake mode output strides match eager (TensorIterator) strides."""
         from torch._subclasses.fake_tensor import FakeTensorMode
