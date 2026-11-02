@@ -2305,6 +2305,12 @@ class PythonWrapperCodegen(CodeGen):
     supports_caching: bool = True  # Whether the output code is cacheable.
     preserve_zero_dim_tensor_args: bool = False
 
+    @classmethod
+    def subgraph_buffer_blocker(cls, stream_idx: int | None) -> str | None:
+        """Why this wrapper cannot codegen a SubgraphBuffer created in
+        stream_idx, or None if it can."""
+        return None
+
     def __init__(self):
         super().__init__()
         self._last_default_stream_device: int | None = None
@@ -6458,6 +6464,29 @@ class PythonWrapperCodegen(CodeGen):
         self.codegen_subgraph_common(subgraph)
         self.codegen_subgraph_call_with_flattened_outputs(
             subgraph, outer_inputs, outer_flattened_outputs
+        )
+
+    def codegen_subgraph_buffer(self, node: ir.SubgraphBuffer) -> None:
+        """Codegen a SubgraphBuffer: call its subgraph with the symbolic inputs
+        followed by the tensor inputs and bind the result to node's name."""
+
+        class CodegenGraph:
+            def __init__(self, graph: GraphLowering):
+                self.graph = graph
+                self.name = graph.name
+
+        if reason := self.subgraph_buffer_blocker(node.get_stream_idx()):
+            raise NotImplementedError(
+                f"{type(self).__name__} cannot codegen SubgraphBuffer "
+                f"{node.get_name()} with {reason}"
+            )
+        if not ir.is_node_sequence(node.inputs):
+            raise AssertionError("Expected is_node_sequence(node.inputs)")
+        outer_inputs = [t.codegen_reference() for t in node.inputs]
+        self.codegen_subgraph_with_flattened_outputs(
+            CodegenGraph(node.subgraph),
+            [*node.sym_inputs, *outer_inputs],
+            [node.get_name()],
         )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_buffer_name):

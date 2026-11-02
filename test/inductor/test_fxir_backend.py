@@ -31,8 +31,12 @@ from torch._inductor.codegen.wrapper_fxir import (
     WrapperFxCodegen,
 )
 from torch._inductor.exc import InductorError
+from torch._inductor.select_algorithm import (
+    add_preprocessing_fn,
+    clear_preprocessing_fns,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, get_k_splits, use_decompose_k_choice
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -42,6 +46,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    IS_BIG_GPU,
     patch_custom_fallback_pass,
     requires_gpu,
 )
@@ -76,6 +81,39 @@ test_config = {
 @instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
+
+    @unittest.skipIf(not IS_BIG_GPU, "requires modern GPU to run max-autotune")
+    def test_decompose_k_not_offered(self):
+        # Decomposed-K lowers to a SubgraphBuffer, which the FX wrapper cannot
+        # codegen, so it must not be offered. Keep only the ATen mm and
+        # decompose_k choices.
+        def f(a, b):
+            return a @ b
+
+        args = (
+            torch.randn(16, 2048, device=self.device, dtype=torch.float16) / 8,
+            torch.randn(2048, 16, device=self.device, dtype=torch.float16) / 8,
+        )
+        names = []
+        add_preprocessing_fn(
+            lambda choices: names.extend(c.name for c in choices) or choices
+        )
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "triton.decompose_k_threshold": 0,
+                    "triton.num_decompose_k_splits": 2,
+                    "test_configs.autotune_choice_name_regex": r"^(mm$|decompose_k)",
+                }
+            ):
+                out = torch.compile(f)(*args)
+        finally:
+            clear_preprocessing_fns()
+        self.assertFalse([n for n in names if n.startswith("decompose_k")], names)
+        self.assertIn("mm", names)
+        self.assertEqual(out, f(*args), atol=1e-2, rtol=1e-2)
 
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
@@ -963,6 +1001,51 @@ class AOTFxirTestCase(InductorTestCase):
 
         inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
         self.check(M(), inp)
+
+    @requires_gpu()
+    @unittest.skipIf(not IS_BIG_GPU, "requires modern GPU to run max-autotune")
+    @parametrize("in_cond", (False, True))
+    def test_decompose_k_not_offered(self, in_cond):
+        # Decomposed-K lowers to a SubgraphBuffer, which the FX wrapper cannot
+        # codegen, so it must not be offered, also in a cond branch, which only
+        # learns it uses the FX wrapper at codegen. Keep only the ATen mm and
+        # decompose_k choices: Triton templates in a cond branch are not
+        # supported by the FX wrapper either.
+        class M(torch.nn.Module):
+            def forward(self, pred, a, b):
+                if not in_cond:
+                    return a @ b
+                return torch.cond(
+                    pred, lambda a, b: a @ b, lambda a, b: (a * 2) @ b, (a, b)
+                )
+
+        inp = (
+            torch.tensor([True], device=self.device),
+            torch.randn(16, 2048, device=self.device, dtype=torch.float16) / 8,
+            torch.randn(2048, 16, device=self.device, dtype=torch.float16) / 8,
+        )
+        offered = []
+        get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
+        add_preprocessing_fn(lambda choices: offered.extend(choices) or choices)
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "triton.decompose_k_threshold": 0,
+                    "triton.num_decompose_k_splits": 2,
+                    "test_configs.autotune_choice_name_regex": r"^(mm$|decompose_k)",
+                }
+            ):
+                self.check(M(), inp, check_fn=lambda a, b: same(a, b, tol=1e-2))
+        finally:
+            clear_preprocessing_fns()
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+        names = [c.name for c in offered]
+        self.assertFalse([n for n in names if n.startswith("decompose_k")], names)
+        self.assertIn("mm", names)
 
     @requires_gpu()
     @parametrize(

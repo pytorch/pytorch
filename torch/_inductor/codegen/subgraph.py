@@ -16,7 +16,10 @@ from torch._inductor.autotune_process import (
     SubgraphGPUBenchmarkRequest,
     TensorMeta,
 )
-from torch._inductor.codegen.common import KernelTemplate
+from torch._inductor.codegen.common import (
+    get_wrapper_codegen_for_device,
+    KernelTemplate,
+)
 from torch._inductor.ir import (
     Buffer,
     FixedLayout,
@@ -55,6 +58,20 @@ def inline_subgraph_to_ir_nodes(
         return process_subgraph_nodes(gm, inputs)
     finally:
         V.graph.module = original_module
+
+
+def allow_subgraph_choices(device_type: str | None) -> bool:
+    """Whether the current graph's wrapper can codegen a SubgraphBuffer created
+    here, so lowerings can offer subgraph choices."""
+    if device_type is None:
+        return False
+    wrapper_cls = get_wrapper_codegen_for_device(
+        device_type, V.graph.cpp_wrapper, V.graph.fx_wrapper
+    )
+    stream_idx = ir.IRNode._current_stream_idx
+    return wrapper_cls is not None and not wrapper_cls.subgraph_buffer_blocker(
+        stream_idx
+    )
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
@@ -193,8 +210,16 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             gm=self.gm,
             example_inputs=compile_inputs,
             shape_env=V.graph._shape_env,
-            cpp_wrapper=V.graph.cpp_wrapper,
-            aot_mode=V.graph.aot_mode,
+            # The candidate runs in-process while the parent is still compiling,
+            # which only Python wrapper code supports: a C++-wrapper module
+            # compiles its Triton kernels lazily on first run and fails there,
+            # an AOT compile yields no runnable module, and benchmark() passes
+            # symbolic inputs as leading arguments. The chosen SubgraphBuffer is
+            # still lowered and codegened with the parent's wrapper, so lowering
+            # decisions that read V.graph.cpp_wrapper can differ from the
+            # benchmarked candidate.
+            cpp_wrapper=False,
+            aot_mode=False,
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
@@ -218,6 +243,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 "benchmark_fusion": False,
                 "pipeline_max_autotune_gemm": False,
                 **self.config_patches,
+                # The module must be Python wrapper code (see above).
+                "cpp_wrapper": False,
+                # A C++-wrapper compile may set these globally; a throwaway
+                # benchmark module wants neither. store_cubin makes every timed
+                # launch save the cubin and skip the static launcher, and
+                # autotune_at_compile_time adds a compile-time autotune block.
+                "triton.autotune_at_compile_time": False,
+                "triton.store_cubin": False,
             }
             with config.patch(benchmark_config):
                 bm_graph_lowering.run(*compile_inputs)
