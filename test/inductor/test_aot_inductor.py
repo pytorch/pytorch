@@ -4,6 +4,7 @@ import functools
 import gc
 import itertools
 import logging
+import math
 import os
 import pathlib
 import re
@@ -41,6 +42,7 @@ from torch._inductor.codegen.wrapper import (
     SymbolicCallArg,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
 from torch._inductor.heuristics.template.contiguous_mm import ContiguousMMHeuristics
@@ -51,7 +53,10 @@ from torch._inductor.kernel.mm import (
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.select_algorithm import (
-    get_algorithm_selector_cache,
+    add_feedback_saver,
+    add_preprocessing_fn,
+    clear_feedback_savers,
+    clear_preprocessing_fns,
     TritonTemplate,
 )
 from torch._inductor.test_case import TestCase
@@ -291,9 +296,9 @@ def get_triton_grid_info(kernel, total_elements, src_code):
 
 
 # copy_tests() only copies test_* methods onto the concrete device classes, so
-# helpers shared by the bmm_shared_a tests have to live at module level.
-def _skip_unless_bmm_shared_a_runnable(test):
-    # The template is only offered under max-autotune on Triton-capable accelerators.
+# helpers shared by tests have to live at module level.
+def _skip_unless_big_gpu(test):
+    # Max-autotune templates are only offered on Triton-capable accelerators.
     if test.device != GPU_TYPE:
         raise unittest.SkipTest("requires an accelerator")
     if not IS_BIG_GPU:
@@ -363,56 +368,333 @@ def profiled_ivalue_kinds(code, kernel_name):
     ]
 
 
+class _TwoMatmuls(torch.nn.Module):
+    def forward(self, a, b, c):
+        return torch.relu(a @ b), torch.sigmoid(a @ c)
+
+
+def _two_matmul_inputs(device, m=16, k=2048, scale=8):
+    return (
+        torch.randn(m, k, device=device, dtype=torch.float16) / scale,
+        torch.randn(k, 16, device=device, dtype=torch.float16) / scale,
+        torch.randn(k, 8, device=device, dtype=torch.float16) / scale,
+    )
+
+
+# Offer two decompose_k splits for any K.
+_DECOMPOSE_K_CONFIGS = {
+    "max_autotune": True,
+    "max_autotune_gemm_backends": "TRITON",
+    "triton.decompose_k_threshold": 0,
+    "triton.num_decompose_k_splits": 2,
+}
+# Keep only the decompose_k choices, and the ATen bmm their subgraphs lower to
+# (SubgraphBuffer lowers its inner graph with only ATen choices).
+_PIN_DECOMPOSE_K = {
+    "triton.decompose_k_bmm_backends": "ATEN",
+    "test_configs.autotune_choice_name_regex": r"^(decompose_k_mm|bmm_dtype$)",
+}
+
+
+def _aoti_compile_recording_choices(model, inputs, configs, dynamic_shapes=None):
+    """AOTI-compile with fresh decompose_k caches; return the package path, the
+    generated C++, the choice lists the autotuner was offered, and the timings
+    of the choices it benchmarked."""
+    offered, timings = [], []
+    get_k_splits.cache_clear()
+    use_decompose_k_choice.cache_clear()
+    add_preprocessing_fn(lambda choices: offered.append(choices) or choices)
+    add_feedback_saver(lambda choice_timings, *args: timings.append(choice_timings))
+    try:
+        # aoti_compile_and_package writes into the configs it is given.
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, model, inputs, {**configs}, dynamic_shapes
+        )
+    finally:
+        clear_preprocessing_fns()
+        clear_feedback_savers()
+        get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
+    return package_path, code, offered, timings
+
+
+def _choice_names(offered, prefix):
+    return [c.name for choices in offered for c in choices if c.name.startswith(prefix)]
+
+
 class AOTInductorTestsTemplate:
     @common_utils.parametrize("dynamic", [False, True])
-    @common_utils.parametrize("autotune_at_compile_time", [False, True])
-    def test_decompose_k(self, dynamic, autotune_at_compile_time):
-        if self.device != GPU_TYPE or not IS_BIG_GPU:
-            raise unittest.SkipTest("requires modern GPU to run max-autotune")
+    def test_decompose_k(self, dynamic):
+        _skip_unless_big_gpu(self)
 
-        class Model(torch.nn.Module):
-            def forward(self, a, b, c):
-                return torch.relu(a @ b), torch.sigmoid(a @ c)
+        configs = {
+            **_DECOMPOSE_K_CONFIGS,
+            **_PIN_DECOMPOSE_K,
+        }
+        dynamic_shapes = ({0: Dim("m", min=2, max=32)}, None, None) if dynamic else None
+        package_path, code, offered, timings = _aoti_compile_recording_choices(
+            _TwoMatmuls(), _two_matmul_inputs(self.device), configs, dynamic_shapes
+        )
 
-        def make_inputs(m):
-            return (
-                torch.randn(m, 2048, device=self.device, dtype=torch.float16) / 8,
-                torch.randn(2048, 16, device=self.device, dtype=torch.float16) / 8,
-                torch.randn(2048, 8, device=self.device, dtype=torch.float16) / 8,
+        # Both splits of each matmul are offered and benchmark successfully.
+        decompose_k = [
+            [c.name for c in choices]
+            for choices in offered
+            if _choice_names([choices], "decompose_k_mm")
+        ]
+        self.assertEqual(len(decompose_k), 2, decompose_k)
+        for names in decompose_k:
+            self.assertEqual(len(names), 2, names)
+        benchmarked = [
+            {c.name: t for c, t in choice_timings.items()}
+            for choice_timings in timings
+            if _choice_names([list(choice_timings)], "decompose_k_mm")
+        ]
+        self.assertEqual(len(benchmarked), 2, benchmarked)
+        for named_timings in benchmarked:
+            self.assertEqual(len(named_timings), 2, named_timings)
+            self.assertTrue(
+                all(map(math.isfinite, named_timings.values())), named_timings
+            )
+        # One subgraph per matmul; dual-wrapper mode captures the JIT and the
+        # AOT wrapper.
+        dual_wrapper = config.triton.autotune_at_compile_time is False
+        FileCheck().check_count(
+            "// subgraph: decompose_k_mm", 4 if dual_wrapper else 2, exactly=True
+        ).run(code)
+        FileCheck().check(f"aoti_torch_{GPU_TYPE}_bmm_dtype_out").run(code)
+        optimized = AOTIRunnerUtil.load_package(package_path)
+        for m in (16, 24) if dynamic else (16,):
+            inputs = _two_matmul_inputs(self.device, m)
+            self.assertEqual(
+                optimized(*inputs), _TwoMatmuls()(*inputs), atol=1e-2, rtol=1e-2
             )
 
+    def test_decompose_k_offered_after_aoti_compile(self):
+        # The decision is cached per shape; an AOTI compile must not decide it
+        # for a later Python-wrapper compile of the same shape.
+        _skip_unless_big_gpu(self)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        inputs = _two_matmul_inputs(self.device)[:2]
+        offered = []
+        add_preprocessing_fn(lambda choices: offered.append(choices) or choices)
+        try:
+            AOTIRunnerUtil.compile(Model(), inputs, {**_DECOMPOSE_K_CONFIGS})
+            aoti_offered = _choice_names(offered, "decompose_k")
+            offered.clear()
+            torch._dynamo.reset()
+            with config.patch(_DECOMPOSE_K_CONFIGS):
+                torch.compile(Model())(*inputs)
+        finally:
+            clear_preprocessing_fns()
+        self.assertTrue(aoti_offered)
+        self.assertTrue(_choice_names(offered, "decompose_k"))
+
+    def test_decompose_k_dynamic_k_keeps_mm(self):
+        # A dynamic K large enough for decompose_k but with no split that
+        # provably divides it must keep the Triton mm choices.
+        _skip_unless_big_gpu(self)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        def make_inputs(k):
+            return (
+                torch.randn(16, k, device=self.device, dtype=torch.float16) / 8,
+                torch.randn(k, 16, device=self.device, dtype=torch.float16) / 8,
+            )
+
+        k = Dim("k", min=4096, max=8192)
+        configs = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "triton.decompose_k_threshold": 32,
+            "triton.num_decompose_k_splits": 2,
+        }
+        package_path, _, offered, _ = _aoti_compile_recording_choices(
+            Model(), make_inputs(4097), configs, ({1: k}, {0: k})
+        )
+        self.assertTrue(_choice_names(offered, "triton_mm"), offered)
+        optimized = AOTIRunnerUtil.load_package(package_path)
+        for k_size in (4097, 6000):
+            inputs = make_inputs(k_size)
+            self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
+
+    @common_utils.parametrize(
+        "limit",
+        [
+            {"memory_planning": True, "memory_pool": "intermediates"},
+            {"triton.multi_kernel": 1},
+            {"aot_inductor.link_libtorch": False},
+        ],
+        name_fn=lambda limit: next(iter(limit)).split(".")[-1],
+    )
+    def test_decompose_k_not_offered(self, limit):
+        # The C++ wrapper cannot inline a subgraph under pooled memory planning,
+        # which ignores the inlined scope, under multi-kernel, which picks
+        # kernels from a map the subgraph never fills, or without libtorch,
+        # which its ATen calls need, so decompose_k must not be offered there.
+        _skip_unless_big_gpu(self)
+
+        configs = {
+            **_DECOMPOSE_K_CONFIGS,
+            **limit,
+        }
+        package_path, _, offered, _ = _aoti_compile_recording_choices(
+            _TwoMatmuls(), _two_matmul_inputs(self.device), configs
+        )
+        self.assertFalse(_choice_names(offered, "decompose_k"))
+        self.assertTrue(_choice_names(offered, "triton_mm"), offered)
+        if limit.get("aot_inductor.link_libtorch", True):
+            inputs = _two_matmul_inputs(self.device)
+            optimized = AOTIRunnerUtil.load_package(package_path)
+            self.assertEqual(
+                optimized(*inputs), _TwoMatmuls()(*inputs), atol=1e-2, rtol=1e-2
+            )
+
+    # The JIT C++ wrapper of the dual-wrapper mode does not support user streams.
+    @requires_autotune_at_compile_time
+    def test_decompose_k_not_offered_in_user_stream(self):
+        # An inlined subgraph's own scheduler would launch its kernels on the
+        # entry stream, so a matmul in a user stream region keeps other choices.
+        if self.device != "cuda" or not IS_BIG_GPU:
+            raise unittest.SkipTest("requires modern CUDA GPU to run max-autotune")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = a @ b
+                s.record_event().wait()
+                return y
+
+        configs = _DECOMPOSE_K_CONFIGS
+        inputs = _two_matmul_inputs(self.device)[:2]
+        package_path, _, offered, _ = _aoti_compile_recording_choices(
+            Model(), inputs, configs
+        )
+        self.assertFalse(_choice_names(offered, "decompose_k"))
+        self.assertTrue(_choice_names(offered, "triton_mm"), offered)
+        optimized = AOTIRunnerUtil.load_package(package_path)
+        self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
+
+    def test_subgraph_buffer_rejected_under_memory_planning(self):
+        # Patching the gate simulates a SubgraphBuffer producer that bypasses
+        # it; the C++ codegen itself must then refuse.
+        _skip_unless_big_gpu(self)
+
+        configs = {
+            **_DECOMPOSE_K_CONFIGS,
+            **_PIN_DECOMPOSE_K,
+            "memory_planning": True,
+            "memory_pool": "intermediates",
+        }
+        with (
+            patch(
+                "torch._inductor.kernel.mm.allow_subgraph_choices", return_value=True
+            ),
+            self.assertRaisesRegex(
+                InductorError,
+                r"cannot codegen SubgraphBuffer \S+ with pooled memory planning",
+            ) as ctx,
+        ):
+            AOTIRunnerUtil.compile(
+                _TwoMatmuls(), _two_matmul_inputs(self.device), configs
+            )
+        self.assertIsInstance(ctx.exception.inner_exception, NotImplementedError)
+
+    def test_decompose_k_in_cond(self):
+        # A decomposed-K SubgraphBuffer inlined inside a cond branch, whose own
+        # C++ scope it nests in (and which dual-wrapper mode codegens twice).
+        _skip_unless_big_gpu(self)
+
+        class Model(torch.nn.Module):
+            def forward(self, pred, a, b, c):
+                return torch.cond(
+                    pred,
+                    lambda a, b, c: _TwoMatmuls()(a, b, c),
+                    lambda a, b, c: _TwoMatmuls()(a * 2, b, c),
+                    (a, b, c),
+                )
+
+        configs = {
+            **_DECOMPOSE_K_CONFIGS,
+            **_PIN_DECOMPOSE_K,
+        }
+        inputs = _two_matmul_inputs(self.device)
+        package_path, code, _, _ = _aoti_compile_recording_choices(
+            Model(), (torch.tensor(True, device=self.device), *inputs), configs
+        )
+        # Two matmuls in each of the two branches; dual-wrapper mode captures
+        # the JIT and the AOT wrapper.
+        dual_wrapper = config.triton.autotune_at_compile_time is False
+        subgraphs = re.findall(r"// subgraph: \w*_decompose_k_mm", code)
+        self.assertEqual(len(subgraphs), 8 if dual_wrapper else 4, subgraphs)
+        optimized = AOTIRunnerUtil.load_package(package_path)
+        for pred in (True, False):
+            args = (torch.tensor(pred, device=self.device), *inputs)
+            self.assertEqual(optimized(*args), Model()(*args), atol=1e-2, rtol=1e-2)
+
+    def test_decompose_k_fp32(self):
+        # An fp32 decomposed-K bmm needs no out_dtype, so it keeps to the
+        # older bmm_out C shim.
+        _skip_unless_big_gpu(self)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        inputs = (
+            torch.randn(16, 2048, device=self.device) / 8,
+            torch.randn(2048, 16, device=self.device) / 8,
+        )
+        configs = {
+            **_DECOMPOSE_K_CONFIGS,
+            "triton.decompose_k_bmm_backends": "ATEN",
+            "test_configs.autotune_choice_name_regex": r"^(decompose_k_mm|bmm$)",
+        }
+        package_path, code, _, _ = _aoti_compile_recording_choices(
+            Model(), inputs, configs
+        )
+        FileCheck().check(f"aoti_torch_{GPU_TYPE}_bmm_out").run(code)
+        self.assertNotIn("bmm_dtype_out", code)
+        optimized = AOTIRunnerUtil.load_package(package_path)
+        self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-3, rtol=1e-3)
+
+    def test_decompose_k_cooperative_reduction(self):
+        # Each inlined subgraph's cooperative reduction needs the semaphore
+        # workspace, which must be declared in each subgraph's own C++ scope.
+        _skip_unless_big_gpu(self)
+
+        inputs = _two_matmul_inputs(self.device, k=32768, scale=64)
         configs = {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
             "triton.decompose_k_threshold": 0,
-            "triton.num_decompose_k_splits": 2,
-            "triton.autotune_at_compile_time": autotune_at_compile_time,
-            # The decompose_k subgraph lowers its own bmm, which the regex must keep.
-            "test_configs.autotune_choice_name_regex": r"^(decompose_k_mm|bmm)",
+            "triton.num_decompose_k_splits": 10,
+            "triton.force_cooperative_reductions": True,
+            "triton.multi_kernel": False,
+            "test_configs.autotune_choice_name_regex": (
+                r"^(decompose_k_mm_256_split|bmm_dtype$)"
+            ),
         }
-        dynamic_shapes = ({0: Dim("m", min=2, max=32)}, None, None) if dynamic else None
-        inputs = make_inputs(16)
-        get_k_splits.cache_clear()
-        use_decompose_k_choice.cache_clear()
-        try:
-            package_path, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, Model(), inputs, configs, dynamic_shapes
-            )
-        finally:
-            get_k_splits.cache_clear()
-            use_decompose_k_choice.cache_clear()
-
-        FileCheck().check_count("// subgraph: decompose_k_mm", 2).run(code)
-        FileCheck().check("bmm_dtype_out").run(code)
-        optimized = torch._inductor.aoti_load_package(package_path)
-        for m in (16, 24) if dynamic else (16,):
-            inputs = make_inputs(m)
-            self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
+        package_path, code, _, _ = _aoti_compile_recording_choices(
+            _TwoMatmuls(), inputs, configs
+        )
+        self.assertIn("semaphores_", code)
+        optimized = AOTIRunnerUtil.load_package(package_path)
+        self.assertEqual(
+            optimized(*inputs), _TwoMatmuls()(*inputs), atol=1e-2, rtol=1e-2
+        )
 
     @common_utils.parametrize("op", ["mm", "addmm"])
     def test_contiguous_mm_transform(self, op):
-        if self.device != GPU_TYPE or not IS_BIG_GPU:
-            raise unittest.SkipTest("requires modern GPU to run max-autotune")
+        _skip_unless_big_gpu(self)
 
         class Model(torch.nn.Module):
             def forward(self, x, w, bias):
@@ -427,16 +709,6 @@ class AOTInductorTestsTemplate:
             torch.randn(48, device=self.device, dtype=torch.float16),
         )
 
-        # Unlike test_decompose_k, autotune_choice_name_regex cannot pin this: it
-        # applies to every autotuned op, and the transform's subgraph lowers the
-        # same op, which offers no contiguous_ choice. So keep the contiguous
-        # choice only where it is offered.
-        def select_contiguous(choices):
-            selected = [c for c in choices if c.name.startswith(f"contiguous_{op}")]
-            return selected or choices
-
-        selector = get_algorithm_selector_cache()
-        preprocessing_fns = [*selector.preprocessing_fns, select_contiguous]
         # The transform registers its heuristics and enables use_contiguous only
         # on ROCm. Registering and stubbing them covers its SubgraphBuffer path on
         # CUDA too; on ROCm the real use_contiguous decides (K >= 16 * max(M, N)).
@@ -460,16 +732,26 @@ class AOTInductorTestsTemplate:
                     override_heuristic_class=ContiguousMMHeuristics,
                 ),
                 stub_use_contiguous,
-                patch.object(selector, "preprocessing_fns", preprocessing_fns),
             ):
                 package_path, code = run_and_get_cpp_code(
-                    AOTIRunnerUtil.compile, Model(), inputs, {"max_autotune": True}
+                    AOTIRunnerUtil.compile,
+                    Model(),
+                    inputs,
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "TRITON",
+                        # TRITON leaves the outer op no ATen choice, while
+                        # SubgraphBuffer lowers its inner op with only ATen ones.
+                        "test_configs.autotune_choice_name_regex": (
+                            rf"^(contiguous_{op}|{op}$)"
+                        ),
+                    },
                 )
         finally:
             use_contiguous.cache_clear()
 
         FileCheck().check(f"// subgraph: contiguous_{op}").run(code)
-        optimized = torch._inductor.aoti_load_package(package_path)
+        optimized = AOTIRunnerUtil.load_package(package_path)
         self.assertEqual(optimized(*inputs), Model()(*inputs), atol=1e-2, rtol=1e-2)
 
     @common_utils.parametrize("embed_kernel_binary", [False, True])
@@ -11447,7 +11729,7 @@ torch._inductor.aoti_load_package("{model_path}")
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_bmm_shared_a_numerics(self):
-        _skip_unless_bmm_shared_a_runnable(self)
+        _skip_unless_big_gpu(self)
         # Autotuning only times candidates, it does not check them, so a template
         # config that miscompiles can win and silently return garbage. Comparing
         # against eager after a real AOTI compile is what catches that.
@@ -11459,7 +11741,7 @@ torch._inductor.aoti_load_package("{model_path}")
             self.check_model(_bmm_shared_a_model(), example_inputs)
 
     def test_bmm_shared_a_offered_when_eligible(self):
-        _skip_unless_bmm_shared_a_runnable(self)
+        _skip_unless_big_gpu(self)
         example_inputs = (
             torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
             torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
@@ -11477,7 +11759,7 @@ torch._inductor.aoti_load_package("{model_path}")
             )
 
     def test_bmm_shared_a_not_offered_when_disabled(self):
-        _skip_unless_bmm_shared_a_runnable(self)
+        _skip_unless_big_gpu(self)
         example_inputs = (
             torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
             torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
@@ -11486,7 +11768,7 @@ torch._inductor.aoti_load_package("{model_path}")
         self.assertEqual(offered, [])
 
     def test_bmm_shared_a_not_offered_for_small_batch(self):
-        _skip_unless_bmm_shared_a_runnable(self)
+        _skip_unless_big_gpu(self)
         # Below the profitability gate: with few batches the grouping only costs
         # parallelism, so the template must decline.
         example_inputs = (
@@ -11497,7 +11779,7 @@ torch._inductor.aoti_load_package("{model_path}")
         self.assertEqual(offered, [])
 
     def test_bmm_shared_a_not_offered_without_broadcast(self):
-        _skip_unless_bmm_shared_a_runnable(self)
+        _skip_unless_big_gpu(self)
 
         class Model(torch.nn.Module):
             def forward(self, a, b):

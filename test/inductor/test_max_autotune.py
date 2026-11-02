@@ -1924,11 +1924,12 @@ class TestMaxAutotune(TestCase):
             kernel_launch = "triton_.*_fused_.*{}.run"
 
         def check_code(code, kernel_suffix=""):
-            # The modules compiled to benchmark decompose_k choices are always
-            # Python wrapper code, and later compiles hit the autotune cache
-            # and skip them, so check the compiled graph itself.
-            graph_code = next(c for c in code if "benchmark_decompose_k" not in c)
+            # The modules compiled to benchmark decompose_k choices come first
+            # and are always Python wrapper code, so check the compiled graph,
+            # which is last.
+            graph_code = code[-1]
             if dynamic:
+                self.assertFalse([c for c in code if "benchmark_decompose_k" in c])
                 FileCheck().check_not(bmm_call).check_not("decompose_k").run(graph_code)
             else:
                 FileCheck().check(bmm_call).check_regex(
@@ -2032,6 +2033,7 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
             "triton.num_decompose_k_splits": 10,
+            "test_configs.autotune_choice_name_regex": r"^(decompose_k_mm|bmm_dtype$)",
         }
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
@@ -2062,12 +2064,22 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(compiled_func, a, b)
             # The symbolic-input binding is checked on a decompose_k benchmark
             # module, which is Python wrapper code under both wrappers.
-            benchmark_code = next(c for c in code if "benchmark_decompose_k" in c)
+            benchmark_code = next(
+                (c for c in code if "benchmark_decompose_k" in c), None
+            )
+            self.assertIsNotNone(benchmark_code, "no decompose_k benchmark module")
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"2\*s[0-9]+"
             ).check_regex("s[0-9]+ = 32").run(benchmark_code)
+            graph_code = code[-1]
+            bmm_call = (
+                f"aoti_torch_{GPU_TYPE}_bmm_dtype_out"
+                if config.cpp_wrapper
+                else "extern_kernels.bmm_dtype"
+            )
+            FileCheck().check(bmm_call).run(graph_code)
             torch.testing.assert_close(
                 out,
                 f(a, b),
@@ -2130,7 +2142,10 @@ class TestMaxAutotune(TestCase):
 
             # The forward does not use decompose_k, so this is a backward
             # benchmark module, which is Python wrapper code under both wrappers.
-            benchmark_code = next(c for c in code if "benchmark_decompose_k" in c)
+            benchmark_code = next(
+                (c for c in code if "benchmark_decompose_k" in c), None
+            )
+            self.assertIsNotNone(benchmark_code, "no decompose_k benchmark module")
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
@@ -2176,11 +2191,84 @@ class TestMaxAutotune(TestCase):
             # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
             self.assertEqual(out.stride(), (1096, 1))
 
-            FileCheck().check_not("extern_kernels.bmm_dtype").check(
-                "decompose_k"
-            ).check(
-                f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
-            ).run(code[0])
+            graph_code = code[-1]
+            self.assertIn("decompose_k", graph_code)
+            if not config.cpp_wrapper:
+                FileCheck().check(
+                    f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
+                ).run(graph_code)
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    def test_max_autotune_decompose_k_config_patch_between_compiles(self):
+        # The opt-out and the split count must take effect for a shape decided
+        # by an earlier compile.
+        a = torch.randn(16, 2048, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2048, 16, device=GPU_TYPE, dtype=torch.float16)
+        names = []
+        add_preprocessing_fn(
+            lambda choices: names.extend(c.name for c in choices) or choices
+        )
+        try:
+            # K=2048, M=N=16: the eligible splits are 2, 4, 8 and 16.
+            for limit, splits in ((2, {2, 4}), (4, {2, 4, 8, 16}), (0, set())):
+                names.clear()
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "TRITON",
+                        "triton.decompose_k_threshold": 0,
+                        "triton.num_decompose_k_splits": limit,
+                        "triton.decompose_k_bmm_backends": "ATEN",
+                    }
+                ):
+                    torch.compile(lambda a, b: a @ b)(a, b)
+                offered = {
+                    int(m.group(1))
+                    for n in names
+                    if (m := re.match(r"decompose_k_mm_(\d+)_split", n))
+                }
+                self.assertEqual(offered, splits, names)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.decompose_k_threshold": 32,
+            "triton.num_decompose_k_splits": 2,
+        }
+    )
+    def test_max_autotune_decompose_k_dynamic_k_keeps_mm(self):
+        # K is large enough for decompose_k, but no split provably divides it,
+        # so decompose_k offers no choice and the Triton mm choices must stay.
+        a = torch.randn(16, 4097, device=GPU_TYPE, dtype=torch.float16) / 64
+        b = torch.randn(4097, 16, device=GPU_TYPE, dtype=torch.float16) / 64
+        torch._dynamo.reset()
+        torch._dynamo.mark_dynamic(a, 1, min=4096, max=8192)
+        torch._dynamo.mark_dynamic(b, 0, min=4096, max=8192)
+        names = []
+        get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
+        add_preprocessing_fn(
+            lambda choices: names.extend(c.name for c in choices) or choices
+        )
+        try:
+            out = torch.compile(lambda a, b: a @ b)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+        self.assertTrue([n for n in names if n.startswith("triton_mm")], names)
+        self.assertEqual(out, a @ b, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
