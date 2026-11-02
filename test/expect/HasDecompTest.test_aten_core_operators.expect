@@ -291,7 +291,9 @@ aten::igammac
 aten::igammac.out
 aten::igammac_
 aten::index_put_
+aten::index_put_.assume_unique
 aten::index_reduce_
+aten::index_reduce_.assume_unique
 aten::index_select
 aten::index_select.out
 aten::is_same_size
@@ -423,6 +425,7 @@ aten::prod
 aten::prod.dim_int
 aten::prod.int_out
 aten::prod.out
+aten::put_.assume_unique
 aten::randn
 aten::reciprocal
 aten::reciprocal.out
@@ -451,12 +454,15 @@ aten::rrelu_with_noise_backward.out
 aten::rsqrt
 aten::rsqrt.out
 aten::rsqrt_
+aten::scatter_.assume_unique
 aten::scatter_.reduce
 aten::scatter_.src
 aten::scatter_.value
 aten::scatter_.value_reduce
 aten::scatter_add_
+aten::scatter_add_.assume_unique
 aten::scatter_reduce_.two
+aten::scatter_reduce_.two_assume_unique
 aten::sigmoid
 aten::sigmoid.out
 aten::sigmoid_

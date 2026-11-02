@@ -872,8 +872,18 @@
   index: non_differentiable
   result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha))
 
+- name: index_add.assume_unique(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, bool assume_unique) -> Tensor
+  self: grad
+  source: "maybe_multiply(source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0)), alpha)"
+  index: non_differentiable
+  result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha), 1, assume_unique)
+
 - name: index_reduce(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor
   self, source: index_reduce_backward(grad, self, dim, index, source, reduce, include_self, result)
+  index: non_differentiable
+
+- name: index_reduce.assume_unique(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, bool assume_unique) -> Tensor
+  self, source: index_reduce_backward(grad, self, dim, index, source, reduce, include_self, result, assume_unique)
   index: non_differentiable
 
 - name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
@@ -884,6 +894,12 @@
   source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
   index: non_differentiable
   result: self_t.index_copy(dim, index, source_t)
+
+- name: index_copy.assume_unique(Tensor self, int dim, Tensor index, Tensor source, *, bool assume_unique) -> Tensor
+  self: grad.index_fill(dim, index, 0)
+  source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
+  index: non_differentiable
+  result: self_t.index_copy(dim, index, source_t, assume_unique)
 
 - name: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   self: grad.index_fill(dim, index, 0)
@@ -900,6 +916,11 @@
   self: "accumulate ? grad : grad.index_put(indices, zeros_like(values), false)"
   values: grad.index(indices)
   result: self_t.index_put(indices, values_t, accumulate)
+
+- name: index_put.assume_unique(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False, *, bool assume_unique) -> Tensor
+  self: "accumulate ? grad : grad.index_put(indices, zeros_like(values), false, assume_unique)"
+  values: grad.index(indices)
+  result: self_t.index_put(indices, values_t, accumulate, assume_unique)
 
 - name: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   self: "accumulate ? grad : at::_unsafe_index_put(grad, indices, zeros_like(values), false)"
@@ -1439,6 +1460,12 @@
   source: grad.take(index).reshape_as(source)
   result: self_t.put(index, source_t, accumulate)
 
+- name: put.assume_unique(Tensor self, Tensor index, Tensor source, bool accumulate=False, *, bool assume_unique) -> Tensor
+  self: "accumulate ? grad : grad.put(index, zeros_like(source), false, assume_unique)"
+  index: non_differentiable
+  source: grad.take(index).reshape_as(source)
+  result: self_t.put(index, source_t, accumulate, assume_unique)
+
 - name: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
   Q, R: linalg_qr_jvp(A_t, Q, R, mode)
@@ -1531,11 +1558,23 @@
   index: non_differentiable
   result: self_t.scatter(dim, index, 0)
 
+- name: scatter.assume_unique(Tensor self, int dim, Tensor index, Tensor src, *, str? reduce=None, bool assume_unique) -> Tensor
+  self: grad.scatter(dim, index, 0)
+  index: non_differentiable
+  src: grad.gather(dim, index)
+  result: self_t.scatter(dim, index, src_t, std::nullopt, assume_unique)
+
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   self: grad
   index: non_differentiable
   src: grad.gather(dim, index)
   result: scatter_add(self_t, dim, index, src_t)
+
+- name: scatter_add.assume_unique(Tensor self, int dim, Tensor index, Tensor src, *, bool assume_unique) -> Tensor
+  self: grad
+  index: non_differentiable
+  src: grad.gather(dim, index)
+  result: at::scatter_add(self_t, dim, index, src_t, assume_unique)
 
 - name: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   dispatch:
@@ -3091,6 +3130,11 @@
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
   result: scatter_reduce_jvp(self_p, self_t, dim, index, src_p, src_t, reduce, include_self, result)
+
+- name: scatter_reduce.two_assume_unique(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True, bool assume_unique) -> Tensor
+  self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result, assume_unique)
+  index: non_differentiable
+  result: scatter_reduce_jvp(self_p, self_t, dim, index, src_p, src_t, reduce, include_self, result, assume_unique)
 
 - name: special_airy_ai(Tensor x) -> Tensor
   x: non_differentiable

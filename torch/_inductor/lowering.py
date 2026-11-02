@@ -66,7 +66,7 @@ from torch.utils._triton import has_triton_reduction_ordering
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import assume_unique_ops, decompositions, get_decompositions
 from .ir import (
     BaseView,
     DtypeView,
@@ -4107,7 +4107,22 @@ make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
-make_fallback(aten.index_reduce)
+make_fallback(aten.index_reduce.default, override_decomp=True)
+# The in-place assume_unique overloads normally do not reach lowering (they are
+# functionalized first); registering them keeps the packet-level lowerings
+# below from capturing them with signatures that do not accept assume_unique.
+for _op in (
+    *assume_unique_ops,
+    aten.index_copy_.assume_unique,
+    aten.index_put_.assume_unique,
+    aten.put_.assume_unique,
+    aten.index_add_.assume_unique,
+    aten.index_reduce_.assume_unique,
+    aten.scatter_.assume_unique,
+    aten.scatter_add_.assume_unique,
+    aten.scatter_reduce_.two_assume_unique,
+):
+    make_fallback(_op, override_decomp=True)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
 make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
@@ -5335,13 +5350,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if reduce not in (None, "sum", "prod", "mean", "amax", "amin"):
         raise AssertionError(
             'expected: reduce in (None, "sum", "prod", "mean", "amax", "amin")'
-        )
-    if not (
-        len(aten.scatter_reduce_.overloads()) == 1
-        and "two" in aten.scatter_reduce_.overloads()
-    ):
-        raise AssertionError(
-            "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
         )
 
     if isinstance(src, Number):

@@ -128,7 +128,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
-    aten.index_add,  # we conditionally call this decomp
+    aten.index_add.default,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -152,6 +152,21 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
 ]
 
+# Under deterministic mode the eager kernels of these ops skip their sorting
+# fallbacks, so they are kept as fallbacks instead of being decomposed into
+# base ops that would lose the flag. See make_fallback calls in lowering.py.
+assume_unique_ops = [
+    aten.index_copy.assume_unique,
+    aten.index_put.assume_unique,
+    aten.put.assume_unique,
+    aten.index_add.assume_unique,
+    aten.index_reduce.assume_unique,
+    aten.scatter.assume_unique,
+    aten.scatter_add.assume_unique,
+    aten.scatter_reduce.two_assume_unique,
+]
+decomps_to_exclude.extend(assume_unique_ops)
+
 remove_decompositions(decompositions, decomps_to_exclude)
 
 
@@ -162,6 +177,20 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+def _register_assume_unique_decomp(op: torch._ops.OpOverload) -> None:
+    core_decomp = decomp.decomposition_table[op]
+
+    @register_decomposition(op)
+    def assume_unique_decomp(*args: Any, **kwargs: Any) -> Any:
+        if torch.are_deterministic_algorithms_enabled():
+            return NotImplemented
+        return core_decomp(*args, **kwargs)
+
+
+for _op in assume_unique_ops:
+    _register_assume_unique_decomp(_op)
 
 
 @register_decomposition(aten.adaptive_max_pool3d.default)
@@ -371,7 +400,7 @@ def full(
     return NotImplemented
 
 
-@register_decomposition([aten.index_add])
+@register_decomposition(aten.index_add.default)
 def index_add(
     x: torch.Tensor,
     dim: int,
@@ -1253,7 +1282,7 @@ def choose_qparams_tensor(
     return scale.to(torch.float64), zero_point.to(torch.int64)
 
 
-@register_decomposition(aten.put)
+@register_decomposition(aten.put.default)
 def put(
     self: torch.Tensor,
     index: torch.Tensor,
@@ -1267,7 +1296,7 @@ def put(
     return flattened.reshape(self.shape)
 
 
-@register_decomposition(aten.put_)
+@register_decomposition(aten.put_.default)
 def put_(
     self: torch.Tensor,
     index: torch.Tensor,
@@ -1300,7 +1329,7 @@ def _softmax_backward_data(
     return grad_input.contiguous()
 
 
-@register_decomposition(aten.index_reduce)
+@register_decomposition(aten.index_reduce.default)
 def index_reduce(
     self: torch.Tensor,
     dim: int,

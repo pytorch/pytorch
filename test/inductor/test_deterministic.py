@@ -15,6 +15,7 @@ from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -202,6 +203,29 @@ class DeterministicTest(TestCase):
         for _ in range(5):
             self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
         self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
+
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
+    @parametrize("deterministic", [False, True])
+    def test_assume_unique_fallback(self, deterministic):
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(6, 4, device=GPU_TYPE, requires_grad=True)
+        src = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        index = torch.randperm(6, device=GPU_TYPE)[:4]
+
+        def fn(x, src):
+            return x.index_add(0, index, src, assume_unique=True).sin()
+
+        def run():
+            out = torch.compile(fn)(x, src)
+            out.sum().backward()
+            return out
+
+        with DeterministicGuard(deterministic):
+            out, codes = run_and_get_code(run)
+        self.assertEqual(out, fn(x, src))
+        # Only deterministic mode keeps the eager kernel, which honors the flag.
+        self.assertEqual("index_add.assume_unique" in codes[0], deterministic)
 
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):

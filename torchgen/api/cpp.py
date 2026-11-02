@@ -466,15 +466,26 @@ def arguments(
     else:
         args.extend(arguments.out)
         args.extend(arguments.non_out)
-    return [
-        r.no_default() if faithful else r
-        for a in args
-        for r in argument(
-            a,
-            faithful=faithful,
-            symint=symint,
-            method=method,
-            has_tensor_options=arguments.tensor_options is not None,
-            cpp_no_default_args=cpp_no_default_args,
-        )
-    ]
+    return drop_non_trailing_defaults(
+        [
+            r.no_default() if faithful else r
+            for a in args
+            for r in argument(
+                a,
+                faithful=faithful,
+                symint=symint,
+                method=method,
+                has_tensor_options=arguments.tensor_options is not None,
+                cpp_no_default_args=cpp_no_default_args,
+            )
+        ]
+    )
+
+
+def drop_non_trailing_defaults(bindings: list[Binding]) -> list[Binding]:
+    # C++ only allows defaults on trailing parameters; a defaulted schema
+    # argument can be followed by a required kwarg-only one.
+    last_required = max(
+        (i for i, b in enumerate(bindings) if b.default is None), default=-1
+    )
+    return [b.no_default() if i < last_required else b for i, b in enumerate(bindings)]

@@ -942,15 +942,17 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
         ScalarType),                                                        \
     fp32_append_dtype)
 
-#define AT_FORALL_PROMOTE(_) \
-  _(addcdiv)                 \
-  _(addcmul)                 \
-  _(atan2)                   \
-  _(bilinear)                \
-  _(cross)                   \
-  _(dot)                     \
-  _(vdot)                    \
-  _(grid_sampler)            \
-  _(index_put)               \
-  _(tensordot)               \
-  _(scatter_add)
+#define AT_FORALL_PROMOTE(_)  \
+  _(addcdiv)                  \
+  _(addcmul)                  \
+  _(atan2)                    \
+  _(bilinear)                 \
+  _(cross)                    \
+  _(dot)                      \
+  _(vdot)                     \
+  _(grid_sampler)             \
+  _(index_put)                \
+  _(index_put, assume_unique) \
+  _(tensordot)                \
+  _(scatter_add)              \
+  _(scatter_add, assume_unique)

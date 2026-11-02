@@ -1154,7 +1154,8 @@ Tensor scatter_reduce_jvp(
     const Tensor& src_t,
     std::string_view reduce,
     bool include_self,
-    const Tensor& result);
+    const Tensor& result,
+    bool assume_unique = false);
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& grad,
@@ -1164,7 +1165,8 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& src,
     std::string_view reduce,
     bool include_self,
-    const Tensor& result);
+    const Tensor& result,
+    bool assume_unique = false);
 
 Tensor _to_copy_backward(
     const Tensor& grad,
@@ -1178,7 +1180,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     const Tensor& source,
     std::string_view reduce,
     bool include_self,
-    const Tensor& result);
+    const Tensor& result,
+    bool assume_unique = false);
 
 Tensor take_backward(
     const Tensor& grad,

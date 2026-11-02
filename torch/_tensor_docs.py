@@ -2346,7 +2346,7 @@ See :func:`torch.histogram`
 add_docstr_all(
     "index_add_",
     r"""
-index_add_(dim, index, source, *, alpha=1) -> Tensor
+index_add_(dim, index, source, *, alpha=1, assume_unique=False) -> Tensor
 
 Accumulate the elements of :attr:`alpha` times ``source`` into the :attr:`self`
 tensor by adding to the indices in the order given in :attr:`index`. For example,
@@ -2374,6 +2374,11 @@ Args:
 
 Keyword args:
     alpha (Number): the scalar multiplier for ``source``
+    assume_unique (bool, optional): if ``True``, the caller guarantees that
+        :attr:`index` has no duplicate entries. Under
+        :func:`torch.use_deterministic_algorithms`, the operation then skips the
+        slower deterministic implementation on CUDA. Results are undefined if the
+        guarantee does not hold. Default: ``False``
 
 Example::
 
@@ -2398,7 +2403,7 @@ Example::
 add_docstr_all(
     "index_copy_",
     r"""
-index_copy_(dim, index, tensor) -> Tensor
+index_copy_(dim, index, tensor, *, assume_unique=False) -> Tensor
 
 Copies the elements of :attr:`tensor` into the :attr:`self` tensor by selecting
 the indices in the order given in :attr:`index`. For example, if ``dim == 0``
@@ -2418,6 +2423,13 @@ Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to copy
+
+Keyword args:
+    assume_unique (bool, optional): if ``True``, the caller guarantees that
+        :attr:`index` has no duplicate entries. Under
+        :func:`torch.use_deterministic_algorithms`, the operation then skips the
+        slower deterministic implementation on CUDA. Results are undefined if the
+        guarantee does not hold. Default: ``False``
 
 Example::
 
@@ -2460,7 +2472,7 @@ Example::
 add_docstr_all(
     "index_put_",
     r"""
-index_put_(indices, values, accumulate=False) -> Tensor
+index_put_(indices, values, accumulate=False, *, assume_unique=False) -> Tensor
 
 Puts values from the tensor :attr:`values` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
@@ -2475,6 +2487,15 @@ Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
     values (Tensor): tensor of same dtype as `self`.
     accumulate (bool): whether to accumulate into self
+
+Keyword args:
+    assume_unique (bool, optional): if ``True``, the caller guarantees that no
+        element of :attr:`self` is selected more than once by :attr:`indices` (after
+        broadcasting and wrapping negative values). Under
+        :func:`torch.use_deterministic_algorithms`, the operation then skips the
+        slower deterministic implementation on CUDA, which ``accumulate=True``
+        always uses. Results are undefined if the guarantee does not hold. Default:
+        ``False``
 """,
 )
 
@@ -2490,7 +2511,7 @@ Out-place version of :meth:`~Tensor.index_put_`.
 add_docstr_all(
     "index_reduce_",
     r"""
-index_reduce_(dim, index, source, reduce, *, include_self=True) -> Tensor
+index_reduce_(dim, index, source, reduce, *, include_self=True, assume_unique=False) -> Tensor
 
 Accumulate the elements of ``source`` into the :attr:`self`
 tensor by accumulating to the indices in the order given in :attr:`index`
@@ -2534,6 +2555,11 @@ Args:
 Keyword args:
     include_self (bool): whether the elements from the ``self`` tensor are
         included in the reduction
+    assume_unique (bool, optional): if ``True``, the caller guarantees that
+        :attr:`index` has no duplicate entries. Under
+        :func:`torch.use_deterministic_algorithms`, the operation then does not
+        raise the nondeterminism error on CUDA. Results are undefined if the
+        guarantee does not hold. Default: ``False``
 
 Example::
 
@@ -3772,7 +3798,7 @@ See :func:`torch.prod`
 add_docstr_all(
     "put_",
     r"""
-put_(index, source, accumulate=False) -> Tensor
+put_(index, source, accumulate=False, *, assume_unique=False) -> Tensor
 
 Copies the elements from :attr:`source` into the positions specified by
 :attr:`index`. For the purpose of indexing, the :attr:`self` tensor is treated as if
@@ -3789,6 +3815,14 @@ Args:
     index (LongTensor): the indices into self
     source (Tensor): the tensor containing values to copy from
     accumulate (bool, optional): whether to accumulate into self. Default: ``False``
+
+Keyword args:
+    assume_unique (bool, optional): if ``True``, the caller guarantees that no
+        two entries of :attr:`index` refer to the same element of :attr:`self`
+        (after wrapping negative values). Under
+        :func:`torch.use_deterministic_algorithms`, the operation then does not
+        raise the nondeterminism error. Results are undefined if the guarantee does
+        not hold. Default: ``False``
 
 Example::
 
@@ -4310,7 +4344,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 add_docstr_all(
     "scatter_",
     r"""
-scatter_(dim, index, src, *, reduce=None) -> Tensor
+scatter_(dim, index, src, *, reduce=None, assume_unique=False) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -4379,6 +4413,12 @@ Args:
 Keyword args:
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
+    assume_unique (bool, optional): if ``True``, the caller guarantees that
+        :attr:`index` maps no two elements to the same position of :attr:`self`.
+        Under :func:`torch.use_deterministic_algorithms`, the operation then skips
+        the slower deterministic implementation on CUDA. Cannot be combined with
+        :attr:`reduce`; use :meth:`~Tensor.scatter_reduce_` instead. Results are
+        undefined if the guarantee does not hold. Default: ``False``
 
 Example::
 
@@ -4438,7 +4478,7 @@ Example::
 add_docstr_all(
     "scatter_add_",
     r"""
-scatter_add_(dim, index, src) -> Tensor
+scatter_add_(dim, index, src, *, assume_unique=False) -> Tensor
 
 Adds all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
@@ -4474,6 +4514,13 @@ Args:
         operation returns ``self`` unchanged.
     src (Tensor): the source elements to scatter and add
 
+Keyword args:
+    assume_unique (bool, optional): if ``True``, the caller guarantees that
+        :attr:`index` maps no two elements to the same position of :attr:`self`.
+        Under :func:`torch.use_deterministic_algorithms`, the operation then skips
+        the slower deterministic implementation on CUDA. Results are undefined if
+        the guarantee does not hold. Default: ``False``
+
 Example::
 
     >>> src = torch.ones((2, 5))
@@ -4494,7 +4541,7 @@ Example::
 add_docstr_all(
     "scatter_reduce_",
     r"""
-scatter_reduce_(dim, index, src, reduce, *, include_self=True) -> Tensor
+scatter_reduce_(dim, index, src, reduce, *, include_self=True, assume_unique=False) -> Tensor
 
 Reduces all values from the :attr:`src` tensor to the indices specified in
 the :attr:`index` tensor in the :attr:`self` tensor using the applied reduction
@@ -4537,6 +4584,14 @@ Args:
         (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
     include_self (bool): whether elements from the :attr:`self` tensor are
         included in the reduction
+
+Keyword args:
+    assume_unique (bool, optional): if ``True``, the caller guarantees that
+        :attr:`index` maps no two elements to the same position of :attr:`self`.
+        Under :func:`torch.use_deterministic_algorithms`, the operation then skips
+        the slower deterministic implementation on CUDA and, for ``reduce="prod"``,
+        does not raise the nondeterminism error on CUDA. Results are undefined if
+        the guarantee does not hold. Default: ``False``
 
 Example::
 

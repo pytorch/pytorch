@@ -180,11 +180,11 @@ static void index_put_kernel_mps(TensorIterator& iter,
 }
 } // namespace mps
 
-TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
-                                    int64_t dim,
-                                    const Tensor& index,
-                                    const Tensor& source,
-                                    const Tensor& result) {
+static void index_copy_mps_impl(const Tensor& self,
+                                int64_t dim,
+                                const Tensor& index,
+                                const Tensor& source,
+                                const Tensor& result) {
   using namespace mps;
 
   // special-case for 0-dim tensors
@@ -296,6 +296,23 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
       }
     }
   });
+}
+
+TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
+                                    int64_t dim,
+                                    const Tensor& index,
+                                    const Tensor& source,
+                                    const Tensor& result) {
+  index_copy_mps_impl(self, dim, index, source, result);
+}
+
+TORCH_IMPL_FUNC(index_copy_assume_unique_out_mps)(const Tensor& self,
+                                                  int64_t dim,
+                                                  const Tensor& index,
+                                                  const Tensor& source,
+                                                  bool /*assume_unique*/,
+                                                  const Tensor& result) {
+  index_copy_mps_impl(self, dim, index, source, result);
 }
 
 // Nonzero kernel-name suffix selecting the flat-index width: "uint" when the
@@ -564,13 +581,13 @@ static void encodeIndexBoundsCheck(id<MTLComputeCommandEncoder> encoder,
   mtl_dispatch1DJob(encoder, pso, index.numel());
 }
 
-TORCH_IMPL_FUNC(index_add_mps_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- const Scalar& alpha,
- const Tensor& result) {
+static void index_add_mps_impl(const Tensor& self,
+                               int64_t dim,
+                               const Tensor& index,
+                               const Tensor& source,
+                               const Scalar& alpha,
+                               const Tensor& result,
+                               bool assume_unique) {
   using namespace mps;
   dim = maybe_wrap_dim(dim, self.dim());
 
@@ -584,8 +601,9 @@ TORCH_IMPL_FUNC(index_add_mps_out)
 
   // Floating-point atomic add is non-associative, so the Metal kernel's
   // accumulation order is non-deterministic. Fall back to index_put_ with
-  // accumulate=true when deterministic algorithms are requested.
-  if (globalContext().deterministicAlgorithms()) {
+  // accumulate=true when deterministic algorithms are requested, unless the
+  // indices are unique.
+  if (globalContext().deterministicAlgorithms() && !assume_unique) {
     torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for (const auto i : c10::irange(dim)) {
@@ -658,6 +676,27 @@ TORCH_IMPL_FUNC(index_add_mps_out)
   if (needs_acc_cast) {
     result_.copy_(acc_result);
   }
+}
+
+TORCH_IMPL_FUNC(index_add_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Scalar& alpha,
+ const Tensor& result) {
+  index_add_mps_impl(self, dim, index, source, alpha, result, /*assume_unique=*/false);
+}
+
+TORCH_IMPL_FUNC(index_add_assume_unique_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Scalar& alpha,
+ bool assume_unique,
+ const Tensor& result) {
+  index_add_mps_impl(self, dim, index, source, alpha, result, assume_unique);
 }
 
 Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
@@ -850,14 +889,13 @@ static inline scalar_t index_reduce_init_value(ReductionType reduction_type) {
   }
 }
 
-TORCH_IMPL_FUNC(index_reduce_mps_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- const std::string_view reduce,
- bool include_self,
- const Tensor& result) {
+static void index_reduce_mps_impl(const Tensor& self,
+                                  int64_t dim,
+                                  const Tensor& index,
+                                  const Tensor& source,
+                                  const std::string_view reduce,
+                                  bool include_self,
+                                  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
   TORCH_CHECK(self.scalar_type() != c10::kLong, "index_reduce for MPS does not support torch.long dtype");
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
@@ -936,6 +974,30 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
       result.div_(counts, "floor");
     }
   }
+}
+
+TORCH_IMPL_FUNC(index_reduce_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ const Tensor& result) {
+  index_reduce_mps_impl(self, dim, index, source, reduce, include_self, result);
+}
+
+// The serial deterministic path does not sort, so it is kept for unique indices.
+TORCH_IMPL_FUNC(index_reduce_assume_unique_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ bool /*assume_unique*/,
+ const Tensor& result) {
+  index_reduce_mps_impl(self, dim, index, source, reduce, include_self, result);
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {

@@ -253,11 +253,51 @@ TORCH_META_FUNC2(scatter_reduce, two)
       *this, self, dim, index, src, reduce);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(index_copy)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
+TORCH_META_FUNC2(scatter, assume_unique)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const std::optional<std::string_view> reduce,
+ bool /*assume_unique*/) {
+  TORCH_CHECK_VALUE(
+      !reduce.has_value(),
+      "scatter(): the deprecated reduce argument is not supported together with ",
+      "assume_unique. Use scatter_reduce(..., assume_unique=True) instead.");
+  scatter_meta_impl(*this, self, dim, index, src);
+}
+
+TORCH_META_FUNC2(scatter_add, assume_unique)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ bool /*assume_unique*/) {
+  scatter_meta_impl(*this, self, dim, index, src, "add");
+}
+
+TORCH_META_FUNC2(scatter_reduce, two_assume_unique)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const std::string_view reduce,
+ bool /*include_self*/,
+ bool /*assume_unique*/) {
+  scatter_meta_impl</*use_new_options=*/true>(
+      *this, self, dim, index, src, reduce);
+}
+
+template <typename Meta>
+static int64_t index_copy_meta_impl(
+    Meta& meta,
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  const Tensor& result = maybe_get_output(0);
+  const Tensor& result = meta.maybe_get_output(0);
 
   // Memory overlap checks need to be done after resizing (if required) is done.
   // But it only makes sense to do these checks when result was defined, hence
@@ -266,7 +306,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
   // https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832 and
   // https://github.com/pytorch/pytorch/issues/63837
   bool check_result = result.defined();
-  set_output_raw_strided(0, self.sizes(), {}, self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (check_result) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -346,7 +386,23 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
       source.size(dim),
       ")");
 
-  return TORCH_PRECOMPUTE_STRUCT(index_copy)().set_dim(dim);
+  return dim;
+}
+
+TORCH_PRECOMPUTE_META_FUNC(index_copy)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
+  return TORCH_PRECOMPUTE_STRUCT(index_copy)().set_dim(
+      index_copy_meta_impl(*this, self, dim, index, source));
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(index_copy, assume_unique)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ bool /*assume_unique*/) {
+  return TORCH_PRECOMPUTE_STRUCT2(index_copy, assume_unique)().set_dim(
+      index_copy_meta_impl(*this, self, dim, index, source));
 }
 
 template <typename Meta>
@@ -454,14 +510,26 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(index_reduce)
+TORCH_PRECOMPUTE_META_FUNC2(index_add, assume_unique)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
- const std::string_view reduce,
- bool include_self) {
-  (void)include_self;
+ const Scalar& /*alpha*/,
+ bool /*assume_unique*/) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  index_func_meta_impl(*this, self, dim, index, source, "index_add");
+  return TORCH_PRECOMPUTE_STRUCT2(index_add, assume_unique)().set_dim(dim);
+}
+
+template <typename Meta>
+static int64_t index_reduce_meta_impl(
+    Meta& meta,
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const std::string_view reduce) {
   TORCH_CHECK(
       reduce == "prod" || reduce == "mean" || reduce == "amax" ||
           reduce == "amin",
@@ -469,8 +537,31 @@ TORCH_PRECOMPUTE_META_FUNC(index_reduce)
       reduce,
       ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "index_reduce");
-  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(dim);
+  index_func_meta_impl(meta, self, dim, index, source, "index_reduce");
+  return dim;
+}
+
+TORCH_PRECOMPUTE_META_FUNC(index_reduce)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool /*include_self*/) {
+  return TORCH_PRECOMPUTE_STRUCT(index_reduce)().set_dim(
+      index_reduce_meta_impl(*this, self, dim, index, source, reduce));
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(index_reduce, assume_unique)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool /*include_self*/,
+ bool /*assume_unique*/) {
+  return TORCH_PRECOMPUTE_STRUCT2(index_reduce, assume_unique)().set_dim(
+      index_reduce_meta_impl(*this, self, dim, index, source, reduce));
 }
 
 static void build_index_op(
@@ -866,16 +957,18 @@ Tensor _unsafe_masked_index_put_accumulate(
   return at::_unsafe_index_put(self, clamped_indices, masked_value, true);
 }
 
-Tensor& put_(
+static Tensor& put_impl(
     Tensor& self,
     const Tensor& index,
     const Tensor& source,
-    const bool accumulate) {
+    const bool accumulate,
+    const bool assume_unique) {
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries and we do not
   // accumulate If we accumulate on GPU, we use atomicGPUAdd, which is
   // non-deterministic
-  if (!accumulate || (accumulate && self.device().type() == DeviceType::CUDA)) {
+  if (!assume_unique &&
+      (!accumulate || self.device().type() == DeviceType::CUDA)) {
     at::globalContext().alertNotDeterministic("put_");
   }
 
@@ -933,6 +1026,33 @@ Tensor& put_(
   return self;
 }
 
+Tensor& put_(
+    Tensor& self,
+    const Tensor& index,
+    const Tensor& source,
+    const bool accumulate) {
+  return put_impl(self, index, source, accumulate, /*assume_unique=*/false);
+}
+
+Tensor& put__assume_unique(
+    Tensor& self,
+    const Tensor& index,
+    const Tensor& source,
+    bool accumulate,
+    bool assume_unique) {
+  return put_impl(self, index, source, accumulate, assume_unique);
+}
+
+Tensor put_assume_unique(
+    const Tensor& self,
+    const Tensor& index,
+    const Tensor& source,
+    bool accumulate,
+    bool assume_unique) {
+  return self.clone(at::MemoryFormat::Preserve)
+      .put_(index, source, accumulate, assume_unique);
+}
+
 Tensor put(
     const Tensor& self,
     const Tensor& index,
@@ -958,12 +1078,13 @@ Tensor _unsafe_index_put(
   return at::index_put(self, indices, value, accumulate);
 }
 
-Tensor& _index_put_impl_(
+static Tensor& index_put_impl(
     Tensor& self,
     const torch::List<std::optional<Tensor>>& indices,
     const Tensor& value,
     const bool accumulate,
-    const bool unsafe) {
+    const bool unsafe,
+    const bool assume_unique) {
   TORCH_CHECK_INDEX(
       indices.size() <= (size_t)self.dim(),
       "too many indices for tensor of dimension ",
@@ -999,7 +1120,8 @@ Tensor& _index_put_impl_(
        self.device().type() == DeviceType::XPU ||
        self.device().type() == DeviceType::PrivateUse1) &&
       (accumulate ||
-       (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
+       (globalContext().deterministicAlgorithms() && !assume_unique &&
+        value_.numel() > 1))) {
     TORCH_CHECK(
         value_.device() == self.device(),
         "expected device ",
@@ -1021,6 +1143,36 @@ Tensor& _index_put_impl_(
       info.indexed_strides,
       accumulate);
   return self;
+}
+
+Tensor& _index_put_impl_(
+    Tensor& self,
+    const torch::List<std::optional<Tensor>>& indices,
+    const Tensor& value,
+    const bool accumulate,
+    const bool unsafe) {
+  return index_put_impl(
+      self, indices, value, accumulate, unsafe, /*assume_unique=*/false);
+}
+
+Tensor& index_put__assume_unique(
+    Tensor& self,
+    const torch::List<std::optional<Tensor>>& indices,
+    const Tensor& values,
+    bool accumulate,
+    bool assume_unique) {
+  return index_put_impl(
+      self, indices, values, accumulate, /*unsafe=*/false, assume_unique);
+}
+
+Tensor index_put_assume_unique(
+    const Tensor& self,
+    const torch::List<std::optional<Tensor>>& indices,
+    const Tensor& values,
+    bool accumulate,
+    bool assume_unique) {
+  return self.clone(at::MemoryFormat::Preserve)
+      .index_put_(indices, values, accumulate, assume_unique);
 }
 
 Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
@@ -1092,13 +1244,14 @@ void index_copy_out_impl(
     int64_t dim,
     const Tensor& index,
     const Tensor& source,
-    const Tensor& result) {
+    const Tensor& result,
+    bool assume_unique) {
   if (!result.is_same(self))
     result.copy_(self);
 
   // See Note [Enabling Deterministic Operations]
   if ((result.is_cuda() || result.is_xpu()) &&
-      globalContext().deterministicAlgorithms()) {
+      globalContext().deterministicAlgorithms() && !assume_unique) {
     torch::List<std::optional<Tensor>> indices;
     indices.resize(dim + 1);
     indices.set(dim, index);
@@ -1166,14 +1319,24 @@ TORCH_IMPL_FUNC(index_copy_out)
   index_copy_out_impl(self, dim, index, source, result);
 }
 
-// Not calling into index_reduce_func_impl because of a different dtype dispatch
-TORCH_IMPL_FUNC(index_add_cpu_out)
+TORCH_IMPL_FUNC(index_copy_assume_unique_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
- const Scalar& alpha,
+ bool assume_unique,
  const Tensor& result) {
+  index_copy_out_impl(self, dim, index, source, result, assume_unique);
+}
+
+// Not calling into index_reduce_func_impl because of a different dtype dispatch
+static void index_add_cpu_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const Scalar& alpha,
+    const Tensor& result) {
   if (!result.is_same(self)) {
     result.copy_(self);
   }
@@ -1323,6 +1486,28 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
               });
         });
   }
+}
+
+TORCH_IMPL_FUNC(index_add_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Scalar& alpha,
+ const Tensor& result) {
+  index_add_cpu_impl(self, dim, index, source, alpha, result);
+}
+
+// The CPU kernels have no deterministic fallbacks, so assume_unique is a no-op.
+TORCH_IMPL_FUNC(index_add_assume_unique_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Scalar& alpha,
+ bool /*assume_unique*/,
+ const Tensor& result) {
+  index_add_cpu_impl(self, dim, index, source, alpha, result);
 }
 
 static void index_reduce_func_impl(
@@ -1532,6 +1717,21 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
       "index_reduce() is in beta and the API may change at any time.");
   auto op = get_operator_enum(reduce, true);
   index_reduce_func_impl(self, dim, index, source, include_input, result, op);
+}
+
+TORCH_IMPL_FUNC(index_reduce_assume_unique_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ bool /*assume_unique*/,
+ const Tensor& result) {
+  TORCH_WARN_ONCE(
+      "index_reduce() is in beta and the API may change at any time.");
+  auto op = get_operator_enum(reduce, true);
+  index_reduce_func_impl(self, dim, index, source, include_self, result, op);
 }
 
 // Check that indices fall within dimension array size
@@ -2246,7 +2446,8 @@ static void scatter_impl(
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
     const std::optional<std::string_view> reduce = std::nullopt,
-    bool reduce_includes_self = true) {
+    bool reduce_includes_self = true,
+    bool assume_unique = false) {
   dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
 
@@ -2258,7 +2459,9 @@ static void scatter_impl(
     return;
 
   auto op = ReductionType::SUM;
+  // With unique indices the regular kernels are deterministic.
   bool deterministic = globalContext().deterministicAlgorithms() &&
+      !assume_unique &&
       (self.device().type() == DeviceType::CUDA ||
        self.device().type() == DeviceType::XPU);
 
@@ -2289,6 +2492,16 @@ static void scatter_impl(
   }
 
   if (reduce.has_value()) {
+    if constexpr (std::is_same_v<T, Tensor>) {
+      // See Note [Writing Nondeterministic Operations]
+      // The CUDA kernels accumulate with atomics.
+      if (self.is_cuda() && !assume_unique &&
+          (!use_new_options || op == ReductionType::PROD)) {
+        globalContext().alertNotDeterministic(
+            use_new_options ? "scatter_reduce_cuda_prod_"
+                            : "scatter_reduce_cuda_kernel");
+      }
+    }
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
     fill_stub(self.device().type(), mut_out, dim, index, src);
@@ -2302,6 +2515,27 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& src,
  const Tensor& out) {
   scatter_impl(self, dim, index, src, out, scatter_reduce_stub, scatter_stub);
+}
+
+TORCH_IMPL_FUNC(scatter_assume_unique_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const std::optional<std::string_view> /*reduce*/,
+ bool assume_unique,
+ const Tensor& out) {
+  scatter_impl(
+      self,
+      dim,
+      index,
+      src,
+      out,
+      scatter_reduce_stub,
+      scatter_stub,
+      /*reduce=*/std::nullopt,
+      /*reduce_includes_self=*/true,
+      assume_unique);
 }
 
 TORCH_IMPL_FUNC(scatter_value_out)
@@ -2349,12 +2583,13 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
       reduce);
 }
 
-TORCH_IMPL_FUNC(scatter_add)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& src,
- const Tensor& out) {
+static void scatter_add_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& src,
+    const Tensor& out,
+    bool assume_unique) {
   auto mut_out = const_cast<Tensor&>(out);
   dim = maybe_wrap_dim(dim, self.dim());
 
@@ -2366,11 +2601,12 @@ TORCH_IMPL_FUNC(scatter_add)
     return;
 
   // See Note [Enabling Deterministic Operations]
-  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on,
+  // unless the indices are unique.
   // we don't need to go index_put route if our inputs are integral
   // we check in the meta function that self and src dtypes match,
   // so here we need to check just one of them
-  if (globalContext().deterministicAlgorithms() &&
+  if (globalContext().deterministicAlgorithms() && !assume_unique &&
       (self.device().type() == DeviceType::CUDA ||
        self.device().type() == DeviceType::XPU) &&
       !at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
@@ -2386,14 +2622,34 @@ TORCH_IMPL_FUNC(scatter_add)
   }
 }
 
-TORCH_IMPL_FUNC(scatter_reduce_two)
+TORCH_IMPL_FUNC(scatter_add)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const std::string_view reduce,
- bool include_self,
  const Tensor& out) {
+  scatter_add_impl(self, dim, index, src, out, /*assume_unique=*/false);
+}
+
+TORCH_IMPL_FUNC(scatter_add_assume_unique_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ bool assume_unique,
+ const Tensor& out) {
+  scatter_add_impl(self, dim, index, src, out, assume_unique);
+}
+
+static void scatter_reduce_two_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& src,
+    const std::string_view reduce,
+    bool include_self,
+    const Tensor& out,
+    bool assume_unique) {
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   if (!self.is_same(out)) {
@@ -2418,12 +2674,13 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
       scatter_reduce_two_stub,
       scatter_stub,
       reduce,
-      include_self);
+      include_self,
+      assume_unique);
 
   if (op == ReductionType::MEAN) {
     auto ones = at::ones_like(src);
     auto count = include_self ? at::ones_like(out) : at::zeros_like(out);
-    count.scatter_add_(dim, index, ones);
+    count.scatter_add_(dim, index, ones, assume_unique);
     count.masked_fill_(count == 0, 1);
 
     if (out.is_floating_point() || out.is_complex()) {
@@ -2432,6 +2689,38 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
       out.div_(count, "floor");
     }
   }
+}
+
+TORCH_IMPL_FUNC(scatter_reduce_two)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const std::string_view reduce,
+ bool include_self,
+ const Tensor& out) {
+  scatter_reduce_two_impl(
+      self,
+      dim,
+      index,
+      src,
+      reduce,
+      include_self,
+      out,
+      /*assume_unique=*/false);
+}
+
+TORCH_IMPL_FUNC(scatter_reduce_two_assume_unique)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const std::string_view reduce,
+ bool include_self,
+ bool assume_unique,
+ const Tensor& out) {
+  scatter_reduce_two_impl(
+      self, dim, index, src, reduce, include_self, out, assume_unique);
 }
 
 Tensor masked_scatter(

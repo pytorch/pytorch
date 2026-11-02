@@ -326,8 +326,10 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(dot, promote)
   KERNEL_MPS(grid_sampler, promote)
   KERNEL_MPS(index_put, promote)
+  KERNEL_MPS(index_put, assume_unique, promote)
   KERNEL_MPS(tensordot, promote)
   KERNEL_MPS(scatter_add, promote)
+  KERNEL_MPS(scatter_add, assume_unique, promote)
 }
 
 TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
@@ -467,6 +469,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(stack, promote)
   KERNEL_CPU(cat, promote)
   KERNEL_CPU(index_copy, promote)
+  KERNEL_CPU(index_copy, assume_unique, promote)
 
 }
 

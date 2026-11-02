@@ -496,18 +496,24 @@ void index_put__batch_rule(
     ArrayRef<std::optional<int64_t>> indices_bdims,
     const Tensor& values,
     std::optional<int64_t> values_bdim,
-    bool accumulate) {
+    bool accumulate,
+    bool assume_unique) {
   if (!self_bdim.has_value()) {
     vmapIncompatibleInplaceError("index_put_");
   }
   auto [self_, indices_, values_] = index_put_batch_rule_helper(
       self, self_bdim, indices, indices_bdims, values, values_bdim);
-  at::index_put_(self_, List<std::optional<Tensor>>(indices_), values_, accumulate);
+  List<std::optional<Tensor>> indices_list(indices_);
+  if (assume_unique) {
+    at::index_put_(self_, indices_list, values_, accumulate, assume_unique);
+  } else {
+    at::index_put_(self_, indices_list, values_, accumulate);
+  }
 }
 
 // plumbing done since we don't support List<std::optional<Tensor>> in codegen
-Tensor& index_put__plumbing(Tensor & self, const List<std::optional<Tensor>> & indices
-, const Tensor & values, bool accumulate) {
+static Tensor& index_put__plumbing_impl(Tensor & self, const List<std::optional<Tensor>> & indices
+, const Tensor & values, bool accumulate, bool assume_unique) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "index_put__plumbing");
@@ -520,12 +526,23 @@ Tensor& index_put__plumbing(Tensor & self, const List<std::optional<Tensor>> & i
   }
 
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values_, cur_level)) {
-    return self.index_put_(indices, values_, accumulate);
+    return assume_unique ? self.index_put_(indices, values_, accumulate, assume_unique)
+                         : self.index_put_(indices, values_, accumulate);
   }
   auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values_, cur_level);
-  index_put__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
+  index_put__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate, assume_unique);
   return self;
+}
+
+Tensor& index_put__plumbing(Tensor & self, const List<std::optional<Tensor>> & indices
+, const Tensor & values, bool accumulate) {
+  return index_put__plumbing_impl(self, indices, values, accumulate, /*assume_unique=*/false);
+}
+
+Tensor& index_put__assume_unique_plumbing(Tensor & self, const List<std::optional<Tensor>> & indices
+, const Tensor & values, bool accumulate, bool assume_unique) {
+  return index_put__plumbing_impl(self, indices, values, accumulate, assume_unique);
 }
 
 void _index_put_impl__batch_rule(
@@ -623,7 +640,8 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
     ArrayRef<std::optional<int64_t>> indices_bdims,
     const Tensor& values,
     std::optional<int64_t> values_bdim,
-    bool accumulate) {
+    bool accumulate,
+    bool assume_unique) {
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
 
   // find the batch_size
@@ -655,13 +673,16 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
   // and the batched `indices_` might change the "have adjacent advanced indices" property
   values_ = maybe_permute_values(values_, indices, indices_bdims);
 
-  auto result = at::index_put(self_, List<std::optional<Tensor>>(indices_), values_, accumulate);
+  List<std::optional<Tensor>> indices_list(indices_);
+  auto result = assume_unique
+      ? at::index_put(self_, indices_list, values_, accumulate, assume_unique)
+      : at::index_put(self_, indices_list, values_, accumulate);
   return std::make_tuple(std::move(result), 0);
 }
 
 // plumbing done since we don't support List<std::optional<Tensor>> in codegen
-Tensor index_put_plumbing(const Tensor & self, const List<std::optional<Tensor>> & indices,
-                          const Tensor & values, bool accumulate) {
+static Tensor index_put_plumbing_impl(const Tensor & self, const List<std::optional<Tensor>> & indices,
+                                      const Tensor & values, bool accumulate, bool assume_unique) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "index_put_plumbing");
@@ -674,13 +695,24 @@ Tensor index_put_plumbing(const Tensor & self, const List<std::optional<Tensor>>
   }
 
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values_, cur_level)) {
-    return self.index_put(indices, values_, accumulate);
+    return assume_unique ? self.index_put(indices, values_, accumulate, assume_unique)
+                         : self.index_put(indices, values_, accumulate);
   }
   auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values_, cur_level);
-  auto results = index_put_batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
+  auto results = index_put_batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate, assume_unique);
   return makeBatched(
       std::move(std::get<0>(results)), std::get<1>(results), cur_level);
+}
+
+Tensor index_put_plumbing(const Tensor & self, const List<std::optional<Tensor>> & indices,
+                          const Tensor & values, bool accumulate) {
+  return index_put_plumbing_impl(self, indices, values, accumulate, /*assume_unique=*/false);
+}
+
+Tensor index_put_assume_unique_plumbing(const Tensor & self, const List<std::optional<Tensor>> & indices,
+                                        const Tensor & values, bool accumulate, bool assume_unique) {
+  return index_put_plumbing_impl(self, indices, values, accumulate, assume_unique);
 }
 
 namespace {
@@ -1381,6 +1413,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
   m.impl("index_put", index_put_plumbing);
+  m.impl("index_put_.assume_unique", index_put__assume_unique_plumbing);
+  m.impl("index_put.assume_unique", index_put_assume_unique_plumbing);
   m.impl("_index_put_impl_", _index_put_impl__plumbing);
   m.impl("slice_scatter", slice_scatter_decomp);
   m.impl("select_scatter", select_scatter_decomp);
