@@ -566,6 +566,8 @@ class TestTunableOpPretune(TestCase):
                     "torch._inductor.tunableop.time",
                     SimpleNamespace(monotonic=_fake_monotonic),
                 ),
+                # A full budget really spent: coverage was cut, so warn.
+                self.assertLogs(tunableop.log, level="WARNING"),
             ):
                 tunableop.maybe_range_pretune(winner)
         # One bucket ran; the rest had too little budget to be anything but
@@ -776,28 +778,56 @@ class TestTunableOpPretune(TestCase):
             tunableop.run_queued_pretunes(V.graph)
         self.assertEqual(submitted, [], "a flexible operand must not be tuned")
 
-    @parametrize("path", ("single_choice", "deterministic"))
-    def test_algorithm_selector_queues_on_early_return(self, path):
-        # Both early returns in AlgorithmSelectorCache.__call__ skip
-        # benchmarking, so each needs the hook of its own -- covering only the
-        # path finalize_multi_template_buffers takes would miss them. Neither
-        # reaches a device, so this runs on a CPU-only shard.
+    @parametrize(
+        "exit_path",
+        ("single_choice", "deterministic", "no_timings", "no_extern", "best_choice"),
+    )
+    def test_algorithm_selector_hook_fires_on_every_exit(self, exit_path):
+        # AlgorithmSelectorCache.__call__ returns from five places and each
+        # needs a hook of its own; calling the hook directly would pass with
+        # any of the five lines deleted. The hook itself is patched, so
+        # no_extern -- whose winner the isinstance gate turns away, see
+        # test_select_algorithm_hook_queues_until_layouts_are_final -- can
+        # assert the same way as the rest. None of this reaches a device.
         from torch._inductor import select_algorithm as _sa
 
-        s = sympy.Symbol(f"s_sel_{path}", positive=True, integer=True)
+        s = sympy.Symbol(f"s_sel_{exit_path}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         winner.output_node = mock.Mock(return_value=mock.Mock())
-        choices = [winner]
-        if path == "deterministic":
-            choices.append(self._mm_winner("mm", s))
-        with _ladder(s) as submitted:
-            with config.patch({"deterministic": path == "deterministic"}):
-                _, chosen = _sa.AlgorithmSelectorCache()(
-                    "mm", choices, winner.input_nodes, winner.layout
+        triton = mock.Mock(spec=_sa.ChoiceCaller)
+        choices = {"single_choice": [winner], "no_extern": [triton, triton]}.get(
+            exit_path, [winner, triton]
+        )
+        with contextlib.ExitStack() as stack:
+            # The post-benchmark exits reach create_inputs_key, which needs a
+            # graph; the two early returns return before it.
+            stack.enter_context(_ladder(s))
+            stack.enter_context(
+                config.patch({"deterministic": exit_path == "deterministic"})
+            )
+            hook = stack.enter_context(
+                mock.patch.object(_sa, "_maybe_pretune_tunableop")
+            )
+            if exit_path in ("no_timings", "no_extern", "best_choice"):
+                # Past the two early returns, into the post-benchmark exits.
+                stack.enter_context(
+                    mock.patch.object(_sa.AlgorithmSelectorCache, "make_precompile_fn")
                 )
-            self.assertIs(chosen, winner)
-            self.assertEqual(submitted, [], "an early return must not ladder here")
-            self.assertEqual(len(V.graph.pending_tunableop_ladder), 1)
+                stack.enter_context(
+                    mock.patch.object(
+                        _sa.AlgorithmSelectorCache,
+                        "do_autotuning",
+                        return_value=(
+                            {winner: 1.0, triton: 2.0}
+                            if exit_path == "best_choice"
+                            else {}
+                        ),
+                    )
+                )
+            _, chosen = _sa.AlgorithmSelectorCache()(
+                "mm", choices, winner.input_nodes, winner.layout
+            )
+        hook.assert_called_once_with(chosen)
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):

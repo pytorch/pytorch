@@ -1073,17 +1073,20 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     # One job per bucket so a fault costs a single size, but one budget for the
     # whole GEMM so compile time does not scale with the bucket count.
     deadline = time.monotonic() + config.cuda.autotune_tunableop_timeout
+    # A sub-minute budget is documented to tune only the traced shape, so
+    # stopping early is expected there; at any larger budget it means the
+    # ladder really ran out and coverage was cut, which is worth a warning.
+    short_budget = config.cuda.autotune_tunableop_timeout < _TUNABLEOP_MIN_BUCKET_BUDGET
     for i, bmreq in enumerate(bmreqs):
         remaining = deadline - time.monotonic()
         # The served rung is exempt, by dim rather than position: once it is
         # memoed, position 0 is the largest rung, and exempting that hands the
         # whole budget to the one likeliest to time out.
-        floored = dim_vals[i] != served_dim and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET
-        if remaining <= 0 or floored:
-            # A floored stop is documented sub-minute-budget behaviour and
-            # fires once per GEMM; only a spent budget is worth a warning.
+        if remaining <= 0 or (
+            dim_vals[i] != served_dim and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET
+        ):
             log.log(
-                logging.INFO if floored else logging.WARNING,
+                logging.INFO if short_budget else logging.WARNING,
                 "TunableOp range pre-tune for %s stopped after %d/%d sizes with "
                 "%.0fs of its %.0fs budget left.",
                 winner.name,
