@@ -3,6 +3,7 @@
 import inspect
 import sys
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
@@ -171,9 +172,6 @@ class TestTraitDevice(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_norm2_leaf_narrow_values(self, device, dtype):
         """Square narrow norm inputs after widening so small values do not underflow early."""
-        import cutlass
-        import cutlass.cute as cute
-
         from torch import _native as native
         from torch._native.ops.reductions import kernel_coltile as ct, traits
 
@@ -206,30 +204,33 @@ class TestTraitDevice(TestCase):
 
     def test_norm2_leaf_rounding(self, device):
         """Match norm leaf rounding between row and column implementations."""
-        from unittest import mock
-
         from torch import _native as native
-        from torch._native.ops.reductions import kernel_coltile as ct
+        from torch._native.ops.reductions import (
+            kernel_coltile as ct,
+            kernel_general as kg,
+        )
 
         rows, columns = 32769, 33
         x = torch.empty(rows, columns, device=device)
         x[0::2] = 0.2678401470184326
         x[1::2] = 0.5074443817138672
         parts = []
-        original = ct._launch
+        original = kg._launch
 
         def record(block, key, ins, outs):
-            if key[0] == "ordered_col2":
+            if key[0] == "genitree2":
                 parts.append(ins[0])
             return original(block, key, ins, outs)
 
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
-            mock.patch.object(ct, "_launch", record),
+            mock.patch.object(kg, "_launch", record),
         ):
+            # Full tiles drop address clamps but must keep the leaf validity select.
+            split = {"allow_split": True, "full_tiles": True}
             ct.reduce_ordered_col(
-                T.NormOps(2), "rounded_norm2", x, [torch.float32], 1, allow_split=True
+                T.NormOps(2), "rounded_norm2", x, [torch.float32], 1, **split
             )
             ct.reduce_ordered_col(
                 T.SumOps(),
@@ -237,7 +238,7 @@ class TestTraitDevice(TestCase):
                 x.square(),
                 [torch.float32],
                 1,
-                allow_split=True,
+                **split,
             )
             self.assertEqual(len(parts), 2)
             self.assertEqual(parts[0].view(torch.uint8), parts[1].view(torch.uint8))
