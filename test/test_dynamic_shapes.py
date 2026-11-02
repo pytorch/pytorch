@@ -7451,6 +7451,82 @@ class ShapeEnvReplacementCacheTest(TestCase):
 instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 
 
+class ShapeEnvAxiomCacheInvalidationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _check_adds_only_axioms(self, shape_env, condition):
+        state = (
+            shape_env.var_to_range.copy(),
+            len(shape_env.replacements),
+            len(shape_env.divisible),
+            shape_env.num_deferred_runtime_asserts,
+        )
+        n_axioms = len(shape_env.axioms)
+        torch._check(condition)
+        with self.subTest("axiom-only guard"):
+            self.assertEqual(
+                (
+                    shape_env.var_to_range,
+                    len(shape_env.replacements),
+                    len(shape_env.divisible),
+                    shape_env.num_deferred_runtime_asserts,
+                ),
+                state,
+            )
+            self.assertGreater(len(shape_env.axioms), n_axioms)
+
+    def test_guard_updates_static_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        probe = sympy.Le(a.node.expr, b.node.expr, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the same call retained None after the guard proved it.
+        with self.subTest("static result"):
+            self.assertEqual(shape_env._maybe_evaluate_static(probe), sympy.true)
+
+    def test_guard_updates_get_axioms_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        self.assertEqual(shape_env.get_axioms(), ())
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the cached tuple omitted the newly recorded guard.
+        with self.subTest("axioms result"):
+            self.assertIn(shape_env.guards[-1].expr, shape_env.get_axioms())
+
+    def test_guard_updates_max_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        difference = b.node.expr - a.node.expr
+        expr = Max(0, difference)
+        self.assertEqual(shape_env.simplify(expr), expr)
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the same call retained Max after its bound was proved.
+        with self.subTest("simplified result"):
+            self.assertEqual(shape_env.simplify(expr), difference)
+
+    def test_guard_updates_floor_div_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 4, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        difference = b.node.expr - a.node.expr
+        expr = FloorDiv(Max(0, difference), 2)
+        expected = CleanDiv(Max(0, difference), 2)
+        # The first call installs the exact division guard; the second warms
+        # the helper's cache with that guard in place.
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the helper's cache retained the old Max-dependent result.
+        with self.subTest("floor division result"):
+            self.assertEqual(
+                shape_env._simplify_floor_div(expr), FloorDiv(difference, 2)
+            )
+
+
 class TestSingletonIntStaticEval(TestCase):
     def test_singleton_int_only_expr_can_be_statically_evaluated(self):
         from torch.utils._sympy.singleton_int import SingletonInt
