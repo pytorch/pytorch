@@ -10,7 +10,9 @@
 
 #include <fstream>
 #include <map>
+#include <optional>
 #include <ostream>
+#include <string>
 #include <thread>
 #include <unordered_map>
 
@@ -70,6 +72,12 @@ class ActivityLogger {
       const Config& config,
       std::unique_ptr<ActivityBuffers> buffers,
       int64_t endTime) = 0;
+
+  // Why the trace could not be written, or nullopt if it was. Checked after
+  // finalizeTrace. The default suits loggers that cannot fail to write.
+  virtual std::optional<std::string> writeError() const {
+    return std::nullopt;
+  }
 
  protected:
   ActivityLogger() = default;

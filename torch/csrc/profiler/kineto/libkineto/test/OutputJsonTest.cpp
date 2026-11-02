@@ -13,13 +13,17 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "include/Config.h"
 #include "include/GenericTraceActivity.h"
 #include "include/ThreadUtil.h"
 #include "include/TraceSpan.h"
+#include "src/ActivityTrace.h"
 #include "src/output_json.h"
 #include "test/TestUtils.h"
 
@@ -344,4 +348,63 @@ TEST(OutputJsonTest, HardwareCountersUseDedicatedGpuCounterTrack) {
   ASSERT_EQ(counters.size(), 2);
   EXPECT_DOUBLE_EQ(counters.at("sm__cycles_active.avg"), 1.25);
   EXPECT_DOUBLE_EQ(counters.at("dram__bytes_read.sum"), 2048.0);
+}
+
+TEST(OutputJsonTest, MissingDirectoryReportsWriteError) {
+  const auto traceFile =
+      libkineto::test::createTempTraceFile("OutputJsonTest.", ".json");
+  const std::string path = traceFile.path() + ".missing/trace.json";
+
+  TestableChromeTraceLogger logger(path);
+  logger.handleTraceStart({}, "");
+  logger.finalizeTrace(/*endTime=*/300);
+
+  const auto error = logger.writeError();
+  ASSERT_TRUE(error.has_value());
+  EXPECT_NE(error->find(path), std::string::npos) << *error;
+}
+
+// A failed save must raise and leave the trace intact for a retry.
+TEST(OutputJsonTest, FailedSaveRaisesAndCanBeRetried) {
+  const auto traceFile =
+      libkineto::test::createTempTraceFile("OutputJsonTest.", ".json");
+  const std::string missingDirPath = traceFile.path() + ".missing/trace.json";
+
+  Config cfg;
+  auto memLogger = std::make_unique<MemoryTraceLogger>(cfg);
+  TraceSpan span(0, 0, "test_span");
+  GenericTraceActivity act(span, ActivityType::CPU_OP, "retried_op");
+  act.startTime = 100;
+  act.endTime = 200;
+  act.device = 0;
+  act.resource = 0;
+  memLogger->handleTraceStart({}, "");
+  memLogger->handleGenericActivity(act);
+  memLogger->finalizeTrace(cfg, std::make_unique<ActivityBuffers>(), 300);
+
+  ActivityLoggerFactory factory;
+  factory.addProtocol("file", [](const std::string& url) {
+    return std::unique_ptr<ActivityLogger>(new ChromeTraceLogger(url));
+  });
+  ActivityTrace trace(std::move(memLogger), factory);
+
+  try {
+    trace.save(missingDirPath);
+    FAIL() << "save to a missing directory did not throw";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find(missingDirPath), std::string::npos)
+        << e.what();
+  }
+
+  trace.save(traceFile.path());
+  const auto data = nlohmann::json::parse(readFile(traceFile.path()));
+  bool found = false;
+  for (const auto& event : data["traceEvents"]) {
+    if (event.value("ph", "") == "X" &&
+        event.value("name", "") == "retried_op") {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "retried save is missing the buffered event";
 }

@@ -11,10 +11,12 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <algorithm>
+#include <cerrno>
 #include <ctime>
 #include <fstream>
 #include <iterator>
 #include <string_view>
+#include <system_error>
 #include "Config.h"
 #include "EnvMetadata.h"
 #include "ThreadUtil.h"
@@ -498,10 +500,21 @@ static std::string defaultFileName() {
   return fmt::format(kDefaultLogFileFmt, processId());
 }
 
+void ChromeTraceLogger::recordWriteError(
+    std::string_view action,
+    std::string_view path) {
+  const int err = errno;
+  if (!writeError_) {
+    writeError_ = fmt::format(
+        "{} '{}': {}", action, path, std::generic_category().message(err));
+  }
+}
+
 void ChromeTraceLogger::openTraceFile() {
   tempFileName_ = fileName_ + ".tmp";
   traceOf_.open(tempFileName_, std::ofstream::out | std::ofstream::trunc);
   if (!traceOf_) {
+    recordWriteError("cannot open", tempFileName_);
     PLOG(ERROR) << "Failed to open '" << fileName_ << "'";
   } else {
     LOG(INFO) << "Tracing to temporary file " << fileName_;
@@ -1094,6 +1107,7 @@ void ChromeTraceLogger::addOnDemandDistMetadata() {
 
 void ChromeTraceLogger::finalizeTrace(int64_t endTime) {
   if (!traceOf_) {
+    recordWriteError("cannot write", tempFileName_);
     LOG(ERROR) << "Failed to write to log file!";
     return;
   }
@@ -1125,11 +1139,16 @@ void ChromeTraceLogger::finalizeTrace(int64_t endTime) {
   fmt::print(traceOf_, R"JSON("traceName": "{}" }})JSON", fileName_);
 
   traceOf_.close();
+  // The stream also fails here if an earlier write or the final flush failed.
+  if (!traceOf_) {
+    recordWriteError("cannot write", tempFileName_);
+  }
 
   // On some systems, rename() fails if the destination file exists.
   // So, remove the destination file first.
   remove(fileName_.c_str());
   if (rename(tempFileName_.c_str(), fileName_.c_str()) != 0) {
+    recordWriteError("cannot rename the temporary file to", fileName_);
     PLOG(ERROR) << "Failed to rename " << tempFileName_ << " to " << fileName_;
   } else {
     LOG(INFO) << "Renamed the trace file to " << fileName_;

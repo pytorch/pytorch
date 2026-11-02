@@ -11,9 +11,11 @@
 #include <chrono>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <ostream>
 #include <ratio>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -89,10 +91,18 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
     return fileName_;
   }
 
+  std::optional<std::string> writeError() const override {
+    return writeError_;
+  }
+
  protected:
   void finalizeTrace(int64_t endTime);
 
  private:
+  // Keeps the first failure, with the current errno, so later failures
+  // caused by it do not hide the root cause.
+  void recordWriteError(std::string_view action, std::string_view path);
+
   // Create a flow event (arrow)
   void handleLink(
       char type,
@@ -230,6 +240,7 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
   std::string fileName_;
   std::string tempFileName_;
   std::ofstream traceOf_;
+  std::optional<std::string> writeError_;
   DistributedInfo distInfo_;
   // Map of all observed process groups to their configs in trace. Key is
   // pg_name, value is pgConfig that will be used to populate pg_config in
