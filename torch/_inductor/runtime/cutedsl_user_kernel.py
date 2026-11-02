@@ -19,7 +19,11 @@ if TYPE_CHECKING:
     from torch._higher_order_ops.cutedsl_kernel_wrap import CuteDSLHostFnInfo
 
 
-# host function -> {argument signature -> compiled function}
+# host function -> {argument signature -> compiled function}. Nothing is evicted: a
+# compile's CUDA library is unloaded once it is freed, while a CUDA graph that
+# captured a launch of it still runs its kernel. A constant keyed by identity (see
+# _object_state in user_kernel_hop.py) made for each launch therefore compiles each
+# time and stays in memory, with its compile, as long as the host function does.
 _compiled: weakref.WeakKeyDictionary[
     Callable[..., Any], dict[tuple[Any, ...], Any]
 ] = weakref.WeakKeyDictionary()
@@ -83,7 +87,7 @@ def launch_cutedsl_kernel(
         get_host_fn_info,
         python_scalar,
     )
-    from torch._higher_order_ops.user_kernel_hop import constant_key
+    from torch._higher_order_ops.user_kernel_hop import _snapshot, constant_key
     from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
     from torch._native.cutedsl.launch import supported_alignment
 
@@ -99,6 +103,7 @@ def launch_cutedsl_kernel(
         key: list[object] = [torch.cuda.get_device_capability(device)]
         compile_args: dict[str, Any] = {}
         call_args: list[Any] = []
+        constants: list[str] = []
         for name in info.params:
             if name == info.stream_param:
                 value: Any = cu_stream
@@ -116,6 +121,7 @@ def launch_cutedsl_kernel(
                     key.append((name, info.numeric_params.get(name, type(value))))
                 else:
                     key.append((name, constant_key(value)))
+                    constants.append(name)
             compile_args[name] = value
             if name not in info.constexpr_params:
                 call_args.append(value)
@@ -126,6 +132,11 @@ def launch_cutedsl_kernel(
             with CUTEDSL_COMPILE_LOCK:
                 compiled = per_fn.get(tuple(key))
                 if compiled is None:
+                    # The key stands for the constants as they are now, but the
+                    # host code that the compile runs can change one (cache a
+                    # layout on a config object, say), so it compiles copies.
+                    for name in constants:
+                        compile_args[name] = _snapshot(compile_args[name])
                     compiled = cute.compile(fn, **compile_args)
                     per_fn[tuple(key)] = compiled
         compiled(*call_args)
