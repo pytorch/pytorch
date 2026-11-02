@@ -1541,7 +1541,7 @@ class TestFastLauncher(FastLauncherTestMixin, TestCase):
         """Verify the fast launcher raises ValueError when nArgs > MAX_ARGS (121)."""
         launcher = self._store_sum_launcher()
         # 'O' is the pointer type code; 130 of them exceeds MAX_ARGS=121.
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "too many arguments"):
             self._make_fast_launcher(launcher, arg_tys="O" * 130)
 
     def test_keyword_arguments_rejected(self):
@@ -1549,7 +1549,7 @@ class TestFastLauncher(FastLauncherTestMixin, TestCase):
         fast = self._make_fast_launcher(launcher)
 
         arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        with self.assertRaises((RuntimeError, TypeError)):
+        with self.assertRaisesRegex(RuntimeError, "keyword arguments"):
             fast(1, 1, 1, self._stream(), arg0, 5, unexpected=1)
 
     def test_call_without_vectorcall(self):
@@ -1561,9 +1561,11 @@ class TestFastLauncher(FastLauncherTestMixin, TestCase):
         type(fast).__call__(fast, 1, 1, 1, self._stream(), arg0, 5)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
 
-    def test_int_and_parameter_pointer_args(self):
-        # Pointer arguments that are not exact tensors: a raw address, and a
-        # Parameter, which the fast path's type check does not match.
+    def test_pointer_arg_kinds(self):
+        # Pointer arguments other than a plain tensor: a raw address; a
+        # Parameter, which the exact type check accepts like a plain tensor;
+        # and an object with a data_ptr() method, which only the fallback that
+        # calls that method can handle.
         launcher = self._store_sum_launcher()
         fast = self._make_fast_launcher(launcher)
         expected = torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
@@ -1577,6 +1579,10 @@ class TestFastLauncher(FastLauncherTestMixin, TestCase):
         )
         fast(1, 1, 1, self._stream(), param, 5)
         self.assertEqual(param.data, expected)
+
+        target = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        fast(1, 1, 1, self._stream(), SimpleNamespace(data_ptr=target.data_ptr), 5)
+        self.assertEqual(target, expected)
 
     def test_launches_are_independent(self):
         # Each launch must bind its own arguments, including when the same
@@ -1682,20 +1688,21 @@ class TestFastXpuLauncher(FastLauncherTestMixin, TestCase):
             self._make_fast_launcher(kernel, arg_tys=kernel.arg_tys + "i")
 
     def test_rejects_invalid_launch_metadata(self):
-        # Rejected before they can size the argument layout, which is a fixed
-        # array indexed by the argument count.
+        # Each row is valid for the kernel but for one value, so the message
+        # shows this check rejected it, not the argument count check after it.
+        # MAX_ARGS is covered by test_too_many_args_raises_value_error.
         from torch._C import _FastXpuLauncher
 
         kernel = self._store_sum_launcher()
-        # 'O' is the pointer type code; 130 of them exceeds MAX_ARGS=121.
-        for num_warps, shared, arg_tys, n_scratch in (
-            (1, 0, "O" * 130, 0),
-            (1, 0, "O", -1),
-            (0, 0, "O", 0),
-            (-1, 0, "O", 0),
-            (1, -1, "O", 0),
+        arg_tys = kernel.arg_tys
+        scratch = kernel.has_global_scratch + kernel.has_profile_scratch
+        for num_warps, shared, n_scratch in (
+            (0, 0, scratch),
+            (-1, 0, scratch),
+            (1, -1, scratch),
+            (1, 0, -1),
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "num_warps must be positive"):
                 _FastXpuLauncher(kernel.function, num_warps, shared, arg_tys, n_scratch)
 
     def test_rejects_unloaded_kernel(self):

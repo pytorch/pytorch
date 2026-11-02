@@ -453,8 +453,9 @@ void setKernelArg(
     - loadedKernel->numArgs == numParams + (bindLocal ? 1 : 0). Otherwise a
       kernel argument is left unbound, or set_arg binds one the kernel does
       not have.
-  The kernel argument count check in launchKernel() is what establishes the
-  second one today.
+  launchKernel() checks the second one before every launch it makes, while
+  fast_launcher_vectorcall() relies on the check FastXpuLauncher_new() made
+  once, when it built the launcher.
 */
 void submitKernel(
     const LoadedKernel* loadedKernel,
