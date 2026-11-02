@@ -163,6 +163,7 @@ class TestColumnCombine(TestCase):
         self.assertFalse(any(k[:2] == ("coltile", "tiled_layout") for k in ct._CACHE))
 
     def test_column_unroll_reaches_stage_one(self, device):
+        """Pass the config's unroll through to the stage-one tile."""
         x = torch.randn((257, 260), device=device)
         cfg = ct.ColConfig("test_unroll", 64, 7, 4, "column", 0, 2)
         trait = T.SumOps(acc=cutlass.Float32)
@@ -171,7 +172,12 @@ class TestColumnCombine(TestCase):
         with patch.object(ct, "select_col_config", return_value=cfg), stage as built:
             got = ct._reduce_col_tile(*args)[0]
         self.assertEqual(built.call_args_list[0].kwargs["unroll"], 2)
-        self.assertEqual(got, x.sum(0), atol=1e-4, rtol=1e-4)
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            expected = x.sum(0)
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
 
 instantiate_parametrized_tests(TestColumnConfig)
