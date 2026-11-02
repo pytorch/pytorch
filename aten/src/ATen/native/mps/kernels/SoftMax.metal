@@ -71,16 +71,38 @@ softmax_row(
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
     max_val = c10::metal::max(max_val, float(input[in_base + col]));
   }
-  max_val = c10::metal::simd_max(max_val);
-  float sum = 0;
+  const auto winner = c10::metal::simd_argmax(max_val);
+  max_val = winner.first;
+  bool skip_max = isfinite(max_val) && lane == winner.second;
+
+  float tail = 0.0f;
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
-    sum += precise::exp(float(input[in_base + col]) - max_val);
+    const float value = float(input[in_base + col]);
+    const bool omit = skip_max && value == max_val;
+    skip_max = skip_max && !omit; // if omit is true, then skip_max is set to false, prevents two calls in same lane in case of duplicates
+    tail += omit ? 0.0f : precise::exp(value - max_val);
   }
-  const SoftmaxEpilogue<log_softmax> epilogue(
-      max_val, c10::metal::simd_sum(sum));
+
+  tail = c10::metal::simd_sum(tail); 
+
+  float normalizer;
+  if IF_CONSTEXPR(log_softmax) {
+    normalizer = c10::metal::log1p(tail); // compute log(1+tail), if tail is close to zero, this will preserve the tail
+  } else {
+    const float inv = 1.0f / (1.0f + tail);
+    normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) :  inv; // fma does 1.0f -tail * inv , preserving precision close to zero
+  }
+
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
-    output[in_base + col] =
-        static_cast<T>(epilogue(float(input[in_base + col])));
+    const float shifted = float(input[in_base + col]) - max_val;
+    float value;
+    if IF_CONSTEXPR(log_softmax) {
+      value = shifted - normalizer;
+    } else {
+      value = precise::exp(shifted) * normalizer;
+    }
+
+    output[in_base + col] = static_cast<T>(value);
   }
 }
 
