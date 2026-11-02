@@ -23,6 +23,7 @@ from .builtin import (
     BuiltinTypeVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    BytesBuiltinVariable,
     ComplexBuiltinVariable,
     DictBuiltinVariable,
     FloatBuiltinVariable,
@@ -32,6 +33,7 @@ from .builtin import (
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
+    StrBuiltinVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -246,6 +248,8 @@ __all__ = [
     "FloatBuiltinVariable",
     "ComplexBuiltinVariable",
     "BoolBuiltinVariable",
+    "StrBuiltinVariable",
+    "BytesBuiltinVariable",
     "BuiltinVariable",
     "ByteArrayBuiltinVariable",
     "ByteArrayIteratorVariable",

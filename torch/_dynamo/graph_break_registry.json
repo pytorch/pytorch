@@ -1568,6 +1568,16 @@
       ]
     }
   ],
+  "GB3976": [
+    {
+      "Gb_type": "str() with non-constant arguments",
+      "Context": "str(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call str() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0096": [
     {
       "Gb_type": "Should not compile partial graph (STORE_ATTR)",
@@ -4039,6 +4049,14 @@
     }
   ],
   "GB9890": [
+    {
+      "Gb_type": "bytes() with non-constant arguments",
+      "Context": "bytes(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call bytes() with non-constant args.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "bytes() with non-constant arguments",
       "Context": "bytes(*{args}, **{kwargs})",

@@ -2160,44 +2160,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return generic_repr(tx, arg)
 
-    def call_str(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
-    ) -> VariableTracker | None:
-        return generic_str(tx, arg)
-
-    def call_bytes(
-        self,
-        tx: "InstructionTranslatorBase",
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        if not args and not kwargs:
-            return variables.ConstantVariable.create(b"")
-        if all(a.is_python_constant() for a in args) and all(
-            v.is_python_constant() for v in kwargs.values()
-        ):
-            try:
-                res = bytes(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-                return VariableTracker.build(tx, res)
-            except (TypeError, ValueError) as e:
-                raise_observed_exception(
-                    type(e),
-                    tx,
-                    args=list(e.args),
-                )
-        unimplemented(
-            gb_type="bytes() with non-constant arguments",
-            context=f"bytes(*{args}, **{kwargs})",
-            explanation="Attempted to call bytes() with non-constant args.",
-            hints=[
-                "Ensure that the args to bytes() are constant (int, str, etc.).",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
             unimplemented(
@@ -4580,6 +4542,72 @@ class BoolBuiltinVariable(BuiltinTypeVariable):
             return ConstantVariable.create(False)
         # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
         return generic_is_true(tx, args[0])
+
+
+class StrBuiltinVariable(BuiltinTypeVariable):
+    _fn = str
+
+    tp_methods = {
+        "maketrans": _constant_fold_classmethod("maketrans"),
+    }
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not args and not kwargs:
+            return ConstantVariable.create("")
+        if len(args) == 1 and not kwargs:
+            return generic_str(tx, args[0])
+        if check_unspec_or_constant_args(args, kwargs):
+            try:
+                res = str(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, res)
+        unimplemented(
+            gb_type="str() with non-constant arguments",
+            context=f"str(*{args}, **{kwargs})",
+            explanation="Attempted to call str() with non-constant args.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+
+class BytesBuiltinVariable(BuiltinTypeVariable):
+    _fn = bytes
+
+    tp_methods = {
+        "fromhex": _constant_fold_classmethod("fromhex"),
+    }
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not args and not kwargs:
+            return ConstantVariable.create(b"")
+        if check_unspec_or_constant_args(args, kwargs):
+            try:
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, res)
+        unimplemented(
+            gb_type="bytes() with non-constant arguments",
+            context=f"bytes(*{args}, **{kwargs})",
+            explanation="Attempted to call bytes() with non-constant args.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
 
 # pyrefly: ignore [deprecated]
