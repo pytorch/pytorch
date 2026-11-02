@@ -8571,7 +8571,6 @@ for dtype in (torch.int32, torch.int64):
             reference_in_float=False,
         )
 
-    @xfail_if_mps_unimplemented  # aten::linalg_eig not implemented for MPS
     @skipIfNoLapack
     def test_linalg_eig_stride_consistency(self):
         def fn(x):
@@ -9664,6 +9663,87 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
 
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_inputs(self):
+        # Each input reads x eight times, so it is realized before stack, and
+        # its unsqueeze view freezes it. The copy into the stack output should
+        # fuse into the producer instead of a separate pointwise cat.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def fn(x):
+            return torch.stack(
+                [sum(x[:, j] * (i + j) for j in range(8)) for i in range(3)], -1
+            )
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_input_twice(self):
+        # One realized buffer copied into two slices, plus another reader; both
+        # copies fuse into the producer (two kernels with the flag off).
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def fn(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, y], -1), y[None, :] + 1
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_stack_cat_rule_exclusions(self):
+        # The cat rule only reroutes whole computed buffers; a slice of one and a
+        # no-op buffer compile as without it.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def sliced(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            half = y.shape[0] // 2
+            return torch.stack([y[:half], y[half:]], -1)
+
+        def with_empty(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, torch.empty_like(y)], -1)[:, 0]
+
+        x = torch.randn([4096, 16], device=self.device)
+        for fn in (sliced, with_empty):
+            codes = []
+            for enabled in (False, True):
+                torch._dynamo.reset()
+                with config.patch(cat_fuse_computed_input_copies=enabled):
+                    _, (code,) = run_and_get_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(codes[0], codes[1], fn.__name__)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_pad_cheap_inputs(self):
+        # Stacks of cheap pointwise inputs stay one pointwise cat kernel.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def pack(x):
+            first = x[:, 0] | (x[:, 1] << 4)
+            second = x[:, 2] | (x[:, 3] << 4)
+            return F.pad(torch.stack((first, second), -1).reshape(-1), (0, 5))
+
+        def interleave(x):
+            return F.pad(torch.stack((x + 1, x + 2), -1).flatten(1), (0, 5))
+
+        cases = (
+            (pack, (torch.arange(1024, dtype=torch.int32) % 16).reshape(256, 4)),
+            (interleave, torch.arange(77, dtype=torch.float32).reshape(7, 11)),
+        )
+        for fn, x in cases:
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            self.common(fn, (x,))
+            assertGeneratedKernelCountEqual(self, 1)
+
     def test_hardtanh(self):
         def fn(x):
             return F.hardtanh(x), F.hardtanh(x + 1), F.hardtanh(x - 1)
@@ -9755,7 +9835,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ):
                 model(x)
 
-    @xfail_if_mps_unimplemented
     def test_adaptive_avg_pool_errors_with_long(self):
         class Model(torch.nn.Module):
             def __init__(self, pool_operator):
@@ -20501,7 +20580,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
-    def test_pdl_store_only_kernel_waits(self):
+    def test_pdl_wait_through_store_only_kernel(self):
         def fn(x):
             y = x
             for _ in range(64):
@@ -20514,14 +20593,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,), check_lowp=False)
 
         code = run_and_get_triton_code(torch.compile(fn), x)
-        # gdc_wait only waits for the direct predecessor, so the zero fill must
-        # wait before exiting or index_put can read y before the sum writes it
+        # the zero fill in between never waits, so the index_put must wait for
+        # the sum before loading its result
         (
             FileCheck()
-            .check("def triton_poi_fused_new_zeros")
-            .check("store")
-            .check_not("def triton_")
+            .check("def triton_poi_fused_arange_index_put")
+            .check_not("load")
             .check("gdc_wait")
+            .check("load")
         ).run(code)
 
     @requires_cuda_and_triton
@@ -20564,6 +20643,70 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         (
             FileCheck()
             .check("def triton_poi_fused_arange_index_fill")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_wait_after_workspace_kernel(self):
+        def fn(x):
+            y = x
+            for _ in range(32):
+                y = torch.sin(y) * 1.5
+            c = torch.cumsum(y, 0)
+            z = torch.arange(2**21, device=x.device, dtype=torch.float32) * 3
+            w = torch.arange(8192, device=x.device, dtype=torch.float32) * 2 + 1
+            return c, z, w
+
+        x = torch.randn(2**20, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False, atol=1e-2, rtol=1e-3)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        # the split scan's workspace is freed right after launch, so the next
+        # kernel must wait before storing into memory it may reuse
+        (
+            FileCheck()
+            .check("def triton_spl_fused_cumsum")
+            .check("def triton_poi_fused_arange_mul")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "triton.cooperative_reductions": True,
+            "triton.force_cooperative_reductions": True,
+            "triton.multi_kernel": 2,
+        }
+    )
+    def test_pdl_wait_after_workspace_multi_kernel(self):
+        def fn(x):
+            s = x.sum(-1)
+            w = torch.arange(64, device=x.device, dtype=torch.float32) * 2 + 1
+            return s, w
+
+        x = torch.randn(1, 2**16, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False, atol=1e-2, rtol=1e-3)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        if not is_dynamic_shape_enabled():
+            # the non-cooperative alternative needs a static rnumel
+            self.assertIn("async_compile.multi_kernel", code)
+        # the cooperative reduction's workspace is freed right after launch, so
+        # the next kernel must wait before storing into memory it may reuse
+        (
+            FileCheck()
+            .check("fused_sum")
+            .check("def triton_poi_fused_add_arange_mul")
             .check_not("store")
             .check("gdc_wait")
             .check("store")
