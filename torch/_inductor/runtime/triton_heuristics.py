@@ -39,6 +39,7 @@ from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
 from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
+from torch.utils import _pytree as pytree
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
@@ -47,9 +48,11 @@ from ..triton_bundler import TritonBundler
 from ..utils import (
     forwarded_cuda_compile_options,
     forwarded_hip_compile_options,
+    get_constexpr_repr_children,
     get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
+    sanitize_constexpr_for_repr,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
@@ -64,6 +67,7 @@ from .hints import (
     HeuristicType,
     InductorMeta,
     is_valid_mix_order_reduction_config,
+    KERNEL_CONFIGS_NAME,
     native_matmul_block_numel,
     ReductionHint,
     TileHint,
@@ -77,6 +81,7 @@ from .runtime_utils import (
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
+    extra_options_to_hashable,
     get_first_attr,
     get_max_y_grid,
     get_num_bytes,
@@ -126,6 +131,24 @@ class InductorConfig(Config):
 
 class NoTritonConfigsError(RuntimeError):
     pass
+
+
+# No compiled config could be loaded, even with pipelining disabled. Not a
+# NoTritonConfigsError, which benchmark fusion takes to mean the fusion is invalid.
+class NoTritonLaunchersError(RuntimeError):
+    pass
+
+
+# What _make_launcher treats as a config not fitting the GPU, and what is raised once
+# no config is left: the failures a pinned kernel falls back to tuning on.
+_PINNED_CONFIG_ERRORS = (
+    NoTritonConfigsError,
+    NoTritonLaunchersError,
+    OutOfResources,
+    PTXASError,
+    torch.cuda.OutOfMemoryError,
+    IntelGPUError,
+)
 
 
 def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
@@ -257,6 +280,31 @@ def _host_tma_aligned(tensor, name):
         return tensor
     _warn_host_tma_clone(name)
     return tensor.clone()
+
+
+def _add_namedtuple_types_to_scope(value: Any, scope: dict[str, Any]) -> None:
+    """Bind NamedTuple types into launcher ``exec`` scope for ``repr`` inlining.
+
+    ``_convert_constant`` embeds constexpr values via ``repr``. NamedTuple
+    reprs reference a stable alias, so the reconstructed type must exist in
+    the launcher scope. Mirrors ``codegen_namedtuple_defs``
+    in the generated Triton module (#192288).
+    """
+    visited: OrderedSet[int] = OrderedSet()
+
+    def visit(obj: Any) -> None:
+        if id(obj) in visited:
+            return
+        visited.add(id(obj))
+        if pytree.is_namedtuple_instance(obj):
+            cls = type(obj)
+            scope[cls.__qualname__] = cls
+        repr_children = get_constexpr_repr_children(obj)
+        if repr_children is not None:
+            for child in repr_children.values:
+                visit(child)
+
+    visit(sanitize_constexpr_for_repr(value))
 
 
 def autotune_hints_to_configs(
@@ -419,6 +467,7 @@ def check_autotune_cache(
     filename: str | None,
     inductor_meta: InductorMeta,
     dynamic_scale_rblock_eligible: bool = False,
+    skip_read: bool = False,
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -443,7 +492,10 @@ def check_autotune_cache(
         watchdog.report_phase(watchdog.Phase.QUERYING_CACHE)
         autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
         if autotune_cache:
-            if best_config := autotune_cache.read_best(inductor_meta, configs):
+            best_config = None
+            if not skip_read:
+                best_config = autotune_cache.read_best(inductor_meta, configs)
+            if best_config:
                 configs = [best_config]
                 autotune_cache_info["best_config"] = triton_config_to_hashable(
                     best_config
@@ -522,6 +574,10 @@ class CachingAutotunerPlugin:
         launcher creation from this point on, including any
         ``TritonBundler`` interaction (the standard
         ``static_triton_bundle_key`` bundling path is skipped).
+
+        A pinned kernel whose config does not fit the GPU falls back to tuning: it
+        becomes a fresh unpinned kernel in place, which drops any state a plugin set
+        on it, and ``pre_compile`` fires again.
         """
         return DEFER
 
@@ -603,6 +659,19 @@ class CachingAutotuner(KernelInterface):
     Unlike the main triton Autotuner, this version can precompile all
     configs, and does not rely on the Triton JIT.
     """
+
+    # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
+    fallback: Callable[[], CachingAutotuner] | None = None
+    # The state set after __init__ that falling back keeps, rather than taking the
+    # unpinned instance's: the held lock, and the launch a lazy precompile from run()
+    # is part of.
+    _kept_on_fallback = (
+        "lock",
+        "_reload_kernel",
+        "compile_id",
+        "is_backward",
+        "_debug_call",
+    )
 
     def __init__(
         self,
@@ -846,7 +915,13 @@ class CachingAutotuner(KernelInterface):
         static_triton_bundle_key: str | None = None,
     ):
         if warm_cache_only:
-            self._precompile_worker()
+            try:
+                self._precompile_worker()
+            except NoTritonConfigsError as e:
+                if self.fallback is None:
+                    raise
+                self._fall_back_to_tuning(e)
+                self._precompile_worker()
             return
         with self.lock:
             # Helper function for reloading a kernel generated in a worker
@@ -855,19 +930,43 @@ class CachingAutotuner(KernelInterface):
             # we need to actually run compilation on the parent process
             if reload_kernel is not None:
                 self._reload_kernel = reload_kernel
-            # Plugin opt-out: ``pre_compile`` returning anything other
-            # than ``DEFER`` means the plugin owns compile + launcher
-            # creation entirely. We return without running
-            # ``_precompile_worker`` / ``_make_launchers`` /
-            # ``_dynamic_scale_rblock``.
-            for plugin in self._active_plugins():
-                if plugin.pre_compile(self) is not DEFER:
-                    return
+            self._precompile_locked(static_triton_bundle_key)
+
+    def _precompile_locked(self, key: str | None) -> None:
+        # Plugin opt-out: ``pre_compile`` returning anything other
+        # than ``DEFER`` means the plugin owns compile + launcher
+        # creation entirely. We return without running
+        # ``_precompile_worker`` / ``_make_launchers`` /
+        # ``_dynamic_scale_rblock``.
+        for plugin in self._active_plugins():
+            if plugin.pre_compile(self) is not DEFER:
+                return
+        try:
             self._precompile_worker()
-            if static_triton_bundle_key is not None and self.is_statically_launchable():
-                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
+            if key is not None and self.is_statically_launchable():
+                TritonBundler.put_static_autotuner(key, self)
             self._make_launchers()
-            self._dynamic_scale_rblock()
+        except _PINNED_CONFIG_ERRORS as e:
+            if self.fallback is None:
+                raise
+            self._fall_back_to_tuning(e)
+            self._precompile_locked(key)
+            return
+        self._dynamic_scale_rblock()
+
+    def _fall_back_to_tuning(self, e: Exception) -> None:
+        # The pinned config fit the GPU it was tuned on; this one may be smaller, which
+        # Triton reports when it loads the binary.
+        log.info("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
+        state = {k: v for k, v in vars(self).items() if k in self._kept_on_fallback}
+        # Built first, so that a build that raises leaves this kernel as it was.
+        unpinned = vars(self.fallback())
+        self.release_benchmark_artifacts()
+        # Become the unpinned kernel in place, since the module-level name binds self.
+        # CachingAutotuner keeps all of its state in __dict__ (no __slots__), and the
+        # unpinned instance is never compiled or run, so nothing else refers to it.
+        self.__dict__ = {**unpinned, **state}
+        self._plugins = get_caching_autotuner_plugins(self)
 
     def _precompile_worker(self):
         if self.compile_results:
@@ -1150,7 +1249,7 @@ class CachingAutotuner(KernelInterface):
                         log.debug("Retrying with num_stages=1 after: %s", exc)
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
-                    raise RuntimeError(
+                    raise NoTritonLaunchersError(
                         f"No valid triton configs. {type(exc).__name__}: {exc}"
                     )
             self.launchers = launchers
@@ -1265,6 +1364,7 @@ class CachingAutotuner(KernelInterface):
             **self.__dict__,
             "lock": None,
             "_plugins": [],
+            "fallback": None,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -2748,7 +2848,7 @@ class CachingAutotuner(KernelInterface):
                 n_scratch = max(n_scratch, 2)
 
             fast_runner = _FastCudaLauncher(
-                cu_function, num_warps, shared, arg_tys, n_scratch
+                cu_function, num_warps, shared, arg_tys, n_scratch, kernel.launch_pdl
             )
 
             new_globals = {**launcher.__globals__, "runner": fast_runner}
@@ -3038,7 +3138,7 @@ class CompileResult(Generic[_T]):
             if isinstance(constant, str):
                 return "r'" + constant + "'"
             else:
-                return repr(constant)
+                return repr(sanitize_constexpr_for_repr(constant))
 
         if triton_version_uses_attrs_dict():
             call_args = arg_names
@@ -3147,11 +3247,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
 
-            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
-                kernel.metadata, "launch_cooperative_grid", False
-            ):
+            if getattr(kernel.metadata, "launch_cooperative_grid", False):
                 raise CannotStaticallyLaunchKernel(
-                    "static launch does not support launch attributes"
+                    "static launch does not support cooperative grid launches"
                 )
 
             binary_ext = GPU_KERNEL_BIN_EXTS.get(
@@ -3328,14 +3426,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         the metadata to be serialized is a namedtuple or regular, serializable one.
         """
 
-        def is_namedtuple(obj) -> bool:
-            return (
-                isinstance(obj, tuple)
-                and hasattr(obj, "_asdict")
-                and hasattr(obj, "_fields")
-            )
-
-        if is_namedtuple(metadata):
+        if pytree.is_namedtuple_instance(metadata):
             return metadata._asdict()
         else:
             return metadata
@@ -3450,6 +3541,9 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
+        # NamedTuple constexprs are inlined via repr into launcher source.
+        _add_namedtuple_types_to_scope(compile_meta.get("constants", {}), scope)
+
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
             # TODO(jansel): delete this branch in mid-2025
@@ -3714,6 +3808,11 @@ def hash_configs(configs: list[Config]):
         hasher.update(
             f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
+        if extra_options := getattr(cfg, "extra_options", None):
+            # Preserve existing hashes when no backend-specific options exist.
+            hasher.update(
+                f"extra_options={extra_options_to_hashable(extra_options)}\n".encode()
+            )
     return hasher.hexdigest()
 
 
@@ -3727,6 +3826,13 @@ compiled_kernels_for_load: contextvars.ContextVar[
 ] = contextvars.ContextVar("compiled_kernels_for_load", default=None)
 
 
+_RETUNING_META = (
+    "coordinate_descent_tuning",
+    "combo_tuning_groups",
+    "incremental_autotune",
+)
+
+
 def cached_autotune(
     size_hints: list[int] | None,
     configs: list[Config],
@@ -3737,10 +3843,18 @@ def cached_autotune(
     custom_kernel=False,
     caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
     debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
+    pinnable: bool = True,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.
+
+    A kernel whose name is a key of the ``KERNEL_CONFIGS_NAME`` dict in its module's
+    globals, which the python wrapper writes under ``triton.autotune_at_compile_time``
+    (see ``_KernelConfigs`` in codegen/wrapper.py), is built as a FIXED kernel with that
+    config. It falls back to ``configs`` only if the config does not fit this GPU (see
+    ``_PINNED_CONFIG_ERRORS``); any other error in an entry, such as a misspelled key, is
+    raised. A kernel built with ``pinnable=False`` ignores the table.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     compiled = compiled_kernels_for_load.get()
@@ -3758,6 +3872,73 @@ def cached_autotune(
             configs, size_hints, inductor_meta
         )
     configs = unique_configs(configs)
+    shared = {
+        "filename": filename,
+        "custom_kernel": custom_kernel,
+        "caching_autotuner_cls": caching_autotuner_cls,
+        "debug_autotuner_cls": debug_autotuner_cls,
+    }
+    unpinned = functools.partial(
+        _cached_autotune,
+        size_hints=size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        heuristic_type=heuristic_type,
+        inductor_meta=inductor_meta,
+        **shared,
+    )
+
+    def decorator(fn):
+        # The config compile-time autotuning chose, which the kernel launches with instead
+        # of tuning again: KERNEL_CONFIGS in the python wrapper module that defines it.
+        # Read from the module rather than the decorator, so that the kernel source, which
+        # the compile caches key on, is the same pinned or not, and a hand edit to the
+        # table takes effect without touching any kernel.
+        table = getattr(fn.fn, "__globals__", {}).get(KERNEL_CONFIGS_NAME)
+        pinned = table.get(name) if isinstance(table, dict) and pinnable else None
+        if pinned is None:
+            return unpinned()(fn)
+        config = config_from_dict(pinned)
+        meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
+        # A copy of triton_meta, which _cached_autotune pops from and the fallback reuses.
+        kernel = _cached_autotune(
+            size_hints=None,
+            configs=[config],
+            triton_meta={**triton_meta},
+            heuristic_type=HeuristicType.FIXED,
+            inductor_meta=meta,
+            **shared,
+        )(fn)
+
+        def fallback(skip_cache_read=False):
+            # Copies, since _cached_autotune pops from them and a failed build is retried.
+            metas = {"triton_meta": {**triton_meta}, "inductor_meta": {**inductor_meta}}
+            tuner = unpinned(**metas, skip_cache_read=skip_cache_read)(fn)
+            # A cached winner that is the config that did not fit, as tuned on another GPU:
+            # tune again, and save the new winner over it.
+            same = [*map(config_to_dict, tuner.configs)] == [config_to_dict(config)]
+            if same and not skip_cache_read:
+                return fallback(skip_cache_read=True)
+            return tuner
+
+        kernel.fallback = fallback
+        return kernel
+
+    return decorator
+
+
+def _cached_autotune(
+    size_hints: list[int] | None,
+    configs: list[Config],
+    triton_meta: TritonMeta,
+    heuristic_type,
+    filename,
+    inductor_meta: InductorMeta,
+    custom_kernel,
+    caching_autotuner_cls: type[CachingAutotuner],
+    debug_autotuner_cls: type[DebugAutotuner],
+    skip_cache_read: bool = False,
+):
     if len(configs) != 1 and not filename:
         raise AssertionError("filename required when multiple configs are provided")
 
@@ -3775,12 +3956,15 @@ def cached_autotune(
         filename,
         inductor_meta,
         dynamic_scale_rblock_eligible=dynamic_scale_rblock_eligible,
+        skip_read=skip_cache_read,
     )
     mutated_arg_names = cast("list[str]", inductor_meta.pop("mutated_arg_names", ()))
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
     if "restore_value" in triton_meta:
-        mutated_arg_names += triton_meta.pop("restore_value")
+        # A new list, since a pinned kernel's inductor_meta shares this one with its
+        # fallback. Defensive: only user kernels, never pinned, have restore_value.
+        mutated_arg_names = [*mutated_arg_names, *triton_meta.pop("restore_value")]
 
     reset_to_zero_arg_names: list[str] = []
     if "reset_to_zero" in triton_meta:
@@ -5250,6 +5434,8 @@ def template(
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
+        # Its config carries compile options, such as ctas_per_cga, a table row does not.
+        pinnable=False,
     )
 
 
@@ -5292,7 +5478,11 @@ def config_to_dict(config: Config) -> dict[str, Any]:
 
 def config_from_dict(config: dict[str, Any]) -> Config:
     config = {**config}
-    return Config(config, **_pop_config_kwargs(config))
+    extra_options = config.pop("extra_options", None)
+    triton_config = Config(config, **_pop_config_kwargs(config))
+    if extra_options:
+        triton_config.extra_options = extra_options
+    return triton_config
 
 
 def fixed_config(
@@ -5334,6 +5524,8 @@ def user_autotune(
         filename=filename,
         inductor_meta=inductor_meta,
         custom_kernel=custom_kernel,
+        # A user kernel keeps its own autotuning, even if a hand edit names it.
+        pinnable=False,
     )
 
 

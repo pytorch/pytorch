@@ -7846,6 +7846,17 @@ class TestTorch(TestCase):
             torch.from_numpy(a)
             torch.from_numpy(a)
 
+    def test_grad_scaler_default_device(self):
+        accel = torch.accelerator.current_accelerator()
+        with warnings.catch_warnings():
+            # "CUDA is not available" warning on builds without a usable CUDA device
+            warnings.simplefilter("ignore")
+            scaler = torch.amp.GradScaler()
+        self.assertEqual(scaler._device, accel.type if accel is not None else "cuda")
+        if accel is None:
+            # BC: without an accelerator, GradScaler() still disables itself
+            self.assertFalse(scaler.is_enabled())
+
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
             npt = tensor.numpy()
@@ -8752,6 +8763,15 @@ class TestTorch(TestCase):
 
         # ensure ones() throws an error when extra positional (non-keyword) arguments are given.
         self.assertRaises(TypeError, lambda: torch.ones((3, 3), torch.float32))
+
+    def test_invalid_arguments_error_names_mismatched_argument(self):
+        # With several overloads, each one whose argument count fits reports the
+        # argument that failed, not a guess from the signature string (#87514).
+        with self.assertRaises(TypeError) as cm:
+            torch.std(torch.ones(2, 2), (0,), "a")
+        msg = str(cm.exception)
+        self.assertIn("didn't match because: std(): argument 'unbiased' (position 3) must be bool, not str", msg)
+        self.assertIn("didn't match because: std() takes", msg)
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
@@ -10215,6 +10235,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.float8_e4m3fnuz: "f8e4m3fnuz",
             torch.float8_e5m2fnuz: "f8e5m2fnuz",
             torch.float8_e8m0fnu: "f8e8m0fnu",
+            torch.float8_e5m3fnu: "f8e5m3fnu",
             torch.float4_e2m1fn_x2: "f4e2m1fnx2",
             torch.complex32: "c32",
             torch.bcomplex32: "bc32",
@@ -10251,7 +10272,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.bool,
             torch.float8_e5m2, torch.float8_e4m3fn,
             torch.float8_e5m2fnuz, torch.float8_e4m3fnuz,
-            torch.float8_e8m0fnu, torch.float4_e2m1fn_x2,
+            torch.float8_e8m0fnu, torch.float8_e5m3fnu, torch.float4_e2m1fn_x2,
             torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8, torch.bits16,
         }
         self.assertEqual(set(torch._C._get_all_dtypes()), expected)
