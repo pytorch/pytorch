@@ -15,6 +15,7 @@ from torch._library.dispatchless import (
 )
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -30,6 +31,9 @@ class Payload:
 
 
 class DispatchlessTest(PytreeRegisteringTestCase):
+
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("pre_dispatch", [False, True])
     def test_nested_and_disabled_proxy_modes(self, pre_dispatch):
         @dispatchless_custom_op
@@ -86,7 +90,9 @@ class DispatchlessTest(PytreeRegisteringTestCase):
             return result
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            traced = pool.submit(make_fx(synchronized_call, pre_dispatch=pre_dispatch), x)
+            traced = pool.submit(
+                make_fx(synchronized_call, pre_dispatch=pre_dispatch), x
+            )
             eager = pool.submit(synchronized_call, x)
             gm, result = traced.result(), eager.result()
 

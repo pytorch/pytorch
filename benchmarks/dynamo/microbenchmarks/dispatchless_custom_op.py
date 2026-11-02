@@ -13,12 +13,17 @@ import json
 import platform
 import statistics
 import timeit
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 from torch._library.dispatchless import dispatchless_custom_op
 from torch.utils.benchmark import Timer
 
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    
 
 def clone(x: torch.Tensor) -> torch.Tensor:
     return x.clone()
@@ -39,7 +44,10 @@ def profile_call_path(min_run_time: float) -> dict[str, float]:
         "cached_helper_lookup_us": "_proxy_mode_getter()",
         "active_mode_lookup_us": "get_proxy_mode()",
     }
-    scope = {"_proxy_mode_getter": _proxy_mode_getter, "get_proxy_mode": _proxy_mode_getter()}
+    scope = {
+        "_proxy_mode_getter": _proxy_mode_getter,
+        "get_proxy_mode": _proxy_mode_getter(),
+    }
     return {
         name: Timer(stmt=stmt, globals=scope, num_threads=1, timer=timeit.default_timer)
         .blocked_autorange(min_run_time=min_run_time)
@@ -118,7 +126,11 @@ def main() -> None:
     parser.add_argument("--sizes", type=int, nargs="+", default=[0, 1, 1024])
     parser.add_argument("--profile-call-path", action="store_true")
     args = parser.parse_args()
-    if args.min_run_time <= 0 or args.repeats < 1 or any(size < 0 for size in args.sizes):
+    if (
+        args.min_run_time <= 0
+        or args.repeats < 1
+        or any(size < 0 for size in args.sizes)
+    ):
         parser.error("run time and repeats must be positive; sizes must be nonnegative")
 
     torch.set_num_threads(1)
