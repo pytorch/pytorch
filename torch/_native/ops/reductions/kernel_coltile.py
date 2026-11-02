@@ -8,7 +8,7 @@ from typing import Any, NamedTuple
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Int32, Int64
+from cutlass import const_expr, Int32
 
 import torch
 
@@ -130,7 +130,8 @@ class PartialColumns:
         identity = trait.init()
         acc = identity
         for p in cutlass.range(group, partitions, self.groups):
-            offset = Int64(p) * Int64(columns) + Int64(safe_col)
+            # select_col_config caps outputs * npar below 2^31.
+            offset = p * columns + safe_col
             acc = combine(acc, tuple(fdtypes[f](ins[f][offset]) for f in range(nf)))
         smem = cutlass.utils.SmemAllocator()
         partials = [
@@ -391,10 +392,7 @@ def _reduce_col_tile(
         ) + tiled.cache_sig
         build2 = lambda: _compile(  # noqa: E731
             tiled,
-            [
-                _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
-                for pp in parts
-            ],
+            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym(),)) for pp in parts],
             [
                 _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
                 for out in kernel_outs
