@@ -607,13 +607,27 @@ class HuggingfaceRunner(BenchmarkRunner):
     def use_model_forward_for_accuracy(self):
         return self.args.hf_inference_mode != "generate"
 
+    def report_eager_latency(self):
+        return self.args.hf_inference_mode in ("prefill", "decode", "encode")
+
+    def get_model_metadata(self, example_inputs):
+        if self.args.hf_inference_mode == "generate":
+            return {}
+        prompt = example_inputs.get("input_ids")
+        decode = example_inputs.get("decode_ids")
+        inputs = prompt if prompt is not None else example_inputs["input_features"]
+        return {
+            "batch_size": inputs.shape[0],
+            "phase": self.args.hf_inference_mode,
+            "prompt_length": prompt.shape[1] if prompt is not None else None,
+            "decode_length": decode.shape[1] if decode is not None else 0,
+        }
+
     def get_request_tokens(self, example_inputs):
         if self.args.hf_inference_mode == "prefill":
             return {"input_tokens_per_second": example_inputs["input_ids"].numel()}
         if self.args.hf_inference_mode == "decode":
             return {"output_tokens_per_second": example_inputs["decode_ids"].numel()}
-        if self.args.hf_inference_mode == "encode":
-            return {}
         return None
 
     def deepcopy_model(self, model):

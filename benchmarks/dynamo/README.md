@@ -160,6 +160,9 @@ input embedding they share weights with. Both the eager baseline and the
 compiled forward run tensor-parallel, so `speedup` compares eager TP with
 compiled TP at the same topology. Compare against a single-GPU run separately to
 measure TP scaling.
+The peak-memory columns include an extra model-weight copy in single-GPU runs,
+while TP runs share each rank's weights. These columns cannot directly measure
+single-GPU-to-TP memory savings.
 Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`,
 `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`.
 
