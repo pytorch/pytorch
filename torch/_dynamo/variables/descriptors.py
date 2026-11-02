@@ -31,6 +31,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, TypeMROSource, TypeSource
 from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
+    _compute_slotdefs,
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
@@ -46,7 +47,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import python_constant_repr_impl
+from .object_protocol import object_richcompare, python_constant_repr_impl, type_init
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -205,14 +206,38 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
+        if not issubclass(obj.python_type(), objclass):
+            raise_type_error(
+                tx,
+                f"descriptor '{name}' requires a '{objclass.__name__}' object "
+                f"but received a '{obj.python_type_name()}'",
+            )
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
-        return self.owner.call_method(
-            tx, self.descriptor.__name__, [obj, *rest], kwargs
-        )
+        obj = obj.realize()
+        if objclass is object:
+            # object's own slot (object_init, object_richcompare, ...), not the
+            # override on type(obj).
+            sd = _compute_slotdefs(object).get(name)
+            if sd is not None:
+                # TODO: use VariableTracker's once https://github.com/pytorch/pytorch/pull/199999 is merged
+                impl = (
+                    object_richcompare
+                    if sd.impl == "tp_richcompare_impl"
+                    else getattr(VariableTracker, sd.impl)
+                )
+                return sd.wrapper(obj, tx, impl, rest, kwargs)
+        elif objclass is type and name == "__init__":
+            return type_init(tx, rest, kwargs)
+        elif isinstance(obj, UserDefinedObjectVariable):
+            return obj.call_base_method(tx, name, rest, kwargs)
+        sd = obj.lookup_slotdefs(name)
+        if sd is None:
+            return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+        return sd(obj, tx, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -228,6 +253,19 @@ class WrapperDescriptorVariable(DescriptorVariable):
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # PyWrapperDescr_Type leaves tp_richcompare NULL and inherits
+        # object_richcompare from object.
+        # TODO(guilhermeleobas): delete this once #199999 is merged
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
 
 class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
@@ -419,7 +457,7 @@ class MethodDescriptorVariable(DescriptorVariable):
             result = method(obj, tx, name, rest, kwargs)
             if result is not None:
                 return result
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+        return obj.call_method(tx, name, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
