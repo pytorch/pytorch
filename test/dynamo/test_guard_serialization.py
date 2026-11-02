@@ -5058,10 +5058,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
     @parametrize("flag_name", ["with_kwargs", "always_call"])
-    @parametrize(
-        "guard_type", ["NN_MODULE_HOOKS_DICT_CONTAINS", "ORDERED_DICT_ORDER_MATCH"]
-    )
-    def test_nn_module_hook_membership(self, flag_name, guard_type):
+    def test_nn_module_hook_membership(self, flag_name):
         def hook(module, args, *rest):
             return rest[-1] + 1
 
@@ -5086,16 +5083,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.ones(2)
         module = make_module((False, True))
-        ref, loaded = self._test_serialization(guard_type, fn, x, module)
-        if guard_type == "NN_MODULE_HOOKS_DICT_CONTAINS":
-            self.assertIn("== (False, True)", str(ref))
-            self.assertIn("== (False, True)", str(loaded))
+        ref, loaded = self._test_serialization(
+            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
+        )
+        self.assertIn("== (False, True)", str(ref))
+        self.assertIn("== (False, True)", str(loaded))
         for flags in ((False, True), (True, False)):
             self._test_check_fn(
                 ref,
                 loaded,
                 {"x": x, "module": make_module(flags)},
-                flags == (False, True) or guard_type == "ORDERED_DICT_ORDER_MATCH",
+                flags == (False, True),
             )
 
         first, second = module._forward_hooks
@@ -5110,7 +5108,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref,
             loaded,
             {"x": x, "module": module},
-            guard_type == "ORDERED_DICT_ORDER_MATCH",
+            False,
         )
         flags[second] = flags.pop(first)
         module._forward_hooks.move_to_end(first)
@@ -5118,8 +5116,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref,
             loaded,
             {"x": x, "module": module},
-            guard_type == "NN_MODULE_HOOKS_DICT_CONTAINS",
+            True,
         )
+
+    def test_nn_module_hook_order_serialization(self):
+        def fn(x, module):
+            for hook in module._forward_hooks.values():
+                x = hook(x)
+            return x
+
+        module = torch.nn.Identity()
+        module._forward_hooks.update({1: torch.sin, 2: torch.cos})
+        x = torch.ones(2)
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, module
+        )
+        fresh = torch.nn.Identity()
+        fresh._forward_hooks.update({3: torch.sin, 4: torch.cos})
+        inputs = {"x": x, "module": fresh}
+        self._test_check_fn(ref, loaded, inputs, True)
+        fresh._forward_hooks.move_to_end(3)
+        self._test_check_fn(ref, loaded, inputs, False)
 
     def test_nested_region_hook_secondary_source(self):
         @torch.compiler.nested_compile_region
