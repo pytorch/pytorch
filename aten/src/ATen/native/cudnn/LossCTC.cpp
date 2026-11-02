@@ -16,9 +16,9 @@
 #include <ATen/ops/_use_cudnn_ctc_loss.h>
 #include <ATen/ops/_use_cudnn_ctc_loss_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/le.h>
 #include <ATen/ops/lt.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <utility>
@@ -210,8 +210,13 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
   // this is CuDNN 7.6 only, see PyTorch 1.2 for older CuDNN.
   ctc_loss_desc.setEx(
       CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_SOFTMAX, CUDNN_PROPAGATE_NAN);
-  TensorDescriptor log_probs_desc{log_probs_t};
-  Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // Same as in _cudnn_ctc_loss_tensor: the descriptor below carries the
+  // tensor's own strides, so hand cuDNN a packed copy (#202338). This is a
+  // no-op when log_probs is already contiguous.
+  const Tensor log_probs_c = log_probs_t.contiguous();
+  TensorDescriptor log_probs_desc{log_probs_c};
+  // See _cudnn_ctc_loss_tensor for why the gradient starts from zeros.
+  Tensor grad = at::zeros_like(log_probs_c, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
 
   size_t workspace_size;
@@ -233,7 +238,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
   AT_CUDNN_CHECK(cudnnCTCLoss(
       handle,
       log_probs_desc.desc(),
-      log_probs_t.const_data_ptr(),
+      log_probs_c.const_data_ptr(),
       targets->const_data_ptr<int>(),
       target_lengths.data(),
       input_lengths.data(),
@@ -308,8 +313,19 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       CUDNN_LOSS_NORMALIZATION_SOFTMAX,
       CUDNN_PROPAGATE_NAN,
       255);
-  TensorDescriptor log_probs_desc{log_probs_t};
-  Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // The descriptor below carries the tensor's own strides, but cuDNN returned
+  // a wrong, run-to-run varying loss for a strided log_probs such as
+  // log_softmax(1).permute(2, 0, 1) (#202338), so hand it a packed copy.
+  // This is a no-op when log_probs is already contiguous.
+  const Tensor log_probs_c = log_probs_t.contiguous();
+  TensorDescriptor log_probs_desc{log_probs_c};
+  // cuDNN leaves parts of the gradient unwritten: the frames t >=
+  // input_lengths[b], on which the loss does not depend, and the whole
+  // gradient of a sample it skips, such as one whose target cannot be
+  // aligned to its input length. With empty_like those entries held
+  // whatever was in memory (#202338); the native kernel returns zero there,
+  // so start from zeros.
+  Tensor grad = at::zeros_like(log_probs_c, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
 
   size_t workspace_size;
@@ -329,7 +345,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       algo,
       ctc_loss_desc.desc(),
       log_probs_desc.desc(),
-      log_probs_t.const_data_ptr(),
+      log_probs_c.const_data_ptr(),
       targets_t_.const_data_ptr<int>(),
       target_lengths_.const_data_ptr<int>(),
       input_lengths_.const_data_ptr<int>(),
