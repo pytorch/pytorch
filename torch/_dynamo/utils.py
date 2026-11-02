@@ -4586,7 +4586,7 @@ def summarize_example_value(v: object) -> str:
     large or can raise."""
     if isinstance(v, torch.Tensor):
         fields = [f"size={tuple(v.shape)}"]
-        if v.dtype not in (torch.get_default_dtype(), torch.int64, torch.bool):
+        if v.dtype != torch.get_default_dtype():
             fields.append(f"dtype={v.dtype}")
         if v.device.type != torch._C._get_default_device():
             fields.append(f"device='{v.device}'")
