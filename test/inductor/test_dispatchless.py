@@ -9,10 +9,12 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._library.dispatchless import dispatchless_custom_op, flat_dispatchless_call
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 
 
 class DispatchlessTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("requires_grad", [False, True])
     def test_values_gradients_and_decomposition(self, device, requires_grad):
         @dispatchless_custom_op

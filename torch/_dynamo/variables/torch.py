@@ -165,12 +165,14 @@ def _create_internal_torch_function(
     from .builder import SourcelessBuilder
 
     return SourcelessBuilder.create_internal_torch_function(value, kind)
+
+
 class DispatchlessCustomOpVariable(VariableTracker):
-    def __init__(self, value: "_DispatchlessCustomOp", **kwargs: Any) -> None:
+    def __init__(self, value: "_DispatchlessCustomOp[Any, Any]", **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
-    def as_python_constant(self) -> "_DispatchlessCustomOp":
+    def as_python_constant(self) -> "_DispatchlessCustomOp[Any, Any]":
         return self.value
 
     def python_type(self) -> type:
@@ -3728,9 +3730,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"  The following returned tensors have consumed grad_fns: {leaked_str}"
                     ),
                     hints=[
-                        f"Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`"
-                        if leaked
-                        else "Call .detach() on the tensor before returning.",
+                        (
+                            f"Detach the problematic tensor(s) before returning: e.g. `{leaked[0]}.detach()`"
+                            if leaked
+                            else "Call .detach() on the tensor before returning."
+                        ),
                         "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad().",
                     ],
                 )
