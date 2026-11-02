@@ -219,18 +219,21 @@ class TestCase(PytorchTestCase):
                 is_leaf=lambda x: isinstance(x, torch.Tensor) and x.dtype.is_complex,
             )
 
+            out_fn = sample_input.output_process_fn_grad
             if isinstance(args[0], torch.Tensor):
                 input_list = list(args)
 
                 def func(*t: torch.Tensor):
-                    return op(*t, **kwargs)
+                    return out_fn(op.gradcheck_wrapper(op, *t, **kwargs))
             else:
                 # For ops like `stack` and `cat`, we need to specify
                 # the list of inputs a bit differently
                 input_list = list(args[0])
 
                 def func(*t: torch.Tensor):
-                    return op(list(t), *args[1:], **kwargs)
+                    return out_fn(
+                        op.gradcheck_wrapper(op, list(t), *args[1:], **kwargs)
+                    )
 
             # Do the actual gradcheck
             self.assertTrue(

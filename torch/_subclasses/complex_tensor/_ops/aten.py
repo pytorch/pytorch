@@ -269,8 +269,10 @@ fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
 def copy_impl(
     self: ComplexTensor, src: ComplexTensor, non_blocking: bool = False
 ) -> ComplexTensor:
-    self_re, self_im = split_complex_arg(self)
     src_re, src_im = split_complex_arg(src)
+    if not self.dtype.is_complex:
+        return aten.copy(self, src_re, non_blocking=non_blocking)
+    self_re, self_im = split_complex_arg(self)
     return ComplexTensor(
         aten.copy(self_re, src_re, non_blocking=non_blocking),
         aten.copy(self_im, src_im, non_blocking=non_blocking),
