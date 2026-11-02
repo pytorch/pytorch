@@ -194,18 +194,6 @@ class Benchmarker:
     inductor generated callables.
     """
 
-    def __init__(self: Self) -> None:
-        # Depth is nonzero only while timing a captured graph's replay, so
-        # benchmark_gpu does not graph-capture the replay. Benchmarks nested in
-        # the warmup (e.g. a callable autotuning on first launch) still take the
-        # graph path. Thread-local because parallel tuning threads share the
-        # benchmarker.
-        self._cudagraph_benchmark_state = threading.local()
-
-    @property
-    def _in_cudagraph_benchmark(self: Self) -> bool:
-        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
-
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: torch.device | None = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
@@ -414,12 +402,7 @@ class Benchmarker:
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
-        self._cudagraph_benchmark_state.depth = previous_depth + 1
-        try:
-            result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
-        finally:
-            self._cudagraph_benchmark_state.depth = previous_depth
+        result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
         if isinstance(result, list):
             return [t / n_iters for t in result]  # type: ignore[return-value]
         return result / n_iters
@@ -586,6 +569,14 @@ class TritonBenchmarker(Benchmarker):
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
+    def __init__(self: Self) -> None:
+        super().__init__()
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
+
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
@@ -633,6 +624,29 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 for start_event, end_event in event_pairs
             ]
         )
+
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
+        **kwargs: Any,
+    ) -> float:
+        # Prevent benchmark_gpu from re-entering this method
+        # when autotune_cudagraph_benchmarking is enabled.
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
+        try:
+            result = super().benchmark_gpu_with_cuda_graph(
+                _callable,
+                grad_to_none=grad_to_none,
+                cudagraph_unroll=cudagraph_unroll,
+                **kwargs,
+            )
+        finally:
+            self._cudagraph_benchmark_state.depth = previous_depth
+        return result
 
     @may_distort_benchmarking_result
     @time_and_count
