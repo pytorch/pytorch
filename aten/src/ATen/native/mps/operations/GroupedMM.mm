@@ -16,7 +16,6 @@
 #endif
 
 #include <algorithm>
-#include <limits>
 
 namespace at::native {
 namespace {
@@ -33,16 +32,8 @@ template <typename idx_t>
 GroupedMMParams<idx_t> grouped_mm_params(const Tensor& mat_a, const Tensor& mat_b, const Tensor& out, uint32_t groups) {
   const auto& batched = mat_a.dim() == 3 ? mat_a : mat_b.dim() == 3 ? mat_b : out;
   return {
-      .m = c10::checked_convert<uint32_t>(mat_a.size(-2), "mat_a.size(-2)"),
-      .n = c10::checked_convert<uint32_t>(mat_b.size(-1), "mat_b.size(-1)"),
-      .k = c10::checked_convert<uint32_t>(std::min(mat_a.size(-1), mat_b.size(-2)), "contraction dimension"),
+      .mm = matmul_params<idx_t>(mat_a, mat_b, out),
       .groups = groups,
-      .a_stride_m = static_cast<idx_t>(mat_a.stride(-2)),
-      .a_stride_k = static_cast<idx_t>(mat_a.stride(-1)),
-      .b_stride_k = static_cast<idx_t>(mat_b.stride(-2)),
-      .b_stride_n = static_cast<idx_t>(mat_b.stride(-1)),
-      .out_stride_m = static_cast<idx_t>(out.stride(-2)),
-      .out_stride_n = static_cast<idx_t>(out.stride(-1)),
       .batch_stride = static_cast<idx_t>(batched.stride(0)),
   };
 }
@@ -72,14 +63,14 @@ GroupedMMKernel grouped_mm_pick_kernel(const GroupedMMParams<uint64_t>& params,
                                        uint32_t mpp_bn) {
   // Decode routes a handful of tokens to top_k experts each, so with no more
   // rows than groups the tiled kernels would launch mostly empty tiles.
-  const bool few_rows_per_group = jagged_rows && params.m <= std::min(kGroupedMMFewRowsMax, params.groups);
+  const bool few_rows_per_group = jagged_rows && params.mm.m <= std::min(kGroupedMMFewRowsMax, params.groups);
   // The few rows kernel vector-loads mat_a rows and mat_b columns along k.
-  const bool k_contiguous = params.a_stride_k == 1 && params.b_stride_k == 1;
+  const bool k_contiguous = params.mm.a_stride_k == 1 && params.mm.b_stride_k == 1;
   if (few_rows_per_group && k_contiguous) {
     return GroupedMMKernel::FewRows;
   }
   // matmul2d stores row-major output tiles and indexes within a tile in int32.
-  const bool mpp_supported = has_mpp() && params.out_stride_n == 1 && matmul_mpp_indices_fit(params, bm, mpp_bn);
+  const bool mpp_supported = has_mpp() && params.mm.out_stride_n == 1 && matmul_mpp_indices_fit(params.mm, bm, mpp_bn);
   return mpp_supported ? GroupedMMKernel::MPP : GroupedMMKernel::Simdgroup;
 }
 
@@ -97,7 +88,7 @@ void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& 
   const auto mode = jagged_rows ? "rows" : jagged_cols ? "cols" : "k";
   const auto params = grouped_mm_params<uint64_t>(mat_a, mat_b, out, groups);
   const auto bm = matmul_tile_rows(jagged_rows ? mat_a.size(0) / groups : mat_a.size(-2));
-  const auto mpp_bn = grouped_mm_mpp_tile_cols(params.n, mat_b.nbytes(), bm);
+  const auto mpp_bn = grouped_mm_mpp_tile_cols(params.mm.n, mat_b.nbytes(), bm);
   const auto kernel = grouped_mm_pick_kernel(params, jagged_rows, bm, mpp_bn);
   if (jagged_cols && kernel == GroupedMMKernel::Simdgroup) {
     // Without matmul2d the jagged columns are cheaper to reach through the
@@ -109,15 +100,15 @@ void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& 
   // Every operand is either row or col major, because mpp matmul2d wants
   // to know the orientation in advance per operand (`n` row-major, `t` column major)
   // and output is always row-major, so the transposed-output 3d x 2d fallback call lands on the simdgroup kernels.
-  const char a_layout = params.a_stride_k == 1 ? 'n' : 't';
-  const char b_layout = params.b_stride_k == 1 ? 't' : 'n';
+  const char a_layout = params.mm.a_stride_k == 1 ? 'n' : 't';
+  const char b_layout = params.mm.b_stride_k == 1 ? 't' : 'n';
   const auto dtype = scalarToMetalTypeString(out);
   const bool use_u32 = kernel != GroupedMMKernel::MPP && offsetsFitIn<int32_t>(mat_a, mat_b, out);
   // The jagged grid axis covers the worst case of one extra partial tile per
   // group; the kernel discards the excess tiles.
   const auto tile_grid = [&](uint32_t bn) {
-    return MTLSizeMake(at::ceil_div<NSUInteger>(params.n, bn) + (jagged_cols ? groups : 0),
-                       at::ceil_div<NSUInteger>(params.m, bm) + (jagged_rows ? groups : 0),
+    return MTLSizeMake(at::ceil_div<NSUInteger>(params.mm.n, bn) + (jagged_cols ? groups : 0),
+                       at::ceil_div<NSUInteger>(params.mm.m, bm) + (jagged_rows ? groups : 0),
                        jagged_rows || jagged_cols ? 1 : groups);
   };
   std::string kernel_name;
@@ -128,7 +119,7 @@ void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& 
     case GroupedMMKernel::FewRows:
       kernel_name = fmt::format("grouped_mm_few_rows_{}{}", dtype, mtlIdxSuffix(use_u32));
       profile_name = "grouped_mm_few_rows";
-      threadgroups = MTLSizeMake(at::ceil_div<NSUInteger>(params.n, kGroupedMMFewRowsSimdgroups), params.m, 1);
+      threadgroups = MTLSizeMake(at::ceil_div<NSUInteger>(params.mm.n, kGroupedMMFewRowsSimdgroups), params.mm.m, 1);
       simdgroups = kGroupedMMFewRowsSimdgroups;
       break;
     case GroupedMMKernel::MPP:
