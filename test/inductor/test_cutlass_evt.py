@@ -13,7 +13,7 @@ from torch._inductor.codegen.cutlass.utils import (
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
-from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90, SM90OrLater
+from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
@@ -132,7 +132,6 @@ class TestCutlassEVTGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -194,7 +193,6 @@ return tmp_0, tmp_2, D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -244,7 +242,6 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -308,7 +305,6 @@ return tmp_0, tmp_2, D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -368,7 +364,6 @@ return tmp_1, D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_neg_constant(self):
         """Test EVT codegen for neg and constant ops (used in decomposed SiLU)."""
@@ -408,7 +403,6 @@ return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_sigmoid_decomposed(self):
         """Test EVT codegen for decomposed sigmoid: 1/(1+exp(-x))."""
@@ -454,7 +448,6 @@ return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_silu_fused(self):
         """Test EVT codegen for SiLU: x/(1+exp(-x)) is folded to silu(x)."""
@@ -494,7 +487,6 @@ return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
@@ -530,7 +522,6 @@ return D""",
 class TestCutlassEVTAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self, device):
@@ -597,7 +588,6 @@ class TestCutlassEVTAccelerator(TestCase):
 """,
             )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self, device):
@@ -666,7 +656,6 @@ def fn(accum, bias):
 """,
             )
 
-    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self, device):
