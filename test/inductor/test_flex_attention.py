@@ -2450,10 +2450,8 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @skip_on_cpu
     def test_create_block_mask_dynamic_recompile_single_block(self, device):
-        # Regression test for https://github.com/pytorch/pytorch/issues/202850.
-        # The 128 call recompiles with a dynamic seq_len s0, so the number of
-        # KV blocks becomes (s0 + 127) // 128. That is always 1 for s0 in
-        # [2, 128], and used to crash with "expected rnumel1 == 1 and rnumel2 != 1".
+        # https://github.com/pytorch/pytorch/issues/202850: with dynamic seq_len s0,
+        # the KV block count (s0 + 127) // 128 is always 1 and used to crash Inductor.
 
         def causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
