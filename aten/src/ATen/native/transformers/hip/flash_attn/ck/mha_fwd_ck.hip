@@ -411,7 +411,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     {
       attn_bias = attn_bias_;
     }
-    // Read below by the p_dropout > 0 epilogue, which runs whether or not the kernel does.
     drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
     drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
 
@@ -465,12 +464,14 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    // Before returning populate seed_t and offset_t if dropout is used
+    // Before returning populate seed_t and offset_t if dropout is used. Use the
+    // host values: rng_state is filled by async kernels, so dereferencing its
+    // device pointer here reads stale memory when the GPU is busy.
     if(p_dropout > 0.0)
     {
-        seed_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.first))),
+        seed_t = at::scalar_tensor(at::Scalar(drop_seed),
                                    at::dtype(at::kUInt64).device(at::kCUDA));
-        offset_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.second))),
+        offset_t = at::scalar_tensor(at::Scalar(drop_offset),
                                    at::dtype(at::kUInt64).device(at::kCUDA));
     }
     // Note: These are propagated up to the return of mha_fwd(). comments

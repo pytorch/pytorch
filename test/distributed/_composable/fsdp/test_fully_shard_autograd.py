@@ -16,6 +16,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     get_devtype,
     MLP,
@@ -30,7 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 device_type = torch.device(get_devtype())
 
 
-class TestFullyShardAutograd(FSDPTest):
+class TestFullyShardAutograd(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())

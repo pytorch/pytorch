@@ -2,6 +2,8 @@
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/ParallelGraphExecutor.h>
 
+#include <c10/util/irange.h>
+
 namespace {
 
 #define WITH_LOCK(m, block)               \
@@ -48,7 +50,7 @@ void ThreadPoolExecutor::execute_inline(SessionState* session, WorkUnit* unit) {
 
 void ThreadPoolExecutor::start(int32_t numThreads) {
   stopped_ = false;
-  for (int32_t i = 0; i < numThreads; ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(numThreads)) {
     threads_.emplace_back(&ThreadPoolExecutor::loop, this);
   }
 }
@@ -98,7 +100,8 @@ void ThreadPoolExecutor::add(
       return;
     }
     case 1: {
-      return add(session, *begin);
+      add(session, *begin);
+      return;
     }
   }
 
@@ -178,7 +181,8 @@ void WorkUnit::run(ThreadPoolExecutor* executor, SessionState* session) {
 
     switch (newWorkUnits.size()) {
       case 0: {
-        return session->removeWork();
+        session->removeWork();
+        return;
       }
       case 1: {
         break;
