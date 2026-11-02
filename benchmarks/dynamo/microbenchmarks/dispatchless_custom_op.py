@@ -13,11 +13,15 @@ import json
 import platform
 import statistics
 import timeit
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 from torch._library.dispatchless import dispatchless_custom_op
 from torch.utils.benchmark import Timer
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def clone(x: torch.Tensor) -> torch.Tensor:
@@ -96,7 +100,11 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--sizes", type=int, nargs="+", default=[0, 1, 1024])
     args = parser.parse_args()
-    if args.min_run_time <= 0 or args.repeats < 1 or any(size < 0 for size in args.sizes):
+    if (
+        args.min_run_time <= 0
+        or args.repeats < 1
+        or any(size < 0 for size in args.sizes)
+    ):
         parser.error("run time and repeats must be positive; sizes must be nonnegative")
 
     torch.set_num_threads(1)
