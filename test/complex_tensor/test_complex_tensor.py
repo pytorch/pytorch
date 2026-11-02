@@ -145,6 +145,10 @@ EXTRA_KWARGS = {
         "rtol": 2e-6,
         "atol": 1e-2,
     },
+    Descriptor(op=aten.tan, dtype=torch.complex64, variant=Variant.OpInterleaved): {
+        "rtol": 2e-6,
+        "atol": 5e-5,
+    },
 }
 
 
@@ -285,11 +289,29 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(pivots, expected.pivots)
         self.assertEqual(info, expected.info)
 
+    def test_div_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, dtype=torch.complex128)
+        b = torch.randn(3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.div_(ComplexTensor.from_interleaved(b))
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a / b)
+
+    def test_tril_inplace(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, 3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.tril_(-1)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a.tril(-1))
+
     def test_interleaved_views_input(self):
-        from torch._subclasses.complex_tensor import (
-            ComplexTensor,
-            InterleavedComplexTensor,
-        )
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
 
         t = torch.randn(4, 6, dtype=torch.complex128)[:, ::2]
         x = InterleavedComplexTensor(t)
@@ -299,11 +321,24 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(x.as_interleaved(), t)
 
         y = x * x
-        self.assertIsInstance(y, ComplexTensor)
+        self.assertIsInstance(y, InterleavedComplexTensor)
         self.assertEqual(y.as_interleaved(), t * t)
 
         x.real = torch.zeros(4, 3)
         self.assertEqual(t.real, torch.zeros(4, 3, dtype=torch.float64))
+
+    def test_interleaved_result_views_alias(self):
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
+
+        x = InterleavedComplexTensor(torch.randn(3, 3, dtype=torch.complex128))
+        y = x + x.mH
+        torch.real(y.diagonal()).mul_(0)
+        y.select(-1, 0).fill_(1)
+
+        self.assertEqual(y.re.diagonal()[1:], torch.zeros(2, dtype=torch.float64))
+        self.assertEqual(
+            y.as_interleaved()[:, 0], torch.ones(3, dtype=torch.complex128)
+        )
 
     def test_interleaved_inplace_writes_through(self):
         from torch._subclasses.complex_tensor import InterleavedComplexTensor
@@ -339,7 +374,17 @@ class TestComplexBwdGradients(TestCase):
         allowed_dtypes=[torch.complex128],
     )
     def test_fn_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
-        self.check_grad(device, dtype, op)
+        self.check_grad(device, dtype, op, Variant.Op)
+
+    @ops(
+        implemented_op_db,
+        dtypes=OpDTypes.supported_backward,
+        allowed_dtypes=[torch.complex128],
+    )
+    def test_fn_grad_interleaved(
+        self, device: str, dtype: torch.dtype, op: OpInfo
+    ) -> None:
+        self.check_grad(device, dtype, op, Variant.OpInterleaved)
 
 
 instantiate_device_type_tests(TestComplexTensor, globals())

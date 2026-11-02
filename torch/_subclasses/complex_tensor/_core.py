@@ -144,6 +144,10 @@ class ComplexTensor(Tensor):
 
         kwargs = {} if kwargs is None else kwargs
 
+        # Let `InterleavedComplexTensor` handle mixed inputs, so results stay interleaved.
+        if InterleavedComplexTensor in types:
+            return NotImplemented
+
         impl = lookup_complex(func, *args, **kwargs)
         if impl is None:
             return NotImplemented
@@ -157,7 +161,7 @@ class ComplexTensor(Tensor):
         return Complex.apply(re, im)
 
     def as_interleaved(self) -> Tensor:
-        return torch.complex(self.re, self.im)
+        return torch.complex(torch.resolve_neg(self.re), torch.resolve_neg(self.im))
 
     @staticmethod
     def __tensor_unflatten__(
@@ -296,7 +300,13 @@ class InterleavedComplexTensor(Tensor):
         if impl is None:
             return NotImplemented
 
-        return impl(*args, **kwargs)
+        # Keep results interleaved so that later views alias them.
+        return tree_map(
+            lambda t: InterleavedComplexTensor(t.as_interleaved())
+            if isinstance(t, ComplexTensor)
+            else t,
+            impl(*args, **kwargs),
+        )
 
     @staticmethod
     def __tensor_unflatten__(
