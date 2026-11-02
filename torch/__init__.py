@@ -232,7 +232,8 @@ if sys.platform == "win32":
                         load_nvidia_dynamic_lib(lib)
                     except Exception:
                         warnings.warn(
-                            f"cuda-pathfinder is unable to load {lib}", stacklevel=2
+                            f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
+                            stacklevel=2,
                         )
             except Exception:
                 warnings.warn(
