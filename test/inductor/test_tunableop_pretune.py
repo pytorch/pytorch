@@ -139,9 +139,9 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
             mock.patch("torch._inductor.tunableop.submit", side_effect=_record)
         )
         stack.enter_context(mock.patch("torch._inductor.tunableop.BenchmarkJob", _Job))
-        # The winners below carry a cuda layout so they reach the ladder, but
-        # torch._C._cuda_tunableop_get_filename only exists in a CUDA build.
-        # Patched so these stay runnable on CPU-only inductor shards.
+        # The winners carry a cuda layout so they reach the ladder, but
+        # _cuda_tunableop_get_filename exists only in a CUDA build: patched so
+        # these stay runnable on CPU-only shards.
         stack.enter_context(
             mock.patch(
                 "torch._inductor.tunableop._resolve_and_pin_filename_locked",
@@ -171,9 +171,8 @@ class TestTunableOpPretune(TestCase):
 
     def setUp(self):
         super().setUp()
-        # The memo is process-global: without this, tests sharing the same
-        # traced shapes (most build _mm_winner("mm", s) at hint 512) pollute
-        # each other depending on run order.
+        # The memo is process-global: without this, tests sharing a traced
+        # shape (most use _mm_winner at hint 512) pollute each other by order.
         tunableop._pretuned_gemms.cache_clear()
 
     def tearDown(self):
@@ -317,17 +316,15 @@ class TestTunableOpPretune(TestCase):
             [_buffer("mat1", [1000 * s, k], [k, 1]), _buffer("mat2", [k, s], [s, 1])],
             [1000 * s, s],
         )
-        # _contiguous_strides cannot build these (both dims are symbolic) and
-        # would yield [1, 1], which the density guard rejects -- masking the
-        # guard under test. Give it the real dense strides.
+        # _contiguous_strides would yield [1, 1] here (both dims symbolic),
+        # which the density guard rejects -- masking the guard under test.
         shared.layout = ir.FixedLayout(DEVICE, DTYPE, [1000 * s, s], [s, 1])
         self.assertEqual(_run(shared, sym=s), [])
         self.assertTrue(_run(self._mm_winner("mm", s), sym=s))
 
     def test_non_dense_operand_is_skipped(self):
-        # [s, 256] strided [300, 1] is padded. _meta_at rebuilds strides densely,
-        # so it would be tuned as [256, 1] -- an ld runtime never asks for, and
-        # one the nearest matcher will not borrow across either.
+        # [s, 256] strided [300, 1] is padded, and _meta_at rebuilds densely:
+        # it would be tuned at [256, 1], an ld runtime never asks for.
         s = sympy.Symbol("s_pad", positive=True, integer=True)
         k, n = 256, 512
         padded = _FakeWinner(
@@ -512,18 +509,16 @@ class TestTunableOpPretune(TestCase):
         self.assertIn(3000, dims, f"traced hint missing from {sorted(dims)}")
 
     def test_a_small_traced_hint_is_still_tuned(self):
-        # A model served at a dim below _TUNABLEOP_MIN_DYN_DIM still needs that
-        # shape: dropping it leaves a guaranteed miss on the only size runtime
-        # is known to ask for.
+        # A model served below _TUNABLEOP_MIN_DYN_DIM still needs that shape:
+        # dropping it guarantees a miss on the only size runtime asks for.
         s = sympy.Symbol("s_small", positive=True, integer=True)
         submitted = _run(self._mm_winner("mm", s), sym=s, hint=4)
         dims = {b.input_tensor_meta[0].sizes[0] for b in submitted}
         self.assertIn(4, dims, f"the served dim was dropped: {sorted(dims)}")
 
     def test_traced_hint_first_then_largest_first(self):
-        # The budget is shared and spent in order, so the one size runtime is
-        # known to ask for goes first; the rest descend, since a fault on a big
-        # size can cost a cold worker restart.
+        # The budget is shared and spent in order, so the size runtime is known
+        # to ask for goes first; the rest descend (a big fault costs a restart).
         s = sympy.Symbol("s_order", positive=True, integer=True)
         submitted = _run(self._mm_winner("mm", s), sym=s, hint=512)
         dims = [bmreq.input_tensor_meta[0].sizes[0] for bmreq in submitted]
@@ -571,6 +566,8 @@ class TestTunableOpPretune(TestCase):
                     "torch._inductor.tunableop.time",
                     SimpleNamespace(monotonic=_fake_monotonic),
                 ),
+                # A full budget really spent: coverage was cut, so warn.
+                self.assertLogs(tunableop.log, level="WARNING"),
             ):
                 tunableop.maybe_range_pretune(winner)
         # One bucket ran; the rest had too little budget to be anything but
@@ -584,7 +581,9 @@ class TestTunableOpPretune(TestCase):
         # configured budget is smaller than it.
         s = sympy.Symbol("s_shortbudget", positive=True, integer=True)
         with config.patch({"cuda.autotune_tunableop_timeout": 30.0}):
-            submitted = _run(self._mm_winner("mm", s), sym=s)
+            # Documented behaviour, once per GEMM: it must not warn.
+            with self.assertNoLogs(tunableop.log, level="WARNING"):
+                submitted = _run(self._mm_winner("mm", s), sym=s)
         dims = {b.input_tensor_meta[0].sizes[0] for b in submitted}
         self.assertEqual(dims, {512}, "only the traced shape fits a short budget")
 
@@ -697,9 +696,8 @@ class TestTunableOpPretune(TestCase):
         self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
     def test_bias_addmm_is_skipped(self):
-        # bias_addmm rewrites its own bias (inp[0]) before dispatching, so the
-        # meta the ladder rebuilds is not what aten receives. Excluded from
-        # _TUNABLEOP_GEMM_CHOICES, so it never reaches the density guard.
+        # bias_addmm rewrites its own bias before dispatching, so it is absent
+        # from _TUNABLEOP_GEMM_CHOICES and never reaches the density guard.
         s = sympy.Symbol("s_biasaddmm", positive=True, integer=True)
         m, k, n = s, 256, 512
         winner = _FakeWinner(
@@ -780,28 +778,56 @@ class TestTunableOpPretune(TestCase):
             tunableop.run_queued_pretunes(V.graph)
         self.assertEqual(submitted, [], "a flexible operand must not be tuned")
 
-    @parametrize("path", ("single_choice", "deterministic"))
-    def test_algorithm_selector_queues_on_early_return(self, path):
-        # Both early returns in AlgorithmSelectorCache.__call__ skip
-        # benchmarking, so each needs the hook of its own -- covering only the
-        # path finalize_multi_template_buffers takes would miss them. Neither
-        # reaches a device, so this runs on a CPU-only shard.
+    @parametrize(
+        "exit_path",
+        ("single_choice", "deterministic", "no_timings", "no_extern", "best_choice"),
+    )
+    def test_algorithm_selector_hook_fires_on_every_exit(self, exit_path):
+        # AlgorithmSelectorCache.__call__ returns from five places and each
+        # needs a hook of its own; calling the hook directly would pass with
+        # any of the five lines deleted. The hook itself is patched, so
+        # no_extern -- whose winner the isinstance gate turns away, see
+        # test_select_algorithm_hook_queues_until_layouts_are_final -- can
+        # assert the same way as the rest. None of this reaches a device.
         from torch._inductor import select_algorithm as _sa
 
-        s = sympy.Symbol(f"s_sel_{path}", positive=True, integer=True)
+        s = sympy.Symbol(f"s_sel_{exit_path}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         winner.output_node = mock.Mock(return_value=mock.Mock())
-        choices = [winner]
-        if path == "deterministic":
-            choices.append(self._mm_winner("mm", s))
-        with _ladder(s) as submitted:
-            with config.patch({"deterministic": path == "deterministic"}):
-                _, chosen = _sa.AlgorithmSelectorCache()(
-                    "mm", choices, winner.input_nodes, winner.layout
+        triton = mock.Mock(spec=_sa.ChoiceCaller)
+        choices = {"single_choice": [winner], "no_extern": [triton, triton]}.get(
+            exit_path, [winner, triton]
+        )
+        with contextlib.ExitStack() as stack:
+            # The post-benchmark exits reach create_inputs_key, which needs a
+            # graph; the two early returns return before it.
+            stack.enter_context(_ladder(s))
+            stack.enter_context(
+                config.patch({"deterministic": exit_path == "deterministic"})
+            )
+            hook = stack.enter_context(
+                mock.patch.object(_sa, "_maybe_pretune_tunableop")
+            )
+            if exit_path in ("no_timings", "no_extern", "best_choice"):
+                # Past the two early returns, into the post-benchmark exits.
+                stack.enter_context(
+                    mock.patch.object(_sa.AlgorithmSelectorCache, "make_precompile_fn")
                 )
-            self.assertIs(chosen, winner)
-            self.assertEqual(submitted, [], "an early return must not ladder here")
-            self.assertEqual(len(V.graph.pending_tunableop_ladder), 1)
+                stack.enter_context(
+                    mock.patch.object(
+                        _sa.AlgorithmSelectorCache,
+                        "do_autotuning",
+                        return_value=(
+                            {winner: 1.0, triton: 2.0}
+                            if exit_path == "best_choice"
+                            else {}
+                        ),
+                    )
+                )
+            _, chosen = _sa.AlgorithmSelectorCache()(
+                "mm", choices, winner.input_nodes, winner.layout
+            )
+        hook.assert_called_once_with(chosen)
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
