@@ -343,6 +343,22 @@ class TestColTileHost(TestCase):
             kg._col_route_ok(view, nouts, (9, 0)), view.dim() == 2 and nouts == 1
         )
 
+    @parametrize(
+        "shape,nouts,routed",
+        [
+            ((4, 64, 2), 1, True),
+            ((4, 65, 2), 1, False),
+            ((4, 65, 15), 1, False),
+            ((4, 65, 16), 1, True),
+            ((1, 65, 8191), 2, False),
+            ((2, 65, 4096), 2, True),
+        ],
+        name_fn=lambda shape, nouts, routed: "x".join(map(str, shape)) + f"_{nouts}",
+    )
+    def test_route_gate_boundaries(self, shape, nouts, routed):
+        view = torch.empty(shape, device="meta")
+        self.assertEqual(kg._col_route_ok(view, nouts, (10, 0)), routed)
+
     def test_route_gate_keeps_other_architectures_on_general(self):
         x = torch.randn(4, 64, 16, device="cuda")
         real = ct.reduce_batched_col_tile
@@ -409,29 +425,82 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
 
+    @parametrize(
+        "launcher, rank, args",
+        [
+            ("reduce_col_tile", 3, (torch.float32,)),
+            ("reduce_col_tile_2out", 3, ([torch.float32] * 2,)),
+            ("reduce_batched_col_tile", 2, ([torch.float32], 1)),
+        ],
+        name_fn=lambda launcher, rank, args: launcher,
+    )
+    def test_launchers_check_rank(self, launcher, rank, args):
+        x = torch.randn((4,) * rank, device="cuda")
+        fn, trait = getattr(ct, launcher), T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(AssertionError, "want [23]D x"):
+            fn(trait, "badrank", x, *args)
+
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
-    def test_direct_plan_matches_the_indexed_tree(self, device):
-        x = torch.randn(2, 128, 33, device=device)
-        trait = T.SumOps(acc=cutlass.Float32)
-        got = ct.reduce_ordered_col(trait, "ordered_direct", x, [torch.float32], 1)
+    @parametrize(
+        "op,dtype,shape",
+        [
+            ("sum", torch.float32, (2, 128, 33)),
+            ("sum", torch.float32, (2, 20, 33)),
+            ("sum", torch.float32, (9000, 32)),
+            ("argmax", torch.float32, (4, 2048, 64)),
+            ("var_mean", torch.bfloat16, (2, 2048, 40)),
+        ],
+        name_fn=lambda op, dtype, shape: f"{op}_{len(shape)}d_{shape[-2]}",
+    )
+    def test_direct_plan_matches_the_indexed_tree(self, device, op, dtype, shape):
+        """Preserve each row's inner-tree DAG across plan shapes, fields, and ranks."""
+        x = torch.randn(shape, device=device).to(dtype)
+        rows, columns = x.shape[-2:]
+        batches = x.numel() // (rows * columns)
+        kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
+        trait, outputs = {
+            "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
+            "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
+            "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
+        }[op]
+        nouts = len(outputs)
+        got = ct.reduce_ordered_col(trait, f"ordered_{op}", x, outputs, nouts)
         reference = kg._try_indexed_itree(
             trait,
-            "ordered_direct_reference",
+            f"ordered_{op}_reference",
             x,
-            [(128, 33)],
-            [(33, 1), (2, 128 * 33)],
-            2 * 33,
-            128,
-            [torch.float32],
-            1,
+            [(rows, columns)],
+            kept,
+            batches * columns,
+            rows,
+            outputs,
+            nouts,
         )
         self.assertIsNotNone(got)
         self.assertIsNotNone(reference)
-        self.assertEqual(
-            got[0].flatten().view(torch.uint8), reference[0].view(torch.uint8)
-        )
+        for a, b in zip(got, reference, strict=True):
+            self.assertEqual(a.flatten().view(torch.uint8), b.view(torch.uint8))
+
+    def test_batch_sizes_share_one_kernel(self, device):
+        trait = T.SumOps(acc=cutlass.Float32)
+        for batches in (2, 3):
+            x = torch.randn(batches, 128, 33, device=device)
+            got = ct.reduce_ordered_col(trait, "ordered_reuse", x, [torch.float32], 1)
+            self.assertEqual(got[0], x.sum(dim=1), atol=1e-4, rtol=1e-4)
+        keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "ordered_reuse")]
+        self.assertEqual(len(keys), 1)
+
+    def test_inner_tree_middle_axis_routes_to_ordered_columns(self, device):
+        x = torch.randn(2, 128, 33, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        real = ct.reduce_ordered_col
+        with mock.patch.object(ct, "reduce_ordered_col", wraps=real) as served:
+            got = kg.reduce_dim(trait, "route", x, 1, torch.float32, order="inner_tree")
+        served.assert_called_once()
+        expected = real(trait, "route_direct", x, [torch.float32], 1)[0]
+        self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
 
 
 instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
