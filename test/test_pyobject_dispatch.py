@@ -4,6 +4,7 @@ import unittest
 from typing import cast
 
 import torch
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 class PyObjectDispatchReturnsTest(unittest.TestCase):
@@ -224,6 +225,125 @@ class PyObjectDispatchArgumentsTest(unittest.TestCase):
         torch.testing.assert_close(result, torch.ones(2, dtype=torch.float64))
         self.assertIs(received[0][0], torch.float64)
         self.assertIsInstance(received[0][1], torch.device)
+
+
+class PyObjectDispatchPythonKeyTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_mode_normalizes_tensor_list_return(self) -> None:
+        @torch.library.custom_op(
+            "_pyobject_dispatch_python_key::list_return", mutates_args=()
+        )
+        def custom(x: torch.Tensor) -> list[torch.Tensor]:
+            return cast(list[torch.Tensor], (x.clone(), x + 1))
+
+        op = torch.ops._pyobject_dispatch_python_key.list_return.default
+        calls = []
+
+        class TrackingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is op:
+                    calls.append(func)
+                return func(*args, **(kwargs or {}))
+
+        x = torch.ones(2)
+        with TrackingMode():
+            result = custom(x)
+        self.assertIsInstance(result, list)
+        torch.testing.assert_close(result, [x, x + 1])
+        self.assertEqual(calls, [op])
+
+    def test_torch_dispatch_mode_intercepts_custom_op(self) -> None:
+        @torch.library.custom_op("_pyobject_dispatch_python_key::mode", mutates_args=())
+        def custom(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        op = torch.ops._pyobject_dispatch_python_key.mode.default
+        calls = []
+
+        class TrackingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is op:
+                    calls.append(func)
+                return func(*args, **(kwargs or {}))
+
+        x = torch.ones(2)
+        with TrackingMode():
+            result = custom(x)
+        torch.testing.assert_close(result, x)
+        self.assertEqual(calls, [op])
+
+    def test_tensor_subclass_intercepts_custom_op(self) -> None:
+        @torch.library.custom_op(
+            "_pyobject_dispatch_python_key::subclass", mutates_args=()
+        )
+        def custom(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        op = torch.ops._pyobject_dispatch_python_key.subclass.default
+        calls = []
+
+        class TrackingTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @staticmethod
+            def __new__(cls, value):
+                return torch.Tensor._make_subclass(cls, value)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is op:
+                    calls.append(func)
+                with torch._C._DisableTorchDispatch():
+                    return func(*args, **(kwargs or {}))
+
+        x = TrackingTensor(torch.ones(2))
+        result = custom(x)
+        torch.testing.assert_close(result, torch.ones(2))
+        self.assertEqual(calls, [op])
+
+    def test_mode_precedes_subclass_with_boxed_parity(self) -> None:
+        @torch.library.custom_op(
+            "_pyobject_dispatch_python_key::precedence", mutates_args=()
+        )
+        def custom(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        op = torch.ops._pyobject_dispatch_python_key.precedence.default
+        calls = []
+
+        class TrackingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is op:
+                    calls.append("mode")
+                return func(*args, **(kwargs or {}))
+
+        class TrackingTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @staticmethod
+            def __new__(cls, value):
+                return torch.Tensor._make_subclass(cls, value)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is op:
+                    calls.append("subclass")
+                with torch._C._DisableTorchDispatch():
+                    return func(*args, **(kwargs or {}))
+
+        x = TrackingTensor(torch.ones(2))
+        with TrackingMode():
+            result = custom(x)
+        torch.testing.assert_close(result, torch.ones(2))
+        self.assertEqual(calls, ["mode", "subclass"])
+
+        calls.clear()
+        op._enable_pyobj_dispatch(False)
+        with TrackingMode():
+            boxed_result = custom(x)
+        torch.testing.assert_close(boxed_result, result)
+        self.assertEqual(calls, ["mode", "subclass"])
 
 
 if __name__ == "__main__":
