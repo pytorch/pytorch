@@ -167,6 +167,16 @@ struct is_vec_specialized_for : std::bool_constant<false> {
 template <typename T>
 constexpr bool is_vec_specialized_for_v = is_vec_specialized_for<T>::value;
 
+// The result of comparing two Vectorized<T>. On SVE it is a predicate
+// register, which compares produce and selects consume directly; elsewhere it
+// is the Vectorized<T> itself, with every bit of a true lane set. A backend
+// makes it a predicate by specializing VecBoolType for its type.
+template <typename T>
+struct VecBoolType;
+
+template <typename T>
+using VecBool = typename VecBoolType<T>::type;
+
 // NOTE: If you specialize Vectorized on a type, you must define all
 // operations!  You must also specialize is_vec_specialized_for for
 // that type.
@@ -236,7 +246,7 @@ struct Vectorized {
       const Vectorized<T>& a,
 #endif
       const Vectorized<T>& b,
-      const Vectorized<T>& mask) {
+      const VecBool<T>& mask) {
     Vectorized vector;
     std::array<int_same_size_t<T>, size()> buffer{};
     mask.store(buffer.data());
@@ -309,7 +319,7 @@ struct Vectorized {
     }
     return mask;
   }
-  Vectorized<T> isnan() const {
+  VecBool<T> isnan() const {
     Vectorized<T> vector;
     for (int64_t i = 0; i != size(); i++) {
       if (_isnan(values[i])) {
@@ -368,6 +378,20 @@ struct Vectorized {
       ret = op(ret, values[i]);
     }
     return ret;
+  }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<T> or_nan_if(const VecBool<T>& mask) const {
+    Vectorized<T> vector;
+    std::array<int_same_size_t<T>, size()> buffer{};
+    mask.store(buffer.data());
+    for (const auto i : c10::irange(size())) {
+      if (buffer[i] & 0x01) {
+        std::memset(&vector.values[i], 0xFF, sizeof(T));
+      } else {
+        vector[i] = values[i];
+      }
+    }
+    return vector;
   }
   template <
       typename other_t_abs = T,
@@ -703,22 +727,22 @@ struct Vectorized {
   }
 
  public:
-  Vectorized<T> operator==(const Vectorized<T>& other) const {
+  VecBool<T> operator==(const Vectorized<T>& other) const {
     return binary_pred(other, std::equal_to<T>());
   }
-  Vectorized<T> operator!=(const Vectorized<T>& other) const {
+  VecBool<T> operator!=(const Vectorized<T>& other) const {
     return binary_pred(other, std::not_equal_to<T>());
   }
-  Vectorized<T> operator>=(const Vectorized<T>& other) const {
+  VecBool<T> operator>=(const Vectorized<T>& other) const {
     return binary_pred(other, std::greater_equal<T>());
   }
-  Vectorized<T> operator<=(const Vectorized<T>& other) const {
+  VecBool<T> operator<=(const Vectorized<T>& other) const {
     return binary_pred(other, std::less_equal<T>());
   }
-  Vectorized<T> operator>(const Vectorized<T>& other) const {
+  VecBool<T> operator>(const Vectorized<T>& other) const {
     return binary_pred(other, std::greater<T>());
   }
-  Vectorized<T> operator<(const Vectorized<T>& other) const {
+  VecBool<T> operator<(const Vectorized<T>& other) const {
     return binary_pred(other, std::less<T>());
   }
 
@@ -753,6 +777,11 @@ struct Vectorized {
   Vectorized<T> le(const Vectorized<T>& other) const {
     return binary_pred_bool(other, std::less_equal<T>());
   }
+};
+
+template <typename T>
+struct VecBoolType {
+  using type = Vectorized<T>;
 };
 
 template <class T>
