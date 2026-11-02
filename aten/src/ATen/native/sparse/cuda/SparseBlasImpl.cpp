@@ -528,12 +528,10 @@ void block_sparse_mm(
 }
 
 #if !defined(USE_ROCM)
-// Describes a CSR tensor to cuSPARSE as a COO matrix over the same column
-// indices and values, with the row indices expanded from crow_indices. This
-// is the input that CUSPARSE_SPMM_COO_ALG2, the deterministic SpMM algorithm
-// that also supports batched matrices, needs. Batches are laid out as in
-// CuSparseSpMatCsrDescriptor: indices and values are either batched, with
-// batch b starting at b * nnz, or shared by all batches (batch stride 0).
+// CSR tensor described to cuSPARSE as COO (row indices expanded from
+// crow_indices) for CUSPARSE_SPMM_COO_ALG2. Batches are laid out as in
+// CuSparseSpMatCsrDescriptor: batch b starts at b * nnz, or at stride 0 when
+// indices and values are shared by all batches.
 class CuSparseSpMatCooFromCsrDescriptor
     : public at::cuda::sparse::CuSparseSpMatDescriptor {
  public:
@@ -628,16 +626,11 @@ void spmm(
 #endif
   if (at::globalContext().deterministicAlgorithms()) {
 #if !defined(USE_ROCM)
-    auto deterministic_alg = at::cuda::sparse::deterministic_spmm_alg(
+    algorithm = at::cuda::sparse::deterministic_spmm_alg(
         opA,
         opB,
         at::cuda::ScalarTypeToCudaDataType(mat1.scalar_type()),
         /*batched=*/mat1.dim() == 3);
-    if (deterministic_alg.has_value()) {
-      algorithm = *deterministic_alg;
-    } else {
-      at::globalContext().alertNotDeterministic("addmm_out_sparse_compressed_cuda");
-    }
     if (algorithm == CUSPARSE_SPMM_COO_ALG2) {
       descA_coo.emplace(mat1);
       spmatA = descA_coo->descriptor();

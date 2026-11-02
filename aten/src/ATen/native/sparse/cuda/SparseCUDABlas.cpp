@@ -70,13 +70,8 @@ void _csrmm2(
   c10::DataPtr coo_row_indices;
   if (at::globalContext().deterministicAlgorithms()) {
 #if !defined(USE_ROCM)
-    auto deterministic_alg = at::cuda::sparse::deterministic_spmm_alg(
+    default_alg = at::cuda::sparse::deterministic_spmm_alg(
       opa, opb, cusparse_value_type, /*batched=*/false);
-    if (deterministic_alg.has_value()) {
-      default_alg = *deterministic_alg;
-    } else {
-      at::globalContext().alertNotDeterministic("addmm_out_sparse_dense_cuda");
-    }
     if (default_alg == CUSPARSE_SPMM_COO_ALG2) {
       // COO_ALG2 needs A in COO format: expand the row offsets into row indices;
       // the column indices and values are shared with the CSR representation.
