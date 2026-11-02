@@ -167,6 +167,75 @@ def _create_internal_torch_function(
     return SourcelessBuilder.create_internal_torch_function(value, kind)
 
 
+class _DispatchlessCapturePolicy:
+    def __init__(self, tracer, flat_args):
+        self.tracer = tracer
+        self.parent = tracer.dispatchless_capture_policy
+        self.input_nodes = {arg.as_proxy().node for arg in flat_args if arg.is_tensor()}
+
+    def observe(self, value):
+        from .lazy import LazyVariableTracker
+
+        value = value.unwrap()
+        if isinstance(value, LazyVariableTracker):
+            if not isinstance(value.peek_value(), torch.Tensor):
+                return
+            value = value.realize()
+        if value.is_tensor():
+            self.check_proxy(value.as_proxy())
+
+    def observe_call(self, args, kwargs):
+        for value in (*args, *kwargs.values()):
+            self.observe(value)
+
+    def check_proxy(self, proxy):
+        from torch._library.dispatchless import _unwrap_tensor
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        value = proxy.node.meta.get("example_value")
+        if not isinstance(value, torch.Tensor):
+            return
+        value = _unwrap_tensor(value)
+        if is_traceable_wrapper_subclass(value) or value.layout != torch.strided:
+            unimplemented(
+                gb_type="Unsupported dispatchless tensor representation",
+                context=str(type(value)),
+                explanation="dispatchless_custom_op cannot establish mutation and alias safety for this tensor representation.",
+                hints=["Use ordinary dense tensors for guarded capture."],
+            )
+        if self.parent is not None:
+            self.parent.check_proxy(proxy)
+        if proxy.node in self.input_nodes:
+            return
+        tracer = proxy.tracer
+        while tracer is not None:
+            if tracer is self.tracer:
+                return
+            tracer = tracer.parent
+        unimplemented(
+            gb_type="Hidden dispatchless tensor dependency",
+            context=str(proxy.node),
+            explanation="dispatchless_custom_op requires tensor dependencies to be explicit arguments, including metadata-only reads.",
+            hints=["Pass the captured tensor as an argument to the operator."],
+        )
+
+    def reject_escape(self, name):
+        unimplemented(
+            gb_type="Unsafe dispatchless capture escape hatch",
+            context=str(name),
+            explanation="dispatchless_custom_op requires guarded Dynamo tracing; opaque Python calls and disabled side-effect checks are not supported.",
+            hints=["Use a Dynamo-traceable Python helper instead."],
+        )
+
+    def reject_tensor_check(self, message):
+        unimplemented(
+            gb_type="Impure dispatchless custom operator",
+            context=message,
+            explanation=message,
+            hints=["Return fresh tensors without mutating inputs."],
+        )
+
+
 class DispatchlessCustomOpVariable(VariableTracker):
     def __init__(self, value: "_DispatchlessCustomOp[Any, Any]", **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -201,20 +270,33 @@ class DispatchlessCustomOpVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._dynamo.utils import _make_inlined, get_fake_value
-        from torch._higher_order_ops.flat_apply import (
-            func_to_graphable,
-            is_graphable_type,
-            to_graphable,
-        )
+        from torch._dynamo.output_graph import SubgraphTracer
+        from torch._dynamo.utils import _make_inlined
+        from torch._higher_order_ops.flat_apply import is_graphable_type
         from torch._library.dispatchless import (
-            _call_with_tensor_checks,
-            flat_dispatchless_call,
+            _check_output_aliases,
+            _DispatchlessTensorCheckError,
+            _input_mutation_guard,
+            flat_dispatchless_graph_call,
         )
 
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .higher_order_ops import (
+            _call_function_with_auto_output_flattening,
+            make_attr,
+            speculate_subgraph_with_auto_output_flattening,
+        )
 
-        flat_args_vt, input_spec_vt = unpack_iterable(
+        if self.source is None:
+            unimplemented(
+                gb_type="Unsourced dispatchless custom operator",
+                context=str(self.value),
+                explanation="Guarded dispatchless capture requires a source for the backing function.",
+                hints=["Define the dispatchless operator outside the compiled region."],
+            )
+        fn = VariableTracker.build(
+            tx, self.value.__wrapped__, source=AttrSource(self.source, "__wrapped__")
+        )
+        flat_args_vt, _ = unpack_iterable(
             tx,
             _make_inlined(tx, _pytree.tree_flatten)(
                 VariableTracker.build(tx, (args, kwargs))
@@ -229,42 +311,78 @@ class DispatchlessCustomOpVariable(VariableTracker):
                     explanation="Dispatchless custom operators require graphable pytree leaves.",
                     hints=["Register container types with torch.utils._pytree."],
                 )
-        input_spec = input_spec_vt.as_python_constant()
-        fn = self.value.__wrapped__
-        proxy_args = tuple(arg.as_proxy() for arg in flat_args)
-        fake_args = _pytree.tree_map_only(
-            torch.fx.Proxy, lambda proxy: get_fake_value(proxy.node, tx), proxy_args
+        tracer = SubgraphTracer(
+            tx.output,
+            parent=tx.output.current_tracer,
+            source_target=flat_dispatchless_graph_call,
+            description="dispatchless_custom_op",
         )
-        if tx.fake_mode is None:
-            raise AssertionError("Dispatchless tracing requires a fake tensor mode")
-        with tx.fake_mode:
-            fake_args, fake_kwargs = _pytree.tree_unflatten(fake_args, input_spec)
-            flat_outputs, output_spec = to_graphable(
-                _call_with_tensor_checks(fn, fake_args, fake_kwargs)
+        tracer.dispatchless_capture_policy = _DispatchlessCapturePolicy(
+            tracer, flat_args
+        )
+        fake_inputs = [
+            arg.as_proxy().node.meta["example_value"]
+            for arg in flat_args
+            if arg.is_tensor()
+        ]
+        try:
+            with _input_mutation_guard(
+                fake_inputs,
+                on_mutation=tracer.dispatchless_capture_policy.reject_tensor_check,
+            ):
+                body_r, graph, lifted, graph_outputs, _ = (
+                    speculate_subgraph_with_auto_output_flattening(
+                        tx,
+                        fn.realize(),
+                        args,
+                        kwargs,
+                        "dispatchless_custom_op",
+                        source_target=flat_dispatchless_graph_call,
+                        supports_input_mutation=False,
+                        supports_aliasing=True,
+                        tracer=tracer,
+                    )
+                )
+            flat_output_vt, _ = unpack_iterable(
+                tx, _make_inlined(tx, _pytree.tree_flatten)(body_r)
             )
-
-        _, func_spec = func_to_graphable(fn)
-        func_proxy = tx.output.register_static_attr_and_return_proxy(
-            "dispatchless_callable", func_spec
+            fake_outputs = []
+            for output in unpack_iterable(tx, flat_output_vt):
+                if not is_graphable_type(output.python_type()):
+                    unimplemented(
+                        gb_type="Unsupported dispatchless custom operator output",
+                        context=str(output.python_type()),
+                        explanation="Dispatchless custom operators require graphable pytree leaves.",
+                        hints=["Register container types with torch.utils._pytree."],
+                    )
+                if output.is_tensor():
+                    tracer.dispatchless_capture_policy.check_proxy(output.as_proxy())
+                    fake_outputs.append(output.as_proxy().node.meta["example_value"])
+            _check_output_aliases(fake_inputs, fake_outputs)
+        except _DispatchlessTensorCheckError as exc:
+            tracer.dispatchless_capture_policy.reject_tensor_check(str(exc))
+            raise
+        for proxy in lifted:
+            tracer.dispatchless_capture_policy.check_proxy(proxy)
+        example_outputs = _pytree.tree_map_only(
+            torch.fx.Node,
+            lambda node: node.meta["example_value"],
+            graph.find_nodes(op="output")[0].args[0],
         )
-        input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            "dispatchless_input_spec", input_spec
-        )
-        output_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            "dispatchless_output_spec", output_spec
-        )
-        proxy = tx.output.create_proxy(
-            "call_function",
-            flat_dispatchless_call,
-            (func_proxy, input_spec_proxy, output_spec_proxy, *proxy_args),
-            {},
-        )
-        flat_output_vt = wrap_fx_proxy(tx, proxy, example_value=flat_outputs)
-        return SourcelessBuilder.create(tx, _pytree.tree_unflatten).call_function(
+        body = torch.fx.GraphModule(tx.output.nn_modules, graph)
+        name = tx.output.install_subgraph("dispatchless_body", body)
+        result = _call_function_with_auto_output_flattening(
             tx,
-            [flat_output_vt, VariableTracker.build(tx, output_spec)],
+            flat_dispatchless_graph_call,
+            (make_attr(tx, name), *lifted),
             {},
+            example_outputs,
+            body_r,
+            graph_outputs,
         )
+        if result is None:
+            raise AssertionError("Dispatchless capture produced no output variable")
+        return result
 
 
 def _is_supported_out_tensor_layout(
@@ -4109,6 +4227,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import SymNodeVariable
         from .builder import wrap_fx_proxy
+
+        if tx.output.current_tracer.dispatchless_capture_policy is not None:
+            from .. import trace_rules
+
+            tx.output.current_tracer.dispatchless_capture_policy.observe_call(
+                args, kwargs
+            )
+            if self.kind in (
+                AllowInGraphKind.NONSTRICT_TRACE,
+                AllowInGraphKind.LEAF_FUNCTION,
+            ) or trace_rules.is_callable_allowed(self.value):
+                tx.output.current_tracer.dispatchless_capture_policy.reject_escape(
+                    self.value
+                )
 
         if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)

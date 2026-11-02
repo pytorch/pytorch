@@ -30,7 +30,12 @@ from torch._dynamo.utils import counters
 from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
-from torch._library.dispatchless import _flat_call, flat_dispatchless_call
+from torch._library.dispatchless import (
+    _flat_call,
+    _flat_graph_call,
+    flat_dispatchless_call,
+    flat_dispatchless_graph_call,
+)
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -181,6 +186,7 @@ def adaptive_max_pool3d(input, output_size):
 
 
 register_decomposition(flat_dispatchless_call)(_flat_call)
+register_decomposition(flat_dispatchless_graph_call)(_flat_graph_call)
 
 
 @register_decomposition([aten.special_log_ndtr])
