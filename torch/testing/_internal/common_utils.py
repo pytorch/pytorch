@@ -1917,7 +1917,8 @@ TEST_CONFIG: str | None = TestEnvironment.def_setting(
     "TEST_CONFIG",
     env_var="TEST_CONFIG",
 )
-# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+# Enables @periodic tests, which CI runs only in periodic-strict and in periodic
+# jobs that set this (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
@@ -3050,7 +3051,10 @@ def periodic(fn):
 
     The periodic test configuration selects the corresponding pytest marker
     and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run in CI.
+    Python test sweep (e.g. distributed or quantization) never run in CI
+    there. Other periodic jobs can opt in by setting PYTORCH_TEST_WITH_PERIODIC,
+    which runs them without the marker filter; unless such a job also sets
+    PYTORCH_TEST_WITH_SLOW, @periodic tests that are also slow still skip there.
 
     Gated only in CI and on Sandcastle (which has no periodic config);
     elsewhere the marker is attached and the test runs normally.

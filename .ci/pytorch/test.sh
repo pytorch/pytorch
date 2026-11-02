@@ -852,6 +852,28 @@ test_inductor_core() {
   assert_git_not_dirty
 }
 
+# inductor_avx2 is the x86 AVX2 coverage of the inductor CPU tests (Inductor and
+# ATen generate different code per ISA). Fail unless the host's best CPU
+# capability is AVX2, so the job can't silently run on AVX-512/AMX hardware. cd
+# test, because from the repo root the source torch/ dir shadows the installed
+# wheel.
+assert_avx2_host() {
+  local cap
+  cap=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability())")
+  if [[ "$cap" != "AVX2" ]]; then
+    echo "inductor_avx2 must run on a host whose best CPU capability is AVX2, but this one is $cap"
+    exit 1
+  fi
+}
+
+test_inductor_avx2_shard() {
+  # This job is itself periodic, so also run @periodic tests on AVX2.
+  PYTORCH_TEST_WITH_PERIODIC=1 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_cpu_select_algorithm inductor/test_torchinductor_dynamic_shapes inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_cpu_repro inductor/test_aot_inductor_arrayref inductor/test_fused_attention \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+}
+
 test_inductor_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -2772,6 +2794,12 @@ elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core
+  collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == inductor_avx2 ]]; then
+  assert_avx2_host
+  install_torchvision
+  setup_torch_trace
+  test_inductor_avx2_shard "${SHARD_NUMBER}"
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision

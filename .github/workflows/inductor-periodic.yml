@@ -165,8 +165,12 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-8-32" },
-          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-8-32" },
+          # inductor_avx2 needs a host whose CPU tops out at AVX2. No CPU-only runner
+          # type has AVX2-only hardware (the x86iavx2 labels are AMX hosts), so this
+          # CPU-only build borrows an L4 node (AMD EPYC 7R13) and leaves the GPU
+          # idle. Temporary: move it to a CPU-only AVX2 runner once one exists.
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-l4" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-l4" },
           { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
