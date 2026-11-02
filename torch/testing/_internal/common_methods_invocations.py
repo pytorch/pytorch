@@ -17030,9 +17030,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
-               # torch-xpu-ops/issues/4108
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                            device_type='xpu', dtypes=(torch.float32,)),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -19647,9 +19644,6 @@ op_db: list[OpInfo] = [
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
-                 # Exception: Backward is not reentrant, #2359
-                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad', device_type='xpu'),
-                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_inplace_gradgrad', device_type='xpu'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
