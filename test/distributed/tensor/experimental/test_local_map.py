@@ -21,6 +21,7 @@ from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     DTensorTestBase,
     with_comms,
 )
@@ -72,10 +73,8 @@ def mul_forward(X, scalar):  # no device mesh needed since we don't do collectiv
     return torch.mul(X, scalar)
 
 
-class TestLocalMap(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 2
+class TestLocalMap(DTensorContinuousTestBase):
+    world_size = 2
 
     # simple correctness check
     @with_comms

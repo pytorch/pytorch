@@ -14,10 +14,36 @@ on:
   release:
     types: [published]
   pull_request:
-    paths: [.github/workflows/create_release.yml]
+    # Files this job reads or ships: the sdist config and its submodule inputs, the
+    # version/metadata providers that `python -m build --sdist` runs, .gitignore (the
+    # sdist walk uses gitignore semantics) and the files copied or force-included into
+    # the archives, including docs/requirements.txt, which the "Create source
+    # distribution" step removes with `rm` under `bash -e`. A change to any of them
+    # must exercise this job before merge.
+    # It does not cover the other tracked symlinks in the sdist `exclude` list of
+    # pyproject.toml (.dockerignore, AGENTS.md, ...), or a new symlink elsewhere in
+    # the tree: running a full sdist build for every change to those is not worth it.
+    paths:
+      - .github/workflows/create_release.yml
+      - pyproject.toml
+      - .gitmodules
+      - .gitignore
+      - third_party/**
+      - version.txt
+      - tools/metadata/**
+      - tools/generate_torch_version.py
+      - tools/optional_submodules.py
+      - .ci/docker/ci_commit_pins/nccl*.txt
+      - .ci/docker/requirements-docs.txt
+      - docs/requirements.txt
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   release:
+    needs: check-ci
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
     runs-on: ubuntu-24.04
@@ -61,11 +87,6 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Checkout optional submodules
         run: python3 tools/optional_submodules.py
-      - name: Copy docs requirements for inclusion
-        run: |
-          # Replace symlink with actual file
-          rm docs/requirements.txt || true
-          cp .ci/docker/requirements-docs.txt docs/requirements.txt
       - name: Create source distribution
         run: |
           # Staged entirely under /tmp. Anything this step leaves in the working
@@ -78,6 +99,15 @@ jobs:
           cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
           # Cleanup
           rm -rf "/tmp/$PT_RELEASE_NAME/.ci"
+          # docs/requirements.txt is a symlink into .ci; replace it with its
+          # target. The PEP 517 sdist below does the same through the
+          # force-include in pyproject.toml.
+          rm "/tmp/$PT_RELEASE_NAME/docs/requirements.txt"
+          cp .ci/docker/requirements-docs.txt "/tmp/$PT_RELEASE_NAME/docs/requirements.txt"
+          # Keep the NCCL pins: the configure step reads them to (re)clone
+          # third_party/nccl. Mirrors the sdist include in pyproject.toml.
+          mkdir -p "/tmp/$PT_RELEASE_NAME/.ci/docker/ci_commit_pins"
+          cp .ci/docker/ci_commit_pins/nccl*.txt "/tmp/$PT_RELEASE_NAME/.ci/docker/ci_commit_pins/"
           find "/tmp/$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
           # Create archive
           tar -czf "/tmp/$PT_RELEASE_FILE" -C /tmp "$PT_RELEASE_NAME"

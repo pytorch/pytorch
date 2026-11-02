@@ -514,6 +514,105 @@ class TestNativeMatmulRowReduction(TestCase):
         self.check(f, args, fused=False)
 
 
+class TestNativeMatmulRowReductionScheduling(TestCase):
+    @parametrize("coalesce", (False, True))
+    def test_benchmark_fusion(self, device, coalesce):
+        def f(x, weight):
+            return (x @ weight).sum(-1)
+
+        args = (
+            torch.randn(16, 16, device=device, dtype=torch.float16),
+            torch.randn(16, 8, device=device, dtype=torch.float16),
+        )
+        torch._dynamo.reset()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": True,
+                    "benchmark_fusion": True,
+                    "triton.coalesce_tiling_analysis": coalesce,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(actual, f(*args), atol=5e-2, rtol=5e-2)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).check("tl.dot").check(
+            "tl.sum"
+        ).run(code[0])
+
+    @parametrize("per_subkernel_blocks", (False, True))
+    @parametrize("autotune", (0, 1))
+    def test_combo_kernel(self, device, per_subkernel_blocks, autotune):
+        def f(x, weight, z):
+            return (x @ weight).sum(-1), z.sin()
+
+        args = (
+            torch.randn(16, 16, device=device, dtype=torch.float16),
+            torch.randn(16, 8, device=device, dtype=torch.float16),
+            torch.randn(137, device=device),
+        )
+        torch._dynamo.reset()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": True,
+                    "combo_kernels": True,
+                    "combo_kernels_autotune": autotune,
+                    "combo_kernel_peak_memory_pct_threshold": None,
+                    "combo_kernel_per_subkernel_blocks": per_subkernel_blocks,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(actual, f(*args), atol=5e-2, rtol=5e-2)
+        FileCheck().check("tl.dot").check("tl.sum").run(code[0])
+
+    @parametrize("n", (8, 128))
+    @parametrize("per_subkernel_blocks", (False, True))
+    @parametrize("autotune", (0, 1))
+    def test_combo_kernel_complete_rows(
+        self, device, n, per_subkernel_blocks, autotune
+    ):
+        def f(x, weight, z):
+            return (x @ weight).sum(-1), (z @ weight).sum(-1)
+
+        args = (
+            torch.randn(16, 16, device=device, dtype=torch.float16),
+            torch.randn(16, n, device=device, dtype=torch.float16),
+            torch.randn(32, 16, device=device, dtype=torch.float16),
+        )
+        metrics.reset()
+        torch._dynamo.reset()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": True,
+                    "combo_kernels": True,
+                    "combo_kernels_autotune": autotune,
+                    "combo_kernel_peak_memory_pct_threshold": None,
+                    "combo_kernel_per_subkernel_blocks": per_subkernel_blocks,
+                    "triton.coalesce_tiling_analysis": True,
+                }
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(actual, f(*args), atol=5e-2, rtol=5e-2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+        source = "\n".join(code)
+        FileCheck().check_count("@triton.jit", 2, exactly=True).run(source)
+        FileCheck().check_count("tl.dot", 2, exactly=True).run(source)
+        FileCheck().check_count("tl.sum", 2, exactly=True).run(source)
+        FileCheck().check_not("combo_grid_meta").run(source)
+
+
+instantiate_device_type_tests(
+    TestNativeMatmulRowReductionScheduling, globals(), only_for=GPU_TYPE
+)
+
+
 class TestNativeMatmulRowReductionHeuristic(TestCase):
     @parametrize("k", (511, 512, 513, 1024))
     @parametrize("m,n", ((256, 128), (4096, 64)))
