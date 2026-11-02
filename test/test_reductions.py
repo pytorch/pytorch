@@ -2548,6 +2548,17 @@ class TestReductionsDevice(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
+        def run_test_across_blocks(num_cols):
+            num_rows = 50003
+            input_ = torch.ones(num_rows, num_cols, dtype=dtype, device=device)
+            self.assertEqual(input_.sum(dim=0), torch.full((num_cols,), num_rows, dtype=dtype, device=device))
+            cols = torch.arange(num_cols, device=device)
+            input_[num_rows - 1 - cols, cols] = 2
+            self.assertEqual(input_.argmax(dim=0), num_rows - 1 - cols)
+        run_test_across_blocks(64)
+        run_test_across_blocks(62)
+        run_test_across_blocks(61)
+
     @onlyAccelerator
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
