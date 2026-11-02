@@ -6520,5 +6520,44 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
 
 
+class TestStageAFanOut(unittest.TestCase):
+    """Stage A's Fan-out section names the skill's Step 2 reviewers; a reviewer
+    renamed in one place and not the other would ask for one that no longer exists."""
+
+    def test_fan_out_names_the_skill_reviewers(self):
+        prompt = stage_a_system_prompt()
+        fan_out = re.search(r"## Fan-out\n(.*?)\n\n", prompt, re.S)
+        self.assertIsNotNone(
+            fan_out, "stage A's system prompt lost its Fan-out section"
+        )
+        listed = re.search(r"(\w+) reviewers \(([^)]*)\)", fan_out.group(1))
+        self.assertIsNotNone(
+            listed, "the Fan-out section no longer lists the reviewers"
+        )
+        skill_md = PR_REVIEW_SKILL.read_text()
+        assert "### Step 2" in skill_md and "### Step 3" in skill_md, (
+            "premise changed: SKILL.md Step 2/3 headings"
+        )
+        step2 = skill_md.split("### Step 2", 1)[1].split("### Step 3", 1)[0]
+        skill = [n.lower() for n in re.findall(r"^- \*\*([^*]+?)\*\*", step2, re.M)]
+        names = [n.strip().lower() for n in re.split(r",\s*", listed.group(2))]
+        self.assertEqual(
+            names,
+            [re.sub(r":$", "", n) for n in skill],
+            "the Fan-out section's reviewer list no longer matches SKILL.md Step 2; update both",
+        )
+        count = {"three": 3, "four": 4, "five": 5, "six": 6}.get(listed.group(1))
+        self.assertEqual(
+            count, len(names), "the Fan-out section's reviewer count is out of date"
+        )
+
+    def test_sub_agents_get_the_security_rules(self):
+        self.assertIn("Security section below, verbatim", stage_a_system_prompt())
+        self.assertIn(
+            "Sub-agent reports are built from pull request content",
+            stage_a_system_prompt(),
+        )
+
+
 if __name__ == "__main__":
     run_this_suite()
