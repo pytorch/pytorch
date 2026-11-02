@@ -24,6 +24,9 @@ from ._memory import (
 from ._work import _live_transports, _MooncakeWork
 
 
+_pinned_registrations: list[tuple[Any, _Registration]] = []
+
+
 if TYPE_CHECKING:
     from .._api import Memory
 
@@ -114,6 +117,9 @@ class MooncakeTransport(Transport):
         # independent of Work completion
         self._closed = False
         self._closing = False
+        # A failed transfer may still be running inside Mooncake; reject new
+        # transfers until the caller replaces the transport.
+        self._failed = False
 
     @staticmethod
     def supported() -> bool:
@@ -224,7 +230,9 @@ class MooncakeTransport(Transport):
                 raise RuntimeError(
                     "memory has pending transfers; wait before unregistering"
                 )
-            if engine.unregister_memory(registration.address) != 0:
+            if registration.pinned:
+                _pinned_registrations.append((engine, registration))
+            elif engine.unregister_memory(registration.address) != 0:
                 raise RuntimeError("Mooncake memory unregistration failed")
             registration.active = False
             key = next(
@@ -278,6 +286,11 @@ class MooncakeTransport(Transport):
         timeout: float,
     ) -> _MooncakeWork:
         engine = self._ensure_open()
+        if self._failed:
+            raise RuntimeError(
+                "transport is unusable after a failed transfer; close it and "
+                "create a new one"
+            )
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
         local_buffer = cast(MooncakeMemoryView, local_buffer)
         remote_buffer = cast(MooncakeRemoteBuffer, remote_buffer)
@@ -302,7 +315,13 @@ class MooncakeTransport(Transport):
                 endpoint, local_address, remote_address, size, operation
             )
             if status != 0:
-                raise RuntimeError(f"Mooncake transfer failed: {status}")
+                registration.pinned = True
+                self._failed = True
+                raise RuntimeError(
+                    f"Mooncake transfer failed: {status}; the transfer may still "
+                    "be running, so its local memory stays pinned and must not "
+                    "be reused"
+                )
 
         future = self._executor.submit(run)
         work = _MooncakeWork(self, local_buffer, remote_buffer, future, timeout)
@@ -501,7 +520,10 @@ class MooncakeTransport(Transport):
         self._executor.shutdown(wait=False)
         engine = self._engine
         for key, registration in list(self._registrations.items()):
-            engine.unregister_memory(registration.address)
+            if registration.pinned:
+                _pinned_registrations.append((engine, registration))
+            else:
+                engine.unregister_memory(registration.address)
             registration.active = False
             del self._registrations[key]
         self._pending.clear()

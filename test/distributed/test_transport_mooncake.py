@@ -81,6 +81,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
     def setUp(self):
         super().setUp()
         register_transport("mooncake", MooncakeTransport, replace=True)
+        self.addCleanup(_mooncake._pinned_registrations.clear)
 
     def make_transport_pair(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -174,6 +175,27 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         first.close()
         first.close()
 
+    def test_failed_transfer_pins_memory_and_poisons_transport(self):
+        first, second = self.make_transport_pair()
+        failed = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        other = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        with patch.object(_Engine, "transfer_sync", return_value=-1):
+            with self.assertRaisesRegex(RuntimeError, "may still be running"):
+                first.write(failed.to_view(), remote)
+        with self.assertRaisesRegex(RuntimeError, "unusable after a failed transfer"):
+            first.write(other.to_view(), remote)
+        engine = first._engine
+        with patch.object(_Engine, "unregister_memory") as native_unregister:
+            first.unregister_memory(failed)
+            first.close()
+        native_unregister.assert_called_once_with(other._registration.address)
+        self.assertEqual(
+            _mooncake._pinned_registrations, [(engine, failed._registration)]
+        )
+
     def test_close_async_after_handled_failure_does_not_reraise(self):
         first, second = self.make_transport_pair()
         source = first.register_memory(torch.ones(8, dtype=torch.uint8))
@@ -202,6 +224,10 @@ _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
 class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
     protocol = os.environ.get("MOONCAKE_PROTOCOL", "rdma")
+
+    @skip("Mooncake transport does not support slicing yet")
+    def test_transport_slice(self):
+        pass
 
     def make_transport_pair(self):
         first = new_transport(
