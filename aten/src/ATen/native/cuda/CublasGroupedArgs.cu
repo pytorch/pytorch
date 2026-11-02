@@ -210,11 +210,12 @@ cublasGroupedArgs::cublasGroupedArgs(
        cublas_k <= int32_max && lda_val <= int32_max &&
        ldb_val <= int32_max && ldd_val <= int32_max));
 
+  TORCH_INTERNAL_ASSERT(scale_a.has_value() == scale_b.has_value());
   if (scale_a && scale_b) {
     scale_mata_ptr = scale_a->data_ptr();
     scale_matb_ptr = scale_b->data_ptr();
 
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         scale_layout_a.has_value() && scale_layout_b.has_value(),
         "Scale layout must be provided when scale tensors are provided");
   }
@@ -298,10 +299,10 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   const int64_t base_scale_a = scale_a ? reinterpret_cast<int64_t>(scale_a->data_ptr()) : 0;
   const int64_t base_scale_b = scale_b ? reinterpret_cast<int64_t>(scale_b->data_ptr()) : 0;
-  const int64_t scale_a_stride_bytes = mata_needs_ptr
+  const int64_t scale_a_stride_bytes = mata_needs_ptr && scale_a->numel() != 1
       ? scale_a->stride(0) * scale_a->element_size()
       : 0;
-  const int64_t scale_b_stride_bytes = matb_needs_ptr
+  const int64_t scale_b_stride_bytes = matb_needs_ptr && scale_b->numel() != 1
       ? scale_b->stride(0) * scale_b->element_size()
       : 0;
 

@@ -584,19 +584,14 @@ void validate_scaled_mm_v2_inputs(
   }
 }
 
-// Recipe-independent validation for `_scaled_grouped_mm_v2`. Mirrors the
-// non-recipe checks at the top of `_scaled_grouped_mm_cuda_v2` for eager
-// execution. FakeTensor and compile use the Python meta, which checks output
-// dtype and offset contiguity before inferring the output shape.
-// Per-recipe scale-shape checks (`_check_scales_*`), the device-capability
-// gate, and the `find_scaled_gemm_impl` dispatch stay in the kernel -- they
-// depend on layout/arch and the (data-dependent) offset values.
-//
-// Uses sym_size() so dynamic-shape tracing through Dynamo still goes through
-// this path -- raw size() throws on symbolic shapes.
+// Shape, offset, and recipe-specific output-dtype validation for v2.
+// Mirrored by the Python meta for FakeTensor and compile. Scale layouts,
+// device capabilities, and backend selection are validated by the kernel.
 void validate_scaled_grouped_mm_v2_inputs(
     const Tensor& mat_a,
     const Tensor& mat_b,
+    ArrayRef<int64_t> recipe_a,
+    ArrayRef<int64_t> recipe_b,
     at::OptionalTensorRef offs,
     at::OptionalTensorRef bias,
     ArrayRef<int64_t> contraction_dim,
@@ -642,6 +637,14 @@ void validate_scaled_grouped_mm_v2_inputs(
   TORCH_CHECK_VALUE(
       out_dtype_ == ScalarType::BFloat16 || out_dtype_ == ScalarType::Half || out_dtype_ == ScalarType::Float,
       "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm");
+  const bool same_recipe = recipe_a.size() == 1 && recipe_b.size() == 1 && recipe_a[0] == recipe_b[0];
+  const bool rowwise = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::RowWise);
+  const bool tensorwise = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::TensorWise);
+  const bool bf16_only = !tensorwise;
+  TORCH_CHECK_VALUE(
+      !bf16_only || out_dtype_ == ScalarType::BFloat16,
+      rowwise ? "Rowwise grouped GEMM requires BFloat16 output"
+              : "Grouped scaling configuration requires BFloat16 output");
 }
 
 }  // at::scaled
