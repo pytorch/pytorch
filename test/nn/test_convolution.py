@@ -3924,6 +3924,7 @@ class TestConvolutionNNDevice(NNTestCase):
         out = conv(input)
         self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
+    @expectedFailureMPS  # No double support
     def test_conv1d_noncontiguous_weight(self, device):
         input = torch.tensor([1, 1, 1], dtype=torch.double, device=device).view(1, 1, 3)
         weights1 = torch.tensor([1], dtype=torch.double, device=device).expand(1, 1, 2)
@@ -3947,6 +3948,7 @@ class TestConvolutionNNDevice(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
+    @expectedFailureMPS  # No double support
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
@@ -4000,7 +4002,7 @@ class TestConvolutionNNDevice(NNTestCase):
     # larger spatial sizes, so the memory-format assertions below only hold on
     # accelerators.
     @onlyAccelerator
-    @expectedFailureMPS
+    @expectedFailureMPS  # No double support
     @dtypes(torch.half, torch.float)
     def test_conv3d_ndhwc(self, device, dtype):
         def helper(n, c, d, h, w, out_channels, kernel_size, groups):
