@@ -2745,7 +2745,10 @@ SYMPY_INTERP = {
 
 
 def _lru_cache(
-    fn: Callable[..., _T], maxsize: int | None = None
+    fn: Callable[..., _T],
+    maxsize: int | None = None,
+    *,
+    replacements_and_ranges: bool = False,
 ) -> functools._lru_cache_wrapper[_T]:
     """
     Wrapper around lru_cache that clears when new info about shapes has been
@@ -2759,11 +2762,31 @@ def _lru_cache(
     Also note that this depends on _update_version_counter being called on the
     shape environment whenever the constraints are updated, otherwise the cache
     will not be cleared.
+
+    With replacements_and_ranges=True, clear only when replacements or value
+    ranges change (_replacements_version_counter, _var_to_range_version_counter).
     """
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
+    prior_range_version = 0
 
-    if config.validate_shape_env_version_key:
+    # Separate wrappers keep the hot path a direct attribute read.
+    if replacements_and_ranges:
+
+        @functools.wraps(fn)
+        def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:  # type: ignore[misc]
+            nonlocal prior_version, prior_range_version
+            if (
+                prior_version != self._replacements_version_counter
+                or prior_range_version != self._var_to_range_version_counter
+            ):
+                fn_cache.cache_clear()
+                prior_version = self._replacements_version_counter
+                prior_range_version = self._var_to_range_version_counter
+
+            return fn_cache(self, *args, **kwargs)
+
+    elif config.validate_shape_env_version_key:
         prior_key = None
 
         @functools.wraps(fn)
@@ -4227,8 +4250,9 @@ class ShapeEnv:
         self._var_to_range_version_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
-        # Separate counter tracking only replacement changes, used by
-        # SymNode.expr
+        # Separate counter tracking only replacement changes. Together with
+        # _var_to_range_version_counter it invalidates replace(), _find() and
+        # SymNode.expr; the symbolic op memo also keys on it.
         self._replacements_version_counter = 0
 
         # Note [symbolic op memo]
@@ -7569,15 +7593,15 @@ class ShapeEnv:
         )
         return r
 
-    @_lru_cache
+    @functools.partial(_lru_cache, replacements_and_ranges=True)
     def replace(self, expr: _SympyT) -> _SympyT:
         """
         Apply symbol replacements to any symbols in the given expression.
 
         IMPORTANT: The output of this method MUST depend only on
-        self.replacements and the input expr. Do not add dependencies on other
-        mutable state. SymNode.expr uses _replacements_version_counter (which
-        tracks only replacement changes) to cache calls to this method, so
+        self.replacements, self.var_to_range and the input expr (see _find).
+        This cache and SymNode.expr are invalidated only by
+        _replacements_version_counter and _var_to_range_version_counter, so
         depending on other state would cause stale cache results.
         """
         replacements: dict[sympy.Basic, sympy.Basic] = {}
@@ -8281,7 +8305,7 @@ class ShapeEnv:
         self.divisible.add(expr)
         self._update_version_counter()
 
-    @_lru_cache
+    @functools.partial(_lru_cache, replacements_and_ranges=True)
     @record_shapeenv_event()
     def _find(self, a: sympy.Symbol) -> sympy.Expr:
         """
@@ -8292,13 +8316,17 @@ class ShapeEnv:
         c: d
 
         IMPORTANT: The output of this method MUST depend only on
-        self.replacements and the input symbol. Do not add dependencies on other
-        mutable state. SymNode.expr uses _replacements_version_counter (which
-        tracks only replacement changes) to cache calls to replace() (and
-        transitively this method), so depending on other state would cause
-        stale cache results. (Note: _set_replacement,  may read other fields
-        like var_to_range, but those are side effects that do not affect the
-        returned value.)
+        self.replacements, self.var_to_range and the input symbol, because
+        this cache (and replace()'s) is cleared only when
+        _replacements_version_counter or _var_to_range_version_counter
+        changes.
+
+        It depends on ranges through the update at the end. Say a -> b + 1
+        and b -> c + d. _find(a) computes c + d + 1 and tries to store it as
+        a's replacement, but _set_replacement rejects it unless c + d + 1 is
+        known to lie within a's range. With a in [0, 100] and c, d unbounded
+        it is rejected, and _find(a) returns b + 1. Once c and d are narrowed
+        so that c + d + 1 fits, the same call returns c + d + 1.
         """
         if a not in self.replacements:
             return a
