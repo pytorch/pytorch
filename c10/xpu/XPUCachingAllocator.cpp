@@ -22,6 +22,15 @@ constexpr size_t kDeviceAlignment = 512;
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
+// The SYCL IPC memory extension was reorganized in compiler 2026.2.
+#if SYCL_COMPILER_VERSION >= 20260200
+namespace sycl_ipc = sycl::ext::oneapi::experimental::ipc;
+namespace sycl_ipc_memory = sycl::ext::oneapi::experimental::ipc::memory;
+#else
+namespace sycl_ipc = sycl::ext::oneapi::experimental::ipc_memory;
+namespace sycl_ipc_memory = sycl::ext::oneapi::experimental::ipc_memory;
+#endif
+
 struct Block;
 
 struct BlockComparatorSize {
@@ -2283,11 +2292,9 @@ class DeviceCachingAllocator {
       }
       offset = static_cast<const char*>(block->ptr) -
           static_cast<const char*>(base_block->ptr);
-      sycl::ext::oneapi::experimental::ipc_memory::handle handle =
-          sycl::ext::oneapi::experimental::ipc_memory::get(
-              base_block->ptr, c10::xpu::get_device_context());
-      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
-          handle.data();
+      sycl_ipc::handle_data_t handle_data =
+          sycl_ipc_memory::get(base_block->ptr, c10::xpu::get_device_context())
+              .data();
       TORCH_INTERNAL_ASSERT(
           handle_data.size() <= std::numeric_limits<char>::max(),
           "IPC handle size exceeds maximum allowed size.");
@@ -2421,13 +2428,11 @@ class NativeCachingAllocator : public XPUAllocator {
 
       if (type == SHAREABLE_XPU_MALLOC) {
         auto handle_size = static_cast<size_t>(ss.get());
-        sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
-            handle_size);
+        sycl_ipc::handle_data_t handle_data(handle_size);
         ss.read(
             reinterpret_cast<char*>(handle_data.data()),
             static_cast<std::streamsize>(handle_size));
-
-        xpu_ipc_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
+        xpu_ipc_ptr = sycl_ipc_memory::open(
             handle_data,
             c10::xpu::get_device_context(),
             c10::xpu::get_raw_device(device));
@@ -2441,12 +2446,11 @@ class NativeCachingAllocator : public XPUAllocator {
     }
 
     // clear() must be called explicitly to release IPC resources. Using a
-    // destructor would risk calling ipc_memory::close after the SYCL runtime
+    // destructor would risk calling ipc::memory::close after the SYCL runtime
     // has already shut down during process exit.
     void clear() {
       if (xpu_ipc_ptr) {
-        sycl::ext::oneapi::experimental::ipc_memory::close(
-            xpu_ipc_ptr, c10::xpu::get_device_context());
+        sycl_ipc_memory::close(xpu_ipc_ptr, c10::xpu::get_device_context());
         xpu_ipc_ptr = nullptr;
       }
       if (expandable_segment) {
