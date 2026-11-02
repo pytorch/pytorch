@@ -496,12 +496,12 @@ class TestPySymInt(TestCase):
         else:
             result = expand_x + expand_x
 
-        gt_op = shape_env.guards[-1].expr
+        gt_op, _bt, is_size_obv = shape_env.guards[-1]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
-        self.assertEqual(len(shape_env.guards[-1]), 2)
+        self.assertFalse(is_size_obv)
 
     def test_floordiv_static(self):
         shape_env = ShapeEnv()
@@ -892,27 +892,6 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """u3""")
-
-    def test_unbacked_size_range_refines_to_zero_one(self):
-        shape_env = ShapeEnv()
-        i0 = shape_env.create_unbacked_symint()
-        symbol = i0.node.expr
-        _constrain_range_for_size(i0)
-        self.assertTrue(expect_true(i0 <= 1))
-        self.assertEqual(shape_env.var_to_range[symbol], ValueRanges(0, 1))
-
-    def test_unbacked_size_replaced_by_zero_one(self):
-        for value in (0, 1):
-            with self.subTest(value=value):
-                shape_env = ShapeEnv()
-                i0 = shape_env.create_unbacked_symint()
-                symbol = i0.node.expr
-                _constrain_range_for_size(i0)
-                self.assertTrue(expect_true(i0 == value))
-                self.assertEqual(shape_env.replacements[symbol], sympy.Integer(value))
-                self.assertEqual(
-                    shape_env.var_to_range[symbol], ValueRanges(value, value)
-                )
 
     def test_rename_unbacked_to_unifies_unbacked_dest(self):
         shape_env = ShapeEnv()
@@ -1972,6 +1951,22 @@ class f(torch.nn.Module):
         for Tensor in legacy_ctors:
             res = Tensor(sym_args)
             self.assertEqual(res, expected, exact_dtype=False)
+
+    def test_backed_size_oblivious_01_spec(self):
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+        @torch.compile(dynamic=True, fullgraph=True)
+        def f(a, b):
+            if guard_size_oblivious(a.size(0) == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            # always go to the >= 2 branch.
+            self.assertEqual(
+                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+            )
 
     @fresh_cache()
     def test_slice_backed_size_oblivious(self):
@@ -7259,6 +7254,89 @@ class TestMaybeFastEvalComparison(TestCase):
         self.assertEqual(eager_result, compiled_result)
 
 
+class ShapeEnvRangeCacheInvalidationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_range_constraint_updates_floor_div_result(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 4, duck=False)
+        sym = s.node.expr
+        expr = FloorDiv(Min(sym, 5), 2)
+        expected = CleanDiv(Min(sym, 5), 2)
+        # The first call installs the exact-division guard; the second warms
+        # the helper's cache with those guards already in place.
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        shape_env.constrain_symbol_range(sym, compiler_min=2, compiler_max=4)
+        # Previously, the helper's cache retained the old range-dependent
+        # result even after this range constraint.
+        self.assertEqual(shape_env._simplify_floor_div(expr), FloorDiv(sym, 2))
+
+    def test_range_constraint_updates_cached_results(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 5, duck=False)
+        sym = s.node.expr
+        expr = Min(sym, 5)
+        probe = sympy.Le(sym, 5, evaluate=False)
+        self.assertEqual(shape_env.simplify(expr), expr)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        shape_env.constrain_symbol_range(sym, compiler_min=2, compiler_max=5)
+        # Before range-version invalidation, these same calls returned stale
+        # Min(5, sym) and None even after the range was narrowed.
+        with self.subTest("simplified result"):
+            self.assertEqual(shape_env.simplify(expr), sym)
+        with self.subTest("static result"):
+            self.assertEqual(shape_env._maybe_evaluate_static(probe), sympy.true)
+
+    def test_refine_ranges_invalidates_simplify_cache(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 5, duck=False)
+        sym = s.node.expr
+        self.assertEqual(shape_env.simplify(Min(sym, 5)), Min(5, sym))
+        counts = (
+            len(shape_env.replacements),
+            len(shape_env.divisible),
+            len(shape_env.axioms),
+        )
+        shape_env._refine_ranges(sympy.Le(sym, 5))
+        self.assertEqual(shape_env.var_to_range[sym], ValueRanges(2, 5))
+        self.assertEqual(
+            (
+                len(shape_env.replacements),
+                len(shape_env.divisible),
+                len(shape_env.axioms),
+            ),
+            counts,
+        )
+        self.assertEqual(shape_env.simplify(Min(sym, 5)), sym)
+
+    def test_update_var_to_range_change_invalidates_static_cache(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 10, duck=False)
+        sym = s.node.expr
+        probe = sympy.Le(sym, 10, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        v0 = shape_env._version_counter
+        shape_env._update_var_to_range(sym, ValueRanges(2, 10))
+        with self.subTest("version"):
+            self.assertGreater(shape_env._version_counter, v0)
+        with self.subTest("static evaluation"):
+            self.assertEqual(shape_env._maybe_evaluate_static(probe), sympy.true)
+
+    def test_update_var_to_range_noop_preserves_version(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 10, duck=False)
+        sym = s.node.expr
+        probe = sympy.Le(sym, 10, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        v0 = shape_env._version_counter
+        hits = shape_env._maybe_evaluate_static.cache_info().hits
+        shape_env._update_var_to_range(sym, ValueRanges(2, int_oo))
+        self.assertEqual(shape_env._version_counter, v0)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        self.assertEqual(shape_env._maybe_evaluate_static.cache_info().hits, hits + 1)
+
+
 class TestSingletonIntStaticEval(TestCase):
     def test_singleton_int_only_expr_can_be_statically_evaluated(self):
         from torch.utils._sympy.singleton_int import SingletonInt
@@ -7703,6 +7781,32 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertEqual(
             len(local_env.foreign_unbacked_symbol_cache), cache_size_before
         )
+
+    def test_transfer_constrains_size_on_cache_hit(self):
+        """When is_size=True and the expression resolves to a single Symbol
+        from the cache (cached via a non-size path earlier),
+        _constrain_range_for_size is still applied; the symbol ends up in
+        size_like."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+
+        local_env = ShapeEnv()
+        # First: transfer u0 via the raw SymInt path (is_size=False).
+        raw_symint = self._transfer_symint(
+            local_env, u0, source=self._make_source("raw")
+        )
+        raw = raw_symint.node.expr
+        self.assertNotIn(raw, local_env.size_like)
+
+        # Now: transfer the same u0 as a tensor size dim (is_size=True via
+        # transfer_symbols_from_foreign_shape_env's UNBACKED path).
+        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
+            (u0,), (1,), 0, source=self._make_source("tensor")
+        )
+        # Same cached local symbol reused.
+        self.assertEqual(new_sizes[0].node.expr, raw)
+        # And now it carries the size lower-bound constraint.
+        self.assertIn(raw, local_env.size_like)
 
     def test_foreign_unbacked_transfer_preserves_derived_tensor_expr(self):
         """Derived tensor dims are minted as opaque symbols; raw SymInt with
