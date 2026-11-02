@@ -164,6 +164,15 @@ def fetch_issue(
     ]
 
 
+def is_repo_issue(value: dict | None, repo: str, number: int) -> bool:
+    return bool(
+        value
+        and value.get("number") == number
+        and value.get("html_url") == f"https://github.com/{repo}/issues/{number}"
+        and "pull_request" not in value
+    )
+
+
 def umbrella_policy(repo: str, annotation: object) -> dict | None:
     """Only a checked-in same-repository policy can authorize an umbrella action."""
     if (
@@ -224,10 +233,8 @@ def possible_duplicate_comment(
         or number == source
         or not isinstance(target, dict)
         or type(target.get("number")) is not int
-        or target["number"] != number
-        or target.get("html_url") != f"https://github.com/{repo}/issues/{number}"
+        or not is_repo_issue(target, repo, number)
         or target.get("state") not in ("open", "closed")
-        or "pull_request" in target
         or umbrella_policy(repo, {"issue": number, "match": "covered"})
     ):
         effects.notes.append(
@@ -310,14 +317,11 @@ def umbrella_comment(
     if (
         not policy
         or number == source
-        or not target
+        or not is_repo_issue(target, repo, number)
         or type(target.get("id")) is not int
         or target["id"] <= 0
         or type(target.get("number")) is not int
-        or target["number"] != number
-        or target.get("html_url") != f"https://github.com/{repo}/issues/{number}"
         or target.get("state") != "open"
-        or "pull_request" in target
     ):
         effects.notes.append("umbrella target is not a configured open issue; review")
         return "", False
@@ -335,7 +339,6 @@ def umbrella_comment(
 
     uncertain = annotation["match"] == "uncertain"
     blocked = bool({TRIAGE_REVIEW, "high priority"} & labels)
-    action = policy.get("action", "link")
     pending_info = (
         "needs reproduction" in labels
         or plan["decision"] in ("request_info", "request_reproduction")
@@ -344,12 +347,10 @@ def umbrella_comment(
             & set(plan.get("templates", []))
         )
     )
-    if uncertain or blocked or pending_info:
-        action = "link"
-    if action != "close":
-        action = "link"
-    effects.umbrella_action = action
-    effects.close = action == "close"
+    effects.close = policy.get("action") == "close" and not (
+        uncertain or blocked or pending_info
+    )
+    effects.umbrella_action = "close" if effects.close else "link"
     if effects.close:
         effects.close_reason = "duplicate"
         effects.duplicate_issue_id = target["id"]
@@ -373,7 +374,7 @@ def umbrella_comment(
         if receipt and not any(receipt in body.splitlines() for body in bot_comments):
             return receipt, True
         return "", True
-    if action == "close":
+    if effects.close:
         comment = (
             f"Duplicate of {reference}. This report is covered by the umbrella's scope."
         )
@@ -423,11 +424,7 @@ def plan_effects(
         effects.notes.append("issue already has an oncall: label; skipping")
         return effects
     if ("umbrella" in plan or "possible_duplicate" in plan) and (
-        not source
-        or source.get("number") != issue
-        or source.get("html_url") != f"https://github.com/{repo}/issues/{issue}"
-        or source.get("state") != "open"
-        or "pull_request" in source
+        not is_repo_issue(source, repo, issue) or source.get("state") != "open"
     ):
         effects.notes.append("related-issue source is not an open issue; skipping")
         return effects
@@ -633,6 +630,13 @@ def current_reference_effects(repo: str, issue: int, plan: dict) -> Effects:
     )
 
 
+def post_labels(repo: str, issue: int, labels: list[str]) -> None:
+    gh_api(
+        ["-X", "POST", f"repos/{repo}/issues/{issue}/labels"]
+        + [arg for label in labels for arg in ("-f", f"labels[]={label}")]
+    )
+
+
 def apply_effects(
     repo: str, issue: int, effects: Effects, *, plan: dict | None = None
 ) -> Effects:
@@ -670,14 +674,7 @@ def apply_effects(
             retry=not bool(effects.umbrella_action or effects.possible_duplicate),
         )
     if effects.add_labels:
-        gh_api(
-            ["-X", "POST", f"repos/{repo}/issues/{issue}/labels"]
-            + [
-                arg
-                for label in effects.add_labels
-                for arg in ("-f", f"labels[]={label}")
-            ],
-        )
+        post_labels(repo, issue, effects.add_labels)
     if effects.close and effects.umbrella_action:
         if plan is None:
             raise ValueError("umbrella closure requires a plan")
@@ -691,15 +688,7 @@ def apply_effects(
                 TRIAGE_REVIEW in checked.add_labels
                 and TRIAGE_REVIEW not in effects.add_labels
             ):
-                gh_api(
-                    [
-                        "-X",
-                        "POST",
-                        f"repos/{repo}/issues/{issue}/labels",
-                        "-f",
-                        f"labels[]={TRIAGE_REVIEW}",
-                    ]
-                )
+                post_labels(repo, issue, [TRIAGE_REVIEW])
                 effects.add_labels.append(TRIAGE_REVIEW)
     if effects.close:
         args = [
