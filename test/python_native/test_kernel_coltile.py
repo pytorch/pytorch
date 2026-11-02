@@ -438,6 +438,18 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
 
+    def test_batched_rows_must_fit_int32(self):
+        # Stage one indexes batched rows as batch * R + row in Int32.
+        x = torch.randn(4, 8, 32, device="cuda")
+        args = (x, {1}, [], [], 8, 128)
+        self.assertEqual(kg._physical_col_view(*args).shape, (4, 8, 32))
+        with mock.patch.object(kg, "_INT32_LIMIT", 32):
+            self.assertIsNone(kg._physical_col_view(*args))
+        trait = T.SumOps(acc=cutlass.Float32)
+        with mock.patch.object(ct, "_INT32_LIMIT", 32):
+            with self.assertRaisesRegex(AssertionError, r"want B \* R < 2\^31"):
+                ct.reduce_batched_col_tile(trait, "rows", x, [torch.float32], 1)
+
     @parametrize(
         "launcher, rank, args",
         [
@@ -452,6 +464,35 @@ class TestColTileHost(TestCase):
         fn, trait = getattr(ct, launcher), T.SumOps(acc=cutlass.Float32)
         with self.assertRaisesRegex(AssertionError, "want [23]D x"):
             fn(trait, "badrank", x, *args)
+
+
+class TestOrderedColRoute(TestCase):
+    @parametrize(
+        "nfields,shape,cc,routed",
+        [
+            (1, (16, 128, 128), (10, 0), True),
+            (1, (16, 128, 127), (10, 0), False),
+            (1, (16, 64, 128), (10, 0), False),
+            (2, (128, 128, 128), (10, 0), True),
+            (2, (127, 128, 128), (10, 0), False),
+            (3, (256, 128, 128), (10, 0), True),
+            (3, (255, 128, 128), (10, 0), False),
+            (4, (256, 128, 128), (10, 0), True),
+            (1, (16, 128, 128), (9, 0), False),
+            (1, (1, 32768, 128), (10, 0), True),
+            (1, (1, 32768, 127), (10, 0), False),
+            (1, (1, 24577, 128), (10, 0), True),
+            (1, (1, 24576, 128), (10, 0), False),
+            (1, (2, 32768, 128), (10, 0), False),
+            (2, (1, 32768, 16384), (10, 0), False),
+        ],
+        name_fn=lambda nfields, shape, cc, routed: "_".join(
+            [f"{nfields}f", "x".join(map(str, shape)), f"sm{cc[0]}{cc[1]}"]
+        ),
+    )
+    def test_gate_boundaries(self, nfields, shape, cc, routed):
+        view = torch.empty(shape, device="meta")
+        self.assertEqual(kg._ordered_col_route_ok(view, nfields, cc), routed)
 
 
 class TestOrderedColHost(TestCase):
@@ -489,9 +530,18 @@ class TestOrderedColDevice(TestCase):
             ("sum", torch.float32, (9000, 32), False),
             ("argmax", torch.float32, (4, 2048, 64), False),
             ("var_mean", torch.bfloat16, (2, 2048, 40), False),
+            ("argmax", torch.float32, (9000, 32), False),
+            ("var_mean", torch.float32, (2, 9000, 32), False),
             ("sum", torch.float32, (100003, 32), True),
+            ("sum", torch.float32, (2, 32768, 32), True),
+            ("sum", torch.float16, (32768, 64), True),
+            ("argmax", torch.float32, (65536, 32), True),
+            ("var_mean", torch.bfloat16, (2, 100003, 32), True),
+            ("sum", torch.float64, (32768, 32), True),
         ],
-        name_fn=lambda op, dtype, shape, split: f"{op}_{len(shape)}d_{shape[-2]}",
+        name_fn=lambda op, dtype, shape, split: "_".join(
+            [op, str(dtype)[6:], f"{len(shape)}d", str(shape[-2])] + ["split"] * split
+        ),
     )
     def test_plan_matches_the_indexed_tree(self, device, op, dtype, shape, split):
         """Preserve each row's inner-tree DAG across plans, fields, ranks, and partials."""
@@ -505,9 +555,8 @@ class TestOrderedColDevice(TestCase):
             "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
         }[op]
         nouts = len(outputs)
-        got = ct.reduce_ordered_col(
-            trait, f"ordered_{op}", x, outputs, nouts, allow_split=split
-        )
+        key = f"ordered_{op}_{dtype}_{shape}"
+        got = ct.reduce_ordered_col(trait, key, x, outputs, nouts, allow_split=split)
         reference = kg._try_indexed_itree(
             trait,
             f"ordered_{op}_reference",
@@ -523,6 +572,44 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(reference)
         for a, b in zip(got, reference, strict=True):
             self.assertEqual(a.flatten().view(torch.uint8), b.view(torch.uint8))
+        ran = {k[0] for k in ct._CACHE if k[1] == key}
+        self.assertEqual(ran, {"ordered_col1" if split else "ordered_col"})
+
+    @parametrize(
+        "rows,begin,count",
+        [(20, 0, 2), (32768, 4, None), (32768, 3, 2), (32768, -1, None)],
+    )
+    def test_partition_ranges_are_validated(self, device, rows, begin, count):
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        dev = torch.device(device)
+        plan = rt.trait_itree_plan(trait, rows, 32, 4, stage=False, device=dev)
+        kwargs = {"partition_begin": begin, "partition_count": count}
+        with self.assertRaisesRegex(ValueError, "partition"):
+            ct._OrderedColReduce(trait, plan, rows, 32, 1, **kwargs)
+
+    def test_full_tiles_exclude_a_ragged_final_partition(self, device):
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        dev = torch.device(device)
+        plan = rt.trait_itree_plan(trait, 32769, 33, 4, stage=False, device=dev)
+        self.assertNotEqual(plan.split[1], plan.split[2])
+        whole = ct._OrderedColReduce(trait, plan, 32769, 33, 1, full_tiles=True)
+        self.assertFalse(whole.full_tiles)
+        count = plan.split[0] - 1
+        head = ct._OrderedColReduce(
+            trait, plan, 32769, 33, 1, full_tiles=True, partition_count=count
+        )
+        self.assertTrue(head.full_tiles)
+
+    def test_split_plans_can_be_declined(self, device):
+        x = torch.randn(32768, 32, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        out = [torch.float32]
+        got = ct.reduce_ordered_col(trait, "decline", x, out, 1, allow_split=False)
+        self.assertIsNone(got)
 
     def test_batch_sizes_share_one_kernel(self, device):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -534,26 +621,60 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(len(keys), 1)
 
     def test_inner_tree_middle_axis_routes_to_ordered_columns(self, device):
-        x = torch.randn(2, 128, 33, device=device)
+        x = torch.randn(16, 128, 128, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         real = ct.reduce_ordered_col
-        with mock.patch.object(ct, "reduce_ordered_col", wraps=real) as served:
+        ccs = (torch.cuda.get_device_capability(device),)
+        with (
+            mock.patch.object(kg, "_ORDERED_COL_CCS", ccs),
+            mock.patch.object(ct, "reduce_ordered_col", wraps=real) as served,
+        ):
             got = kg.reduce_dim(trait, "route", x, 1, torch.float32, order="inner_tree")
         served.assert_called_once()
-        expected = real(trait, "route_direct", x, [torch.float32], 1)[0]
-        self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
+        expected = kg._try_indexed_itree(
+            trait,
+            "route_indexed",
+            x,
+            [(128, 128)],
+            [(128, 1), (16, 128 * 128)],
+            16 * 128,
+            128,
+            [torch.float32],
+            1,
+        )[0]
+        self.assertEqual(got.flatten().view(torch.uint8), expected.view(torch.uint8))
+
+    def test_declined_ordered_columns_fall_back_to_the_indexed_tree(self, device):
+        # The gate admits 4096 outputs, but the kernel declines fewer than 32 columns.
+        x = torch.randn(256, 128, 16, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        real = kg._try_indexed_itree
+        ccs = (torch.cuda.get_device_capability(device),)
+        with (
+            mock.patch.object(kg, "_ORDERED_COL_CCS", ccs),
+            mock.patch.object(kg, "_try_indexed_itree", wraps=real) as fallback,
+        ):
+            got = kg.reduce_dim(
+                trait, "fallback", x, 1, torch.float32, order="inner_tree"
+            )
+        fallback.assert_called_once()
+        self.assertEqual(got, x.sum(dim=1), atol=1e-4, rtol=1e-4)
 
     @parametrize(
-        "op,dtype,rows,columns,pack,workers,width,offset",
+        "op,dtype,rows,columns,pack,workers,width,offset,split",
         [
-            ("sum", torch.float32, 128, 132, 2, 8, 16, 4),
-            ("argmax", torch.float32, 32769, 33, 1, 8, 8, 4),
-            ("var_mean", torch.bfloat16, 32768, 33, 1, 16, 32, 4),
-            ("mean", torch.bfloat16, 32769, 36, 4, 16, 8, 1),
+            ("sum", torch.float32, 128, 132, 2, 8, 16, 4, False),
+            ("argmax", torch.float32, 32769, 33, 1, 8, 8, 4, True),
+            ("var_mean", torch.bfloat16, 32768, 33, 1, 16, 32, 4, True),
+            ("mean", torch.bfloat16, 32769, 36, 4, 16, 8, 1, True),
+            ("mean", torch.bfloat16, 32769, 36, 4, 8, 8, 4, True),
+            ("amax", torch.bfloat16, 32768, 66, 2, 16, 16, 2, True),
+            ("var_mean", torch.bfloat16, 32768, 34, 2, 16, 16, 2, True),
+            ("sum", torch.float32, 128, 33, 2, 8, 16, 4, False),
         ],
     )
     def test_ordered_mapping_bits(
-        self, device, op, dtype, rows, columns, pack, workers, width, offset
+        self, device, op, dtype, rows, columns, pack, workers, width, offset, split
     ):
         """Keep packed, indexed, and multi-output column mappings bitwise exact."""
         from torch import _native as native
@@ -569,15 +690,17 @@ class TestOrderedColDevice(TestCase):
             "mean": T.MeanOps(),
             "argmax": T.ArgMaxOps(),
             "var_mean": T.VarMeanOps(correction=0),
+            "amax": T.AMaxOps(),
         }[op]
         output = torch.int64 if op == "argmax" else torch.float32
         outputs = [output] * (2 if op == "var_mean" else 1)
-        parts = {}
+        parts = []
         original = kg._launch
 
         def record(block, key, ins, outs):
-            if key[0] in ("genitree2", "ordered_col2"):
-                parts[key[0]] = ins
+            # Both paths fold split partials through the shared genitree2 combine.
+            if key[0] == "genitree2":
+                parts.append(ins)
             return original(block, key, ins, outs)
 
         cfg = ct.OrderedColConfig(
@@ -601,23 +724,40 @@ class TestOrderedColDevice(TestCase):
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
-            mock.patch.object(ct, "_launch", record),
             mock.patch.object(kg, "_launch", record),
             mock.patch.object(ct, "select_ordered_col_config", return_value=cfg),
         ):
             if offset % pack:
                 with self.assertRaisesRegex(ValueError, "aligned contiguous"):
                     run(column_pack=pack)
+            ops, build = [], ct._OrderedColReduce
+
+            def record_op(*args, **kwargs):
+                ops.append(build(*args, **kwargs))
+                return ops[-1]
+
             with mock.patch.object(
-                ct, "_OrderedColReduce", wraps=ct._OrderedColReduce
+                ct, "_OrderedColReduce", side_effect=record_op
             ) as kernel:
                 actual = run()
+            # Policy packs fall back to unpacked 32-column tiles on misaligned storage or
+            # outputs that cannot pack.
+            packs = offset % pack == 0 and columns % pack == 0
+            packs = pack == 1 or packs and trait.nfields == 1 and len(outputs) == 1
             self.assertEqual(
-                kernel.call_args.kwargs["column_pack"], 1 if offset % pack else pack
+                kernel.call_args.kwargs["column_pack"], pack if packs else 1
             )
             self.assertEqual(
-                kernel.call_args.kwargs["tile_columns"], 32 if offset % pack else width
+                kernel.call_args.kwargs["tile_columns"], width if packs else 32
             )
+            # Full split partitions drop clamps; a ragged final partition keeps them.
+            plan = kernel.call_args.args[1]
+            if split:
+                ragged = plan.split[1] != plan.split[2]
+                full = [True, False] if ragged else [True]
+                self.assertEqual([op.full_tiles for op in ops], full)
+            else:
+                self.assertEqual(len(ops), 1)
             self.assertIsNotNone(actual)
             reference = kg._try_indexed_itree(
                 trait,
@@ -636,15 +776,17 @@ class TestOrderedColDevice(TestCase):
                 self.assertEqual(
                     got.flatten().view(torch.uint8), expected.view(torch.uint8)
                 )
-            self.assertEqual("ordered_col2" in parts, "genitree2" in parts)
-            if "genitree2" in parts:
-                self.assertEqual(len(parts["ordered_col2"]), trait.nfields)
-                for got, expected in zip(parts["ordered_col2"], parts["genitree2"]):
+            self.assertEqual(len(parts), 2 if split else 0)
+            if parts:
+                self.assertEqual(len(parts[0]), trait.nfields)
+                for got, expected in zip(*parts, strict=True):
                     self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
 
 
 instantiate_parametrized_tests(TestOrderedColHost)
 instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
+instantiate_parametrized_tests(TestOrderedColRoute)
+
 instantiate_parametrized_tests(TestKernelColTile)
 instantiate_parametrized_tests(TestColTileHost)
 
