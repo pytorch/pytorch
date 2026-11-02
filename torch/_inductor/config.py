@@ -3014,10 +3014,13 @@ class cuda(cutlass):
     # autotuning and records the solutions; with autotune_tunableop_ladder it
     # also tunes a range of sizes of each GEMM's dynamic dim, the traced shape
     # among them. A GEMM it skips (ladder off, static, several dynamic symbols,
-    # dynamic K, a non-dense operand, an unsupported choice, a CPU winner, an
-    # unbacked dim with no user hint, the layout-conflict fallback) is covered
-    # only with PYTORCH_TUNABLEOP_ENABLED set, by max-autotune benchmarking the
-    # aten choice here or a later run. "reuse" instead borrows the nearest
+    # dynamic K, a non-dense operand, an operand still flexible at lowering, an
+    # unsupported choice, a CPU winner, an unbacked dim with no user hint, the
+    # layout-conflict fallback) is covered only with PYTORCH_TUNABLEOP_ENABLED
+    # set, by max-autotune benchmarking the aten choice here or a later run.
+    # Tuning happens while lowering, so a warm FxGraphCache or AOTAutogradCache
+    # hit tunes nothing at all: a tune pass needs a cold cache, or
+    # force_disable_caches. "reuse" instead borrows the nearest
     # recorded shape, benchmarks it against the default, and records the
     # winner. Run as separate passes: "tune" writes, "reuse" reads.
     # pyrefly: ignore [bad-assignment]
