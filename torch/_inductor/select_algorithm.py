@@ -64,7 +64,7 @@ from .codegen.common import (
     WorkspaceZeroMode,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
-from .codegen.subgraph import SubgraphChoiceCaller
+from .codegen.subgraph import SubgraphChoiceCaller, SubgraphCompileError
 from .codegen.triton import (
     texpr,
     TMACompatibilityChecker,
@@ -5748,6 +5748,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 timing = float("inf")
             except NotImplementedError:
                 log.warning("Not yet implemented", exc_info=True)
+                timing = float("inf")
+            except SubgraphCompileError:
+                log.exception("Ignoring choice %s.", choice)
                 timing = float("inf")
             except RuntimeError as e:
                 msg = str(e)
