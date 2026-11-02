@@ -5619,13 +5619,13 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(out, x + 1)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
-    @unittest.expectedFailure
     def test_enter_exit_autocast_graph_break_aot_eager(self):
-        # Unsupported under aot_eager: unmanaged _enter/_exit_autocast across a
-        # graph break. AOT does not replay autocast-enabled TLS at runtime, and
-        # ExcludeDispatchKeyGuard restores enabled after tracing, so the second
-        # graph sees BF16 x vs FP32 z. Nesting restore is compile-time cleanup
-        # only; this expectedFailure documents rejection of the pattern.
+        # Unsupported and currently undetected: unmanaged _enter/_exit_autocast
+        # across a graph break. AOT does not replay autocast-enabled TLS at
+        # runtime, and ExcludeDispatchKeyGuard restores enabled after tracing,
+        # so the second graph can see BF16 x vs FP32 z (or silently diverge for
+        # other ops). The metadata pass does not reject this when ambient dtype
+        # is unchanged; nesting/enabled restore is compile-time cleanup only.
         from torch.amp.autocast_mode import _get_autocast_nesting
 
         def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
@@ -5641,32 +5641,10 @@ class TestAOTAutocastStates(AOTTestCase):
         x = torch.randn(3, 3, dtype=torch.float32)
         y = torch.randn(3, 3, dtype=torch.float32)
         z = torch.randn(3, 3, dtype=torch.float32)
-        out = f(x, y, z)
-        opt_out = torch.compile(f, backend="aot_eager", fullgraph=False)(x, y, z)
-        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
-        self.assertEqual(_get_autocast_nesting(), prior_nesting)
-        self.assertEqual(out, opt_out)
-        self.assertEqual(out.dtype, opt_out.dtype)
-
-    def test_enter_exit_autocast_graph_break_aot_eager_restores_nesting(self):
-        # Cleanup-only coverage for the unsupported pattern above: compile must
-        # not leak nesting/enabled TLS even when runtime results diverge.
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
-        def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
-            m = torch.amp.autocast_mode._enter_autocast("cpu")
-            x = x @ y
-            torch._dynamo.graph_break()
-            x = x @ z
-            torch.amp.autocast_mode._exit_autocast(m)
-            return x
-
-        prior_nesting = _get_autocast_nesting()
-        prior_enabled = torch.is_autocast_enabled("cpu")
-        x = torch.randn(3, 3, dtype=torch.float32)
-        y = torch.randn(3, 3, dtype=torch.float32)
-        z = torch.randn(3, 3, dtype=torch.float32)
-        torch.compile(f, backend="aot_eager", fullgraph=False)(x, y, z)
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=False)
+        # Pin the known pre-existing failure mode, then require TLS cleanup.
+        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+            compiled(x, y, z)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 

@@ -222,15 +222,16 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        # Autocast tracing-state contract for this metadata pass (and matching
-        # cleanup in _create_graph):
+        # Autocast tracing-state contract for this metadata pass:
         # - dtype: must balance across the traced region; mismatch raises. Prefer
-        #   `with torch.autocast(...)`.
+        #   `with torch.autocast(...)`. make_fx dtype safety relies on this check;
+        #   _create_graph restores nesting only, not dtypes.
         # - enabled / cache / nesting: cleaned up after tracing only. Cleanup is
         #   not runtime support across graph breaks (Dynamo may emit unbalanced
         #   nesting; ExcludeDispatchKeyGuard restores enabled TLS; cache is
         #   forced off by disable_autocast_cache). Unmanaged _enter/_exit_autocast
-        #   split by a graph break is unsupported under AOT backends.
+        #   split by a graph break is unsupported and not detected when ambient
+        #   dtype is unchanged; compiled results may error or silently diverge.
         with (
             disable_above,
             _preserve_autocast_nesting(),
