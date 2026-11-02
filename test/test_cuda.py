@@ -3017,14 +3017,22 @@ raise RuntimeError("device assert did not fire")
 
     def test_mixed_dtype_binary_low_precision_out(self):
         # The float input must not be rounded to the output dtype before the op.
+        # gfx11 and gfx12 fuse the add and the fp16 conversion into v_fma_mix*_f16,
+        # which rounds the exact sum once instead of through float, so either
+        # rounding is accepted.
         for dtype in (torch.bfloat16, torch.half):
             for n in (1, 16383, 16384, 65537):
                 a = torch.randn(n, device="cuda").to(dtype)
                 b = torch.randn(n, device="cuda")
                 out = torch.empty(n, device="cuda", dtype=dtype)
                 torch.add(a, b, out=out)
-                self.assertEqual(
-                    out, (a.cpu().float() + b.cpu()).to(dtype), atol=0, rtol=0
+                out, a, b = out.cpu(), a.cpu(), b.cpu()
+                via_float = (a.float() + b).to(dtype)
+                rounded_once = (a.double() + b.double()).to(dtype)
+                bad = (out != via_float) & (out != rounded_once)
+                self.assertFalse(
+                    bad.any(),
+                    f"{dtype} n={n}: {int(bad.sum())} elements match neither rounding",
                 )
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
