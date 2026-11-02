@@ -15,6 +15,7 @@ from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -1221,8 +1222,11 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             "namedtuple_without_a_name": {**root, "context": no_name},
             "type_without_a_name": {**root, "type": no_name, "context": "null"},
         }[case]
-        with self.assertRaisesRegex(NotImplementedError, reason):
-            python_pytree.treespec_loads(json.dumps([protocol, node]))
+        # The name that stands for types without a serialized name points at the
+        # last such type registered, which can be a namedtuple class.
+        with patch.dict(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE, {no_name: Point}):
+            with self.assertRaisesRegex(NotImplementedError, reason):
+                python_pytree.treespec_loads(json.dumps([protocol, node]))
 
     @parametrize(
         "value,reason",
@@ -1244,14 +1248,9 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         with self.assertRaisesRegex(ValueError, reason):
             python_pytree._treespec_loads_without_imports(serialized)
 
-    def test_pytree_loads_without_imports_plain(self):
-        plain = python_pytree.tree_structure(({"a": 0}, [1, (2,)]))
-        self.assertEqual(
-            python_pytree._treespec_loads_without_imports(
-                python_pytree.treespec_dumps(plain)
-            ),
-            plain,
-        )
+    def test_pytree_loads_without_imports_unknown_protocol(self):
+        with self.assertRaisesRegex(ValueError, "Unknown protocol 2"):
+            python_pytree._treespec_loads_without_imports("[2, null]")
 
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:

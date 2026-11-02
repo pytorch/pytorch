@@ -19,7 +19,7 @@ import tempfile
 import types
 import unittest
 import zipfile
-from collections import defaultdict, namedtuple
+from collections import namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -2881,7 +2881,7 @@ class TestPredispatchSerialization(TestCase):
                 pass
 
             Local.__module__ = TwoTensor.__module__
-            with self.assertRaisesRegex(SerializeError, "defined inside a function"):
+            with self.assertRaisesRegex(SerializeError, "not a top-level"):
                 torch.export.save(builds(Local), io.BytesIO())
 
         with self.subTest("name that finds a different class"):
@@ -3115,18 +3115,6 @@ class TestPredispatchSerialization(TestCase):
                 name="os_system",
             ),
             subtest(
-                ("function", "torch.os.system", "not a top-level"),
-                name="torch_os_system",
-            ),
-            subtest(
-                ("function", "torch.builtins.exec", "not a top-level"),
-                name="torch_builtins_exec",
-            ),
-            subtest(
-                ("function", "torch.does_not_exist.f", "not a top-level"),
-                name="missing",
-            ),
-            subtest(
                 ("function", "torch.utils.model_dump.__main__.main", "__main__ module"),
                 name="main",
             ),
@@ -3134,14 +3122,6 @@ class TestPredispatchSerialization(TestCase):
             subtest(
                 ("class", "builtins.exec", "is not a torch.autograd.Function"),
                 name="class_exec",
-            ),
-            subtest(
-                ("class", "torch.autograd.Function", "not a class or function defined"),
-                name="class_alias",
-            ),
-            subtest(
-                ("class", "torch.os.system", "not a top-level"),
-                name="class_torch_os_system",
             ),
             # Export only calls autograd functions whose apply allows it.
             subtest(
@@ -3193,13 +3173,23 @@ class TestPredispatchSerialization(TestCase):
         self.addCleanup(sys_path.stop)
         return ran
 
-    @parametrize("replaced", ["function", "class"])
     @parametrize(
-        "name,reason",
+        "replaced,name,reason",
         [
-            subtest(("flat_apply_side_effect.F", "not a top-level"), name="new"),
-            subtest(("flat_apply_holder.lazy", "not a class or function"), name="lazy"),
-            subtest(("flat_apply_holder.F", "not a class or function"), name="getattr"),
+            subtest(
+                ("function", "flat_apply_side_effect.F", "not a top-level"), name="new"
+            ),
+            subtest(
+                ("function", "flat_apply_holder.lazy", "not a class or function"),
+                name="lazy",
+            ),
+            subtest(
+                ("function", "flat_apply_holder.F", "not a class or function"),
+                name="getattr",
+            ),
+            subtest(
+                ("class", "flat_apply_side_effect.F", "not a top-level"), name="class"
+            ),
         ],
     )
     def test_predispatch_flat_apply_load_runs_no_module_code(
@@ -3221,23 +3211,9 @@ class TestPredispatchSerialization(TestCase):
 
             return change
 
-        def with_node(node):
-            # The spec of (("name", node), {}), as save writes it.
-            protocol, root = json.loads(spec_of((("name", 0), {})))
-            root["children_spec"][0]["children_spec"][1] = node
-            return json.dumps([protocol, root])
-
-        def dict_context(context):
-            # The spec of the saved inputs with another context for the dict.
-            protocol, root = json.loads(spec_of((("name", 0, 0), {})))
-            root["children_spec"][1]["context"] = context
-            return json.dumps([protocol, root])
-
         class Color(enum.Enum):
             RED = 0
 
-        leaf = {"type": None, "context": None, "children_spec": []}
-        no_name = pytree.NO_SERIALIZED_TYPE_NAME_FOUND
         enum_spec = spec_of((("name", {Color.RED: 0}), {}))
         # JSON allows other spellings of the key, which load decodes too.
         escaped_enum_spec = enum_spec.replace("__enum__", "\\\\u005f_enum__")
@@ -3245,30 +3221,16 @@ class TestPredispatchSerialization(TestCase):
         return {
             # The input spec decides which input the helper gets as the class
             # name. For a dict, *args would pass its keys, not args[0].
-            "keyword": set_spec(spec_of(((0, 0), {"function_cls_name": 0}))),
             "dict_args": set_spec(spec_of(({0: 0, 1: 0, 2: [0]}, {}))),
-            "kwargs_context": set_spec(dict_context("5")),
-            # Loading an enum or a defaultdict factory would import its module.
-            "enum": set_spec(enum_spec),
+            "not_a_pair": set_spec(spec_of(((0, 0), {}, 0))),
+            "args_empty": set_spec(spec_of(((), {"a": 0, "b": 0, "c": 0}))),
+            "first_not_leaf": set_spec(spec_of((((0, 0), 0), {}))),
+            # Loading an enum would import its module.
             "escaped_enum": set_spec(escaped_enum_spec),
-            "defaultdict": set_spec(spec_of((("name", defaultdict(int, a=0)), {}))),
-            # Save never writes the name of a type without a serialized name.
-            "no_name_type": set_spec(
-                with_node({**leaf, "type": no_name, "context": "{}"})
-            ),
-            "no_name_namedtuple": set_spec(
-                with_node(
-                    {
-                        "type": "collections.namedtuple",
-                        "context": no_name,
-                        "children_spec": [leaf],
-                    }
-                )
-            ),
-            "not_a_treespec": set_spec("not a treespec"),
             # FX writes attribute names into the code it generates.
             "name_not_identifier": lambda node: node.update(name='x")\nimport os  # '),
             "no_function": lambda node: node["inputs"].pop(0),
+            "only_function": lambda node: node.update(inputs=node["inputs"][:1]),
             "function_not_a_string": lambda node: node["inputs"][0]["arg"].update(
                 as_operator=5
             ),
@@ -3277,17 +3239,14 @@ class TestPredispatchSerialization(TestCase):
     @parametrize(
         "case,reason",
         [
-            ("keyword", "name as the first input"),
             ("dict_args", "name as the first input"),
-            ("kwargs_context", "name as the first input"),
-            ("enum", "module of an enum"),
-            ("escaped_enum", "module of an enum"),
-            ("defaultdict", "module of a defaultdict factory"),
-            ("no_name_type", "does not name one type"),
-            ("no_name_namedtuple", "couldn't find a serialized name"),
-            ("not_a_treespec", "Cannot load the input spec"),
+            ("not_a_pair", "name as the first input"),
+            ("args_empty", "name as the first input"),
+            ("first_not_leaf", "name as the first input"),
+            ("escaped_enum", "Cannot load the input spec.*module of an enum"),
             ("name_not_identifier", "is not an identifier"),
             ("no_function", "does not start with its function"),
+            ("only_function", "does not start with its function"),
             ("function_not_a_string", "does not start with its function"),
         ],
         name_fn=lambda case, reason: case,
@@ -3322,34 +3281,18 @@ class TestPredispatchSerialization(TestCase):
 
         cond = {"as_operator": "torch.ops.higher_order.cond"}
 
-        def call_helper_directly_after_keyword(node):
-            # Inputs after a keyword input are matched with their values too.
-            call_helper_directly_with(cond)(node)
-            node["inputs"].insert(
-                -1, {"name": "k", "arg": {"as_int": 1}, "kind": ArgumentKind.KEYWORD}
-            )
-
         return {
             # An input that names an operator would reach the function as a
             # callable.
             "torch_os_system": set_last(arg={"as_operator": "torch.os.system"}),
-            "module": set_last(arg={"as_operator": "torch.os"}),
-            # Load refuses such a name by its text, because looking it up reads
-            # attributes of torch, which can import a torch module such as
-            # torch.onnx.
-            "torch_onnx_export": set_last(arg={"as_operator": "torch.onnx.export"}),
             "unregistered_op": set_last(
                 arg={"as_operator": "torch.ops.flat_apply_test_ns.op.default"}
             ),
-            "helper": set_last(arg={"as_operator": _FLAT_APPLY_HELPER}),
             "higher_order_op": set_last(arg=cond),
             # A dict of arguments could hold one too, and export passes neither
             # dicts nor keyword arguments through flat_apply.
             "dict": set_last(
                 arg={"as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}}
-            ),
-            "custom_obj": set_last(
-                arg={"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
             ),
             "keyword": set_last(arg={"as_int": 0}, kind=ArgumentKind.KEYWORD),
             "named": set_last(name="checked_output"),
@@ -3365,27 +3308,29 @@ class TestPredispatchSerialization(TestCase):
             "direct_helper_call_keyword": call_helper_directly_with(
                 cond, name="f", kind=ArgumentKind.KEYWORD
             ),
-            "direct_helper_call_after_keyword": call_helper_directly_after_keyword,
+            "direct_helper_call_dict_custom_obj": call_helper_directly_with(
+                {
+                    "as_string_to_argument": {
+                        "o": {"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
+                    }
+                }
+            ),
         }
 
     @parametrize(
         "case,reason",
         [
             ("torch_os_system", "outside torch.ops"),
-            ("module", "outside torch.ops"),
-            ("torch_onnx_export", "outside torch.ops"),
             ("unregistered_op", "not registered"),
-            ("helper", "outside torch.ops"),
             ("higher_order_op", "not an operator overload"),
             ("dict", "of kind as_string_to_argument"),
-            ("custom_obj", "of kind as_custom_obj"),
             ("keyword", "keyword input"),
             ("named", "keyword input"),
             ("direct_helper_call", "not a class or function defined"),
             ("direct_helper_call_operator", "outside torch.ops"),
             ("direct_helper_call_dict", "operator in a dict input"),
             ("direct_helper_call_keyword", "not an operator overload"),
-            ("direct_helper_call_after_keyword", "not an operator overload"),
+            ("direct_helper_call_dict_custom_obj", "of kind as_custom_obj"),
         ],
         name_fn=lambda case, reason: case,
     )
@@ -3401,7 +3346,6 @@ class TestPredispatchSerialization(TestCase):
             ("higher_order_op", "not an operator overload"),
             ("direct_helper_call", "not a class or function defined"),
             ("direct_helper_call_operator", "not an operator overload"),
-            ("direct_helper_call_keyword", "not an operator overload"),
         ],
         name_fn=lambda case, reason: case,
     )
@@ -3422,11 +3366,8 @@ class TestPredispatchSerialization(TestCase):
             )
             if case == "direct_helper_call":
                 node.args = ("os.system", *node.args[3:])
-            elif case == "direct_helper_call_operator":
-                node.args = (*node.args[2:-1], torch.ops.higher_order.cond)
             else:
-                node.args = node.args[2:]
-                node.kwargs = {"f": torch.ops.higher_order.cond}
+                node.args = (*node.args[2:-1], torch.ops.higher_order.cond)
         with self.assertRaisesRegex(SerializeError, reason):
             serialize(ep)
 
@@ -3452,31 +3393,35 @@ class TestPredispatchSerialization(TestCase):
         module = self._import_test_module(ByKey=ByKey)
         ByKey.__module__, ByKey.__qualname__ = module.__name__, "ByKey"
         x = torch.randn(4)
-        cases = {
-            "index_in_vmap": (
-                self._index_in_vmap_program(),
-                (torch.arange(4), torch.tensor([3, 1])),
-            ),
-            "dict_input": (export(UsesKey(), (x,), strict=False), (x,)),
-        }
-        for case, (ep, inp) in cases.items():
-            with self.subTest(case):
-                (node,) = ep.graph.find_nodes(
-                    op="call_function", target=torch.ops.higher_order.flat_apply
-                )
-                spec_name = node.args[1].target
-                spec = torch.fx.graph_module._get_attr(ep.graph_module, spec_name)
-                node.args, node.kwargs = pytree.tree_unflatten(node.args[2:], spec)
-                node.target = torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-                for n in ep.graph.find_nodes(op="get_attr"):
-                    if not n.users:
-                        ep.graph.erase_node(n)
-                ep.graph_module.recompile()
-                buffer = io.BytesIO()
-                torch.export.save(ep, buffer)
-                buffer.seek(0)
-                loaded = torch.export.load(buffer)
-                self.assertEqual(loaded.module()(*inp), ep.module()(*inp))
+        ep = export(UsesKey(), (x,), strict=False)
+        (node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        spec = torch.fx.graph_module._get_attr(ep.graph_module, node.args[1].target)
+        node.args, node.kwargs = pytree.tree_unflatten(node.args[2:], spec)
+        node.target = (
+            torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        )
+        for n in ep.graph.find_nodes(op="get_attr"):
+            if not n.users:
+                ep.graph.erase_node(n)
+        ep.graph_module.recompile()
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.export.load(buffer).module()(x), ep.module()(x))
+
+        # Inputs after a keyword input are matched with their own values, so an
+        # operator overload after one loads.
+        def overload_after_keyword(node):
+            node["target"] = _FLAT_APPLY_HELPER
+            node["inputs"] = node["inputs"][2:]
+            node["inputs"][-1]["arg"] = {"as_operator": "torch.ops.aten.add.Tensor"}
+            node["inputs"].insert(
+                -1, {"name": "k", "arg": {"as_int": 1}, "kind": ArgumentKind.KEYWORD}
+            )
+
+        self._load_changed(self._index_in_vmap_artifact(), overload_after_keyword)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

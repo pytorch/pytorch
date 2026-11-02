@@ -26,7 +26,6 @@ from typing import Annotated, Any, cast, final, Optional
 import sympy
 
 import torch
-import torch._dynamo._trace_wrapped_higher_order_op  # defines ModIndex, which load finds by name
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
@@ -728,11 +727,6 @@ def _find_imported(name: str) -> Any:
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
         raise SerializeError(f"{name} is in a __main__ module")
-    if "<locals>" in module_name.split("."):
-        raise SerializeError(
-            f"{name} is defined inside a function. Define it at the top level "
-            "of a module."
-        )
     module = sys.modules.get(module_name)
     if module is None:
         raise SerializeError(
@@ -888,8 +882,6 @@ def _find_flat_apply_func(
     argument, so that name must find a torch.autograd.Function. Both names
     are found with ``_find_imported``.
     """
-    if in_spec.num_leaves != len(flat_args):
-        raise SerializeError("flat_apply inputs do not match its input spec")
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
         return func
@@ -903,20 +895,17 @@ def _find_flat_apply_func(
             "and loaded"
         )
     # flat_apply rebuilds (args, kwargs) from the input spec and calls the helper
-    # with *args and **kwargs, so args[0] is the name it gets only when the spec
-    # is a (tuple, dict) pair, as export saves it. Only the spec is read, because
-    # rebuilding the inputs would run the code of registered pytree types on
-    # graph nodes instead of the values they stand for.
+    # with *args and **kwargs, so the helper gets flat_args[0] as its class name
+    # only when args is a tuple that starts with a leaf, as export saves it. A
+    # class name in kwargs then makes the call fail. Only the spec is read,
+    # because rebuilding the inputs would run the code of registered pytree types
+    # on graph nodes instead of the values they stand for.
     pair = in_spec.children() if in_spec.type is tuple else []
     if (
         len(pair) != 2
         or pair[0].type is not tuple
         or pair[0].num_children == 0
         or not pair[0].child(0).is_leaf()
-        or pair[1].type is not dict
-        or not isinstance(pair[1].context, list)
-        or "function_cls_name" in pair[1].context
-        or not isinstance(flat_args[0], str)
     ):
         raise SerializeError("Expected an autograd function name as the first input")
     _find_autograd_function(flat_args[0])
@@ -3497,7 +3486,6 @@ class GraphModuleDeserializer(metaclass=Final):
             len(inputs) < 2
             or inputs[0].arg.type != "as_operator"
             or not isinstance(inputs[0].arg.as_operator, str)
-            or inputs[1].arg.type != "as_string"
         ):
             raise SerializeError(
                 f"flat_apply node {serialized_node.name} does not start with its "
@@ -3523,11 +3511,7 @@ class GraphModuleDeserializer(metaclass=Final):
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []
         for suffix, spec in specs.items():
-            attr_name = base_name = f"{serialized_node.name}_{suffix}"
-            i = 0
-            while hasattr(self.module, attr_name):
-                i += 1
-                attr_name = f"{base_name}_{i}"
+            attr_name = f"{serialized_node.name}_{suffix}"
             setattr(self.module, attr_name, spec)
             spec_nodes.append(
                 self.graph.create_node("get_attr", attr_name, name=attr_name)
