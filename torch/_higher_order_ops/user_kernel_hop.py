@@ -363,8 +363,10 @@ class UserKernelHOPInfo:
       may write in place.
     - Any other argument is the DSL's own; the passes only hand it on.
 
-    Despite its name, config.triton_kernel_default_layout_constraint sets the layout
-    constraint that Inductor applies to every registered DSL's mutation HOP.
+    The functional HOP's CompositeExplicitAutograd py_impl, which eager runs, must
+    call the mutation HOP once, on clones of the tensors named in
+    ``tensors_to_clone`` (functional_hop_dense does this). The post-grad
+    decomposition traces that impl, so a pair without one cannot be registered.
 
     The FX graph cache keys user kernels by source for Triton only
     (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
@@ -385,9 +387,11 @@ class UserKernelHOPInfo:
     get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
     # HOP kwargs -> kernel name, for logs and the reinplacing counters.
     get_kernel_name: Callable[[Mapping[str, Any]], str]
-    # The functional HOP's dense impl: the post-grad decomposition traces it into
-    # clones plus the mutation HOP.
-    functional_dense: Callable[..., dict[str, Any]]
+    # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
+    # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
+    # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
+    # one of this DSL's mutation HOP nodes.
+    get_layout_constraint: Callable[[], str]
     # Counts this DSL's reinplacing decisions.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
@@ -404,8 +408,11 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
     for hop in hops:
         if not isinstance(hop, UserKernelWrapperHOP):
             raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
-        if _user_kernel_hops.get(hop, info) is not info:
-            raise AssertionError(f"{hop} is already registered as a user-kernel HOP")
+        owner = _user_kernel_hops.get(hop, info)
+        if owner is not info:
+            raise RuntimeError(f"{hop} is already registered by the {owner.dsl} DSL")
+    if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+        raise TypeError(f"{info.functional} has no CompositeExplicitAutograd py_impl")
     for hop in hops:
         _user_kernel_hops[hop] = info
 
