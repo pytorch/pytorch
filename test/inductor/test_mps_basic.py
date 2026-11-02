@@ -370,8 +370,11 @@ class MPSBasicTests(TestCase):
             """
         )
         out = torch.zeros(4, device=self.device)
-        with self.assertRaisesRegex(RuntimeError, "dispatch of 4294967296 threads"):
-            lib.fill_kernel(out, threads=[1] * (ndim - 1) + [2**32])
+        threads = [1] * (ndim - 1) + [2**32]
+        grid = "x".join(map(str, threads))
+        msg = f"Dispatch grid {grid} exceeds 2\\^32 - 1 threads along one axis"
+        with self.assertRaisesRegex(ValueError, msg):
+            lib.fill_kernel(out, threads=threads)
 
     def test_argmax_bf16(self):
         def fn(x):
