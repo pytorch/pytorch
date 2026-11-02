@@ -73,7 +73,8 @@ class BenchmarkRunnerTests(TestCase):
 
     @skipIfTorchDynamo("speedup_experiment calls set_stance")
     @parametrize("mode", ("generate", "prefill"))
-    def test_prefill_timing_units_and_setup(self, mode):
+    @parametrize("report_eager_latency", (False, True))
+    def test_prefill_timing_units_and_setup(self, mode, report_eager_latency):
         args = common.parse_args(
             [
                 "--performance",
@@ -88,11 +89,15 @@ class BenchmarkRunnerTests(TestCase):
         args.profile_details = {}
         args.profiler_trace_name = "profile"
         profile = mock.Mock()
-        setup = mock.Mock() if mode == "prefill" else None
-        request_tokens = {"input_tokens_per_second": 6} if mode == "prefill" else None
+        setup = mock.Mock() if mode != "generate" else None
+        request_tokens = {
+            "prefill": {"input_tokens_per_second": 6},
+        }.get(mode)
         model = torch.nn.Identity()
         model.name = "Qwen/Qwen3-0.6B"
-        inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
+        inputs = {
+            "input_ids": torch.zeros(2, 3, dtype=torch.long),
+        }
         with (
             mock.patch.object(common, "current_batch_size", 2),
             mock.patch.object(common, "output_filename", "results.csv"),
@@ -116,16 +121,19 @@ class BenchmarkRunnerTests(TestCase):
                 hf_llm=True,
                 setup_fn=setup,
                 request_tokens=request_tokens,
+                report_eager_latency=report_eager_latency,
             )
         _, headers, values = write.call_args_list[0].args
         row = dict(zip(headers, values))
         self.assertEqual(row["speedup"], 2.0)
         self.assertEqual(row["abs_latency"], 2000.0)
-        if mode == "prefill":
+        if report_eager_latency:
             self.assertEqual(row["eager_latency"], 4000.0)
-            self.assertEqual(row["input_tokens_per_second"], 12.0)
         else:
             self.assertNotIn("eager_latency", row)
+        if mode == "prefill":
+            self.assertEqual(row["input_tokens_per_second"], 12.0)
+        else:
             self.assertNotIn("input_tokens_per_second", row)
         self.assertEqual(timed.call_count, 4)
         for call in timed.call_args_list:
@@ -265,11 +273,15 @@ class HuggingFacePrefillTestCase(TestCase):
                 "subprocess.check_call",
                 side_effect=unittest.SkipTest("requires compatible transformers"),
             ):
-                from benchmarks.dynamo.huggingface_llm_models import MIN_TRANSFORMERS_VERSION
+                from benchmarks.dynamo.huggingface_llm_models import (
+                    MIN_TRANSFORMERS_VERSION,
+                )
         except ImportError:
             raise unittest.SkipTest("requires compatible transformers") from None
         if Version(version) < Version(MIN_TRANSFORMERS_VERSION):
-            raise unittest.SkipTest(f"requires transformers >= {MIN_TRANSFORMERS_VERSION}")
+            raise unittest.SkipTest(
+                f"requires transformers >= {MIN_TRANSFORMERS_VERSION}"
+            )
         from transformers import AutoConfig
 
         with (
@@ -453,7 +465,8 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             mock.patch.object(common.time, "sleep") as sleep,
         ):
             runner.validate_args(args)
-        self.assertEqual(download.call_args_list, [mock.call(args.only)] * 2)
+        download.assert_has_calls([mock.call(args.only)] * 2)
+        self.assertEqual(download.call_count, 2)
         sleep.assert_called_once_with(30)
 
     def test_prefill_performance_run(self):
