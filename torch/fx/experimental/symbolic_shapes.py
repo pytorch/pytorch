@@ -4260,12 +4260,13 @@ class ShapeEnv:
 
         # Version counter used to invalidate cached values
         self._var_to_range_version_counter = 0
+        # Separate counter tracking only replacement changes; also part of
+        # _get_key(). Together with _var_to_range_version_counter it
+        # invalidates replace(), _find() and SymNode.expr; it also invalidates
+        # the symbolic op memo.
+        self._replacements_version_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
-        # Separate counter tracking only replacement changes. Together with
-        # _var_to_range_version_counter it invalidates replace(), _find() and
-        # SymNode.expr; it also invalidates the symbolic op memo.
-        self._replacements_version_counter = 0
 
         # Note [symbolic op memo]
         # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
@@ -4925,7 +4926,7 @@ class ShapeEnv:
         Determines when we need to invalidate our cache
         """
         return (
-            len(self.replacements),
+            self._replacements_version_counter,
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
@@ -8156,10 +8157,20 @@ class ShapeEnv:
                     if v not in r:
                         raise AssertionError(f"{v} not in {r}")
 
-    def _set_replacement(self, a: sympy.Symbol, tgt: sympy.Expr, msg: str) -> None:
+    def _set_replacement(
+        self,
+        a: sympy.Symbol,
+        tgt: sympy.Expr,
+        msg: str,
+        *,
+        path_compression: bool = False,
+    ) -> None:
         """
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
+
+        path_compression: tgt is an equivalent, more resolved form of the
+        current replacement (from _find), so cached results stay valid.
         """
 
         if tgt == self.replacements.get(a, None):
@@ -8322,8 +8333,9 @@ class ShapeEnv:
         # them)
         if a not in self.replacements_slocs:
             self.replacements_slocs[a] = self._get_sloc()
-        self._replacements_version_counter += 1
-        self._update_version_counter()
+        if not path_compression:
+            self._replacements_version_counter += 1
+            self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
@@ -8362,7 +8374,7 @@ class ShapeEnv:
         cur_replace = {s: self._find(s) for s in res.free_symbols}
         replaced, changed = self.replacements[a]._xreplace(cur_replace)
         if changed:
-            self._set_replacement(a, replaced, "find")
+            self._set_replacement(a, replaced, "find", path_compression=True)
         return self.replacements[a]
 
     @lru_cache(256)
