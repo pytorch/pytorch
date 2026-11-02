@@ -4252,7 +4252,7 @@ class ShapeEnv:
         self._version_counter = 0
         # Separate counter tracking only replacement changes. Together with
         # _var_to_range_version_counter it invalidates replace(), _find() and
-        # SymNode.expr; the symbolic op memo also keys on it.
+        # SymNode.expr; it also invalidates the symbolic op memo.
         self._replacements_version_counter = 0
 
         # Note [symbolic op memo]
@@ -4260,9 +4260,9 @@ class ShapeEnv:
         # numel and contiguity for every fake tensor recomputes the same
         # products and comparisons over and over: on one model over 99% of a
         # few hundred thousand ops were repeats of about two thousand distinct
-        # computations. Memoize on
-        # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
-        # valid only while replacements have not moved.
+        # computations. Memoize on (op, lhs expr, rhs expr); _get_symop_cache
+        # empties the memo whenever replacements change. mod isn't memoized
+        # because it picks Mod or PythonMod from the operands' value ranges.
         #
         # What is cached is the result sympy expression. Every call site still
         # builds its own SymNode around it, and must: see the comment in
@@ -4270,6 +4270,7 @@ class ShapeEnv:
         # proxy tracing binary_magic_impl returns before it reaches this cache,
         # so nothing being traced is served from here.
         self._symop_cache: dict[Any, Any] = {}
+        self._symop_cache_version = 0
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
@@ -4472,6 +4473,7 @@ class ShapeEnv:
             "replacements_slocs",
             "_replacements_version_counter",
             "_symop_cache",
+            "_symop_cache_version",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -4909,6 +4911,13 @@ class ShapeEnv:
             len(self.real_tensor_prop_unbacked_vals),
             self._var_to_range_version_counter,
         )
+
+    def _get_symop_cache(self) -> dict[Any, Any]:
+        """Returns the symbolic op memo; see Note [symbolic op memo]."""
+        if self._replacements_version_counter != self._symop_cache_version:
+            self._symop_cache.clear()
+            self._symop_cache_version = self._replacements_version_counter
+        return self._symop_cache
 
     def _update_version_counter(self) -> None:
         # if the change to shape env effects self.divisible set
