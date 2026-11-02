@@ -78,6 +78,7 @@ from torch.utils._sympy.functions import (
     Max,
     Min,
     Mod,
+    PythonMod,
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -7370,6 +7371,37 @@ class ShapeEnvReplacementCacheTest(TestCase):
         shape_env._update_var_to_range(d, ValueRanges(0, 49))
         # Previously, SymNode kept the expr computed before the range change.
         self.assertEqual(node.expr, c + d + 1)
+
+    def test_range_change_refreshes_mod(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        self.assertIsInstance((a % b).node.expr, PythonMod)
+        shape_env.constrain_symbol_range(a.node.expr, 0, 10)
+        shape_env.constrain_symbol_range(b.node.expr, 1, 10)
+        # Both operands are now known nonnegative, so mod lowers to Mod.
+        # Previously, the symbolic op memo returned the PythonMod.
+        self.assertIsInstance((a % b).node.expr, Mod)
+
+    def test_range_change_refreshes_symop_memo(self):
+        shape_env = ShapeEnv()
+        a, b, c, d = self._chain_rejected_by_range(shape_env)
+        node = SymNode(a, shape_env, int, None)
+        one = SymNode(sympy.Integer(1), shape_env, int, 1)
+        self.assertEqual(node.add(one).expr, b + 2)
+        shape_env._update_var_to_range(c, ValueRanges(0, 50))
+        shape_env._update_var_to_range(d, ValueRanges(0, 49))
+        # Previously, the memo was keyed on the unresolved a and returned b + 2.
+        self.assertEqual(node.add(one).expr, c + d + 2)
+
+    def test_replacement_change_clears_symop_memo(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        _ = a + 1
+        self.assertGreater(len(shape_env._get_symop_cache()), 0)
+        shape_env._set_replacement(b.node.expr, a.node.expr + 1, "test")
+        self.assertEqual(len(shape_env._get_symop_cache()), 0)
 
     @parametrize("method", ["replace", "_find"])
     def test_runtime_assert_preserves_cache_hit(self, method):
