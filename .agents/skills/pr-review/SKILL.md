@@ -173,7 +173,7 @@ Before reviewing, build understanding of what the PR touches and why:
 
 Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
 
-When you have the Agent tool, whatever the PR's size, and unless the Time Budget's convergence or posting window is open (see "Time Budget"), spawn these reviewers in parallel, each over the full diff with the checklist's path and the `REVIEW.md` paths covering the changed files (Step 1, item 5), and each told to report every candidate problem with its `file:line` and evidence:
+When you have the Agent tool, whatever the PR's size, and unless the Time Budget's convergence or posting window is open (see "Time Budget"), spawn these reviewers in parallel, each over the full diff with the checklist's path and the `REVIEW.md` paths covering the changed files, with which files each one covers (Step 1, item 5), and each told to report every candidate problem with its `file:line` and evidence:
 
 - **Correctness and security:** logic, edge cases, error handling, concurrency, dtype, device and shape handling, and the checklist's security items.
 - **Tests:** missing coverage, tests that cannot fail or do not check what they claim, flakiness.

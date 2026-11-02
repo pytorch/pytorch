@@ -6557,7 +6557,15 @@ class TestStageAFanOut(unittest.TestCase):
             [n.lower() for n in skill],
             "the Fan-out section's reviewer list no longer matches SKILL.md Step 2; update both",
         )
-        count = {"three": 3, "four": 4, "five": 5, "six": 6}.get(listed.group(1))
+        word = listed.group(1)
+        count = (
+            int(word)
+            if word.isdigit()
+            else {"three": 3, "four": 4, "five": 5, "six": 6}.get(word)
+        )
+        self.assertIsNotNone(
+            count, f"unknown reviewer count {word!r}; extend the table"
+        )
         self.assertEqual(
             count, len(names), "the Fan-out section's reviewer count is out of date"
         )
