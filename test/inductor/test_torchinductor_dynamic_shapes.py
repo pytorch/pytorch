@@ -740,22 +740,17 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 self.fail("expected to fail, but actually passed")
 
     def test_reduction_numel_provably_one_lowers_to_pointwise(self, device):
-        # (s0 + 127) // 128 is not structurally 1, but it is exactly 1 for
-        # every s0 in [2, 128]. Reduction.create must see that through the
-        # shape env and lower the sum to Pointwise instead of a Reduction
-        # whose rnumel later simplifies to 1 (breaks SIMD scheduler asserts).
-        kinds = []
-        orig_create = torch._inductor.ir.Reduction.create.__func__
+        # n = (s0 + 127) // 128 is a symbolic expression, but it equals 1 for every
+        # s0 in [2, 128]. A sum over 1 element must be lowered to Pointwise.
+        ir = torch._inductor.ir
+        built_node_types = []
+        real_create = ir.Reduction.create.__func__
 
-        def record_create(cls, *args, **kwargs):
-            r = orig_create(cls, *args, **kwargs)
-            node = r
-            while not isinstance(node, torch._inductor.ir.Loops) and hasattr(
-                node, "data"
-            ):
-                node = node.data
-            kinds.append(type(node).__name__)
-            return r
+        def create_and_record(cls, *args, **kwargs):
+            result = real_create(cls, *args, **kwargs)
+            node = result.data.data  # unwrap TensorBox(StorageBox(node))
+            built_node_types.append(type(node))
+            return result
 
         def f(x, y):
             n = (x.shape[0] + 127) // 128
@@ -764,12 +759,12 @@ class TestInductorDynamic(DynamicShapesTestCase):
         x = torch.randn(64, device=device)
         y = torch.randn(256, device=device)
         torch._dynamo.mark_dynamic(x, 0, min=2, max=128)
-        with unittest.mock.patch.object(
-            torch._inductor.ir.Reduction, "create", classmethod(record_create)
-        ):
+        recording_create = classmethod(create_and_record)
+        with unittest.mock.patch.object(ir.Reduction, "create", recording_create):
             actual = torch.compile(f)(x, y)
+
         self.assertEqual(actual, f(x, y))
-        self.assertEqual(kinds, ["Pointwise"])
+        self.assertEqual(built_node_types, [ir.Pointwise])
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
