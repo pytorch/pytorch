@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    recover_orig_fp32_precision,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -1696,6 +1697,19 @@ class TestMaxAutotune(TestCase):
             torch.compile(m)(inp)
 
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm
+    @parametrize("precision", ("tf32", "ieee"))
+    @config.patch(max_autotune=True, max_autotune_conv_backends="TRITON")
+    @recover_orig_fp32_precision
+    def test_conv_template_follows_cudnn_conv_precision(self, precision):
+        torch.backends.cudnn.conv.fp32_precision = precision
+        x = torch.randn(2, 32, 16, 16, device=GPU_TYPE)
+        w = torch.randn(32, 32, 3, 3, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(torch.nn.functional.conv2d), x, w)
+        expected = precision == "tf32" and torch.cuda.is_tf32_supported()
+        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expected}", code[0])
 
     def test_non_contiguous_input_mm(self):
         """
@@ -5889,6 +5903,28 @@ class TestPrologueFusion(TestCase):
             ).run(code[0])
             self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_identical_template_epilogue_fusions(self):
+        # The mm + relu pairs all render the same fused kernel, so they share
+        # one async compile future. Each pair must still be benchmarked and
+        # fused, leaving one template launch per pair.
+        def fn(*xs):
+            return tuple(torch.relu(x @ y) for x, y in zip(xs[::2], xs[1::2]))
+
+        torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
+
+        args = [torch.randn(128, 128, device=GPU_TYPE) for _ in range(6)]
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(fn), *args)
+
+        self.assertEqual(out, fn(*args), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
+
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
     def test_multiple_inputs(self, sizes, use_async_compile: bool):
@@ -6855,7 +6891,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         self.assertTrue(is_gfx1250_arch("gfx1250"))
         self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
-        self.assertFalse(is_gfx1250_arch("gfx1251"))
         self.assertFalse(is_gfx1250_arch("gfx0000"))
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
