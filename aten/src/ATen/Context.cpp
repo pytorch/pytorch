@@ -519,8 +519,8 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     return false;
   };
   if (match(s)) { return; }
-  std::string sl;
-  std::transform(s.begin(), s.end(), sl.begin(),
+  std::string sl = s;
+  std::transform(sl.begin(), sl.end(), sl.begin(),
                  [](unsigned char c) -> unsigned char { return std::tolower(c); });
   if (match(sl)) { return; }
   TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"

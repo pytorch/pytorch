@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
     IS_MACOS, HardwareClassification, instantiate_parametrized_tests,
-    skipIfXpu,
+    skipIfXpu, recover_orig_fp32_precision,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -10621,6 +10621,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for device in device_set:
             dev = torch.device(device)
             self.assertEqual(repr(dev), get_expected_device_repr(dev))
+
+    @recover_orig_fp32_precision
+    def test_float32_matmul_precision_case_insensitive(self):
+        torch.set_float32_matmul_precision("highest")
+        torch.set_float32_matmul_precision("HIGH")
+        self.assertEqual(torch.get_float32_matmul_precision(), "high")
+        # Longer than the small-string buffer, so a bad lowercase copy overflows
+        with self.assertWarnsRegex(UserWarning, "is not one of"):
+            torch.set_float32_matmul_precision("A" * 4096)
+        self.assertEqual(torch.get_float32_matmul_precision(), "high")
 
     # Tests that the use_deterministic_flag can be set as expected
     @wrapDeterministicFlagAPITest
