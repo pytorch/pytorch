@@ -68,7 +68,9 @@ def _require_transformers():
             "subprocess.check_call",
             side_effect=unittest.SkipTest("requires compatible transformers"),
         ):
-            from benchmarks.dynamo.huggingface_llm_models import MIN_TRANSFORMERS_VERSION
+            from benchmarks.dynamo.huggingface_llm_models import (
+                MIN_TRANSFORMERS_VERSION,
+            )
     except ImportError:
         raise unittest.SkipTest("requires compatible transformers") from None
     if Version(version) < Version(MIN_TRANSFORMERS_VERSION):
@@ -188,7 +190,8 @@ class BenchmarkRunnerTests(TestCase):
 
     @skipIfTorchDynamo("speedup_experiment calls set_stance")
     @parametrize("mode", ("generate", "prefill", "decode"))
-    def test_prefill_timing_units_and_setup(self, mode):
+    @parametrize("report_eager_latency", (False, True))
+    def test_prefill_timing_units_and_setup(self, mode, report_eager_latency):
         args = common.parse_args(
             [
                 "--performance",
@@ -237,15 +240,16 @@ class BenchmarkRunnerTests(TestCase):
                 hf_llm=True,
                 setup_fn=setup,
                 request_tokens=request_tokens,
+                report_eager_latency=report_eager_latency,
             )
         _, headers, values = write.call_args_list[0].args
         row = dict(zip(headers, values))
         self.assertEqual(row["speedup"], 2.0)
         self.assertEqual(row["abs_latency"], 2000.0)
-        if mode == "generate":
-            self.assertNotIn("eager_latency", row)
-        else:
+        if report_eager_latency:
             self.assertEqual(row["eager_latency"], 4000.0)
+        else:
+            self.assertNotIn("eager_latency", row)
         if mode == "prefill":
             self.assertEqual(row["input_tokens_per_second"], 12.0)
         else:
@@ -330,6 +334,7 @@ class BenchmarkRunnerTests(TestCase):
                 hf_llm=True,
                 setup_fn=setup,
                 request_tokens={"input_tokens_per_second": 6},
+                report_eager_latency=True,
                 tp_group=group,
                 compilation_latency=1.0,
                 compression_ratio=1.0,
@@ -642,6 +647,15 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         self.assertEqual(inputs["input_ids"].shape, (3, expected_length))
         self.assertEqual(batch_size, 3)
         self.assertEqual(model.cache_capacity, expected_length + 1999)
+        self.assertEqual(
+            runner.get_model_metadata(inputs),
+            {
+                "batch_size": 3,
+                "phase": mode,
+                "prompt_length": expected_length,
+                "decode_length": 128 if mode == "decode" else 0,
+            },
+        )
         if mode == "decode":
             self.assertEqual(inputs["decode_ids"].shape, (3, 128))
             self.assertIs(runner.model_iter_fn.__func__, type(runner).decode)
@@ -734,7 +748,8 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             mock.patch.object(common.time, "sleep") as sleep,
         ):
             runner.validate_args(args)
-        self.assertEqual(download.call_args_list, [mock.call(args.only)] * 2)
+        download.assert_has_calls([mock.call(args.only)] * 2)
+        self.assertEqual(download.call_count, 2)
         sleep.assert_called_once_with(30)
 
     @parametrize("mode", ("prefill", "decode"))
@@ -764,11 +779,19 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             self.assertTrue(os.path.exists(os.path.join(tmp, trace)))
             with open(os.path.join(tmp, f"speedup_eager_{mode}.csv")) as f:
                 (row,) = csv.DictReader(f)
+            with open(os.path.join(tmp, f"speedup_eager_{mode}.json")) as f:
+                records = [json.loads(line) for line in f]
         # validate_model, eager and compiled warmup, timed runs, and profiled runs.
         expected_lengths = (0, 7) if mode == "prefill" else (7, 10)
         self.assertEqual(cache_lengths, [expected_lengths] * 15)
         self.assertEqual(row["name"], "Qwen/Qwen3-0.6B")
         self.assertEqual(int(row["batch_size"]), 2)
+        for record in records:
+            info = record["benchmark"]["extra_info"]
+            self.assertEqual(info["batch_size"], 2)
+            self.assertEqual(info["phase"], mode)
+            self.assertEqual(info["prompt_length"], 7)
+            self.assertEqual(info["decode_length"], 3 if mode == "decode" else 0)
         self.assertGreater(float(row["eager_latency"]), 0)
         tokens_column = "input" if mode == "prefill" else "output"
         tokens = 7 if mode == "prefill" else 3
@@ -832,8 +855,9 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
     @parametrize("mode", ("reduce-overhead", "max-autotune"))
     def test_tp_rejects_cudagraph_compile_modes(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._tp_args("--inductor")
+        args = self._tp_args()
         args.backend = None
+        args.inductor = True
         args.devices = ["cuda"]
         args.inductor_compile_mode = mode
         args.inductor_config = ["triton.cudagraphs=False"]
@@ -1696,13 +1720,14 @@ class TestTensorParallelResults(TestCase):
             self.assertEqual(float(rows["passed"]["speedup"]), 1.0)
 
     @parametrize("mode", ("prefill", "decode"))
-    def test_tp_json_result_identity_and_metrics(self, mode):
+    @parametrize("tp_size", (1, 2))
+    def test_json_result_identity_and_metrics(self, mode, tp_size):
         args = common.parse_args(
             [
                 "--performance",
                 "--inference",
                 "--float32",
-                "--tp-size=2",
+                f"--tp-size={tp_size}",
                 f"--hf-inference-mode={mode}",
             ]
         )
@@ -1713,19 +1738,31 @@ class TestTensorParallelResults(TestCase):
             "dynamo_peak_mem_per_rank": "0.500;1.500",
         }
         decode_length = 128 if mode == "decode" else 0
+        metadata = {
+            "batch_size": 4,
+            "phase": mode,
+            "prompt_length": 1000,
+            "decode_length": decode_length,
+        }
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict(vars(common)),
         ):
-            common.set_current_metadata(args)
+            common.set_current_metadata(args, model_metadata=metadata)
+            # Accuracy fallback can enable cosine comparison after model loading.
+            args.cosine = True
             common.current_name = "Qwen/Qwen3-0.6B"
             common.current_device = "cuda"
             common.current_batch_size = 4
             filename = os.path.join(tmp, "results.csv")
-            identity = ["cuda", common.current_name, 4, mode, 2, 1000, decode_length]
+            headers = ["dev", "name", "batch_size"]
+            identity = ["cuda", common.current_name, 4]
+            if tp_size > 1:
+                headers += common.TP_IDENTITY_HEADERS
+                identity += [mode, tp_size, 1000, decode_length]
             common.output_json(
                 filename,
-                ["dev", "name", "batch_size", *common.TP_IDENTITY_HEADERS, *metrics],
+                [*headers, *metrics],
                 [*identity, *metrics.values()],
             )
             with open(os.path.join(tmp, "results.json")) as f:
@@ -1737,9 +1774,13 @@ class TestTensorParallelResults(TestCase):
             self.assertEqual(record["benchmark"]["dtype"], "float32")
             info = record["benchmark"]["extra_info"]
             self.assertEqual(info["device"], "cuda")
+            self.assertTrue(info["cosine"])
             self.assertEqual(info["batch_size"], 4)
             self.assertEqual(info["phase"], mode)
-            self.assertEqual(info["tp_size"], 2)
+            if tp_size > 1:
+                self.assertEqual(info["tp_size"], tp_size)
+            else:
+                self.assertNotIn("tp_size", info)
             self.assertEqual(info["prompt_length"], 1000)
             self.assertEqual(info["decode_length"], decode_length)
             metric = record["metric"]
