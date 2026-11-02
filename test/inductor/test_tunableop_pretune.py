@@ -697,9 +697,44 @@ class TestTunableOpPretune(TestCase):
         retried = {b.input_tensor_meta[0].sizes[0] for b in second}
         self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
+    @parametrize("tunableop_on", (True, False))
+    def test_autotune_local_cache_is_bypassed_when_enabled(self, tunableop_on):
+        # Tuning and borrow validation both happen inside benchmark(); a cached
+        # timing skips it, so neither runs. The mode is in neither the choice
+        # hash nor the benchmark cache key, so without this a plain run's
+        # timing is served to a tune compile, and the reverse.
+        from torch._inductor.codecache import PersistentCache
+
+        s = sympy.Symbol(f"s_cache_{tunableop_on}", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.hash_key = lambda: "fake-choice"
+        with mock.patch.object(
+            PersistentCache, "get_local_cache", return_value={}
+        ) as local_cache:
+            with mock.patch(
+                "torch._inductor.tunableop.is_enabled", return_value=tunableop_on
+            ):
+                PersistentCache().lookup(
+                    [winner], "mm", "inputs", lambda cs: {c: 1.0 for c in cs}
+                )
+        self.assertEqual(local_cache.called, not tunableop_on)
+
+    def test_routing_is_wider_than_the_ladder(self):
+        # Two sets, not one: routing contains a hipBLASLt fault in the worker
+        # and is worth doing for every tunable GEMM, while the ladder rebuilds
+        # metas and cannot do that safely for bias_addmm. Pinned here because
+        # the gates read different globals -- one set shadowing the other is
+        # silent, and test_bias_addmm_is_skipped below does not catch it (the
+        # K-dim guard rejects that fixture first, whatever the set says).
+        self.assertTrue(tunableop.is_tunableop_gemm("bias_addmm"))
+        self.assertNotIn("bias_addmm", tunableop._TUNABLEOP_LADDER_CHOICES)
+        self.assertLess(
+            tunableop._TUNABLEOP_LADDER_CHOICES, tunableop._TUNABLEOP_ROUTING_CHOICES
+        )
+
     def test_bias_addmm_is_skipped(self):
         # bias_addmm rewrites its own bias before dispatching, so it is absent
-        # from _TUNABLEOP_GEMM_CHOICES and never reaches the density guard.
+        # from _TUNABLEOP_LADDER_CHOICES and never reaches the density guard.
         s = sympy.Symbol("s_biasaddmm", positive=True, integer=True)
         m, k, n = s, 256, 512
         winner = _FakeWinner(

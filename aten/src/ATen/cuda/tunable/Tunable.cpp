@@ -203,10 +203,10 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
 
 ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     const std::string& params_signature) {
-  // No runtime-flag gate here. TunableOp dispatch resolves shapes through
-  // Lookup and never reaches this, so calling it is itself the opt-in; the
-  // reuse pass is the only caller and already decides whether borrowing
-  // applies. The env kill switch is honoured regardless of the caller.
+  // No runtime-flag gate here: calling it is the opt-in. Dispatch reaches this
+  // only with tuning disabled, no exact match, and IsNearestMatchEnabled() set
+  // -- which is normally the reuse pass, since borrowing costs a benchmark.
+  // The env kill switch is honoured regardless of the caller.
   if (NearestMatchDisabledByEnv()) {
     return ResultEntry::Null();
   }
@@ -356,6 +356,21 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
+}
+
+void TuningResultsManager::CacheBorrowedInMemory(const std::string& op_signature,
+    const std::string& params_signature,
+    ResultEntry entry) {
+  // Same kill switch as RecordBorrowed, applied here rather than at the call
+  // site so it holds for every caller. Skipping only the file write would
+  // leave the verdict in results_, where get_results() reports it and a later
+  // write_file() persists it -- the switch would not be a switch.
+  if (RecordBorrowedDisabledByEnv()) {
+    return;
+  }
+  std::scoped_lock l{lock_};
+  auto& km = results_[op_signature];
+  AddImpl(op_signature, params_signature, std::move(entry), km);
 }
 
 void TuningResultsManager::RecordBorrowed(const std::string& op_signature,

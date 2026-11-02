@@ -268,10 +268,11 @@ class TunableOp {
             // results file that does not carry these entries.
             mgr.RecordBorrowed(op_sig, concrete_sig, result);
           } else {
-            // Cache the verdict in memory only: Add() does not reach the file
-            // with tuning off and record-borrowed off, so later calls in this
-            // process skip the re-benchmark without persisting anything.
-            mgr.Add(op_sig, concrete_sig, result);
+            // Remember it for this process so the comparison is not repeated,
+            // without persisting. Not Add(): results_ is reachable from
+            // get_results() and write_file(), so this has to honour the
+            // record-borrowed kill switch, which CacheBorrowedInMemory does.
+            mgr.CacheBorrowedInMemory(op_sig, concrete_sig, result);
           }
           return result;
         }
@@ -280,7 +281,19 @@ class TunableOp {
       // donor of either kind (nearest or wildcard) is a miss rather than a
       // reason to return an unvalidated wildcard hint.
       if (ctx->IsNearestMatchEnabled()) {
-        return ResultEntry::Default();
+        // Record the verdict, the same way a validated borrow is recorded.
+        // Without it every later call repeats LookupNearest, which copies the
+        // kernel map under lock_ and re-parses every candidate signature. The
+        // reuse pass leaves nearest match on after a successful warm-up, so
+        // that scan would land inside the measured call -- the compile-time
+        // cost the warm/measure split exists to keep out of the measurement.
+        auto no_donor = ResultEntry::Default();
+        if (ctx->IsRecordBorrowedEnabled()) {
+          mgr.RecordBorrowed(op_sig, concrete_sig, no_donor);
+        } else {
+          mgr.CacheBorrowedInMemory(op_sig, concrete_sig, no_donor);
+        }
+        return no_donor;
       }
       if (ctx->IsWildcardFallbackEnabled()) {
         return mgr.LookupWildcardFallback(op_sig, concrete_sig);

@@ -133,36 +133,16 @@ def is_enabled() -> bool:
 
 
 def is_tunableop_gemm(choice_name: str) -> bool:
-    """Whether an extern choice is a GEMM TunableOp tunes.
+    """Whether an extern choice may be routed to the TunableOp worker.
 
-    Single source of truth shared by the ladder (maybe_range_pretune) and the
-    worker routing (ExternKernelCaller.benchmark): routing an op the ladder
-    never tunes would benchmark it in the worker for no coverage, and in tune
-    mode any GEMM an unrelated kernel calls internally would pollute the
-    results file. Matched by choice name string so a double import of the
-    kernel modules cannot break the match.
+    Routing is the wider of the two sets: it exists to contain a hipBLASLt
+    abort or hang in the worker rather than the compile, which is worth doing
+    for every GEMM TunableOp can tune. The ladder set is narrower -- see
+    _TUNABLEOP_LADDER_CHOICES -- because rebuilding metas is not safe for all
+    of them. Matched by choice name string so a double import of the kernel
+    modules cannot break the match.
     """
-    return choice_name in _TUNABLEOP_GEMM_CHOICES
-
-
-# ExternKernelChoice names the ladder and worker routing cover. _int_mm /
-# sparse semi-structured variants are not hipBLASLt-tunable.
-_TUNABLEOP_GEMM_CHOICES = frozenset(
-    OrderedSet(
-        [
-            "mm",
-            "mm_dtype",
-            "addmm",
-            "addmm_dtype",
-            "bmm",
-            "bmm_dtype",
-            "baddbmm",
-            "bias_addmm",
-            "_scaled_mm",
-            "_scaled_mm_v2",
-        ]
-    )
-)
+    return choice_name in _TUNABLEOP_ROUTING_CHOICES
 
 
 class BenchmarkJob:
@@ -650,7 +630,7 @@ _TUNABLEOP_MIN_BUCKET_BUDGET = 60.0
 # ExternKernelChoice names the ladder covers. bias_addmm rewrites its own bias
 # (inp[0]) first, so the rebuilt meta is not what aten gets; addmm_dtype is
 # ROCm-only, hard-erroring on the CUDA cublasLt path (cuda/Blas.cpp).
-_TUNABLEOP_GEMM_CHOICES = frozenset(
+_TUNABLEOP_LADDER_CHOICES = frozenset(
     [
         "mm",
         "mm_dtype",
@@ -663,6 +643,12 @@ _TUNABLEOP_GEMM_CHOICES = frozenset(
         *(["addmm_dtype"] if torch.version.hip is not None else []),
     ]
 )
+
+# Routing adds bias_addmm: the ladder cannot rebuild its meta, but running it
+# in the worker still keeps a hipBLASLt fault out of the compile. addmm_dtype
+# stays excluded off ROCm for the same reason it is above -- routing it would
+# run it with TunableOp enabled, which is what hard-errors there.
+_TUNABLEOP_ROUTING_CHOICES = _TUNABLEOP_LADDER_CHOICES | frozenset(["bias_addmm"])
 
 # Smallest dim worth its own tuning job. Applied to the dim, not to the symbol:
 # for an expression dim the smallest symbol values already yield substantial GEMMs.
@@ -827,7 +813,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if winner.layout.device.type != "cuda":
         return
     choice_name = winner.choice.name
-    if not is_tunableop_gemm(choice_name):
+    if choice_name not in _TUNABLEOP_LADDER_CHOICES:
         return
     if winner.bmreq is None:
         return
