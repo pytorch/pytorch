@@ -13,6 +13,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -77,6 +78,14 @@ Tensor toNonOptPrimal(const std::optional<Tensor>& t) {
 void update_wrapped_number(Tensor& input, Tensor& output) {
   if (input.unsafeGetTensorImpl()->is_wrapped_number()) {
     output.unsafeGetTensorImpl()->set_wrapped_number(true);
+    // A zero tangent created inside a torch.func transform is wrapped. Keep
+    // its scalar promotion semantics when the transform unwraps the tangent.
+    auto* wrapper = at::functorch::maybeGetTensorWrapper(output);
+    while (wrapper) {
+      const auto& value = wrapper->value();
+      value.unsafeGetTensorImpl()->set_wrapped_number(true);
+      wrapper = at::functorch::maybeGetTensorWrapper(value);
+    }
   }
 }
 
