@@ -59,8 +59,9 @@ if IS_WINDOWS and IS_CI:
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
-# Launching the 256-row decode kernel can need GBs of free device memory, and fails
-# with CUDA_ERROR_OUT_OF_MEMORY on MIG slices such as an A100 1g.5gb.
+# Launching the 256-row decode kernel can need GBs of free device memory (it spills,
+# https://github.com/pytorch/pytorch/issues/203041), and fails with
+# CUDA_ERROR_OUT_OF_MEMORY on MIG slices such as an A100 1g.5gb.
 skip_on_mig = unittest.skipIf(IS_MIG, "BLOCK_M=256 launch OOMs on MIG slices")
 
 
