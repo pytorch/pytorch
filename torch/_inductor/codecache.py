@@ -2999,20 +2999,13 @@ class AotCodeCompiler:
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
                 return consts_asm, "weights.S"
 
-            # This is a usably fast way to convert binary to comma separated text
-            # with 16 bytes per line. 
+            # This is a usably fast and iterative way to convert binary
+            # to comma separated text with 16 bytes per line. 
+            # for inclusion in a C header file.
+            # n.b.. this file can be multiple megabytes, so don't replace this
+            # with anything that is slow or uses lots of memory copy operations.
             def _quick_format_array_to_string(data: bytes | bytearray) -> str:
-                all_lines = []
-                count_bytes = 0
-                while count_bytes < len(data):
-                    if count_bytes+16<len(data):
-                        line = struct.unpack('16B',data[count_bytes:count_bytes+16])
-                        count_bytes+=16
-                    else:
-                        line = struct.unpack(f'{len(data)-count_bytes}B',data[count_bytes:])
-                        count_bytes=len(data)
-                    all_lines.append(str(line).replace(" ", "").strip("()")+",\t\n")
-                return "".join(all_lines)
+                return ",\n".join(str(batch).strip("()") for batch in itertools.batched(data,16))
 
             
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
