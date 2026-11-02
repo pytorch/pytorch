@@ -21,8 +21,7 @@ def _flydsl_mxfp8_wgrad(
     output, mat1, mat2, scale_a, scale_b, offs, stream, compile_only=False
 ):
     m = mat1.shape[1]
-    # With a dynamic token dim the lowering cannot always prove these, and the
-    # kernel would read past the end of a shorter operand without them.
+    # The lowering matched M only by hint; a shorter operand would be overread.
     if (
         mat2.shape[0] != m
         or tuple(scale_a.shape) != (mat1.shape[0], m // 32)
@@ -34,8 +33,7 @@ def _flydsl_mxfp8_wgrad(
             f"{tuple(scale_a.shape)}, scale_b {tuple(scale_b.shape)}"
         )
     if m == 0:
-        # No routed tokens: every group's gradient is zero. Skip the launch
-        # rather than hand FlyDSL zero-element operands.
+        # No routed tokens: zero gradients, without zero-element FlyDSL operands.
         return output.zero_()
     sc_pair = m % 256 == 0
     param = _mxfp8_wgrad_params.get(sc_pair)
@@ -48,29 +46,18 @@ def _flydsl_mxfp8_wgrad(
                 )
                 _mxfp8_wgrad_params[sc_pair] = param
 
-    # mat2 is [M, K] with column-major storage. Its transpose is therefore the
-    # row-major [K, M] view consumed by the kernel, without a copy.
+    # mat2 is column-major [M, K]: its transpose is the row-major [K, M] view.
     configure_flydsl_cache_dir()
     launch_mxfp8_wgrad_gfx950(
-        output,
-        mat1,
-        mat2.permute(1, 0),
-        scale_a,
-        scale_b,
-        offs,
-        param,
-        stream,
-        tensor_arg=flydsl_tensor_arg,
-        compile_only=compile_only,
+        output, mat1, mat2.permute(1, 0), scale_a, scale_b, offs, param, stream,
+        tensor_arg=flydsl_tensor_arg, compile_only=compile_only,
     )
     return output
 
 
 {{def_kernel("mat1", "mat2", "scale_a", "scale_b", "offs")}}
     output = {{get_output()}}
-    return _flydsl_mxfp8_wgrad(
-        output, mat1, mat2, scale_a, scale_b, offs, stream
-    )
+    return _flydsl_mxfp8_wgrad(output, mat1, mat2, scale_a, scale_b, offs, stream)
 
 
 def {{kernel_name}}_precompile(

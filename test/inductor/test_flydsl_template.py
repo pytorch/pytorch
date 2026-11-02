@@ -2108,15 +2108,12 @@ class TestFlyDSLTemplate(TestCase):
         ),
     )
     def test_flydsl_mxfp8_wgrad_gate(self, case):
-        """M (the contraction, i.e. the token count) may be dynamic; N, K, G
-        may not. Cross-operand M relations are matched by hint here and
-        enforced by the template at launch."""
+        """M (the token count) may be dynamic, matched across operands by hint."""
         from torch._inductor.ir import FlexibleLayout
         from torch._inductor.kernel import mm_grouped
 
         n, k, g = 256, 384, 4
         m = 512
-        # Token-dim symbols and the hints dynamo would give them for M = 512.
         s0, s1, s2 = (
             sympy.Symbol(f"s{i}", positive=True, integer=True) for i in range(3)
         )
@@ -2129,7 +2126,6 @@ class TestFlyDSLTemplate(TestCase):
         if case == "dynamic_m_separate_symbols":
             m_b, m_sa, m_sb = s1, s1 // 32, s1 // 32
         elif case == "dynamic_m_independent_scale_symbols":
-            # What dynamo produces: the scale dim is its own symbol, hinting M/32.
             m_sa = m_sb = s2
         elif case == "dynamic_m_mismatched_b_rows":
             m_b = s0 + 128
@@ -2139,11 +2135,9 @@ class TestFlyDSLTemplate(TestCase):
             m_a = m_b = m + 32
             m_sa = m_sb = (m + 32) // 32
         if case == "static_sympy_sizes":
-            # Real IR sizes are sympy Integers, not ints.
             n, k, g = sympy.Integer(n), sympy.Integer(k), sympy.Integer(g)
 
         def node(size, stride, dtype, offset=0):
-            # A computed input: its layout is still flexible when the gate runs.
             flexible = FlexibleLayout(torch.device("cuda", 1), dtype, size)
             return SimpleNamespace(
                 get_size=lambda: size,
@@ -2162,7 +2156,6 @@ class TestFlyDSLTemplate(TestCase):
         scale_a = node([n, m_sa], [m_sa, 1], e8m0)
         scale_b = node([k, m_sb], [m_sb, 1], e8m0)
         offs = node([g], [2 if case == "offs_strided" else 1], torch.int32)
-        # Not the current device, so the XCD count has to come from the layout.
         device = torch.device("cuda", 1)
         out_stride = [n * k, k, 1]
         layout = SimpleNamespace(
@@ -2210,13 +2203,10 @@ class TestFlyDSLTemplate(TestCase):
             "dynamic_m_independent_scale_symbols",
         )
         if case in accepted:
-            # A 128-CU partition has four of gfx950's 32-CU XCDs.
             self.assertEqual(
                 kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": 4}]
             )
             props.assert_called_once_with(device.index)
-            # The strides the kernel relies on are pinned exactly (no padding)
-            # once it is chosen.
             for operand in operands:
                 operand.freeze_layout_with_exact_strides.assert_called_once_with(
                     operand.get_stride()
@@ -2227,8 +2217,6 @@ class TestFlyDSLTemplate(TestCase):
                 operand.freeze_layout_with_exact_strides.assert_not_called()
 
     def test_flydsl_mxfp8_wgrad_launch_checks(self):
-        """The launcher refuses an int32-overflowing contraction and any
-        target but gfx950, before anything is compiled or dispatched."""
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
         import importlib
@@ -2241,7 +2229,6 @@ class TestFlyDSLTemplate(TestCase):
         param = module.make_mxfp8_wgrad_param(n, k, g, sc_pair=True)
 
         def operands(m):
-            # Meta tensors: shapes only, nothing is allocated.
             fp8, e8m0 = torch.float8_e4m3fn, torch.float8_e8m0fnu
             return (
                 torch.empty(g, n, k, dtype=torch.bfloat16, device="meta"),
@@ -2253,7 +2240,6 @@ class TestFlyDSLTemplate(TestCase):
             )
 
         with mock.patch.object(module, "run_cached_flydsl") as run:
-            # DeepSeek-V3 scale: ~1.1M tokens x N=7168 is past int32.
             with self.assertRaisesRegex(NotImplementedError, "int32"):
                 module.launch_mxfp8_wgrad_gfx950(*operands(1_108_736), param, stream=0)
             run.assert_not_called()
@@ -2268,8 +2254,6 @@ class TestFlyDSLTemplate(TestCase):
             compile_.assert_not_called()
 
     def test_flydsl_mxfp8_wgrad_template_rejects_mismatched_operands(self):
-        """With a dynamic token dim the lowering only matches hints, so the
-        template checks the operands agree on M before launching."""
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
         import jinja2
@@ -2304,7 +2288,6 @@ class TestFlyDSLTemplate(TestCase):
             with self.assertRaisesRegex(ValueError, "disagree on the contraction"):
                 namespace["kernel_main"](**args, output=output, stream=0)
         launch.assert_not_called()
-        # No routed tokens: zeros, without handing FlyDSL empty operands.
         output.fill_(1.0)
         empty = (
             torch.empty(n, 0),
@@ -2334,7 +2317,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(large.order, "idsel")
         self.assertEqual((large.xcd_count, large.group_r, large.group_c), (8, 2, 2))
 
-        # A 128-CU partition has 4 XCDs; the swizzle uses what it is given.
         partitioned = make_mxfp8_wgrad_param(1408, 2048, 8, sc_pair=True, num_xcd=4)
         self.assertEqual(partitioned.xcd_count, 4)
 
@@ -2381,8 +2363,6 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=False,
     )
     def test_flydsl_mxfp8_wgrad_offs_view_e2e(self):
-        """Offsets that arrive as a view (here, group ends sliced off a [0, ...]
-        prefix-sum) are validated and passed as the realized node."""
         from torch._inductor.utils import run_and_get_code
 
         if not flydsl_utils.runtime_available():
@@ -2395,7 +2375,6 @@ class TestFlyDSLTemplate(TestCase):
         )
 
         def fn(a, b, a_scale, b_scale, offs):
-            # Computed in the graph and then sliced: the gate sees a view node.
             bounds = torch.cat([offs.new_zeros(1), offs])
             return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, bounds[1:])
 
@@ -2413,8 +2392,6 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=False,
     )
     def test_flydsl_mxfp8_wgrad_dynamic_m_e2e(self):
-        """The token count is the wgrad contraction. As it changes, automatic
-        dynamic shapes recompile once and one FlyDSL graph serves the rest."""
         from torch._inductor.graph import GraphLowering
 
         if not flydsl_utils.runtime_available():
@@ -2430,7 +2407,6 @@ class TestFlyDSLTemplate(TestCase):
         compiled = torch.compile(fn, backend="inductor")
         n, k = 256, 384
         token_counts = ([128, 256, 0, 384], [256, 128, 512, 128], [384, 0, 256, 256])
-        # run_and_get_code would reset dynamo between calls; capture directly.
         with mock.patch.object(GraphLowering, "save_output_code", codes.append):
             for step, group_sizes in enumerate(token_counts):
                 a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
@@ -2439,7 +2415,6 @@ class TestFlyDSLTemplate(TestCase):
                 with torch._dynamo.config.patch(error_on_recompile=step == 2):
                     result = compiled(a, b, a_scale, b_scale, offs)
                 self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
-        # One static graph, then one with a symbolic token dim, both FlyDSL.
         self.assertEqual(len(codes), 2)
         self.assertIn("mxfp8_wgrad_gfx950", codes[1])
 
@@ -2452,9 +2427,7 @@ class TestFlyDSLTemplate(TestCase):
     )
     @parametrize("n,k", ((256, 384), (1408, 2048)))
     def test_flydsl_mxfp8_wgrad_nan_stays_in_its_group(self, n, k):
-        """Blocks walk 256-aligned windows, so they also read neighbouring
-        groups' tokens and the padding past offs[-1]. A NaN there must not
-        reach any other group's output, as eager slicing guarantees."""
+        """NaN in neighbouring groups' tokens or in padding stays out."""
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
@@ -2489,10 +2462,7 @@ class TestFlyDSLTemplate(TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     def test_flydsl_mxfp8_wgrad_traps_on_invalid_offsets(self):
-        """Group offsets live on the device, so the kernel validates them: a
-        bound that splits a 32-element MX scale block, or one past M, aborts
-        the kernel instead of producing silently wrong gradients. The trap
-        takes the process down, so each case runs in its own subprocess."""
+        """Bad device offsets trap; the trap kills the process, so subprocess."""
         import subprocess
         import sys
 
@@ -2542,8 +2512,6 @@ print("completed")
 
     @classmethod
     def _make_mxfp8_wgrad_inputs(cls, group_sizes, n, k, device="cuda"):
-        """A[N, M] and B[M, K] (M contiguous) with groups along M, and the
-        per-group f32 dequantized reference out[G, N, K]."""
         offs = torch.tensor(group_sizes, device=device, dtype=torch.int32).cumsum(0)
         offs = offs.to(torch.int32)
         m = sum(group_sizes)

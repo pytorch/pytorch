@@ -760,17 +760,13 @@ def _flydsl_grouped_shape(
     return m_hint, n_static, k_static, g_static
 
 
-# FlyDSL's CABI packs each operand's shape as int32, and the MXFP8 kernels pass
-# operands as 1-D views, so this bounds an operand's element count (it mirrors
-# _INT32_MAX in the vendored kernels, which import FlyDSL).
+# FlyDSL packs operand shapes as int32 and the MXFP8 kernels pass 1-D views;
+# mirrors _INT32_MAX in the vendored kernels, which import FlyDSL.
 _FLYDSL_INT32_MAX = (1 << 31) - 1
 
 
 def _flydsl_device_cu_count(device: torch.device) -> int:
-    """CU count of the device a FlyDSL kernel launches on.
-
-    An index-less device resolves to 0, as in use_flydsl_gemm_template.
-    """
+    # An index-less device resolves to 0, as in use_flydsl_gemm_template.
     return torch.cuda.get_device_properties(
         device.index if device.index is not None else 0
     ).multi_processor_count
@@ -918,7 +914,8 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # The kernel addresses every operand through a 32-bit buffer descriptor.
     # `_row_windows` splits the token dim so the M-dependent operands always
     # fit, but the weight and its scales are not split and must fit outright.
-    # The tile is sized against the grid cap of the device the kernel launches on.
+    # The tile is sized against the grid cap of the device the kernel launches
+    # on; resolve an index-less device the way use_flydsl_gemm_template does.
     num_cus = _flydsl_device_cu_count(layout.device)
 
     weight_spans = (
@@ -956,16 +953,10 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     layout: Layout,
     is_nonzero: bool,
 ) -> list[dict[str, object]]:
-    """Return the FlyDSL config for a 2D x 2D grouped MXFP8 GEMM.
+    """FlyDSL config for the 2D x 2D (wgrad) form: groups split the contraction M.
 
-    Offsets partition the shared contraction dimension, so each group computes
-    ``mat_a[:, start:end] @ mat_b[start:end, :]``. This is the weight-gradient
-    form used by MXFP8 MoE training.
-
-    Group offsets must be multiples of 32, the MX scale block along M, as the
-    per-group MXFP8 cast produces them: a scale block may not straddle two
-    groups. They live on the device, so the kernel validates them itself and
-    traps on a violation, as MSLK's CUDA path asserts.
+    Group offsets must be multiples of 32 (the MX scale block); they are on the
+    device, so the kernel checks them and traps on a violation, as MSLK asserts.
     """
     if not is_nonzero or not use_flydsl_gemm_template(layout) or offs is None:
         return []
@@ -994,10 +985,9 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     g = statically_known(offs.get_size()[0])
     if n is None or k is None or g is None:
         return []
-    # M is the contraction -- the routed token count -- so it is dynamic in MoE
-    # training, and dynamo gives each operand its own symbol for it. It is
-    # never compiled in: the kernel reads it at launch and the template checks
-    # that the operands agree, so only the hints have to match here.
+    # M (the routed token count) is dynamic and may be a separate symbol per
+    # operand. The kernel reads it at launch and the template checks that the
+    # operands agree, so only the hints have to match here.
     m_a, m_b = mat_a.get_size()[1], mat_b.get_size()[0]
     m = sizevars.optimization_hint(m_a)
     if sizevars.optimization_hint(m_b) != m:
@@ -1012,8 +1002,7 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
             stride[0], size[1]
         ) and sizevars.statically_known_equals(stride[1], 1)
 
-    # A is [N, M] row-major; B is [M, K] with M contiguous, i.e. a row-major
-    # [K, M] buffer; each scale is a row-major [rows, M // 32] plane.
+    # A is row-major [N, M]; B is [M, K] with M contiguous; scales row-major.
     if not is_row_major(mat_a):
         return []
     if not (
@@ -1041,20 +1030,17 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         for node in operands
     ):
         return []
-    # Operands go over as 1-D views whose element counts FlyDSL packs as int32.
-    # The launcher re-checks the M-dependent ones against the real M.
+    # The launcher re-checks the M-dependent operands against the real M.
     if max(n * m, k * m, g * n * k) > _FLYDSL_INT32_MAX:
         return []
 
-    # The kernel reads every operand with the strides checked above, and
-    # FlyDSLTemplate does not freeze its inputs, so pin a flexible layout to
-    # exactly those strides; a plain freeze could pad them.
+    # FlyDSLTemplate does not freeze its inputs; pin the strides checked above
+    # exactly (a plain freeze could pad them).
     for node in operands:
         if isinstance(node.get_layout(), FlexibleLayout):
             node.freeze_layout_with_exact_strides(node.get_stride())
 
-    # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs, and the
-    # block swizzle should spread work over the ones this device actually has.
+    # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs.
     num_xcd = max(1, _flydsl_device_cu_count(layout.device) // 32)
     return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": num_xcd}]
 
@@ -1094,12 +1080,14 @@ def tuned_scaled_grouped_mm_v2(
 ) -> TensorBox:
     """Auto-tuning for the _scaled_grouped_mm_v2() operator.
 
-    MXFP8 x MXFP8 (BlockWise1x32 e8m0 scales, NO_SWIZZLE) on gfx950 is served
-    by FlyDSL for both the 2D x 3D forward form and the 2D x 2D weight-gradient
-    form. These combinations have no ATen kernel on ROCm -- the MSLK grouped
-    path is CUDA-only and `_mx8_mx8_bf16_grouped_mm_mslk` raises NOT_IMPLEMENTED
-    there -- so no ATen choice is offered. Everything else falls back to the
-    eager op, which is what happened before this lowering existed.
+    Only one combination has a lowering here: MXFP8 x MXFP8 (BlockWise1x32
+    e8m0 scales, NO_SWIZZLE) on gfx950, served by the vendored FlyDSL ragged
+    grouped GEMM and wgrad. That combination has no ATen kernel on ROCm at all -- the
+    MSLK grouped path is CUDA-only and `_mx8_mx8_bf16_grouped_mm_mslk` raises
+    NOT_IMPLEMENTED there -- so the FlyDSL template is not competing with an
+    extern choice, it is the only one, and no ATen choice is offered for it.
+    Everything else falls back to the eager op, which is what happened before
+    this lowering existed.
     """
 
     def _is_mxfp8_recipe(recipe: list[int]) -> bool:
@@ -1125,7 +1113,6 @@ def tuned_scaled_grouped_mm_v2(
         )
         _, is_nonzero = _is_static_problem(mm_layout)
         scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
-        # The gates validate the same offsets node the kernel is handed.
         offs_real = realize_inputs(offs)
         input_nodes: list[Any] = [
             mat_a,

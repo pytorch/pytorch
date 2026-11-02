@@ -2,22 +2,11 @@
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 """Ragged MXFP8 weight-gradient grouped GEMM for gfx950.
 
-The inputs are row-major ``A[N, M]`` and ``B[K, M]`` views produced by the
-32x1 MXFP8 cast. Device-resident offsets partition the contracting dimension
-``M`` and the kernel writes ``out[G, N, K]``.
-
-Each workgroup owns one output tile and walks the full contraction interval for
-one group. Group sizes and the operand row stride stay runtime values, so routed
-token counts do not become FlyDSL compile keys. The contraction window is
-rounded outward to 256 elements for cooperative scale loads. Tokens in the
-window but outside the group (neighbouring groups, and padding past the last
-offset) are zero-filled as they are loaded and their scales are zeroed, so
-they contribute exactly nothing, NaN or Inf included; empty groups write
-zeros.
-
-The body uses four waves, an eight-buffer LDS pipeline, AGPR accumulators, and
-device-side group scheduling. Large grids use constant-index offset loads and
-XCD-aware rectangular tile rasterization.
+``out[g] = A[:, offs[g-1]:offs[g]] @ B[:, offs[g-1]:offs[g]].T`` for row-major
+``A[N, M]`` and ``B[K, M]`` from the 32x1 MXFP8 cast, with device-resident
+``offs``. Each workgroup owns one output tile of one group and walks the group's
+tokens rounded out to a 256-token window; window tokens outside the group are
+zero-filled at load, so they contribute nothing, NaN or Inf included.
 """
 
 import dataclasses
@@ -53,11 +42,8 @@ SCALE_BLOCK = 32
 WINDOW_ALIGN = 256
 LPT_MAX_E = 32
 ORDER_MODES = ("id", "idsel", "lpt")
-_INTERLEAVE = True
 _IDSEL_MIN_BLOCKS = 1024
-# XCDs on a full MI350X/MI355X; partitioned parts expose fewer, so callers that
-# know the device pass its count to make_mxfp8_wgrad_param.
-_XCD_COUNT = 8
+_XCD_COUNT = 8  # full MI355X; partitioned parts pass their count as num_xcd
 _SUPERTILE_TARGET = 4
 
 
@@ -66,7 +52,6 @@ def _divisors(value: int) -> list[int]:
 
 
 def _pick_supertile(n_r: int, n_c: int) -> tuple[int, int]:
-    """Pick the largest rectangular tile no bigger than the measured target."""
     best_score = (0, 0)
     best_r, best_c = 1, 1
     for group_r in _divisors(n_r):
@@ -82,7 +67,6 @@ def _pick_supertile(n_r: int, n_c: int) -> tuple[int, int]:
 
 
 def _swizzle_params(n: int, k: int, num_xcd: int) -> tuple[int, int, int]:
-    """Return the XCD gather count and rectangular output-tile dimensions."""
     n_r = ceildiv(n, BLOCK_R)
     n_c = ceildiv(k, BLOCK_C)
     group_r, group_c = _pick_supertile(n_r, n_c)
@@ -91,10 +75,8 @@ def _swizzle_params(n: int, k: int, num_xcd: int) -> tuple[int, int, int]:
 
 
 def _mfma_scale_agpr(a, b, sa, sb, acc):
-    """fp8 16x16x128 scaled MFMA, accumulator pinned in AGPR (=a,...,0) so the
-    f32x4 acc accumulates in place and the compiler does not shuffle it
-    between AGPR slots. a/b are i32x8 (K=128 fp8); sa/sb are broadcast-i32
-    E8M0 scales. cbsz:0 blgp:0, no op_sel (fp8)."""
+    # The accumulator is pinned in AGPRs and tied to the output, so it
+    # accumulates in place instead of being shuffled between slots.
     asm = "v_mfma_scale_f32_16x16x128_f8f6f4 $0, $1, $2, $0, $3, $4 cbsz:0 blgp:0"
     return _llvm.inline_asm(
         Vec.make_type(4, fx.Float32),
@@ -111,23 +93,16 @@ def _mfma_scale_agpr(a, b, sa, sb, acc):
     )
 
 
-# Any voffset at or past the descriptor's num_records reads as zero. Operands
-# are bounded to int32 elements, so this is out of range for all of them.
+# Past every operand's num_records (operands are int32-bounded): reads as zero.
 _OOB_VOFFSET = 0x7FFFFFFF
 
 
 class _WindowedG2S(G2SLoader):
-    """G2SLoader that zero-fills the 16-token chunks outside a group's tokens.
-
-    A block walks its group's contraction window rounded out to 256 tokens, so
-    the window's edges hold neighbouring groups' tokens (and, for the last
-    group, padding past offs[-1]). Their scales are zeroed, but e8m0 0x00 is
-    2**-127, not 0, so a NaN or Inf there would survive into this group's
-    output. Group bounds are multiples of 32, so each lane's 16-token chunk is
-    wholly inside or outside the group; an outside chunk's load is pointed out
-    of range, and the buffer range check writes zeros to LDS instead.
-    """
-
+    # Window-edge tokens belong to neighbouring groups or the padding past
+    # offs[-1]. Zeroing their e8m0 scale gives 2**-127, not 0, so NaN/Inf would
+    # survive. Group bounds are multiples of 32, so each lane's 16-token chunk
+    # is wholly inside or outside the group; an outside chunk is loaded from an
+    # out-of-range offset, which the buffer range check turns into zeros.
     def __init__(self, gl_src, gl_offsets, gl_cols, head, span, *args):
         super().__init__(gl_src, gl_offsets, *args)
         self.gl_cols = gl_cols
@@ -157,8 +132,7 @@ class _WindowedG2S(G2SLoader):
 
 
 def _global_swizzle_cols(lane_id, wave_id, n_rounds):
-    """The window column of each lane's 16-token chunk, per load round: the
-    column part of compute_global_swizzle(..., preshuffled=False)."""
+    # The column part of compute_global_swizzle(..., preshuffled=False).
     n_waves = fx.block_dim.x // 64
     cols = []
     for round in range_constexpr(n_rounds):
@@ -169,8 +143,7 @@ def _global_swizzle_cols(lane_id, wave_id, n_rounds):
 
 
 def _trap_if(bad):
-    """Abort the kernel (s_trap 2, as __builtin_trap) when wave-uniform `bad`
-    is nonzero. The branch is skipped on the normal path."""
+    # s_trap 2 (as __builtin_trap) when the wave-uniform `bad` is nonzero.
     _llvm.inline_asm(
         res=None,
         operands_=[arith._to_raw(bad)],
@@ -181,7 +154,6 @@ def _trap_if(bad):
 
 
 def _uniform(value):
-    """Place a value known to be wave-uniform in an SGPR."""
     return fx.Int32(rocdl.readfirstlane(res=T.i32, src=arith._to_raw(value)))
 
 
@@ -195,7 +167,6 @@ def _compile(
     group_r: int,
     group_c: int,
 ):
-    """Build a kernel keyed by output geometry, group count, and scale loading."""
     if order not in ORDER_MODES:
         raise AssertionError(f"unknown order {order!r}")
     ORDER = order
@@ -226,31 +197,27 @@ def _compile(
     N_ACCUMS = N_TILES_A * N_TILES_B
     N_LDS_ROUNDS = max(N_TILES_A, N_TILES_B)
 
-    # Pair loads require M_ROW % 256 == 0. Other 128-aligned rows use two
-    # dword loads; the choice is a compile key because it changes wait counts.
+    # Paired scale loads need M_ROW % 256 == 0, else two dword loads; a compile
+    # key because it changes the wait counts below.
     SC_PAIR = sc_pair
     N_SC_OPS = 4 if SC_PAIR else 8  # scale vm ops per unrolled body
     N_CHUNK = 8  # raw i32 carried per chunk (4 halves x 2 K-steps)
 
-    # These counts track the vector loads trailing each LDS fill. A count that
-    # is too large can expose an incomplete fill before the barrier.
+    # Vector loads trailing each LDS fill. Too large a count can expose an
+    # incomplete fill before the barrier.
     W1A = 2 * (N_TILES_A + N_TILES_B)
     W2A = 2 * (N_TILES_A + N_TILES_B) + N_SC_OPS
     W1B = 2 * (N_TILES_A + N_TILES_B) + N_SC_OPS
     W2B = 2 * (N_TILES_A + N_TILES_B)
 
-    LDS_BLOCK_R = BLOCK_R // 2  # 128: each wave-dim half owns 128 rows
+    LDS_BLOCK_R = BLOCK_R // 2  # each wave-dim half owns 128 rows
     LDS_BLOCK_C = BLOCK_C // 2
 
     a_lds_size = LDS_BLOCK_R * BLOCK_M
     b_lds_size = LDS_BLOCK_C * BLOCK_M
 
+    # Outside the traced kernel, so the order branch and offset loops unroll.
     def slot_to_group(offs_rsrc, slot):
-        """Map a dispatch slot to a group and its device-resident bounds.
-
-        This helper remains outside the traced kernel so the order branch and
-        fixed-length offset loops are resolved and unrolled at compile time.
-        """
         if ORDER == "id":
             # Clamp the discarded g=-1 read to the bounded offsets buffer.
             g = slot
@@ -329,13 +296,10 @@ def _compile(
         m_row: fx.Int32,
     ):
         F8_IR_t = fx.Float8E4M3FN.ir_type
-
-        # Runtime row stride. One e8m0 per 32 contracting elements, 4 packed
-        # per i32, so a row is m_row/128 i32 and m_row/32 bytes.
+        # One e8m0 per 32 tokens, 4 per i32: a scale row is m_row/128 i32.
         sc_i32_row = ArithValue(m_row) // fx.Int32(BLOCK_M)
         sc_e8_row = ArithValue(m_row) // fx.Int32(SCALE_BLOCK)
 
-        # -- Block -> (group, output tile). One block per (g, tile). --
         bid = ArithValue(fx.block_idx.x)
         slot = bid // fx.Int32(TILES_PER_GROUP)
         tile = bid % fx.Int32(TILES_PER_GROUP)
@@ -343,34 +307,28 @@ def _compile(
         r_base = row_tile * fx.Int32(BLOCK_R)
         c_base = col_tile * fx.Int32(BLOCK_C)
 
-        # -- Group bounds, read ON DEVICE (uniform s.buffer.load, no sync) --
         offs_rsrc = buffer_ops.create_buffer_resource(
             OFFS, max_size=False, num_records_bytes=E * 4
         )
-
         g, m_start, m_end = slot_to_group(offs_rsrc, slot)
-        # Validate the device-resident offsets as MSLK's CUDA path does: group
-        # bounds must be multiples of the 32-element MX scale block (a block
-        # cannot straddle two groups), non-decreasing, and within M. The host
-        # cannot check them without a sync; a violation would otherwise give
-        # silently wrong gradients.
+        # Trap unless bounds are multiples of the 32-token scale block (a block
+        # cannot straddle two groups), non-decreasing, and within M, like MSLK.
         one_i32, zero_c = fx.Int32(1), fx.Int32(0)
         misaligned = ((m_start | m_end) & fx.Int32(SCALE_BLOCK - 1)) != zero_c
         out_of_range = (m_end > ArithValue(m_row)) | (m_end < m_start)
         _trap_if(arith.select(misaligned | out_of_range, one_i32, zero_c))
 
-        # The window: base rounded DOWN to 256, so it starts on an even scale
-        # dword for the paired scale loads; length rounded UP to an even number
-        # of K-steps (the loop body does two, matching the LDS ping-pong) and
-        # at least 4 (two prologue steps plus the two drained at the end).
+        # Window base rounded down to 256 (an even scale dword for the paired
+        # loads); length rounded up to an even number of K-steps (two per loop
+        # body), at least 4 (two prologue steps plus two drained at the end).
         lo0 = (m_start // fx.Int32(WINDOW_ALIGN)) * fx.Int32(WINDOW_ALIGN)
         head = m_start - lo0  # 0..224, multiple of 32
-        span = m_end - lo0  # real elements from the window base
+        span = m_end - lo0
         k_need = (span + fx.Int32(BLOCK_M - 1)) // fx.Int32(BLOCK_M)
         k_even = ((k_need + fx.Int32(1)) // fx.Int32(2)) * fx.Int32(2)
         K_eff = arith.select(k_even < fx.Int32(4), fx.Int32(4), k_even)
-        N_ROLLED = K_eff - fx.Int32(2)  # even, >= 2: no constexpr peel needed
-        m_start_i32 = lo0 // fx.Int32(BLOCK_M)  # even (lo0 is 256-aligned)
+        N_ROLLED = K_eff - fx.Int32(2)
+        m_start_i32 = lo0 // fx.Int32(BLOCK_M)
 
         lds = fx.SharedAllocator().allocate(SharedStorage).peek()
         a_cur0, a_cur1 = lds.A_lds_cur_0, lds.A_lds_cur_1
@@ -386,12 +344,11 @@ def _compile(
         m_lane = lane_id % fx.Int32(16)
         k_grp = lane_id // fx.Int32(16)
         kshift = k_grp * fx.Int32(8)
-        kgrp32 = k_grp * fx.Int32(SCALE_BLOCK)  # this lane's sub-block offset
+        kgrp32 = k_grp * fx.Int32(SCALE_BLOCK)
         mask_ff = fx.Int32(0xFF)
         bcast = fx.Int32(0x01010101)
         zero_i32 = fx.Int32(0)
 
-        # Contraction (K-walk) global offsets; row stride = m_row, base = lo0.
         A0_gl = r_base * m_row + lo0
         A1_gl = (r_base + fx.Int32(LDS_BLOCK_R)) * m_row + lo0
         B0_gl = c_base * m_row + lo0
@@ -402,11 +359,9 @@ def _compile(
         a_div = fx.logical_divide(gA, fx.make_layout(1, 1))
         b_div = fx.logical_divide(gB, fx.make_layout(1, 1))
 
-        # Scale loads can overhang a row tile and the rounded contraction
-        # window. Rows past the end are caught by the descriptor's range check,
-        # which is not guaranteed to include soffset, so the whole row offset is
-        # kept in the VGPR and those loads return zero. Window overhang stays
-        # inside the plane and is masked by window_ok below.
+        # Scale loads past the last row return zero via the range check, which
+        # may not include soffset, so each lane's whole row offset is in the
+        # VGPR. Window overhang stays inside the plane and is masked by window_ok.
         sa_bytes = arith.index_cast(
             T.i64, arith.index_cast(T.index, fx.Int32(R) * sc_e8_row)
         )
@@ -437,19 +392,13 @@ def _compile(
         a_s2r = S2RLoader(wave_i, N_TILES_A)
         b_s2r = S2RLoader(wave_j, N_TILES_B)
 
-        # Each lane loads one scale row for both K-steps. ds_bpermute then
-        # redistributes the four tile scales within the wave.
-        if N_TILES_A != 4 or N_TILES_B != 4:
-            raise AssertionError("cooperative scale load assumes 4x16=64 rows/half")
-
+        # Each lane loads one scale row (4 tiles x 16 rows per half) for both
+        # K-steps; ds_bpermute then hands each tile its scales.
         sa0_base = r_base + wave_i * fx.Int32(N_TILES_A * 16)
         sa1_base = r_base + fx.Int32(LDS_BLOCK_R) + wave_i * fx.Int32(N_TILES_A * 16)
         sb0_base = c_base + wave_j * fx.Int32(N_TILES_B * 16)
         sb1_base = c_base + fx.Int32(LDS_BLOCK_C) + wave_j * fx.Int32(N_TILES_B * 16)
 
-        # Per-lane dword offset of this lane's scale row at the window start.
-        # It must all be in the VGPR offset: a row base in soffset may escape
-        # the range check and let the last row tile read past the plane.
         sc_vbase = [
             (_rs, (_base + lane_id) * sc_i32_row + m_start_i32)
             for _rs, _base in (
@@ -464,11 +413,8 @@ def _compile(
             for t_ in range_constexpr(N_TILES_A)
         ]
 
+        # Scales for K-steps (k_i32, k_i32 + 1), flat: [a0_lo, a0_hi, a1_lo, ...].
         def issue_chunk(k_i32):
-            """Cooperative scale loads for K-steps (k_i32, k_i32+1).
-
-            Returns 2 raw i32 per operand-half, flat: [a0_lo, a0_hi, a1_lo, ...].
-            """
             out = []
             for _rs, _vb in sc_vbase:
                 voff = _vb + k_i32
@@ -485,7 +431,6 @@ def _compile(
                         )
                     )
                 else:
-                    # Two dwords handle an odd scale-row stride.
                     out.append(
                         buffer_ops.buffer_load(_rs, voff, vec_width=1, dtype=T.i32)
                     )
@@ -497,12 +442,10 @@ def _compile(
             return out
 
         def window_ok(k_idx):
-            """Return whether this lane's scale block belongs to the group."""
             e = k_idx * fx.Int32(BLOCK_M) + kgrp32
             return (e >= head) & (e < span)
 
         def use_chunk(chunk, p, k_idx):
-            """Redistribute a scale chunk and mask both operands to the group."""
             ok = window_ok(k_idx)
             groups = []
             for h_ in range_constexpr(4):
@@ -535,7 +478,6 @@ def _compile(
         b_g2s.load(b_cur0, B0_gl + 0 * BLOCK_M, k_col0)
         b_g2s.load(b_cur1, B1_gl + 0 * BLOCK_M, k_col0)
         a_g2s.load(a_cur1, A1_gl + 0 * BLOCK_M, k_col0)
-
         a_g2s.load(a_next0, A0_gl + 1 * BLOCK_M, k_col1)
         b_g2s.load(b_next0, B0_gl + 1 * BLOCK_M, k_col1)
         b_g2s.load(b_next1, B1_gl + 1 * BLOCK_M, k_col1)
@@ -562,16 +504,9 @@ def _compile(
                 out.append(swz)
             return out
 
-        def _cluster_plain(lds_dst, g2s, k_off, k_col, s2r, lds_src, a, b, c, sa, sb):
-            g2s.load(lds_dst, k_off, k_col)
-            rt = s2r.load(lds_src)
-            c = mma(a, b, c, sa, sb)
-            return c, rt
-
-        def _cluster_il(lds_dst, g2s, k_off, k_col, s2r, lds_src, a, b, c, sa, sb):
-            # Interleave the 16 scaled MFMAs (4x4) with the g2s (4 steps) and
-            # s2r (4 tiles x 2 halves) loads of the NEXT fragment, so the loads
-            # co-issue in the MFMA execute shadow.
+        def _cluster(lds_dst, g2s, k_off, k_col, s2r, lds_src, a, b, c, sa, sb):
+            # The 16 MFMAs interleaved with the next fragment's g2s and s2r
+            # loads, which co-issue in the MFMA shadow.
             swz = _lds_swizzle(s2r)
             rt = []
 
@@ -614,21 +549,16 @@ def _compile(
             M(3, 3)
             return c, rt
 
-        _cluster = _cluster_il if _INTERLEAVE else _cluster_plain
-
-        # The runtime K-loop advances two steps per body, matching the LDS
-        # ping-pong period and leaving two steps for the drain below.
         _R = arith._to_raw
         NA, NB = N_TILES_A, N_TILES_B
 
+        # One K-step; slot p == 0 of the two-step body also issues the scale
+        # chunk for K-steps (issue_k, issue_k + 1).
         def _one_step(kk_i, a0, b0, accs, bufs, chunk, p, issue_k):
-            """One K-step. `p` is the step's slot in the unrolled body (0 or 1);
-            slot 0 also issues the chunk for K-steps (issue_k, issue_k+1)."""
             c00, c01, c10, c11 = accs
             ac0, ac1, an0, an1, bc0, bc1, bn0, bn1 = bufs
             k2 = (kk_i + fx.Int32(2)) * fx.Int32(BLOCK_M)
             wait_barrier(W1A if p == 0 else W1B)
-            # Prefetch scales for the body two K-steps ahead.
             ch_new = issue_chunk(issue_k) if p == 0 else None
             sa0, sa1, sb0, sb1 = use_chunk(chunk, p, kk_i)
             c00, b1 = _cluster(
@@ -694,7 +624,6 @@ def _compile(
 
         a0, b0, accs, chunk = _unpack(state)
         c00, c01, c10, c11 = accs
-        a_cur0, a_cur1, a_next0, a_next1, b_cur0, b_cur1, b_next0, b_next1 = bufs0
 
         # Drain the final two prefetched K-steps.
         t0 = K_eff - fx.Int32(2)
@@ -712,22 +641,16 @@ def _compile(
         b0 = b_s2r.load(b_next0)
         c11 = mma(a1, b1, c11, sa1, sb1)
 
-        a_cur0, a_next0 = a_next0, a_cur0
-        a_cur1, a_next1 = a_next1, a_cur1
-        b_cur0, b_next0 = b_next0, b_cur0
-        b_cur1, b_next1 = b_next1, b_cur1
-
         wait_barrier(0)
         sa0, sa1, sb0, sb1 = use_chunk(chunk, 1, t1)
-        b1 = b_s2r.load(b_cur1)
-        a1 = a_s2r.load(a_cur1)
+        b1 = b_s2r.load(b_next1)
+        a1 = a_s2r.load(a_next1)
         c00 = mma(a0, b0, c00, sa0, sb0)
         c01 = mma(a0, b1, c01, sa0, sb1)
         c10 = mma(a1, b0, c10, sa1, sb0)
         c11 = mma(a1, b1, c11, sa1, sb1)
 
-        # One block owns each output tile. Empty groups are selected to exact
-        # zero because e8m0 0x00 represents 2**-127 rather than mathematical 0.
+        # Empty groups are selected to exact zero: their e8m0 0x00 is 2**-127.
         nonempty = m_end > m_start
         f32_zero = fx.Float32(0.0)
         out_r_i = arith.index_cast(T.index, out_r)
@@ -767,9 +690,7 @@ def _compile(
         store_group(c01, base_row, base_col + fx.Int32(LDS_BLOCK_C))
         store_group(c10, base_row + fx.Int32(LDS_BLOCK_R), base_col)
         store_group(
-            c11,
-            base_row + fx.Int32(LDS_BLOCK_R),
-            base_col + fx.Int32(LDS_BLOCK_C),
+            c11, base_row + fx.Int32(LDS_BLOCK_R), base_col + fx.Int32(LDS_BLOCK_C)
         )
 
     @flyc.jit
@@ -858,8 +779,7 @@ def make_mxfp8_wgrad_param(
         raise NotImplementedError(
             f"MXFP8 wgrad needs N and K divisible by 16; got N={n}, K={k}"
         )
-    # The output is passed whole as a 1-D view, whose element count FlyDSL packs
-    # as int32. The M-dependent operands are checked at launch, where M is known.
+    # The output goes over as a 1-D view; FlyDSL packs its element count as int32.
     if group_count * n * k > _INT32_MAX:
         raise NotImplementedError(
             f"MXFP8 wgrad output (G={group_count}, N={n}, K={k}) exceeds the "
@@ -902,9 +822,8 @@ def launch_mxfp8_wgrad_gfx950(
         raise NotImplementedError(
             f"MXFP8 wgrad row stride must be divisible by {BLOCK_M}; got {m}"
         )
-    # M is the contraction, so A and B cannot be split into windows the way the
-    # forward splits rows: the windows would share partial sums. Refuse clearly
-    # instead of letting FlyDSL's int32 shape packing fail inside the dispatch.
+    # M is the contraction, so the operands cannot be split into windows the
+    # way the forward splits rows: refuse before FlyDSL's int32 packing fails.
     if max(n, k) * m > _INT32_MAX:
         raise NotImplementedError(
             f"MXFP8 wgrad operand ({max(n, k)} x {m}) exceeds the int32 operand "
