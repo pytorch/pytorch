@@ -3464,10 +3464,15 @@ class TestFullyShardWorldSize1(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-class TestFullyShardCudaGraph(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
+class TestFullyShardCudaGraph(FSDPTestContinuous):
+    world_size = 2
+
+    def tearDown(self):
+        try:
+            if self.rank != self.MAIN_PROCESS_RANK:
+                torch.cuda.synchronize()
+        finally:
+            super().tearDown()
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -3502,6 +3507,7 @@ class TestFullyShardCudaGraph(FSDPTest):
         # stream capture to graph
         static_input = input_tensor.clone()
         graph = torch.cuda.CUDAGraph()
+        self.addCleanup(graph.reset)
         with torch.cuda.graph(graph, stream=stream):
             static_output = model(static_input)
             static_output.sum().backward()
@@ -3548,6 +3554,7 @@ class TestFullyShardCudaGraph(FSDPTest):
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
         fake_pg = dist.new_group(backend="fake")
+        self.addCleanup(dist.destroy_process_group, fake_pg)
         mesh = DeviceMesh.from_group(fake_pg, "cuda")
         model = nn.Sequential(
             nn.Linear(8, 8, bias=False),
@@ -3584,6 +3591,7 @@ class TestFullyShardCudaGraph(FSDPTest):
             orig_finalize_backward(param_group)
 
         graph = torch.cuda.CUDAGraph()
+        self.addCleanup(graph.reset)
         with mock.patch.object(FSDPParamGroup, "finalize_backward", finalize_backward):
             with torch.cuda.graph(graph, stream=stream):
                 run_accumulation()
@@ -3630,6 +3638,7 @@ class TestFullyShardCudaGraph(FSDPTest):
             model.zero_grad(set_to_none=True)
 
         graph = torch.cuda.CUDAGraph()
+        self.addCleanup(graph.reset)
         with torch.cuda.graph(graph, stream=stream):
             graph_grads = run_accumulation()
 
