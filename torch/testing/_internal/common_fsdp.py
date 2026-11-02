@@ -1669,15 +1669,28 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
         # collective mismatches when the process group is reused across tests.
         if self.rank != self.MAIN_PROCESS_RANK:
             dist.barrier()
+            from torch.distributed.tensor import _random
+
+            _random._rng_tracker = None
         torch._dynamo.reset()
         set_rng_seed()
 
     def tearDown(self):
-        # Barrier to synchronize workers after test, similar to FSDPTest._run().
-        if self.rank != self.MAIN_PROCESS_RANK:
-            dist.barrier()
-        super().tearDown()
-        torch._dynamo.reset()
+        try:
+            super().tearDown()
+        finally:
+            torch._dynamo.reset()
+
+    @classmethod
+    def _run_test_given_id(cls, test_id, **kwargs):
+        import gc
+
+        try:
+            super()._run_test_given_id(test_id, **kwargs)
+        finally:
+            torch._dynamo.reset()
+            gc.collect()
+        # The dispatcher drains every rank before sending the next test.
 
     @property
     def process_group(self):
