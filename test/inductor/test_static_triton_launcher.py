@@ -10,6 +10,7 @@ import unittest
 import weakref
 from contextlib import nullcontext
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -41,7 +42,7 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -210,6 +211,250 @@ class TestStaticTritonLauncherUnit(TestCase):
         self.assertEqual(retried_config.num_stages, 1)
         self.assertEqual(retried_config.kwargs["NUM_STAGES"], 1)
 
+    def _compile_result_for_repeated_launcher(self, device=0):
+        kernel = self._global_scratch_kernel(global_scratch_size=0)
+        kernel.function = None
+        kernel.hash = "0" * 64
+        kernel.C_impl = mock.Mock()
+        kernel.C_impl._load_kernel.return_value = (101, 102, 7, 0)
+        self.addCleanup(kernel.close)
+        result = StaticTritonCompileResult(
+            kernel,
+            SimpleNamespace(kwargs={}, num_warps=4, num_stages=1),
+            {
+                "device": device,
+                "device_type": "cuda",
+                "constants": {},
+                "signature": {"out": "*fp32"},
+            },
+            {},
+        )
+        result._gen_launcher_code = mock.Mock(
+            side_effect=lambda *args, **kwargs: SimpleNamespace()
+        )
+        return result
+
+    def test_make_launcher_reuses_loaded_kernel_after_cache_context(self):
+        result = self._compile_result_for_repeated_launcher(device=3)
+        kernel = result.kernel
+        with (
+            tempfile.TemporaryDirectory() as compile_cache,
+            tempfile.TemporaryDirectory() as runtime_cache,
+        ):
+            kernel.cubin_path = None
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=compile_cache):
+                first = result.make_launcher()
+            compile_path = kernel.C_impl._load_kernel.call_args.args[0]
+            self.assertEqual(Path(compile_path).read_bytes(), b"cubin")
+            self.assertIsNone(kernel.cubin_path)
+            self.assertIsNone(kernel.cubin_raw)
+            self.assertEqual(kernel.function, 102)
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=runtime_cache):
+                second = result.make_launcher()
+            self.assertTrue(os.path.exists(compile_path))
+            self.assertEqual(os.listdir(runtime_cache), [])
+            self.assertEqual(first.n_regs, second.n_regs)
+            kernel.C_impl._load_kernel.assert_called_once_with(
+                compile_path, kernel.name, kernel.shared, 3
+            )
+
+    def test_make_launcher_missing_unloaded_binary_still_errors(self):
+        result = self._compile_result_for_repeated_launcher()
+        result.kernel.cubin_path = None
+        result.kernel.cubin_raw = None
+        with (
+            tempfile.TemporaryDirectory() as cache,
+            mock.patch.dict(os.environ, TRITON_CACHE_DIR=cache),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "Cubin file saved by TritonBundler not found"
+            ):
+                result.make_launcher()
+        result.kernel.C_impl._load_kernel.assert_not_called()
+
+    def _compile_result_for_repeated_launcher(self, device=0):
+        kernel = self._global_scratch_kernel(global_scratch_size=0)
+        kernel.function = None
+        kernel.hash = "0" * 64
+        kernel.C_impl = mock.Mock()
+        kernel.C_impl._load_kernel.return_value = (101, 102, 7, 0)
+        self.addCleanup(kernel.close)
+        result = StaticTritonCompileResult(
+            kernel,
+            SimpleNamespace(kwargs={}, num_warps=4, num_stages=1),
+            {
+                "device": device,
+                "device_type": "cuda",
+                "constants": {},
+                "signature": {"out": "*fp32"},
+            },
+            {},
+        )
+        result._gen_launcher_code = mock.Mock(
+            side_effect=lambda *args, **kwargs: SimpleNamespace()
+        )
+        return result
+
+    def test_make_launcher_reuses_loaded_kernel_after_cache_context(self):
+        result = self._compile_result_for_repeated_launcher(device=3)
+        kernel = result.kernel
+        with (
+            tempfile.TemporaryDirectory() as compile_cache,
+            tempfile.TemporaryDirectory() as runtime_cache,
+        ):
+            kernel.cubin_path = None
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=compile_cache):
+                first = result.make_launcher()
+            compile_path = kernel.C_impl._load_kernel.call_args.args[0]
+            self.assertEqual(Path(compile_path).read_bytes(), b"cubin")
+            self.assertIsNone(kernel.cubin_path)
+            self.assertIsNone(kernel.cubin_raw)
+            self.assertEqual(kernel.function, 102)
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=runtime_cache):
+                second = result.make_launcher()
+            self.assertTrue(os.path.exists(compile_path))
+            self.assertEqual(os.listdir(runtime_cache), [])
+            self.assertEqual(first.n_regs, second.n_regs)
+            kernel.C_impl._load_kernel.assert_called_once_with(
+                compile_path, kernel.name, kernel.shared, 3
+            )
+
+    def test_make_launcher_missing_unloaded_binary_still_errors(self):
+        result = self._compile_result_for_repeated_launcher()
+        result.kernel.cubin_path = None
+        result.kernel.cubin_raw = None
+        with (
+            tempfile.TemporaryDirectory() as cache,
+            mock.patch.dict(os.environ, TRITON_CACHE_DIR=cache),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "Cubin file saved by TritonBundler not found"
+            ):
+                result.make_launcher()
+        result.kernel.C_impl._load_kernel.assert_not_called()
+
+    def _compile_result_for_repeated_launcher(self, device=0):
+        kernel = self._global_scratch_kernel(global_scratch_size=0)
+        kernel.function = None
+        kernel.hash = "0" * 64
+        kernel.C_impl = mock.Mock()
+        kernel.C_impl._load_kernel.return_value = (101, 102, 7, 0)
+        self.addCleanup(kernel.close)
+        result = StaticTritonCompileResult(
+            kernel,
+            SimpleNamespace(kwargs={}, num_warps=4, num_stages=1),
+            {
+                "device": device,
+                "device_type": "cuda",
+                "constants": {},
+                "signature": {"out": "*fp32"},
+            },
+            {},
+        )
+        result._gen_launcher_code = mock.Mock(
+            side_effect=lambda *args, **kwargs: SimpleNamespace()
+        )
+        return result
+
+    def test_make_launcher_reuses_loaded_kernel_after_cache_context(self):
+        result = self._compile_result_for_repeated_launcher(device=3)
+        kernel = result.kernel
+        with (
+            tempfile.TemporaryDirectory() as compile_cache,
+            tempfile.TemporaryDirectory() as runtime_cache,
+        ):
+            kernel.cubin_path = None
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=compile_cache):
+                first = result.make_launcher()
+            compile_path = kernel.C_impl._load_kernel.call_args.args[0]
+            self.assertEqual(Path(compile_path).read_bytes(), b"cubin")
+            self.assertIsNone(kernel.cubin_path)
+            self.assertIsNone(kernel.cubin_raw)
+            self.assertEqual(kernel.function, 102)
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=runtime_cache):
+                second = result.make_launcher()
+            self.assertTrue(os.path.exists(compile_path))
+            self.assertEqual(os.listdir(runtime_cache), [])
+            self.assertEqual(first.n_regs, second.n_regs)
+            kernel.C_impl._load_kernel.assert_called_once_with(
+                compile_path, kernel.name, kernel.shared, 3
+            )
+
+    def test_make_launcher_missing_unloaded_binary_still_errors(self):
+        result = self._compile_result_for_repeated_launcher()
+        result.kernel.cubin_path = None
+        result.kernel.cubin_raw = None
+        with (
+            tempfile.TemporaryDirectory() as cache,
+            mock.patch.dict(os.environ, TRITON_CACHE_DIR=cache),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "Cubin file saved by TritonBundler not found"
+            ):
+                result.make_launcher()
+        result.kernel.C_impl._load_kernel.assert_not_called()
+
+    def _compile_result_for_repeated_launcher(self, device=0):
+        kernel = self._global_scratch_kernel(global_scratch_size=0)
+        kernel.function = None
+        kernel.hash = "0" * 64
+        kernel.C_impl = mock.Mock()
+        kernel.C_impl._load_kernel.return_value = (101, 102, 7, 0)
+        self.addCleanup(kernel.close)
+        result = StaticTritonCompileResult(
+            kernel,
+            SimpleNamespace(kwargs={}, num_warps=4, num_stages=1),
+            {
+                "device": device,
+                "device_type": "cuda",
+                "constants": {},
+                "signature": {"out": "*fp32"},
+            },
+            {},
+        )
+        result._gen_launcher_code = mock.Mock(
+            side_effect=lambda *args, **kwargs: SimpleNamespace()
+        )
+        return result
+
+    def test_make_launcher_reuses_loaded_kernel_after_cache_context(self):
+        result = self._compile_result_for_repeated_launcher(device=3)
+        kernel = result.kernel
+        with (
+            tempfile.TemporaryDirectory() as compile_cache,
+            tempfile.TemporaryDirectory() as runtime_cache,
+        ):
+            kernel.cubin_path = None
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=compile_cache):
+                first = result.make_launcher()
+            compile_path = kernel.C_impl._load_kernel.call_args.args[0]
+            self.assertEqual(Path(compile_path).read_bytes(), b"cubin")
+            self.assertIsNone(kernel.cubin_path)
+            self.assertIsNone(kernel.cubin_raw)
+            self.assertEqual(kernel.function, 102)
+            with mock.patch.dict(os.environ, TRITON_CACHE_DIR=runtime_cache):
+                second = result.make_launcher()
+            self.assertTrue(os.path.exists(compile_path))
+            self.assertEqual(os.listdir(runtime_cache), [])
+            self.assertEqual(first.n_regs, second.n_regs)
+            kernel.C_impl._load_kernel.assert_called_once_with(
+                compile_path, kernel.name, kernel.shared, 3
+            )
+
+    def test_make_launcher_missing_unloaded_binary_still_errors(self):
+        result = self._compile_result_for_repeated_launcher()
+        result.kernel.cubin_path = None
+        result.kernel.cubin_raw = None
+        with (
+            tempfile.TemporaryDirectory() as cache,
+            mock.patch.dict(os.environ, TRITON_CACHE_DIR=cache),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "Cubin file saved by TritonBundler not found"
+            ):
+                result.make_launcher()
+        result.kernel.C_impl._load_kernel.assert_not_called()
+
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
         kernel_capsule = object()
@@ -257,7 +502,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         import types
 
         class FakeFastLauncher:
-            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+            def __init__(self, func, num_warps, shared, arg_tys, n_scratch, launch_pdl):
                 self.func = func
 
         kernel = object.__new__(StaticallyLaunchedCudaKernel)
@@ -267,6 +512,7 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel.arg_tys = "O"
         kernel.has_global_scratch = False
         kernel.has_profile_scratch = False
+        kernel.launch_pdl = False
 
         launcher_globals = {"runner": kernel.run}
 
@@ -898,6 +1144,55 @@ class TestStaticTritonLauncher(TestCase):
             )
 
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_non_default_warp_size(self):
+        # The work-group size is num_warps times the kernel's compiled SIMD
+        # width; the kernel also declares its required work-group size, so
+        # launching a SIMD16 kernel at the default width of 32 fails.
+        @triton.jit
+        def arange_kernel(out, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            tl.store(out + off, off)
+
+        num_warps, warp_size = 4, 16
+        BLOCK = num_warps * warp_size
+        out = torch.zeros(BLOCK, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = arange_kernel[(1,)](
+            out, BLOCK=BLOCK, num_warps=num_warps, warp_size=warp_size
+        )
+        self.assertEqual(compiled_kernel.metadata.threads_per_warp, warp_size)
+        launcher = self._make_launcher(compiled_kernel)
+        new_out = torch.zeros_like(out)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_out)
+        self.assertEqual(new_out, out)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_launch_rejects_non_kernel_capsule(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(ValueError, "PyCapsule"):
+            launcher.C_impl._launch_kernel(
+                None,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                launcher.arg_tys,
+                (arg0,),
+                stream,
+            )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
     def test_xpu_close_releases_kernel_capsule(self):
         # _load_kernel must hand over its only capsule reference. An extra one
         # keeps the capsule alive for the process lifetime, so its destructor
@@ -1120,6 +1415,18 @@ class TestStaticTritonCompileResult(TestCase):
     """
 
     def test_basic_compile(self):
+        @torch.compile
+        def foo(x, y):
+            return x + y
+
+        x = torch.randn(10, device=GPU_TYPE)
+        y = torch.randn(10, device=GPU_TYPE)
+        self.assertEqual(foo(x, y), x + y)
+
+    @skipIfRocm
+    @unittest.skipIf(not SM90OrLater, "PDL requires sm90+")
+    @torch._inductor.config.patch("triton.enable_pdl", True)
+    def test_basic_compile_pdl(self):
         @torch.compile
         def foo(x, y):
             return x + y
