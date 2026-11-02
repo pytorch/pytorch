@@ -6,6 +6,7 @@ import itertools
 import math
 import operator
 import unittest
+from unittest import mock
 
 import numpy as np
 import sympy
@@ -7525,6 +7526,37 @@ class ShapeEnvAxiomCacheInvalidationTest(TestCase):
             self.assertEqual(
                 shape_env._simplify_floor_div(expr), FloorDiv(difference, 2)
             )
+
+
+class ShapeEnvFallbackCacheTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_range_update_refines_fallback_result(self):
+        shape_env = ShapeEnv()
+        s = shape_env.create_unbacked_symint().node.expr
+        query = sympy.Gt(s, 0)
+        # s is unknown, so this returns the fallback rather than a proved False.
+        self.assertFalse(shape_env.evaluate_expr(query, fallback_value=False))
+        shape_env.constrain_symbol_range(s, 1, 10)
+        # Previously, the outer evaluate_expr cache retained the fallback.
+        self.assertTrue(shape_env.evaluate_expr(query, fallback_value=False))
+
+    def test_proven_fallback_query_survives_version_change(self):
+        shape_env = ShapeEnv()
+        s = shape_env.create_unbacked_symint().node.expr
+        t = shape_env.create_unbacked_symint().node.expr
+        shape_env.constrain_symbol_range(s, 1, 10)
+        query = sympy.Gt(s, 0)
+        with mock.patch.object(
+            shape_env, "_inner_evaluate_expr", wraps=shape_env._inner_evaluate_expr
+        ) as inner:
+            self.assertTrue(shape_env.evaluate_expr(query, fallback_value=False))
+            version = shape_env._version_counter
+            shape_env.constrain_symbol_range(t, 2, 5)
+            self.assertGreater(shape_env._version_counter, version)
+            self.assertTrue(shape_env.evaluate_expr(query, fallback_value=False))
+            # A proven answer does not depend on later facts, so it is not recomputed.
+            self.assertEqual(inner.call_count, 1)
 
 
 class TestSingletonIntStaticEval(TestCase):
