@@ -83,6 +83,23 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    @parametrize("mapping_type", [dict, collections.OrderedDict])
+    def test_dict_input_key_snapshot_reused(self, mapping_type):
+        def hook(instructions):
+            attrs = [i.argval for i in instructions if i.opname == "LOAD_ATTR"]
+            self.assertEqual(attrs.count("keys"), 1)
+
+        def fn(mapping):
+            a, b, c = mapping.values()
+            return a + b * c
+
+        mapping = mapping_type((object(), torch.full((1,), i)) for i in range(1, 4))
+        if mapping_type is collections.OrderedDict:
+            mapping.move_to_end(next(iter(mapping)))
+        with self.register_bytecode_hook(hook):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(mapping), fn(mapping))
+
     @parametrize("container_type", [None, list, dict, set])
     @parametrize("nested", [False, True])
     def test_sourced_constant_in_aggregates(self, container_type, nested):

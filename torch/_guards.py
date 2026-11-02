@@ -817,6 +817,9 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
+    # Reinstall guards under each stamped-out call's sources.
+    guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
+    traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
 
 
 @dataclass

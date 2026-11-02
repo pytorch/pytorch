@@ -605,7 +605,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             return id(obj), True
         # A constant receiver may alias a sourced receiver, but has no source
         # for a relational guard. Preserve identity specialization in that case.
-        tracker.add_custom_key(tx)
+        tracker.add_custom_key()
         return self.hash_impl(tx)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
