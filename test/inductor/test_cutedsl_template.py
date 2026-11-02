@@ -51,7 +51,12 @@ def {{kernel_name}}_kernel(gA: cute.Tensor, gB: cute.Tensor, gC: cute.Tensor):
             gC[mi, ni] = gA[mi, ni] + gB[mi, ni]
 
 @cute.jit
-def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, stream):
+def {{kernel_name}}_jit(
+    mA: cute.Tensor,
+    mB: cute.Tensor,
+    mC: cute.Tensor,
+    stream: cuda.CUstream,
+):
     {{gen_defines()}}
     m, n = mA.shape
     total_threads = m * n
