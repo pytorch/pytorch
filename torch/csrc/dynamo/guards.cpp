@@ -2873,6 +2873,8 @@ class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
     (_is_hooks ? _state->hooks : _state->flags) = py::object();
   }
 
+  std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP> clone(RootGuardManager* root);
+
  private:
   std::shared_ptr<NNModuleHookMembership> _state;
   bool _is_hooks;
@@ -3822,7 +3824,11 @@ class GuardManager {
       RootGuardManager* cloned_root,
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
-    for (const auto& guard : _leaf_guards) {
+    for (auto guard : _leaf_guards) {
+      if (auto membership =
+              std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(guard)) {
+        guard = membership->clone(cloned_root);
+      }
       cloned_mgr->_leaf_guards.emplace_back(guard);
       if (std::shared_ptr<RelationalGuard> relational_guard =
               std::dynamic_pointer_cast<RelationalGuard>(guard)) {
@@ -4614,6 +4620,8 @@ GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
  */
 
 class RootGuardManager : public GuardManager {
+  friend class NN_MODULE_HOOK_MEMBERSHIP;
+
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
@@ -4808,6 +4816,7 @@ class RootGuardManager : public GuardManager {
     cloned_root->_init_local_state = _init_local_state;
     cloned_root->_compile_on_one_rank = _compile_on_one_rank;
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
+    cloned_root->_cloned_hook_memberships.clear();
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -4914,6 +4923,12 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
+  // Share role state only while constructing one cloned tree.
+  std::unordered_map<
+      const NNModuleHookMembership*,
+      std::shared_ptr<NNModuleHookMembership>>
+      _cloned_hook_memberships;
+
   // See set_compile_on_one_rank.
   bool _compile_on_one_rank = false;
 
@@ -4971,6 +4986,17 @@ class RootGuardManager : public GuardManager {
   std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
+
+std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP> NN_MODULE_HOOK_MEMBERSHIP::clone(
+    RootGuardManager* root) {
+  auto& state = root->_cloned_hook_memberships[_state.get()];
+  if (!state) {
+    state = std::make_shared<NNModuleHookMembership>();
+    state->expected = _state->expected;
+  }
+  return std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
+      root, state, _is_hooks, verbose_code_parts(), get_user_stack());
+}
 
 /*
  * Dicts are common in python code. Therefore, we handle guards for dicts

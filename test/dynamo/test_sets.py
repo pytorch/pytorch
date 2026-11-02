@@ -253,6 +253,40 @@ class TestSetGuards(LoggingTestCase):
             frame_counts.append(counter.frame_count)
         self.assertEqual(frame_counts, [1, 1, 2, 3, 4, 5, 6, 6])
 
+    @parametrize("operation", ["isdisjoint", "intersection", "difference"])
+    def test_dict_operand_order_observed_by_equality(self, operation):
+        events = []
+
+        class Key:
+            def __init__(self, name):
+                self.name = name
+
+            def __hash__(self):
+                return 0
+
+        class Probe(Key):
+            __hash__ = Key.__hash__
+
+            def __eq__(self, other):
+                events.append(other.name)
+                return False
+
+        def fn(x, mapping):
+            events.clear()
+            getattr({Probe("probe")}, operation)(mapping)
+            return x + 1, tuple(events)
+
+        first, second = Key("first"), Key("second")
+        mappings = [dict.fromkeys((first, second)), dict.fromkeys((second, first))]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        expected = [fn(x, mapping) for mapping in mappings]
+        self.assertNotEqual(expected[0][1], expected[1][1])
+        for mapping, result in zip(mappings, expected):
+            self.assertEqual(compiled(x, mapping), result)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
