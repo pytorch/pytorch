@@ -27,59 +27,90 @@ if(NOT __NCCL_EP_INCLUDED)
   add_library(__caffe2_nccl_ep INTERFACE)
   target_include_directories(__caffe2_nccl_ep INTERFACE ${NCCL_EP_INCLUDE_DIRS})
 
-  if(NOT USE_SYSTEM_NCCL_EP)
-    # Match PyTorch's requested architectures, keeping only Hopper and newer.
-    if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-      set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-    endif()
-    string(REPLACE " " ";" __nccl_ep_archs "${TORCH_CUDA_ARCH_LIST}")
-    list(TRANSFORM __nccl_ep_archs REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1\\2")
-    list(FILTER __nccl_ep_archs INCLUDE REGEX "^[0-9]+$")
-    set(__NCCL_EP_ARCHS "")
-    foreach(__arch IN LISTS __nccl_ep_archs)
-      if(__arch GREATER_EQUAL 90)
-        list(APPEND __NCCL_EP_ARCHS "${__arch}")
-      endif()
-    endforeach()
-    set(__NCCL_EP_ARCH_ARG "")
-    if(__NCCL_EP_ARCHS)
-      list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
-      list(JOIN __NCCL_EP_ARCHS "|" __NCCL_EP_ARCHS)
-      set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
-    endif()
+  if(USE_SYSTEM_NCCL_EP)
+    # The nccl-extensions package supplies the shared runtime.
+    return()
+  endif()
 
-    set(__NCCL_EP_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl_ep")
-    set(__NCCL_EP_OUTPUT_DIR "${__NCCL_EP_BUILD_DIR}/artifacts")
-    set(NCCL_EP_LIBRARIES "${__NCCL_EP_OUTPUT_DIR}/lib/libnccl_ep.a")
+  # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
+  set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
+  set(__NCCL_EP_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl_ep/artifacts")
+
+  # Build NCCL EP as its own CMake project against the selected NCCL.
+  # Build nccl_ep for the same CUDA archs as the rest of PyTorch, dropping
+  # anything below sm_90 since nccl_ep requires Hopper+. PyTorch disables
+  # CMAKE_CUDA_ARCHITECTURES in favor of TORCH_CUDA_ARCH_LIST, so derive the arch
+  # list from there. If nothing qualifies (list unset, or a symbolic value like
+  # "Common"/"All"), pass no flag and let nccl_ep's CMakeLists pick its own
+  # CUDA-version default.
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    # Usually only set in the environment (e.g. by setup.py), not as a cache var.
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
+  # TORCH_CUDA_ARCH_LIST may be space- or ;-separated; normalize to a CMake list.
+  string(REPLACE " " ";" __nccl_ep_archs "${TORCH_CUDA_ARCH_LIST}")
+  # Reduce each entry to its compact sm number, dropping any decoration:
+  # "9.0" / "9.0a" / "10.0+PTX" -> "90" / "90" / "100".
+  list(TRANSFORM __nccl_ep_archs REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1\\2")
+  # Drop anything that wasn't a numeric arch spec (e.g. "Common", "All", "").
+  list(FILTER __nccl_ep_archs INCLUDE REGEX "^[0-9]+$")
+  set(__NCCL_EP_ARCHS "")
+  foreach(__arch IN LISTS __nccl_ep_archs)
+    if(__arch GREATER_EQUAL 90)  # nccl_ep is Hopper+ only
+      list(APPEND __NCCL_EP_ARCHS "${__arch}")
+    endif()
+  endforeach()
+  set(__NCCL_EP_ARCH_ARG "")
+  if(__NCCL_EP_ARCHS)
+    list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
+    list(JOIN __NCCL_EP_ARCHS "|" __NCCL_EP_ARCHS)
+    set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
+  endif()
+
+  # Embedded EP uses PyTorch's selected NCCL, whether built or installed.
+  if(USE_SYSTEM_NCCL)
+    list(GET NCCL_INCLUDE_DIRS 0 __nccl_inc)
+    get_filename_component(__NCCL_EP_NCCL_HOME "${__nccl_inc}" DIRECTORY)
     set(__NCCL_EP_DEPENDS "")
-    if(NOT USE_SYSTEM_NCCL)
-      set(__NCCL_EP_DEPENDS nccl_external)
-    endif()
+  else()
+    set(__NCCL_EP_NCCL_HOME "${__NCCL_BUILD_DIR}")
+    set(__NCCL_EP_DEPENDS nccl_external)
+  endif()
 
-    ExternalProject_Add(nccl_ep_external
-      SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/nccl_ep_build
-      BINARY_DIR ${__NCCL_EP_BUILD_DIR}
-      LIST_SEPARATOR |
-      CMAKE_ARGS
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}
-        # Match PyTorch's shared CUDA runtime for minor-version compatibility.
-        -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
-        ${__NCCL_EP_ARCH_ARG}
-        -DNCCL_INCLUDE_DIR=${NCCL_INCLUDE_DIRS}
-        -DNCCL_EP_BUILDDIR=${__NCCL_EP_OUTPUT_DIR}
-        -DNCCL_EP_SOURCE_DIR=${__NCCL_EP_SOURCE_DIR}/nccl_ep
-      BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG>
-        --target nccl_ep_static
-      BUILD_BYPRODUCTS "${NCCL_EP_LIBRARIES}"
-      BUILD_ALWAYS TRUE
-      INSTALL_COMMAND ""
-      DEPENDS ${__NCCL_EP_DEPENDS}
-    )
+  message(STATUS "Configuring NCCL EP (__caffe2_nccl_ep): libnccl_ep.a against NCCL at ${__NCCL_EP_NCCL_HOME}")
+  ExternalProject_Add(nccl_ep_external
+    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/nccl_ep_build
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/nccl_ep
+    LIST_SEPARATOR |
+    CMAKE_ARGS
+      -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}
+      # Link the CUDA runtime dynamically (CMake defaults to static). The static
+      # cudart does not support CUDA minor-version (enhanced) compatibility, so a
+      # static-cudart libnccl_ep cannot run on a minor-older driver; the shared
+      # libcudart does, matching how libtorch_cuda links it.
+      -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
+      ${__NCCL_EP_ARCH_ARG}
+      -DNCCL_HOME=${__NCCL_EP_NCCL_HOME}
+      -DNCCL_EP_BUILDDIR=${__NCCL_EP_OUTPUT_DIR}
+      -DNCCL_EP_SOURCE_DIR=${__NCCL_EP_SOURCE_DIR}/nccl_ep
+    BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG>
+      --target nccl_ep_static
+    BUILD_BYPRODUCTS "${__NCCL_EP_OUTPUT_DIR}/lib/libnccl_ep.a"
+    BUILD_ALWAYS TRUE
+    INSTALL_COMMAND ""
+    # In the static path NCCL (Makefile) must finish first; in the system path
+    # NCCL is already present so there is no in-tree dependency.
+    DEPENDS ${__NCCL_EP_DEPENDS}
+  )
 
-    add_dependencies(__caffe2_nccl_ep nccl_ep_external)
-    target_link_libraries(__caffe2_nccl_ep INTERFACE
-      ${NCCL_EP_LIBRARIES} CUDA::cuda_driver)
+  set(NCCL_EP_LIBRARIES "${__NCCL_EP_OUTPUT_DIR}/lib/libnccl_ep.a")
+
+  add_dependencies(__caffe2_nccl_ep nccl_ep_external)
+  target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})
+  # libnccl_ep's JIT calls CUDA Driver APIs; pull in libcuda.so.
+  if(TARGET CUDA::cuda_driver)
+    target_link_libraries(__caffe2_nccl_ep INTERFACE CUDA::cuda_driver)
   endif()
 endif()

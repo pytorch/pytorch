@@ -484,8 +484,10 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
   # by torch/distributed/_token_switch.py so libtorch_cuda never references
-  # ncclEp*. With USE_SYSTEM_NCCL_EP, nccl-extensions supplies the entry points;
-  # otherwise they are statically linked into this module.
+  # ncclEp*. USE_SYSTEM_NCCL_EP selects how the extension uses libnccl_ep:
+  #  - OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked here, with JIT
+  #    header paths baked into EP by its build; no external EP package needed.
+  #  - ON: nccl-extensions provides libnccl_ep.so and JIT headers at runtime.
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
@@ -500,13 +502,18 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     target_include_directories(_nccl_ep BEFORE PRIVATE
       ${NCCL_EP_INCLUDE_DIRS} ${NCCL_INCLUDE_DIRS})
-    if(NOT USE_SYSTEM_NCCL_EP)
+    set_target_properties(_nccl_ep PROPERTIES
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
+    if(USE_SYSTEM_NCCL_EP)
+      # Keep the nccl-extensions library directory on the runtime search path.
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib;${_rpath_portable_origin}/../nccl/ep/lib")
+    else()
       # Bind to this EP copy even when another package loads libnccl_ep.so.
       target_link_options(_nccl_ep PRIVATE "LINKER:--exclude-libs,libnccl_ep.a")
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
     endif()
-    set_target_properties(_nccl_ep PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
-      INSTALL_RPATH "${_rpath_portable_origin}/lib")
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()
