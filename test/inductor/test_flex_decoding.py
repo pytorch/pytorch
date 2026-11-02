@@ -13,7 +13,7 @@ from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
 from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
@@ -2281,6 +2281,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     ):
         # The decode kernel tiles GQA-folded rows: each BLOCK_M tile covers
         # BLOCK_M // (Hq // Hkv) query positions, which must fit in one sparse Q block.
+        if pinned_block_m is not None and not is_big_gpu(torch.device(device)):
+            # Launching the pinned 256-row kernel can fail with CUDA_ERROR_OUT_OF_MEMORY
+            # on a small GPU such as an A100 1g.5gb MIG slice.
+            self.skipTest("pinned BLOCK_M=256 needs a big GPU")
         kv_seq_len = 256
         offset = kv_seq_len - q_seq_len
 
