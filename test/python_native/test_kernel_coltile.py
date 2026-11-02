@@ -459,7 +459,7 @@ class TestOrderedColRoute(TestCase):
         [
             (1, (16, 128, 128), (10, 0), True),
             (1, (16, 128, 127), (10, 0), False),
-            (1, (16, 64, 128), (10, 0), False),
+            (1, (16, 127, 128), (10, 0), False),
             (2, (128, 128, 128), (10, 0), True),
             (2, (127, 128, 128), (10, 0), False),
             (3, (256, 128, 128), (10, 0), True),
@@ -488,16 +488,19 @@ class TestOrderedColDevice(TestCase):
         "op,dtype,shape,split",
         [
             ("sum", torch.float32, (2, 128, 33), False),
-            ("sum", torch.float32, (2, 20, 33), False),
-            ("sum", torch.float32, (9000, 32), False),
+            ("sum", torch.float32, (8000, 32), False),
+            ("sum", torch.float16, (2, 3000, 32), False),
+            ("sum", torch.bfloat16, (2, 3000, 32), False),
+            ("mean", torch.float32, (2, 3000, 32), False),
             ("argmax", torch.float32, (4, 2048, 64), False),
             ("var_mean", torch.bfloat16, (2, 2048, 40), False),
-            ("argmax", torch.float32, (9000, 32), False),
-            ("var_mean", torch.float32, (2, 9000, 32), False),
+            ("argmax", torch.float32, (8000, 32), False),
+            ("var_mean", torch.float32, (2, 8000, 32), False),
             ("sum", torch.float32, (100003, 32), True),
             ("sum", torch.float32, (2, 32768, 32), True),
             ("sum", torch.float16, (32768, 64), True),
             ("argmax", torch.float32, (65536, 32), True),
+            ("argmax", torch.float32, (100003, 32), True),
             ("var_mean", torch.bfloat16, (2, 100003, 32), True),
             ("sum", torch.float64, (32768, 32), True),
         ],
@@ -513,6 +516,7 @@ class TestOrderedColDevice(TestCase):
         kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
         trait, outputs = {
             "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
+            "mean": (T.MeanOps(acc=cutlass.Float32), [torch.float32]),
             "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
             "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
         }[op]
@@ -537,33 +541,48 @@ class TestOrderedColDevice(TestCase):
         ran = {k[0] for k in ct._CACHE if k[1] == key}
         self.assertEqual(ran, {"ordered_col1" if split else "ordered_col"})
 
-    @parametrize("case", ["unsplit", "empty", "past_end", "negative"])
-    def test_partition_ranges_are_validated(self, device, case):
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
-        trait = T.SumOps(acc=cutlass.Float32)
-        rows = 20 if case == "unsplit" else 32768
-        dev = torch.device(device)
-        plan = rt.trait_itree_plan(trait, rows, 32, 4, stage=False, device=dev)
-        self.assertEqual(plan.shape == "split", case != "unsplit")
-        n = plan.split[0] if plan.shape == "split" else 1
-        begin, count = {
-            "unsplit": (0, 2),
-            "empty": (n, None),
-            "past_end": (n - 1, 2),
-            "negative": (-1, None),
-        }[case]
-        error = "only split plans" if case == "unsplit" else "out of bounds"
-        kwargs = {"partition_begin": begin, "partition_count": count}
-        with self.assertRaisesRegex(ValueError, error):
-            ct._OrderedColReduce(trait, plan, rows, 32, 1, **kwargs)
-
     def test_split_plans_can_be_declined(self, device):
         x = torch.randn(32768, 32, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         out = [torch.float32]
         got = ct.reduce_ordered_col(trait, "decline", x, out, 1, allow_split=False)
         self.assertIsNone(got)
+
+    @parametrize("pattern", ["negative_zero", "ties"])
+    @parametrize("rows", [2048, 32768])
+    def test_special_values_match_the_indexed_tree(self, device, pattern, rows):
+        """Keep signed-zero sums and argmax ties bitwise equal to the indexed tree."""
+        columns = 32
+        if pattern == "negative_zero":
+            x = torch.full((rows, columns), -0.0, device=device)
+            trait, outputs = T.SumOps(), [torch.float32]
+        else:
+            x = torch.ones(rows, columns, device=device)
+            trait, outputs = T.ArgMaxOps(), [torch.int64]
+        key = f"special_{pattern}"
+        got = ct.reduce_ordered_col(trait, key, x, outputs, 1, allow_split=True)
+        reference = kg._try_indexed_itree(
+            trait,
+            key + "_reference",
+            x,
+            [(rows, columns)],
+            [(columns, 1)],
+            columns,
+            rows,
+            outputs,
+            1,
+        )
+        self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
+
+    @parametrize("op", ["sum", "argmax"])
+    @parametrize("rows,served", [(8192, True), (8193, False), (16384, False)])
+    def test_replay_is_bounded(self, device, op, rows, served):
+        """Decline looped plans whose static replay passes MAX_UNROLL."""
+        x = torch.randn(rows, 32, device=device)
+        trait = T.SumOps() if op == "sum" else T.ArgMaxOps()
+        output = torch.float32 if op == "sum" else torch.int64
+        got = ct.reduce_ordered_col(trait, "bounded_" + op, x, [output], 1)
+        self.assertEqual(got is not None, served)
 
     def test_batch_sizes_share_one_kernel(self, device):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -602,15 +621,23 @@ class TestOrderedColDevice(TestCase):
         # The gate admits 4096 outputs, but the kernel declines fewer than 32 columns.
         x = torch.randn(256, 128, 16, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
-        real = kg._try_indexed_itree
+        real, ordered = kg._try_indexed_itree, ct.reduce_ordered_col
+        served = []
+
+        def record(*args, **kwargs):
+            served.append(ordered(*args, **kwargs))
+            return served[-1]
+
         ccs = (torch.cuda.get_device_capability(device),)
         with (
             mock.patch.object(kg, "_ORDERED_COL_CCS", ccs),
+            mock.patch.object(ct, "reduce_ordered_col", record),
             mock.patch.object(kg, "_try_indexed_itree", wraps=real) as fallback,
         ):
             got = kg.reduce_dim(
                 trait, "fallback", x, 1, torch.float32, order="inner_tree"
             )
+        self.assertEqual(served, [None])
         fallback.assert_called_once()
         self.assertEqual(got, x.sum(dim=1), atol=1e-4, rtol=1e-4)
 
