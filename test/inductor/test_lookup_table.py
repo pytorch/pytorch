@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_TRITON,
 )
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
@@ -554,7 +553,6 @@ class TestLookupTable(BaseLookupTableTest):
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @parametrize(
         "table_has_device_key,lookup_device_matches,expected_found",
         [
@@ -644,7 +642,6 @@ class TestLookupTable(BaseLookupTableTest):
                 ),
             )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
     def test_device_key_priority(self, device):
         """Test that device-specific keys take priority over device-agnostic keys"""
@@ -690,7 +687,6 @@ class TestLookupTable(BaseLookupTableTest):
                 "Should use device-specific config when both exist",
             )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
     def test_make_lookup_key_variants(self, device):
         """Test the make_lookup_key_variants helper function"""
@@ -889,7 +885,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @parametrize("max_autotune", [True, False])
     @fresh_cache()
     def test_no_lookup_table_entry_autotune_modes(self, device, max_autotune):
@@ -935,7 +930,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             {"max_autotune_gemm": max_autotune, "max_autotune": max_autotune},
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180234")
     @parametrize("operation", ["mm", "addmm", "bmm", "mm_plus_mm"])
     @fresh_cache()
@@ -968,7 +962,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             )
         self.run_model(operation, tensors)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @parametrize("operation", ["mm", "addmm"])
     @fresh_cache()
@@ -1000,7 +993,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             operation, tensors, {"triton.enable_persistent_tma_matmul": True}
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @fresh_cache()
     def test_decompose_k_lookup_table_entry(self, device):
         """Test decompose_k template entry"""
@@ -1024,7 +1016,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             {"triton.num_decompose_k_splits": 10},
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180233")
     @fresh_cache()
     def test_bias_addmm_lookup_table_entry(self, device):
@@ -1058,7 +1049,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             compiled_model = torch.compile(model.to(device), mode="max-autotune")
             compiled_model(expanded_bias, tensors[1], tensors[2])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @fresh_cache()
     def test_multiple_configs_same_template(self, device):
@@ -1085,7 +1075,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         )
         self.run_model("mm", tensors, {"triton.enable_persistent_tma_matmul": True})
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @fresh_cache()
     def test_mixed_template_configs(self, device):
@@ -1108,7 +1097,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         )
         self.run_model("mm", tensors, {"triton.enable_persistent_tma_matmul": True})
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @fresh_cache()
     def test_template_hash_filtering_e2e(self, device):
         """Test end-to-end template hash filtering in real MM operation"""
