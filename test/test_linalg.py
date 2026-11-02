@@ -4,6 +4,7 @@
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
+from torch._subclasses.fake_tensor import FakeTensorMode
 import numpy as np
 
 import os
@@ -57,6 +58,7 @@ import contextlib
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     TEST_WITH_SLOW,
+    set_warn_always_context,
 )
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
@@ -1313,15 +1315,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvalsh(t, out=out)
 
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_eigh_lwork_lapack(self, device, dtype):
-        # test that the calculated lwork does not cause a crash, see https://github.com/pytorch/pytorch/issues/145801
-        t = torch.rand(3000, 3000, device=device, dtype=dtype)
-        y = torch.linalg.eigh(t)
-        self.assertEqual(y.eigenvalues.shape, (3000,))
-
     @dtypes(*floating_and_complex_types())
     def test_kron(self, device, dtype):
 
@@ -1924,32 +1917,6 @@ class TestLinalg(TestCase):
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out, expected, msg=msg)
-
-    @onlyCPU
-    def test_norm_complexhalf(self, device):
-        def gen_error_message(input_size, ord, keepdim, dim=None):
-            return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
-
-        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
-
-        # Test supported ords
-        for keepdim in [False, True]:
-            # vector norm
-            x = torch.randn(25, device=device, dtype=torch.chalf)
-            x_cfloat = x.to(torch.cfloat)
-            for ord in vector_ords:
-                res = torch.linalg.norm(x, ord, keepdim=keepdim)
-                res_float = torch.linalg.norm(x_cfloat, ord, keepdim=keepdim)
-                msg = gen_error_message(x.size(), ord, keepdim)
-                self.assertEqual(res.shape, res_float.shape, msg=msg)
-                self.assertEqual(res.dtype, torch.half, msg=msg)
-                self.assertEqual(res, res_float, msg=msg, exact_dtype=False)
-
-                res_out = torch.tensor([], device=device, dtype=res.dtype)
-                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
-                self.assertEqual(res_out.shape, res_float.shape, msg=msg)
-                self.assertEqual(res_out.dtype, torch.half, msg=msg)
-                self.assertEqual(res_out, res_float, msg=msg, exact_dtype=False)
 
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
@@ -3064,6 +3031,123 @@ class TestLinalg(TestCase):
 
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
+
+    def _svd_driver_calls(self, A, driver):
+        return (
+            ("svd", partial(torch.linalg.svd, A, driver=driver)),
+            ("svd_out", partial(
+                torch.linalg.svd, A, driver=driver,
+                out=(A.new_empty(0), A.real.new_empty(0), A.new_empty(0)))),
+            ("svdvals", partial(torch.linalg.svdvals, A, driver=driver)),
+            ("svdvals_out", partial(
+                torch.linalg.svdvals, A, driver=driver, out=A.real.new_empty(0))),
+        )
+
+    def _assert_svd_driver_error(self, A, driver, msg):
+        for op, call in self._svd_driver_calls(A, driver):
+            with self.subTest(shape=A.shape, op=op):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    call()
+
+    def _call_without_rocm_driver_warning(self, call):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with set_warn_always_context(True):
+                result = call()
+        self.assertFalse([w.message for w in caught if "ignored on ROCm" in str(w.message)])
+        return result
+
+    @onlyNativeDeviceTypes
+    @parametrize("mode", ("real", "fake"))
+    @parametrize("op", ("svd", "svd_out", "svdvals", "svdvals_out"))
+    def test_svd_driver_validation(self, device, mode, op):
+        with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                A = torch.empty(shape, device=device)
+                for driver in ("invalid", ""):
+                    with self.subTest(shape=shape, driver=driver):
+                        with self.assertRaisesRegex(RuntimeError, "torch.linalg.svd: unknown svd driver"):
+                            dict(self._svd_driver_calls(A, driver))[op]()
+
+    @onlyCPU
+    @parametrize("mode", ("fake", "meta"))
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_meta(self, device, dtype, mode):
+        with FakeTensorMode() if mode == "fake" else contextlib.nullcontext():
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                A = torch.empty(shape, device="meta" if mode == "meta" else device, dtype=dtype)
+                if mode == "meta":
+                    # Meta ignores the device; test_svd_driver_validation covers the other modes.
+                    for driver in ("invalid", ""):
+                        with self.subTest(driver=driver):
+                            self._assert_svd_driver_error(A, driver, "torch.linalg.svd: unknown svd driver")
+                expected = [call() for _, call in self._svd_driver_calls(A, None)]
+                for driver in ("gesvd", "gesvdj", "gesvda"):
+                    for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                        with self.subTest(shape=shape, driver=driver, op=op):
+                            actual = call()
+                            actual = actual if isinstance(actual, tuple) else (actual,)
+                            result = result if isinstance(result, tuple) else (result,)
+                            for tensor, reference in zip(actual, result):
+                                self.assertEqual(tensor.shape, reference.shape)
+                                self.assertEqual(tensor.dtype, reference.dtype)
+                                self.assertEqual(tensor.stride(), reference.stride())
+
+    @onlyCPU
+    def test_svd_driver_cpu(self, device):
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for driver in ("gesvd", "gesvdj", "gesvda"):
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                self._assert_svd_driver_error(
+                    torch.empty(shape, device=device), driver, msg)
+
+    @onlyCUDA
+    @skipIfRocm
+    @skipCUDAIf(not torch.cuda.has_magma, "requires MAGMA")
+    @setLinalgBackendsToDefaultFinally
+    def test_svd_driver_magma(self, device):
+        torch.backends.cuda.preferred_linalg_library("magma")
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = torch.empty(shape, device=device)
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                self._assert_svd_driver_error(A, driver, msg)
+            self._assert_svd_driver_error(A, "invalid", "torch.linalg.svd: unknown svd driver")
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_default(self, device, dtype):
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            U, S, Vh = torch.linalg.svd(A)
+            k = min(shape[-2:])
+            self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A)
+            for op, call in self._svd_driver_calls(A, None):
+                actual = self._call_without_rocm_driver_warning(call)
+                self.assertEqual(actual, S if "svdvals" in op else (U, S, Vh))
+
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_ignored_on_rocm(self, device, dtype):
+        # These convergent controls check warnings and ignored selection, not fallback execution.
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            expected = [self._call_without_rocm_driver_warning(call)
+                        for _, call in self._svd_driver_calls(A, None)]
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                    with self.subTest(shape=shape, driver=driver, op=op):
+                        with self.assertWarnsOnceRegex(UserWarning, ".*driver.*ignored on ROCm"):
+                            actual = call()
+                        self.assertEqual(actual, result)
 
     @skipCPUIfNoLapack
     @skipCUDAIf(
@@ -5957,62 +6041,6 @@ class TestLinalg(TestCase):
                     else:
                         self.assertEqual(B_left, X @ A_adj)
 
-    @onlyCPU
-    @dtypes(*floating_and_complex_types())
-    def test_linalg_lu_cpu_errors(self, device, dtype):
-        # Square tests
-        sample = torch.randn(3, 2, 2, device=device, dtype=dtype)
-        B = torch.randn(3, 2, 2, device=device, dtype=dtype)
-        LU, pivots = torch.linalg.lu_factor(sample)
-
-        # This should run without issues
-        torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
-        torch.lu_unpack(LU, pivots)
-
-        pivots[0] = 0
-        with self.assertRaisesRegex(RuntimeError, r"greater or equal to 1"):
-            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
-            torch.lu_unpack(LU, pivots)
-
-        pivots[0] = 3
-        with self.assertRaisesRegex(RuntimeError, r"smaller or equal to LU.size\(-2\)"):
-            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
-            torch.lu_unpack(LU, pivots)
-
-        # Rectangular tests
-        sample = torch.randn(3, 4, 2, device=device, dtype=dtype)
-        B = torch.randn(3, 4, 2, device=device, dtype=dtype)
-        LU, pivots = torch.linalg.lu_factor(sample)
-
-        # This should run without issues
-        torch.lu_unpack(LU, pivots)
-
-        pivots[0] = 0
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
-            torch.lu_unpack(LU, pivots)
-
-        pivots[0] = 5
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
-            torch.lu_unpack(LU, pivots)
-
-        # Rectangular tests
-        sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
-        B = torch.randn(2, 3, 5, device=device, dtype=dtype)
-        LU, pivots = torch.linalg.lu_factor(sample)
-
-        # This should run without issues
-        torch.lu_unpack(LU, pivots)
-
-        pivots[0] = 0
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
-            torch.lu_unpack(LU, pivots)
-
-        pivots[0] = 4
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
-            torch.lu_unpack(LU, pivots)
-
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lu_unpack_check_input(self, device, dtype):
@@ -6200,174 +6228,6 @@ class TestLinalg(TestCase):
         E1, V1 = lobpcg(A1, X=X1)
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         self.assertLess(eq_err, 1e-6)
-
-    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
-                     "Scipy not found or older than 1.4.1")
-    @skipCPUIfNoLapack
-    @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
-    @onlyCPU
-    @dtypes(torch.double)
-    def test_lobpcg_scipy(self, device, dtype):
-        """Compare torch and scipy.sparse.linalg implementations of lobpcg
-        """
-        import time
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
-        from torch._linalg_utils import matmul as mm
-        from scipy.sparse.linalg import lobpcg as scipy_lobpcg
-        import scipy.sparse
-
-        def toscipy(A):
-            if A.layout == torch.sparse_coo:
-                values = A.coalesce().values().cpu().numpy().copy()
-                indices = A.coalesce().indices().cpu().numpy().copy()
-                return scipy.sparse.coo_matrix((values, (indices[0], indices[1])), A.shape)
-            return A.cpu().numpy().copy()
-
-        niter = 1000
-        repeat = 10
-        m = 500   # size of the square matrix
-        k = 7     # the number of requested eigenpairs
-        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
-        B1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
-        X1 = torch.randn((m, k), dtype=dtype, device=device)
-
-        A2 = toscipy(A1)
-        B2 = toscipy(B1)
-        X2 = toscipy(X1)
-
-        lambdas1 = []
-
-        def tracker(worker):
-            lambdas1.append(worker.E[:])
-
-        tol = 1e-8
-        # tol for scipy lobpcg will be chosen so that the number of
-        # iterations will be equal or very close to pytorch lobpcg
-        # (that is around 170-180)
-
-        # Standard eigenvalue problem
-        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
-        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=1.1 * tol)
-        iters1 = len(lambdas1)
-        iters2 = len(lambdas2)
-        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
-
-        E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
-
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
-        eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
-        self.assertLess(eq_err, 1e-6)        # std
-        self.assertLess(eq_err_scipy, 1e-6)  # std
-
-        self.assertEqual(E1, torch.from_numpy(E2.copy()))
-
-        # Generalized eigenvalue problem
-        lambdas1 = []
-
-        def tracker(worker):
-            lambdas1.append(worker.E[:])
-
-        E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
-        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=39 * tol)
-        E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
-        iters1 = len(lambdas1)
-        iters2 = len(lambdas2)
-        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
-
-        eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
-        eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
-        self.assertLess(eq_err, 1e-6)        # general
-        self.assertLess(eq_err_scipy, 1e-6)  # general
-
-        self.assertEqual(E1, torch.from_numpy(E2.copy()))
-
-        # Timings
-        elapsed_ortho = 0
-        elapsed_ortho_general = 0
-        elapsed_scipy = 0
-        elapsed_general_scipy = 0
-        for _ in range(repeat):
-            start = time.time()
-            torch.lobpcg(A1, X=X1, niter=niter, method='ortho', tol=tol)
-            end = time.time()
-            elapsed_ortho += end - start
-
-            start = time.time()
-            torch.lobpcg(A1, X=X1, B=B1, niter=niter, method='ortho', tol=tol)
-            end = time.time()
-            elapsed_ortho_general += end - start
-
-            start = time.time()
-            scipy_lobpcg(A2, X2, maxiter=niter, tol=1.1 * tol)
-            end = time.time()
-            elapsed_scipy += end - start
-
-            start = time.time()
-            scipy_lobpcg(A2, X2, B=B2, maxiter=niter, tol=39 * tol)
-            end = time.time()
-            elapsed_general_scipy += end - start
-
-        elapsed_ortho_ms = 1000.0 * elapsed_ortho / repeat
-        elapsed_ortho_general_ms = 1000.0 * elapsed_ortho_general / repeat
-        elapsed_scipy_ms = 1000.0 * elapsed_scipy / repeat
-        elapsed_general_scipy_ms = 1000.0 * elapsed_general_scipy / repeat
-
-        print(f'''
-CPU timings: torch.lobpcg vs scipy.sparse.linalg.lobpcg
--------------------------------------------------------
-              | standard    | generalized | method
-torch.lobpcg  | {elapsed_ortho_ms:10.2f}  | {elapsed_ortho_general_ms:10.2f}  | ortho
-scipy_lobpcg  | {elapsed_scipy_ms:10.2f}  | {elapsed_general_scipy_ms:10.2f}  | N/A
--(input size: {m:4}, eigenpairs:{k:2}, units: ms per call)-
-        ''')
-
-        # Handling of very small tolerance
-        tol = 1e-100
-
-        lambdas1 = []
-
-        def tracker(worker):
-            lambdas1.append(worker.E[:])
-
-        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
-        iters1 = len(lambdas1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
-
-        try:
-            E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
-            iters2 = len(lambdas2)
-            eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
-        except Exception as msg:
-            print('Calling scipy_lobpcg failed [standard]:', msg)
-            iters2 = -1
-            eq_err_scipy = -1
-
-        lambdas1 = []
-
-        def tracker(worker):
-            lambdas1.append(worker.E[:])
-
-        E1, V1 = torch.lobpcg(A1, X=X1, B=B1, niter=niter, largest=True, tracker=tracker, tol=tol)
-        iters1_general = len(lambdas1)
-        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
-
-        try:
-            E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
-            iters2_general = len(lambdas2)
-            eq_err_general_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
-        except Exception as msg:
-            print('Calling scipy_lobpcg failed [generalized]:', msg)
-            iters2_general = -1
-            eq_err_general_scipy = -1
-
-        print(f'''\
-Handling of small tol={tol:6.0e}: torch.lobpcg vs scipy.sparse.linalg.lobpcg
-----------------------------------------------------------------------------
-              | standard    | generalized |  niter | method
-torch.lobpcg  | {eq_err:10.2e}  | {eq_err_general:10.2e}  | {iters1:6} | ortho
-scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:6} | N/A
----(input size: {m:4}, eigenpairs:{k:2}, units: relative error, maxiter={niter:4})---
-''')
 
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
         dtype = t.dtype
@@ -6727,102 +6587,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
-    @onlyCPU
-    @parametrize("m", [0, 8, 17])
-    @parametrize("k", [0, 16, 32])
-    @parametrize("n", [16, 32])
-    @parametrize("use_transpose_a", [True, False])
-    @parametrize("use_transpose_b", [True, False])
-    @parametrize("non_contig_type", [0, 1, 2])
-    @parametrize("x_dtype", [torch.int8, torch.uint8])
-    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
-        # non_contig_type:
-        # 0: the whole data buffer is contiguous (can be transposed)
-        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
-        # 2: Neither stride is 1
-
-        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
-            if use_transpose:
-                x, y = y, x
-            if non_contig_type != 0:
-                y = y * 2
-            dt_info = torch.iinfo(dtype)
-            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
-            x_float = x_int8.to(torch.float32)
-            if non_contig_type == 1:
-                x_int8 = x_int8[:, : y // 2]
-                x_float = x_float[:, : y // 2]
-            elif non_contig_type == 2:
-                x_int8 = x_int8[:, ::2]
-                x_float = x_float[:, ::2]
-            if use_transpose:
-                return x_int8.t(), x_float.t()
-            return x_int8, x_float
-
-        if non_contig_type != 0 and (m == 0 or k == 0):
-            return
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
-        c_int32 = torch._int_mm(a_int8, b_int8)
-        self.assertTrue(c_int32.dtype is torch.int32)
-        self.assertEqual(c_int32.device, torch.device(device))
-        self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
-        c_int32_result = c_int32.new_empty(c_int32.size())
-        # Checking out variant
-        torch._int_mm(a_int8, b_int8, out=c_int32_result)
-        self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
-
-    @onlyCPU
-    @parametrize("k", [16, 32])
-    @parametrize("n", [16, 32])
-    @parametrize("x_dtype", [torch.int8, torch.uint8])
-    def test__int_mm_cpu_size1_dim_stride(self, device, k, n, x_dtype):
-        # https://github.com/pytorch/pytorch/issues/195066
-        def genf(rows, cols, dtype):
-            info = torch.iinfo(dtype)
-            return torch.randint(
-                info.min, info.max, (rows, cols), dtype=dtype, device=device
-            )
-
-        def check(a, b):
-            ref = torch.mm(a.float(), b.float())
-            self.assertEqual(torch._int_mm(a, b).float(), ref)
-            out = a.new_full((a.size(0), b.size(1)), 42, dtype=torch.int32)
-            torch._int_mm(a, b, out=out)
-            self.assertEqual(out.float(), ref)
-
-        a, b = genf(1, k, x_dtype), genf(k, n, torch.int8)
-        for a_stride in ((0, 1), (1, 1)):
-            check(a.as_strided((1, k), a_stride), b)
-        # with a size-1 contraction dim it is the other stride that is arbitrary
-        check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
-
-    @onlyCPU
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_mm_cpu_unaligned(self, device, dtype):
-        m, n, k, n_groups = 16, 32, 64, 4
-
-        base_a = torch.randn(m * k * n_groups + 1, device=device, dtype=dtype)
-        a = base_a[1:].view(m, k * n_groups)
-
-        base_b = torch.randn(n * k * n_groups + 1, device=device, dtype=dtype)
-        b = base_b[1:].view(n, k * n_groups)
-
-        self.assertNotEqual(a.data_ptr() % 16, 0)
-        self.assertNotEqual(b.data_ptr() % 16, 0)
-
-        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-
-        out = F.grouped_mm(a, b.t(), offs=offs, out_dtype=dtype)
-
-        start = 0
-        for i in range(n_groups):
-            a_slice = a[:, start:offs[i]]
-            b_slice = b[:, start:offs[i]]
-            out_ref = torch.mm(a_slice, b_slice.t())
-            self.assertEqual(out[i], out_ref)
-            start = offs[i]
-
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
@@ -7150,56 +6914,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
-
-    @slowTest
-    @onlyCPU
-    @largeTensorTest('12GB', device='cpu')
-    def test__int8_mm_large_shape(self, device):
-        torch.manual_seed(1)
-        m = 65536
-        k = 64
-        n = 50400
-        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
-        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
-
-        def convert_weight_to_int8pack(b):
-            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
-                b, -128, 127, torch.int8
-            )
-            return b_int8pack, b_scales
-
-        def weight_int8pack_mm(a, b_int8pack, b_scales):
-            return torch._weight_int8pack_mm(
-                a, b_int8pack, b_scales
-            )
-
-        b_int8pack, b_scales = convert_weight_to_int8pack(b)
-        # should pass without segfault
-        weight_int8pack_mm(a, b_int8pack, b_scales)
-
-    @onlyCPU
-    @parametrize("m", [32, 35, 36, 40, 64])
-    @parametrize("k", [32, 35, 36, 40, 64])
-    # NOTE: This is intended to cover fp16_gemv_trans in
-    # BlasKernel.cpp. Currently, bounds being divisible by 32, 8-but-not-32, and 4-but-not-8
-    # all matter.
-    def test_fp16_mv_transposed_first_argument_arm_cpu(self, device, m, k):
-        torch.manual_seed(1)
-        a = torch.rand((m, k), dtype=torch.half, device=device)
-        b = torch.rand((1, k), dtype=torch.half, device=device)
-
-        prev = torch._C._get_cpu_allow_fp16_reduced_precision_reduction()
-        try:
-            torch._C._set_cpu_allow_fp16_reduced_precision_reduction(False)
-            ref = torch.mm(a, b.t())
-            try:
-                torch._C._set_cpu_allow_fp16_reduced_precision_reduction(True)
-            except RuntimeError as e:
-                raise unittest.SkipTest from e
-            res = torch.mm(a, b.t())
-            torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
-        finally:
-            torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
     @slowTest
     @onlyNativeDeviceTypes
@@ -11104,6 +10818,53 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @dtypes(torch.float)
+    def test_addmm_lt_follows_blas_backend_switch(self, device, dtype):
+        # The first addmm in a process ran under rocBLAS; switching to hipBLASLt afterwards must still route
+        # linear+bias through the Lt GemmAndBias path (#186873). Run in a fresh process so this addmm is the first.
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        script = textwrap.dedent(
+            f"""
+            import torch
+
+            x = torch.rand(4, 2, device={device!r}, dtype={dtype})
+            w = torch.rand(8, 2, device={device!r}, dtype={dtype})
+            bias = torch.rand(8, device={device!r}, dtype={dtype})
+            torch.backends.cuda.preferred_blas_library("cublas")
+            torch.nn.functional.linear(x, w, bias)
+
+            if torch.backends.cuda.preferred_blas_library("cublaslt") != torch._C._BlasBackend.Cublaslt:
+                raise AssertionError("switching to hipBLASLt did not take effect")
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.enable(True)
+            torch.nn.functional.linear(x, w, bias)
+            torch.cuda.tunable.enable(False)
+            for result in torch.cuda.tunable.get_results():
+                print(result[0])
+            """
+        )
+        # DISABLE_ADDMM_CUDA_LT overrides the preferred backend, and PYTORCH_TUNABLEOP_*
+        # override the tunable setters below (and can preload results), so keep them
+        # out of the child.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTORCH_TUNABLEOP_")}
+        env.pop("DISABLE_ADDMM_CUDA_LT", None)
+        # TunableOp writes its results file into the cwd at exit.
+        cmd = [sys.executable, "-c", script]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        op_sigs = result.stdout.split()
+        self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
+
     @dtypes(torch.float)
     def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
         # Regression test for https://github.com/ROCm/TheRock/issues/5553
@@ -12038,19 +11799,469 @@ class TestLinalgCudaOnly(TestCase):
     @skipCUDAIfNotRocm
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.float64])
     def test_ck_blas_library_mm(self, dtype):
         if dtype == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
             self.skipTest("bfloat16 case skipped on gfx90a")
         device = 'cuda'
         shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
         for M, K, N in shapes:
-            a = torch.randint(2, 5, (M, K), device=device, dtype=torch.float32).to(dtype)
-            b = torch.randint(2, 5, (K, N), device=device, dtype=torch.float32).to(dtype)
-            cpu_out = torch.mm(a.cpu(), b.cpu())
+            # Small integers keep every partial sum exact, even in float16.
+            a = torch.randint(-2, 3, (M, K), device=device, dtype=torch.float32).to(dtype)
+            b = torch.randint(-2, 3, (K, N), device=device, dtype=torch.float32).to(dtype)
+            cpu_out = torch.mm(a.cpu().double(), b.cpu().double()).to(dtype)
             with blas_library_context("ck"):
                 ck_out = torch.mm(a, b)
             self.assertEqual(ck_out, cpu_out)
+
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_ck_blas_library_addmm(self, dtype):
+        a = torch.randint(-2, 3, (256, 64), device="cuda").to(dtype)
+        b = torch.randint(-2, 3, (64, 512), device="cuda").to(dtype)
+        for bias_shape in [(256, 512), (512,)]:
+            bias = torch.randint(-2, 3, bias_shape, device="cuda").to(dtype)
+            for alpha, beta in [(1, 0), (2, 0), (1, 1), (2, 0.5)]:
+                expected = torch.addmm(bias.cpu().double(), a.cpu().double(), b.cpu().double(), alpha=alpha, beta=beta)
+                with blas_library_context("ck"):
+                    out = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
+                self.assertEqual(out, expected.to(dtype))
+
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_ck_blas_library_unsupported_falls_back(self, dtype):
+        def check(fn, *args, **kwargs):
+            expected = fn(*(t.cpu().double() for t in args), **kwargs).to(dtype)
+            with blas_library_context("ck"):
+                self.assertEqual(fn(*args, **kwargs), expected)
+
+        def make(*shape):
+            return torch.randint(-2, 3, shape, device="cuda").to(dtype)
+
+        # No CK GEMM instance accepts these shapes.
+        for m, n, k in [(77, 129, 63), (128, 128, 130)]:
+            check(torch.mm, make(m, k), make(k, n))
+            check(torch.mm, make(k, m).t(), make(n, k).t())
+        a, b, c = make(4, 128, 512), make(4, 96, 512).mT, make(4, 128, 96)
+        for a_, b_ in [(a, b), (a.contiguous(), b.contiguous()), (a.mT.contiguous().mT, b)]:
+            check(torch.bmm, a_, b_)
+            # Batch strides that are not the packed m * k and k * n.
+            check(torch.bmm, a_[:, :, :256], b_[:, :256])
+            check(torch.baddbmm, c, a_, b_, alpha=0.5, beta=2)
+
+
+class TestLinalgCpuOnly(TestCase):
+    """CPU-specific linear algebra tests."""
+
+    def setUp(self):
+        super().setUp()
+        self._prev_fp32_state = _snapshot_fp32_precision()
+
+    def tearDown(self):
+        _restore_fp32_precision(self._prev_fp32_state)
+        super().tearDown()
+
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_eigh_lwork_lapack(self, device, dtype):
+        # test that the calculated lwork does not cause a crash, see https://github.com/pytorch/pytorch/issues/145801
+        t = torch.rand(3000, 3000, device=device, dtype=dtype)
+        y = torch.linalg.eigh(t)
+        self.assertEqual(y.eigenvalues.shape, (3000,))
+
+    def test_norm_complexhalf(self, device):
+        def gen_error_message(input_size, ord, keepdim, dim=None):
+            return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
+
+        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
+
+        # Test supported ords
+        for keepdim in [False, True]:
+            # vector norm
+            x = torch.randn(25, device=device, dtype=torch.chalf)
+            x_cfloat = x.to(torch.cfloat)
+            for ord in vector_ords:
+                res = torch.linalg.norm(x, ord, keepdim=keepdim)
+                res_float = torch.linalg.norm(x_cfloat, ord, keepdim=keepdim)
+                msg = gen_error_message(x.size(), ord, keepdim)
+                self.assertEqual(res.shape, res_float.shape, msg=msg)
+                self.assertEqual(res.dtype, torch.half, msg=msg)
+                self.assertEqual(res, res_float, msg=msg, exact_dtype=False)
+
+                res_out = torch.tensor([], device=device, dtype=res.dtype)
+                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
+                self.assertEqual(res_out.shape, res_float.shape, msg=msg)
+                self.assertEqual(res_out.dtype, torch.half, msg=msg)
+                self.assertEqual(res_out, res_float, msg=msg, exact_dtype=False)
+
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_lu_cpu_errors(self, device, dtype):
+        # Square tests
+        sample = torch.randn(3, 2, 2, device=device, dtype=dtype)
+        B = torch.randn(3, 2, 2, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"greater or equal to 1"):
+            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 3
+        with self.assertRaisesRegex(RuntimeError, r"smaller or equal to LU.size\(-2\)"):
+            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        # Rectangular tests
+        sample = torch.randn(3, 4, 2, device=device, dtype=dtype)
+        B = torch.randn(3, 4, 2, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 5
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        # Rectangular tests
+        sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
+        B = torch.randn(2, 3, 5, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 4
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
+                     "Scipy not found or older than 1.4.1")
+    @skipCPUIfNoLapack
+    @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
+    @dtypes(torch.double)
+    def test_lobpcg_scipy(self, device, dtype):
+        """Compare torch and scipy.sparse.linalg implementations of lobpcg
+        """
+        import time
+        from torch.testing._internal.common_utils import random_sparse_pd_matrix
+        from torch._linalg_utils import matmul as mm
+        from scipy.sparse.linalg import lobpcg as scipy_lobpcg
+        import scipy.sparse
+
+        def toscipy(A):
+            if A.layout == torch.sparse_coo:
+                values = A.coalesce().values().cpu().numpy().copy()
+                indices = A.coalesce().indices().cpu().numpy().copy()
+                return scipy.sparse.coo_matrix((values, (indices[0], indices[1])), A.shape)
+            return A.cpu().numpy().copy()
+
+        niter = 1000
+        repeat = 10
+        m = 500   # size of the square matrix
+        k = 7     # the number of requested eigenpairs
+        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
+        B1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
+        X1 = torch.randn((m, k), dtype=dtype, device=device)
+
+        A2 = toscipy(A1)
+        B2 = toscipy(B1)
+        X2 = toscipy(X1)
+
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        tol = 1e-8
+        # tol for scipy lobpcg will be chosen so that the number of
+        # iterations will be equal or very close to pytorch lobpcg
+        # (that is around 170-180)
+
+        # Standard eigenvalue problem
+        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=1.1 * tol)
+        iters1 = len(lambdas1)
+        iters2 = len(lambdas2)
+        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
+
+        E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
+
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
+        self.assertLess(eq_err, 1e-6)        # std
+        self.assertLess(eq_err_scipy, 1e-6)  # std
+
+        self.assertEqual(E1, torch.from_numpy(E2.copy()))
+
+        # Generalized eigenvalue problem
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=39 * tol)
+        E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
+        iters1 = len(lambdas1)
+        iters2 = len(lambdas2)
+        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
+
+        eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
+        self.assertLess(eq_err, 1e-6)        # general
+        self.assertLess(eq_err_scipy, 1e-6)  # general
+
+        self.assertEqual(E1, torch.from_numpy(E2.copy()))
+
+        # Timings
+        elapsed_ortho = 0
+        elapsed_ortho_general = 0
+        elapsed_scipy = 0
+        elapsed_general_scipy = 0
+        for _ in range(repeat):
+            start = time.time()
+            torch.lobpcg(A1, X=X1, niter=niter, method='ortho', tol=tol)
+            end = time.time()
+            elapsed_ortho += end - start
+
+            start = time.time()
+            torch.lobpcg(A1, X=X1, B=B1, niter=niter, method='ortho', tol=tol)
+            end = time.time()
+            elapsed_ortho_general += end - start
+
+            start = time.time()
+            scipy_lobpcg(A2, X2, maxiter=niter, tol=1.1 * tol)
+            end = time.time()
+            elapsed_scipy += end - start
+
+            start = time.time()
+            scipy_lobpcg(A2, X2, B=B2, maxiter=niter, tol=39 * tol)
+            end = time.time()
+            elapsed_general_scipy += end - start
+
+        elapsed_ortho_ms = 1000.0 * elapsed_ortho / repeat
+        elapsed_ortho_general_ms = 1000.0 * elapsed_ortho_general / repeat
+        elapsed_scipy_ms = 1000.0 * elapsed_scipy / repeat
+        elapsed_general_scipy_ms = 1000.0 * elapsed_general_scipy / repeat
+
+        print(f'''
+CPU timings: torch.lobpcg vs scipy.sparse.linalg.lobpcg
+-------------------------------------------------------
+              | standard    | generalized | method
+torch.lobpcg  | {elapsed_ortho_ms:10.2f}  | {elapsed_ortho_general_ms:10.2f}  | ortho
+scipy_lobpcg  | {elapsed_scipy_ms:10.2f}  | {elapsed_general_scipy_ms:10.2f}  | N/A
+-(input size: {m:4}, eigenpairs:{k:2}, units: ms per call)-
+        ''')
+
+        # Handling of very small tolerance
+        tol = 1e-100
+
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        iters1 = len(lambdas1)
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+
+        try:
+            E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
+            iters2 = len(lambdas2)
+            eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
+        except Exception as msg:
+            print('Calling scipy_lobpcg failed [standard]:', msg)
+            iters2 = -1
+            eq_err_scipy = -1
+
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        E1, V1 = torch.lobpcg(A1, X=X1, B=B1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        iters1_general = len(lambdas1)
+        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+
+        try:
+            E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
+            iters2_general = len(lambdas2)
+            eq_err_general_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
+        except Exception as msg:
+            print('Calling scipy_lobpcg failed [generalized]:', msg)
+            iters2_general = -1
+            eq_err_general_scipy = -1
+
+        print(f'''\
+Handling of small tol={tol:6.0e}: torch.lobpcg vs scipy.sparse.linalg.lobpcg
+----------------------------------------------------------------------------
+              | standard    | generalized |  niter | method
+torch.lobpcg  | {eq_err:10.2e}  | {eq_err_general:10.2e}  | {iters1:6} | ortho
+scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:6} | N/A
+---(input size: {m:4}, eigenpairs:{k:2}, units: relative error, maxiter={niter:4})---
+''')
+
+    @parametrize("m", [0, 8, 17])
+    @parametrize("k", [0, 16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("use_transpose_a", [True, False])
+    @parametrize("use_transpose_b", [True, False])
+    @parametrize("non_contig_type", [0, 1, 2])
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
+        # non_contig_type:
+        # 0: the whole data buffer is contiguous (can be transposed)
+        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
+        # 2: Neither stride is 1
+
+        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
+            if use_transpose:
+                x, y = y, x
+            if non_contig_type != 0:
+                y = y * 2
+            dt_info = torch.iinfo(dtype)
+            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
+            x_float = x_int8.to(torch.float32)
+            if non_contig_type == 1:
+                x_int8 = x_int8[:, : y // 2]
+                x_float = x_float[:, : y // 2]
+            elif non_contig_type == 2:
+                x_int8 = x_int8[:, ::2]
+                x_float = x_float[:, ::2]
+            if use_transpose:
+                return x_int8.t(), x_float.t()
+            return x_int8, x_float
+
+        if non_contig_type != 0 and (m == 0 or k == 0):
+            return
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
+        c_int32 = torch._int_mm(a_int8, b_int8)
+        self.assertTrue(c_int32.dtype is torch.int32)
+        self.assertEqual(c_int32.device, torch.device(device))
+        self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
+        c_int32_result = c_int32.new_empty(c_int32.size())
+        # Checking out variant
+        torch._int_mm(a_int8, b_int8, out=c_int32_result)
+        self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+
+    @parametrize("k", [16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu_size1_dim_stride(self, device, k, n, x_dtype):
+        # https://github.com/pytorch/pytorch/issues/195066
+        def genf(rows, cols, dtype):
+            info = torch.iinfo(dtype)
+            return torch.randint(
+                info.min, info.max, (rows, cols), dtype=dtype, device=device
+            )
+
+        def check(a, b):
+            ref = torch.mm(a.float(), b.float())
+            self.assertEqual(torch._int_mm(a, b).float(), ref)
+            out = a.new_full((a.size(0), b.size(1)), 42, dtype=torch.int32)
+            torch._int_mm(a, b, out=out)
+            self.assertEqual(out.float(), ref)
+
+        a, b = genf(1, k, x_dtype), genf(k, n, torch.int8)
+        for a_stride in ((0, 1), (1, 1)):
+            check(a.as_strided((1, k), a_stride), b)
+        # with a size-1 contraction dim it is the other stride that is arbitrary
+        check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
+
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_mm_cpu_unaligned(self, device, dtype):
+        m, n, k, n_groups = 16, 32, 64, 4
+
+        base_a = torch.randn(m * k * n_groups + 1, device=device, dtype=dtype)
+        a = base_a[1:].view(m, k * n_groups)
+
+        base_b = torch.randn(n * k * n_groups + 1, device=device, dtype=dtype)
+        b = base_b[1:].view(n, k * n_groups)
+
+        self.assertNotEqual(a.data_ptr() % 16, 0)
+        self.assertNotEqual(b.data_ptr() % 16, 0)
+
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+
+        out = F.grouped_mm(a, b.t(), offs=offs, out_dtype=dtype)
+
+        start = 0
+        for i in range(n_groups):
+            a_slice = a[:, start:offs[i]]
+            b_slice = b[:, start:offs[i]]
+            out_ref = torch.mm(a_slice, b_slice.t())
+            self.assertEqual(out[i], out_ref)
+            start = offs[i]
+
+    @slowTest
+    @largeTensorTest('12GB', device='cpu')
+    def test__int8_mm_large_shape(self, device):
+        torch.manual_seed(1)
+        m = 65536
+        k = 64
+        n = 50400
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        # should pass without segfault
+        weight_int8pack_mm(a, b_int8pack, b_scales)
+
+    @parametrize("m", [32, 35, 36, 40, 64])
+    @parametrize("k", [32, 35, 36, 40, 64])
+    # NOTE: This is intended to cover fp16_gemv_trans in
+    # BlasKernel.cpp. Currently, bounds being divisible by 32, 8-but-not-32, and
+    # 4-but-not-8 all matter.
+    def test_fp16_mv_transposed_first_argument_arm_cpu(self, device, m, k):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.half, device=device)
+        b = torch.rand((1, k), dtype=torch.half, device=device)
+
+        prev = torch._C._get_cpu_allow_fp16_reduced_precision_reduction()
+        try:
+            torch._C._set_cpu_allow_fp16_reduced_precision_reduction(False)
+            ref = torch.mm(a, b.t())
+            try:
+                torch._C._set_cpu_allow_fp16_reduced_precision_reduction(True)
+            except RuntimeError as e:
+                raise unittest.SkipTest from e
+            res = torch.mm(a, b.t())
+            torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
+        finally:
+            torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
 
 _GROUPED_MM_CASES = [
@@ -12218,7 +12429,8 @@ class TestGroupedMM(TestCase):
 
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
-instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestLinalgCpuOnly, globals(), only_for=("cpu",))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':

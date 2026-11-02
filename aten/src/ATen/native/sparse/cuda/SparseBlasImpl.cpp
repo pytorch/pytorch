@@ -829,9 +829,9 @@ void addmm_out_sparse_csr(
     const auto [C_compressed, C_plain] = at::sparse_csr::getCompressedPlainIndices(result);
     if (
       (AB._nnz() == result._nnz())
-      && AB_compressed.eq(C_compressed).all().logical_and(AB_plain.eq(C_plain).all()).item<bool>()
+      && AB_compressed.eq(C_compressed).all().logical_and_(AB_plain.eq(C_plain).all()).item<bool>()
     ) {
-      result.values().mul_(beta).add_(AB.values());
+      (beta.toComplexDouble() == 1. ? result.values() : result.values().mul_(beta)).add_(AB.values());
     } else {
       const auto add_dtype = at::isReducedFloatingType(result.scalar_type()) ? kFloat : result.scalar_type();
       // CUDA sparse add supports CSR only, and the transpose of a CSC tensor is CSR.
