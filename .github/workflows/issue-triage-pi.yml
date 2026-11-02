@@ -134,9 +134,15 @@ jobs:
       log-prefix: ${{ needs.prepare.outputs.mode == 'apply' && github.repository == 'pytorch/pytorch' && 'review-logs' || '' }}
       prompt: |
         Triage issue #{0} in ${{ github.repository }} with the `triaging-issues` skill
-        (`.agents/skills/triaging-issues/SKILL.md`). Read the skill first, then `labels.json` and
-        `templates.json` beside it, and `pt2-triage-rubric.md` when the issue involves
-        PT2/torch.compile. Finish by calling `submit_result` with your plan.
+        (`.agents/skills/triaging-issues/SKILL.md`). Read the skill and the issue first.
+        If it already has an oncall label, follow Step 0. Otherwise, before the final decision:
+        - Read `labels.json`, `templates.json`, and `umbrellas.json` beside the skill;
+          also read `pt2-triage-rubric.md` for PT2/torch.compile issues.
+        - Use `search_issues` as described in Step 0.5 and read promising candidate issues/comments.
+          Broaden unhelpful queries; neither empty nor nonempty results prove the search is complete.
+        - Check the umbrella catalog's scopes and exclusions; include an `umbrella` annotation
+          when a configured target fits. Do not infer closure permission from search results.
+        Finish by calling `submit_result` with your plan.
 
         RELEASE CONTEXT (authoritative: use this and nothing else for the current release
         version, not any version written in the skill files or your own knowledge of PyTorch
