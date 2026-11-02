@@ -677,8 +677,7 @@ _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 
 # Ceiling on the SYMBOL, not the dim: a declared range says what a symbol MAY
 # take (every one here reports [2, 2**31-1]), so without a cap the ladder runs
-# orders of magnitude past the hint. In symbol space an expression dim like
-# 200*s can still reach its served size; the dim ceiling below bounds those.
+# orders of magnitude past the hint. The dim ceiling below bounds expressions.
 _TUNABLEOP_MAX_DYN_SYM = 16384
 
 
@@ -946,10 +945,9 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
             continue
         buckets.append(sym_val)
         dim_vals.append(dim_val)
-    # Served dim first, then largest first. The shared budget is spent in this
+    # Served dim first, then largest first; the shared budget is spent in that
     # order, so whatever sorts last is dropped. Keyed on the dim, not the
-    # symbol: a non-injective expression lets a smaller symbol claim the served
-    # dim during dedup, and then no bucket equals sym_hint.
+    # symbol: a non-injective expr lets a smaller symbol claim the served dim.
     order = sorted(
         range(len(buckets)), key=lambda i: (dim_vals[i] != served_dim, -dim_vals[i])
     )
@@ -976,8 +974,7 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         if bias_first:
             # The bias is exempt: no Signature() carries it (GemmCommon.h keys
             # trans/M/N/K/ld and batch), and mm_args expands a broadcast bias,
-            # so requiring density here would reject almost every addmm and
-            # baddbmm. _meta_at rebuilds it dense.
+            # so requiring density would reject almost every addmm/baddbmm.
             operands = operands[1:]
         if not all(_is_densely_packed(n) for n in operands):
             log.info(
@@ -1081,10 +1078,12 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         # The served rung is exempt, by dim rather than position: once it is
         # memoed, position 0 is the largest rung, and exempting that hands the
         # whole budget to the one likeliest to time out.
-        if remaining <= 0 or (
-            dim_vals[i] != served_dim and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET
-        ):
-            log.warning(
+        floored = dim_vals[i] != served_dim and remaining < _TUNABLEOP_MIN_BUCKET_BUDGET
+        if remaining <= 0 or floored:
+            # A floored stop is documented sub-minute-budget behaviour and
+            # fires once per GEMM; only a spent budget is worth a warning.
+            log.log(
+                logging.INFO if floored else logging.WARNING,
                 "TunableOp range pre-tune for %s stopped after %d/%d sizes with "
                 "%.0fs of its %.0fs budget left.",
                 winner.name,
