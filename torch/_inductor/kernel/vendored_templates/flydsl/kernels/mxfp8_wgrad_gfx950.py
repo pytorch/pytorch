@@ -34,7 +34,6 @@ import torch
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 
 from . import mxfp8_buffer_ops as buffer_ops
-from .mxfp8_grouped_gemm_gfx950 import _compile_gfx950, _INT32_MAX
 from .mxfp8_gemm_utils import (
     compute_global_swizzle,
     G2SLoader,
@@ -44,6 +43,7 @@ from .mxfp8_gemm_utils import (
     swizzle_128,
     wait_barrier,
 )
+from .mxfp8_grouped_gemm_gfx950 import _compile_gfx950, _INT32_MAX
 
 
 BLOCK_R = 256
