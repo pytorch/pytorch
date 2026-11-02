@@ -13046,6 +13046,16 @@ aot_autograd_failures = {
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
     ),
+    # Eager vs compiled gradients differ by ~1.4e-5 (default atol is 1e-5) with
+    # MKL 2026.2.
+    decorate(
+        "linalg.pinv",
+        decorator=toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1.3e-06)}),
+    ),
+    decorate(
+        "pinverse",
+        decorator=toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1.3e-06)}),
+    ),
     decorate(
         "linalg.pinv",
         "singular",
@@ -13078,23 +13088,26 @@ aot_autograd_failures = {
     decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
-if not TEST_MKL:
-    aot_autograd_failures.update(
-        {
-            decorate(
-                "matmul",
-                decorator=toleranceOverride(
-                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
-                ),
+# Eager and AOTDispatcher gradients of matmul differ by up to ~5e-5 in float32.
+# MKL builds used to match closely enough for the default tolerance; with MKL
+# 2026.2 they do not (the gemm accumulation order changed), so MKL builds get an
+# override as well, a little looser than the non-MKL one.
+aot_autograd_failures.update(
+    {
+        decorate(
+            "matmul",
+            decorator=toleranceOverride(
+                {torch.float32: tol(atol=1e-04 if TEST_MKL else 6e-05, rtol=4e-06)}
             ),
-            decorate(
-                "__rmatmul__",
-                decorator=toleranceOverride(
-                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
-                ),
+        ),
+        decorate(
+            "__rmatmul__",
+            decorator=toleranceOverride(
+                {torch.float32: tol(atol=1e-04 if TEST_MKL else 6e-05, rtol=4e-06)}
             ),
-        }
-    )
+        ),
+    }
+)
 
 symbolic_aot_autograd_failures = {
     xfail(
@@ -13118,6 +13131,11 @@ symbolic_aot_autograd_failures = {
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
+    ),
+    # Eager vs compiled gradients differ by up to ~4.3e-4 with MKL 2026.2.
+    decorate(
+        "linalg.householder_product",
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1.3e-06)}),
     ),
 }
 
