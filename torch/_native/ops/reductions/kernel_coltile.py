@@ -17,7 +17,7 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
 from .kernel_general import _flat, _INT32_LIMIT, _launch, ReduceBlock
-from .kernel_rowtile import _MULTIROW_ROWS_PER_BLOCK
+from .kernel_rowtile import _MULTIROW_ROWS_PER_BLOCK, trait_itree_plan
 from .traits import WARP
 
 
@@ -89,7 +89,12 @@ def select_col_config(
 
 
 class PartialColumns:
-    """Combine partition-major states while coalescing adjacent column loads."""
+    """Combine partition-major states while coalescing adjacent column loads.
+
+    TileReduce's combine mode folds each output's partitions serially in one thread. This
+    kernel strides thread groups over partitions and merges them in shared memory, a second
+    schedule that would otherwise add smem and branching to TileReduce's shared body.
+    """
 
     def __init__(self, trait, tile_columns, nouts):
         # The tuned widths; each tiles the 128-thread block exactly.
@@ -417,13 +422,14 @@ def reduce_ordered_col(
     last = B * C + _MULTIROW_ROWS_PER_BLOCK
     if x.stride(-1) != 1 or C < WARP or last >= _INT32_LIMIT:
         return None
-    from . import kernel_rowtile as rt
-
-    plan = rt.trait_itree_plan(
+    plan = trait_itree_plan(
         trait, R, B * C, x.element_size(), stage=False, device=x.device
     )
     # Linear vector folds change the DAG, and this kernel replays tree folds only.
     if plan is None or plan.shape not in ("multirow", "looped") or plan.vec_linear:
+        return None
+    # Leaves fold plan.vec wide; a plan whose tiles load narrower would move bits.
+    if plan.tms[0].vec != plan.vec:
         return None
     op = _OrderedColReduce(trait, plan, R, C, nouts)
     outs = [
