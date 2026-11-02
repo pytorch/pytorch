@@ -2621,8 +2621,6 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         # bytearray_join: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        from .builder import SourcelessBuilder
-
         iterable = args[0].realize()
         sep = self.data
         if istype(iterable, (ListVariable, TupleVariable)):
@@ -2633,29 +2631,11 @@ class ByteArrayVariable(VariableTracker):
             # buffer, so a changed self.data means the separator was mutated:
             # leave that to eager, also when iteration raised.
             try:
-                # PySequence_Fast: GetIter, then list(iterator), which calls
-                # iter() again, asks the first iterator for a length hint
-                # (default 8) and reads the items from the second.
-                try:
-                    iterator = generic_getiter(tx, iterable)
-                except ObservedException:
-                    from ..symbolic_convert import pyerr_given_exception_match
-
-                    exc = tx.exn_vt_stack.get_raised_exception()
-                    if not pyerr_given_exception_match(exc, TypeError):
-                        raise
-                    handle_observed_exception(tx)
-                    raise_type_error(tx, "can only join an iterable")
-                inner = generic_getiter(tx, iterator)
-                hint = SourcelessBuilder.create_internal_builtin(operator.length_hint)
-                hint.call_function(tx, [iterator, ConstantVariable.create(8)], {})
-                items = []
-                while True:
-                    try:
-                        items.append(pyiter_next(tx, inner))
-                    except ObservedUserStopIteration:
-                        handle_observed_exception(tx)
-                        break
+                items = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.sequence_fast),
+                    [iterable, ConstantVariable.create("can only join an iterable")],
+                    {},
+                ).items
             except ObservedException:
                 if self.data is not sep:
                     handle_observed_exception(tx)

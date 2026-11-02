@@ -14,7 +14,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
-from operator import eq, ge, gt, le, lt, ne
+from operator import eq, ge, gt, le, length_hint, lt, ne
 from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
@@ -96,6 +96,24 @@ def index(
     # Callers pass the message their sequence type raises in CPython, which is
     # not uniform: list/deque repr the value, tuple ignores it.
     raise ValueError(not_found_msg.format(item))
+
+
+def sequence_fast(iterable: Iterable[T], message: str) -> list[T]:
+    # Mirrors CPython's PySequence_Fast for an argument that is not a list or
+    # tuple. list(it) is spelled out because it calls iter() again and asks
+    # the first iterator for a length hint before reading the items.
+    try:
+        it = iter(iterable)
+    except TypeError:
+        raise TypeError(message) from None
+    inner = iter(it)
+    length_hint(it, 8)
+    items: list[T] = []
+    while True:
+        try:
+            items.append(next(inner))
+        except StopIteration:
+            return items
 
 
 def repeat(item: T, count: int) -> Iterator[T]:
