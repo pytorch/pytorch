@@ -34,23 +34,6 @@ inline void pos_from_thread_index(
   }
 }
 
-// 2D dispatch overload: thread_pos.x maps directly to pos[0] (innermost dim),
-// thread_pos.y is decomposed across the remaining outer dims. Skips one
-// div/mod per element vs the 1D form.
-template <typename T>
-inline void pos_from_thread_index(
-    uint2 thread_pos,
-    thread T pos[max_ndim],
-    constant long* sizes,
-    uint ndim) {
-  pos[0] = static_cast<T>(thread_pos.x);
-  auto idx = static_cast<T>(thread_pos.y);
-  for (uint i = 1; i < ndim; ++i) {
-    pos[i] = idx % T(sizes[i]);
-    idx /= T(sizes[i]);
-  }
-}
-
 inline long offset_from_thread_index(
     long idx,
     constant long* sizes,
@@ -59,6 +42,66 @@ inline long offset_from_thread_index(
   long pos[max_ndim];
   pos_from_thread_index(idx, pos, sizes, ndim);
   return offset_from_coord(pos, strides, ndim);
+}
+
+// offs[I + k] += pos * strides_k[dim] for every strides pointer. Recursion
+// rather than a loop keeps each offs index a compile-time constant, so offs
+// stays in registers instead of a thread-memory array.
+template <size_t I, size_t N>
+inline void add_offsets(thread array<int, N>&, int, uint) {}
+
+template <size_t I, size_t N, typename S0, typename... S>
+inline void add_offsets(
+    thread array<int, N>& offs,
+    int pos,
+    uint dim,
+    S0 stride0,
+    S... strides) {
+  offs[I] += pos * int(stride0[dim]);
+  add_offsets<I + 1>(offs, pos, dim, strides...);
+}
+
+// Byte offset of the element at linear index `idx`, one per strides pointer in
+// argument order. Skips the div/mod on the outermost dim, which is valid since
+// the grid is exactly sized (idx < prod(sizes)).
+template <typename... S>
+inline array<int, sizeof...(S)> offsets_from_thread_index(
+    int idx,
+    constant long* sizes,
+    uint ndim,
+    S... strides) {
+  array<int, sizeof...(S)> offs = {};
+  for (uint dim = 0; dim < ndim; ++dim) {
+    int pos = idx;
+    if (dim + 1 < ndim) {
+      pos %= int(sizes[dim]);
+      idx /= int(sizes[dim]);
+    }
+    add_offsets<0>(offs, pos, dim, strides...);
+  }
+  return offs;
+}
+
+// 2D dispatch overload: thread_pos.x is the dim 0 coordinate, thread_pos.y is
+// the linear index over dims [1, ndim).
+template <typename... S>
+inline array<int, sizeof...(S)> offsets_from_thread_index(
+    uint2 thread_pos,
+    constant long* sizes,
+    uint ndim,
+    S... strides) {
+  array<int, sizeof...(S)> offs = {};
+  add_offsets<0>(offs, int(thread_pos.x), 0, strides...);
+  int idx = thread_pos.y;
+  for (uint dim = 1; dim < ndim; ++dim) {
+    int pos = idx;
+    if (dim + 1 < ndim) {
+      pos %= int(sizes[dim]);
+      idx /= int(sizes[dim]);
+    }
+    add_offsets<0>(offs, pos, dim, strides...);
+  }
+  return offs;
 }
 
 template <typename T>
@@ -139,12 +182,9 @@ kernel void unary_strided(
     uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(thread_pos, pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  ref_at_offs<res_t>(output, output_offs) =
-      f(val_at_offs<T>(input, input_offs));
+  const auto offs = offsets_from_thread_index(
+      thread_pos, sizes, ndim, input_strides, output_strides);
+  ref_at_offs<res_t>(output, offs[1]) = f(val_at_offs<T>(input, offs[0]));
 }
 
 // Innermost dim is unit-stride for both operands (a slice/narrow view): compute
@@ -165,15 +205,16 @@ kernel void unary_inner_contiguous(
   using res_t = result_of<F, T>;
   const uint ndim_outer = ndim_outer_inner.x;
   const uint inner = ndim_outer_inner.y;
-  int pos[max_ndim];
-  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
-  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
-  const auto out_base =
-      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  const auto offs = offsets_from_thread_index(
+      int(thread_pos.y),
+      outer_sizes,
+      ndim_outer,
+      input_outer_strides,
+      output_outer_strides);
   device const T* in = reinterpret_cast<device const T*>(
-      static_cast<device const char*>(input) + in_base);
+      static_cast<device const char*>(input) + offs[0]);
   device res_t* out = reinterpret_cast<device res_t*>(
-      static_cast<device char*>(output) + out_base);
+      static_cast<device char*>(output) + offs[1]);
   uint base = thread_pos.x * ILP_PER_THREAD;
   if (base + ILP_PER_THREAD <= inner) {
     array<T, ILP_PER_THREAD> tmp_in;
@@ -387,12 +428,10 @@ kernel void unary_alpha_strided(
     uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T2>;
-  int pos[max_ndim];
-  pos_from_thread_index(thread_pos, pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  ref_at_offs<res_t>(output, output_offs) =
-      f(val_at_offs<T>(input, input_offs), alpha);
+  const auto offs = offsets_from_thread_index(
+      thread_pos, sizes, ndim, input_strides, output_strides);
+  ref_at_offs<res_t>(output, offs[1]) =
+      f(val_at_offs<T>(input, offs[0]), alpha);
 }
 
 // unary_inner_contiguous with a scalar argument (relu/clamp_min, ...): one
@@ -411,15 +450,16 @@ kernel void unary_alpha_inner_contiguous(
   using res_t = result_of<F, T, T2>;
   const uint ndim_outer = ndim_outer_inner.x;
   const uint inner = ndim_outer_inner.y;
-  int pos[max_ndim];
-  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
-  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
-  const auto out_base =
-      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  const auto offs = offsets_from_thread_index(
+      int(thread_pos.y),
+      outer_sizes,
+      ndim_outer,
+      input_outer_strides,
+      output_outer_strides);
   device const T* in = reinterpret_cast<device const T*>(
-      static_cast<device const char*>(input) + in_base);
+      static_cast<device const char*>(input) + offs[0]);
   device res_t* out = reinterpret_cast<device res_t*>(
-      static_cast<device char*>(output) + out_base);
+      static_cast<device char*>(output) + offs[1]);
   uint base = thread_pos.x * ILP_PER_THREAD;
   if (base + ILP_PER_THREAD <= inner) {
     array<T, ILP_PER_THREAD> tmp_in;
@@ -591,16 +631,13 @@ kernel void unary_strided_castout(
     uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, Tin>;
-  int pos[max_ndim];
-  pos_from_thread_index(thread_pos, pos, sizes, ndim_outtype.x);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim_outtype.x);
-  const auto output_offs =
-      offset_from_coord(pos, output_strides, ndim_outtype.x);
+  const auto offs = offsets_from_thread_index(
+      thread_pos, sizes, ndim_outtype.x, input_strides, output_strides);
   store_at_offs<res_t>(
       output,
-      output_offs,
+      offs[1],
       static_cast<ScalarType>(ndim_outtype.y),
-      f(val_at_offs<Tin>(input, input_offs)));
+      f(val_at_offs<Tin>(input, offs[0])));
 }
 
 // Castout variant of unary_inner_contiguous: output dtype is runtime (stored
@@ -621,13 +658,14 @@ kernel void unary_inner_contiguous_castout(
   const uint inner = ndimO_inner_elem_outtype.y;
   const uint elem = ndimO_inner_elem_outtype.z;
   const auto out_type = static_cast<ScalarType>(ndimO_inner_elem_outtype.w);
-  int pos[max_ndim];
-  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
-  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
-  const auto out_base =
-      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  const auto offs = offsets_from_thread_index(
+      int(thread_pos.y),
+      outer_sizes,
+      ndim_outer,
+      input_outer_strides,
+      output_outer_strides);
   device const Tin* in = reinterpret_cast<device const Tin*>(
-      static_cast<device const char*>(input) + in_base);
+      static_cast<device const char*>(input) + offs[0]);
   uint base = thread_pos.x * ILP_PER_THREAD;
   if (base + ILP_PER_THREAD <= inner) {
     array<Tin, ILP_PER_THREAD> tmp_in;
@@ -643,12 +681,12 @@ kernel void unary_inner_contiguous_castout(
 #pragma unroll
     for (uint j = 0; j < ILP_PER_THREAD; ++j) {
       store_at_offs<res_t>(
-          output, out_base + long(base + j) * elem, out_type, tmp_out[j]);
+          output, offs[1] + long(base + j) * elem, out_type, tmp_out[j]);
     }
   } else {
     for (uint j = base; j < inner; ++j) {
       store_at_offs<res_t>(
-          output, out_base + long(j) * elem, out_type, f(in[j]));
+          output, offs[1] + long(j) * elem, out_type, f(in[j]));
     }
   }
 }
@@ -684,15 +722,11 @@ kernel void binary_strided(
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim.x);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
-  const auto a = val_at_offs<T>(input, input_offs);
-  const auto b = val_at_offs<T>(other, other_offs);
-  ref_at_offs<res_t>(output, output_offs) =
-      static_cast<res_t>(f(om_t(a), om_t(b)));
+  const auto offs = offsets_from_thread_index(
+      int(index), sizes, ndim.x, input_strides, other_strides, output_strides);
+  const auto a = val_at_offs<T>(input, offs[0]);
+  const auto b = val_at_offs<T>(other, offs[1]);
+  ref_at_offs<res_t>(output, offs[2]) = static_cast<res_t>(f(om_t(a), om_t(b)));
 }
 
 template <typename T, typename T2, typename F>
@@ -708,14 +742,11 @@ kernel void binary_alpha_strided(
     constant uint3& ndim [[buffer(8)]],
     uint index [[thread_position_in_grid]]) {
   F f;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim.x);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
-  const auto a = val_at_offs<T>(input, input_offs);
-  const auto b = val_at_offs<T>(other, other_offs);
-  ref_at_offs<result_of<F, T, T, T2>>(output, output_offs) = f(a, b, alpha);
+  const auto offs = offsets_from_thread_index(
+      int(index), sizes, ndim.x, input_strides, other_strides, output_strides);
+  const auto a = val_at_offs<T>(input, offs[0]);
+  const auto b = val_at_offs<T>(other, offs[1]);
+  ref_at_offs<result_of<F, T, T, T2>>(output, offs[2]) = f(a, b, alpha);
 }
 
 template <typename T, typename F, typename om_t = opmath_t<T>>
@@ -731,16 +762,18 @@ kernel void binary_strided_cast(
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
-  const auto a = val_at_offs<om_t>(
-      input, input_offs, static_cast<ScalarType>(ndim_types.y));
-  const auto b = val_at_offs<om_t>(
-      other, other_offs, static_cast<ScalarType>(ndim_types.z));
-  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b));
+  const auto offs = offsets_from_thread_index(
+      int(index),
+      sizes,
+      ndim_types.x,
+      input_strides,
+      other_strides,
+      output_strides);
+  const auto a =
+      val_at_offs<om_t>(input, offs[0], static_cast<ScalarType>(ndim_types.y));
+  const auto b =
+      val_at_offs<om_t>(other, offs[1], static_cast<ScalarType>(ndim_types.z));
+  ref_at_offs<res_t>(output, offs[2]) = static_cast<res_t>(f(a, b));
 }
 
 // Variant of binary_strided_cast that also runtime-casts on store: the output
@@ -762,18 +795,20 @@ kernel void binary_strided_castout(
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
-  const auto a = val_at_offs<om_t>(
-      input, input_offs, static_cast<ScalarType>(ndim_types.y));
-  const auto b = val_at_offs<om_t>(
-      other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  const auto offs = offsets_from_thread_index(
+      int(index),
+      sizes,
+      ndim_types.x,
+      input_strides,
+      other_strides,
+      output_strides);
+  const auto a =
+      val_at_offs<om_t>(input, offs[0], static_cast<ScalarType>(ndim_types.y));
+  const auto b =
+      val_at_offs<om_t>(other, offs[1], static_cast<ScalarType>(ndim_types.z));
   const res_t result = static_cast<res_t>(f(a, b));
   store_at_offs<res_t>(
-      output, output_offs, static_cast<ScalarType>(ndim_types.w), result);
+      output, offs[2], static_cast<ScalarType>(ndim_types.w), result);
 }
 
 template <typename T, typename T2, typename F>
@@ -789,16 +824,18 @@ kernel void binary_alpha_strided_cast(
     constant uint4& ndim_types [[buffer(8)]],
     uint index [[thread_position_in_grid]]) {
   F f;
-  int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto offs = offsets_from_thread_index(
+      int(index),
+      sizes,
+      ndim_types.x,
+      input_strides,
+      other_strides,
+      output_strides);
   const auto a =
-      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_types.y));
+      val_at_offs<T>(input, offs[0], static_cast<ScalarType>(ndim_types.y));
   const auto b =
-      val_at_offs<T>(other, other_offs, static_cast<ScalarType>(ndim_types.z));
-  ref_at_offs<result_of<F, T, T, T2>>(output, output_offs) = f(a, b, alpha);
+      val_at_offs<T>(other, offs[1], static_cast<ScalarType>(ndim_types.z));
+  ref_at_offs<result_of<F, T, T, T2>>(output, offs[2]) = f(a, b, alpha);
 }
 
 template <typename T, typename F, typename om_t = opmath_t<T>>
@@ -879,18 +916,19 @@ kernel void binary_inner_contiguous(
   using res_t = result_of<F, T, T>;
   const uint ndim_outer = ndim_outer_inner.x;
   const uint inner = ndim_outer_inner.y;
-  int pos[max_ndim];
-  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
-  const auto out_base =
-      offset_from_coord(pos, output_outer_strides, ndim_outer);
-  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
-  const auto oth_base = offset_from_coord(pos, other_outer_strides, ndim_outer);
+  const auto offs = offsets_from_thread_index(
+      int(thread_pos.y),
+      outer_sizes,
+      ndim_outer,
+      output_outer_strides,
+      input_outer_strides,
+      other_outer_strides);
   device res_t* out = reinterpret_cast<device res_t*>(
-      static_cast<device char*>(output) + out_base);
+      static_cast<device char*>(output) + offs[0]);
   device const T* a = reinterpret_cast<device const T*>(
-      static_cast<device const char*>(input) + in_base);
+      static_cast<device const char*>(input) + offs[1]);
   device const T* b = reinterpret_cast<device const T*>(
-      static_cast<device const char*>(other) + oth_base);
+      static_cast<device const char*>(other) + offs[2]);
   uint base = thread_pos.x * ILP_PER_THREAD;
   if (base + ILP_PER_THREAD <= inner) {
     array<T, ILP_PER_THREAD> ta;
@@ -1535,18 +1573,18 @@ inline long4 ternary_offsets(
   // `ndim` lives in a constant buffer, so these branches are uniform across the
   // threadgroup. Up to 3 dims the coordinates come straight from the dispatch
   // grid and no division is needed at all; only dims past the third pay for it.
-  if (ndim == 3) {
-    const int p2 = int(thread_pos.z);
-    return long4(
-        offs +
-        int4(
-            p2 * int(strides0[2]),
-            p2 * int(strides1[2]),
-            p2 * int(strides2[2]),
-            p2 * int(strides3[2])));
-  }
   int idx = int(thread_pos.z);
-  for (uint i = 2; i < ndim; ++i) {
+  if (ndim > 3) {
+    const int sz2 = int(sizes[2]);
+    const int p2 = idx % sz2;
+    idx /= sz2;
+    offs += int4(
+        p2 * int(strides0[2]),
+        p2 * int(strides1[2]),
+        p2 * int(strides2[2]),
+        p2 * int(strides3[2]));
+  }
+  for (uint i = 3; i + 1 < ndim; ++i) {
     const int sz = int(sizes[i]);
     const int p = idx % sz;
     idx /= sz;
@@ -1556,6 +1594,11 @@ inline long4 ternary_offsets(
         p * int(strides2[i]),
         p * int(strides3[i]));
   }
+  offs += int4(
+      idx * int(strides0[ndim - 1]),
+      idx * int(strides1[ndim - 1]),
+      idx * int(strides2[ndim - 1]),
+      idx * int(strides3[ndim - 1]));
   return long4(offs);
 }
 

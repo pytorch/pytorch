@@ -43,7 +43,7 @@ jobs:
 
       - name: Populate test owners
         env:
-          CLICKHOUSE_DATABASE: fortesting
+          CLICKHOUSE_DATABASE: ci
           CLICKHOUSE_ENDPOINT: ${{ env.UPLOAD_TO_CLICKHOUSE == 'true' && secrets.CLICKHOUSE_ENDPOINT || '' }}
           CLICKHOUSE_USERNAME: ${{ env.UPLOAD_TO_CLICKHOUSE == 'true' && secrets.CLICKHOUSE_USERNAME || '' }}
           CLICKHOUSE_PASSWORD: ${{ env.UPLOAD_TO_CLICKHOUSE == 'true' && secrets.CLICKHOUSE_PASSWORD || '' }}
