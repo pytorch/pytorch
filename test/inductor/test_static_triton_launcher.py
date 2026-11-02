@@ -528,24 +528,25 @@ class TestStaticTritonLauncherUnit(TestCase):
                 self.assertIsNone(static_kernel)
 
 
-@requires_gpu_and_triton
-class TestStaticTritonLauncher(TestCase):
+class StaticLauncherTestMixin:
+    """Helpers for statically launching a freshly compiled kernel."""
+
     def setUp(self):
         super().setUp()
         self.tmp_files = []
+        self.addCleanup(self._remove_tmp_files)
         if HAS_XPU_AND_TRITON:
+            # The XPU static launcher needs the kernel's zebin, which triton
+            # only writes out when asked for native code.
+            self.addCleanup(setattr, JITFunction, "__getitem__", _orig_getitem)
             JITFunction.__getitem__ = _patched_getitem
 
-    def tearDown(self):
-        super().tearDown()
+    def _remove_tmp_files(self):
         for tmp_file in self.tmp_files:
             try:
                 os.remove(tmp_file.name)
             except OSError:
                 pass
-
-        if HAS_XPU_AND_TRITON:
-            JITFunction.__getitem__ = _orig_getitem
 
     def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
         """
@@ -587,6 +588,9 @@ class TestStaticTritonLauncher(TestCase):
         result.load_kernel(device_interface.current_device())
         return result
 
+
+@requires_gpu_and_triton
+class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
     def test_basic(self):
         """Verify _FastCudaLauncher correctly launches a kernel with tensor + scalar args.
 
@@ -1330,53 +1334,8 @@ class TestStaticTritonCompileResult(TestCase):
             self.assertEqual(result, torch.cat(((x * 4), y + 10)))
 
 
-class FastLauncherTestMixin:
+class FastLauncherTestMixin(StaticLauncherTestMixin):
     """Helpers for building a fast launcher around a freshly compiled kernel."""
-
-    def setUp(self):
-        super().setUp()
-        self.tmp_files = []
-        self.addCleanup(self._remove_tmp_files)
-        if HAS_XPU_AND_TRITON:
-            # The XPU static launcher needs the kernel's zebin, which triton
-            # only writes out when asked for native code.
-            self.addCleanup(setattr, JITFunction, "__getitem__", _orig_getitem)
-            JITFunction.__getitem__ = _patched_getitem
-
-    def _remove_tmp_files(self):
-        for tmp_file in self.tmp_files:
-            try:
-                os.remove(tmp_file.name)
-            except OSError:
-                pass
-
-    def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
-        if hasattr(kernel, "_cubin_path"):
-            return
-        if GPU_TYPE == "xpu":
-            binary_key = "zebin"
-        else:
-            binary_key = "hsaco" if torch.version.hip else "cubin"
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as tmp_file:
-            tmp_file.write(kernel.asm[binary_key])
-            self.tmp_files.append(tmp_file)
-            return tmp_file.name
-
-    def _make_launcher(
-        self,
-        compiled_kernel: CompiledKernel,
-    ) -> StaticallyLaunchedCudaKernel | StaticallyLaunchedXpuKernel:
-        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
-        compiled_kernel._cubin_path = cubin_file
-        result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
-        old_cubin_path = result.cubin_path
-        if old_cubin_path is None:
-            raise AssertionError
-        result.cubin_path = None
-        result.reload_cubin_from_raw(old_cubin_path)
-        device_interface = get_interface_for_device(GPU_TYPE)
-        result.load_kernel(device_interface.current_device())
-        return result
 
     def _fast_launcher_cls(self):
         if GPU_TYPE == "xpu":
