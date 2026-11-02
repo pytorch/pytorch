@@ -461,7 +461,11 @@ def contiguous_last_dim(x):
         if not isinstance(x.data.data, Buffer):
             x.data.realize()
         buf = x.data.data
-        if isinstance(buf.layout, FlexibleLayout) and len(buf.get_size()) > 0:
+        if (
+            isinstance(buf, Buffer)
+            and isinstance(buf.layout, FlexibleLayout)
+            and len(buf.get_size()) > 0
+        ):
             # freeze in the fill order decide_layout would pick, with the last dim
             # moved innermost if it isn't already
             order = buf.get_fill_order() if isinstance(buf, ComputedBuffer) else None
