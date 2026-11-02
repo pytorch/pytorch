@@ -2051,6 +2051,9 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
     )
 
+    # Keep CPU LayerNorm in ATen when downstream rounding amplifies numerical drift.
+    fallback_native_layer_norm = False
+
     # Use funsafe-math-optimizations when compiling
     enable_unsafe_math_opt_flag = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
