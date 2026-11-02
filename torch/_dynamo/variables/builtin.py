@@ -79,7 +79,6 @@ from ..utils import (
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
-    lazily_unpack,
     no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -2583,27 +2582,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
 
-    def call__frozendict_fromkeys(
-        self,
-        tx: "InstructionTranslatorBase",
-        seed: VariableTracker,
-        iterable: VariableTracker,
-        value: VariableTracker,
-        /,
-    ) -> VariableTracker:
-        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
-        storage.dict_update(tx, [seed], {}, container_name="frozendict")
-        if pyanydict_checkexact(iterable) or pyanyset_checkexact(iterable):
-            if isinstance(iterable, ConstDictVariable):
-                iterable.install_dict_keys_match_guard()
-            for key in iterable.items:
-                storage.items[key] = value
-        else:
-            for key in lazily_unpack(tx, iterable):
-                hashed = storage._lookup_key(tx, key, container_name="frozendict")
-                storage.items[hashed] = value
-        return variables.FrozenDictVariable.create(storage)
-
     def call_set(
         self,
         tx: "InstructionTranslatorBase",
@@ -3585,9 +3563,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pyanydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
-                args[0].install_dict_keys_match_guard()
-                if args[0].source:
-                    tx.output.guard_on_key_order.add(args[0].source)
+                args[0].install_dict_order_guard(tx)
+            elif pyanyset_checkexact(args[0]):
+                args[0].install_set_order_guard(tx)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
             result.items.update(dict.fromkeys(args[0].items.keys(), value))
@@ -3725,11 +3703,8 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
             return variables.FrozenDictVariable.create(result.storage)
         if name == "fromkeys":
-            unimplemented(
-                gb_type="frozendict fromkeys",
-                context=name,
-                explanation="Dynamo does not yet support frozendict.fromkeys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+            return variables.FrozenDictVariable.frozen_deferred_operator(
+                self, tx, args, kwargs
             )
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
             check_positional(tx, name, len(args), 1, sys.maxsize)

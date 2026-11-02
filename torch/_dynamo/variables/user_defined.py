@@ -121,7 +121,12 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pyanydict_check
+from .dicts import (
+    ConstDictVariable,
+    OrderedDictVariable,
+    pydict_check,
+    pyfrozendict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -5181,8 +5186,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            ConstDictVariable.dict_update(self, tx, args, kwargs)
-            return variables.ConstantVariable.create(None)
+            result = ConstDictVariable.dict_update(self, tx, args, kwargs)
+            if result is not None:
+                return result
         return super().tp_init_impl(tx, args, kwargs)
 
     def debug_repr(self) -> str:
@@ -5367,7 +5373,11 @@ class DefaultDictVariable(ConstDictVariable):
         if not isinstance(self_, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(self_)}")
 
-        if not pyanydict_check(other_):
+        if pyfrozendict_check(other_):
+            return variables.FrozenDictVariable.frozen_deferred_operator(
+                other_, tx, [], {}
+            )
+        if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
         cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
@@ -5422,7 +5432,7 @@ class DefaultDictVariable(ConstDictVariable):
     ) -> "VariableTracker":
         if len(args) != 1:
             raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
-        return self.mp_subscript_impl(tx, args[0])
+        return DefaultDictVariable.mp_subscript_impl(self, tx, args[0])
 
     def _missing(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs

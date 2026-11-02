@@ -14864,6 +14864,9 @@ class TestConsistency(TestCaseMPS):
             # Forward is bit-exact; backward may include inexact broadcast reductions.
             if op.name == "nextafter":
                 atol, rtol = 0, 0
+            # Computed in float with float params and rounded once, same as CPU
+            if op.name in ("nn.functional.elu", "nn.functional.celu", "nn.functional.selu") and dtype.itemsize == 2:
+                atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and
                mps_sample.kwargs.get("recompute_scale_factor") is True and

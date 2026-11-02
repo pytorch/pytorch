@@ -81,6 +81,7 @@ from .dicts import (
     FrozenDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    NNModuleHooksOrderedDictVariable,
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
