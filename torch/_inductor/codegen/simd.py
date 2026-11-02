@@ -1959,8 +1959,6 @@ class _GroupedReductionLayout:
         )
 
     def child_block(self, factor: int) -> str:
-        if factor == self.local_reduction_size:
-            return self.num_groups_str
         return str(FloorDiv(self.group_tree.block_size(), factor))
 
     def make_sub_parent_family(self, factor: int) -> _DerivedIterationFamily:
@@ -1969,11 +1967,7 @@ class _GroupedReductionLayout:
         derived_tree = DerivedIterationRangesRoot(
             self.group_tree,
             numel=FloorDiv(self.group_tree.numel, factor),
-            block_size=(
-                self.reduced_block_sym
-                if factor == self.local_reduction_size
-                else FloorDiv(self.group_tree.block_size(), factor)
-            ),
+            block_size=FloorDiv(self.group_tree.block_size(), factor),
             block_offset=FloorDiv(self.group_tree.block_offset(), factor),
             name_suffix=f"lane{factor}",
             named_constants=self._grouped_axis_named_constants(self.group_tree),
@@ -2281,47 +2275,21 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         value: CSEVariable,
     ) -> CSEVariable:
         """Reshape the parent-full tile and reduce over the local reduction."""
-        from .triton import low_precision_fp, triton_type, upcast_compute_type
-
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
         # The grouped-reduction reshape uses the grouped-axis named constants
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
         self._family.ensure_headers(k)
-        value_dtype = value.dtype
-        if value_dtype is None:
-            raise AssertionError("value must have a known dtype")
-        # As in TritonKernel.reduction, low-precision floats reduce in float32,
-        # also when codegen_upcast_to_fp32 leaves the loaded tile in its dtype,
-        # and the result is handed back in the compute type of its dtype.
-        upcast = low_precision_fp(src_dtype) or low_precision_fp(value_dtype)
-        if upcast and value_dtype != torch.float32:
-            value_dtype = torch.float32
-            value = k.cse.generate(
-                k.compute,
-                f"{value}.to(tl.float32)",
-                dtype=value_dtype,
-                shape=value.shape,
-            )
-        reshaped = k.emit_reshape(value, self._layout.reshape_shape, value_dtype)
+        reshaped = k.emit_reshape(value, self._layout.reshape_shape, src_dtype)
         k.num_reduction += 1
-        result = k.emit_reduce(
+        return k.emit_reduce(
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            torch.float32 if upcast else dtype,
+            dtype,
             self._layout.output_shape,
         )
-        compute_dtype = upcast_compute_type(dtype)
-        if upcast and result.dtype != compute_dtype:
-            result = k.cse.generate(
-                k.compute,
-                f"{result}.to({triton_type(compute_dtype)})",
-                dtype=compute_dtype,
-                shape=result.shape,
-            )
-        return result
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         remapped_index = self._family.remap_index(index)
@@ -2591,12 +2559,11 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         split loads. When the same op ran on the same operands at parent
         resolution, its recorded result already holds every lane, so the chain
         collapses into one split of its final value. The split is deferred so
-        intermediate lanes never reach the generated code. Bitcasts of fully
-        consumed sources may create that parent result first.
+        intermediate lanes never reach the generated code.
         """
         if name not in registered_pointwise_ops or self._kernel._load_mask is not None:
             return None
-        if not self._lane_projections:
+        if not self._lane_projections or not self._parent_twins:
             return None
         if any(isinstance(v, CSEVariable) for v in kwargs.values()):
             return None
@@ -2621,23 +2588,6 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         if lane is None:
             return None
         parent_value = self._parent_twins.get(self._twin_key(name, parent_args, kwargs))
-        if parent_value is None and name == "to_dtype_bitcast":
-            # Sparse readers do not amortize a new tile conversion and split.
-            # Restrict synthesis to original sources, rather than cast chains.
-            if not any(
-                parent_args[0] in values
-                and (lanes := self._contracts[source].parent_lanes) is not None
-                and len(lanes) == self._sub_parent_factor
-                for source, values in self._values.items()
-            ):
-                return None
-            # An already split source would gain a second, full split.
-            if parent_args[0] in self._materialized or not (
-                self._kernel.cse.contains_value(parent_args[0])
-            ):
-                return None
-            parent_value = self._inner.to_dtype_bitcast(*parent_args, **kwargs)
-            self._record_parent_twin(name, tuple(parent_args), kwargs, parent_value)
         if parent_value is None or parent_value.shape is None:
             return None
         if not self._kernel.cse.contains_value(cast("TritonCSEVariable", parent_value)):
@@ -2738,17 +2688,22 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         )
         return materialized
 
-    def check_sources(
+    def materialize_sources(
         self, relations: Iterable[scheduler.SubParentAccessRelation]
     ) -> None:
-        """Check required sources are live; split lanes when a consumer needs them."""
+        """Preserve required lane sources before the parent body is flushed.
+
+        External sources are plain loads: their lanes split lazily when a
+        consumer needs them, or reload if the value has expired by then.
+        """
         for name in OrderedSet(relation.consumer_access.name for relation in relations):
             if not self._contracts[name].source_is_internal:
                 continue
-            if not any(
-                self._kernel.cse.contains_value(cast("TritonCSEVariable", value))
+            materialized = any(
+                self._materialize(value) is not None
                 for value in self._values.get(name, ())
-            ):
+            )
+            if not materialized:
                 raise AssertionError(f"lost required sub-parent source {name!r}")
 
     def is_planned(self, name: str) -> bool:
@@ -3176,15 +3131,6 @@ class SIMDScheduling(BaseScheduling):
             return None
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
             return None
-        if plan.requires_persistent:
-            schedule = self.generate_node_schedule(
-                list(plan.parent_nodes), parent_numel, parent_rnumel
-            )
-            features = SIMDKernelFeatures(schedule, parent_numel, parent_rnumel)
-            if not V.choices.should_use_persistent_reduction(
-                features, cooperative_reduction=False
-            ):
-                return None
         return plan
 
     def _sub_parent_tiling_is_2d(
@@ -3810,20 +3756,17 @@ class SIMDScheduling(BaseScheduling):
                 )
                 sub_parent_family: _DerivedIterationFamily | None = None
                 value_resolver: _SubParentValueResolver | None = None
-                if sub_parent_stage is not None or stage.lane_accesses:
-                    factor, relations = (
-                        (sub_parent_stage.factor, sub_parent_stage.access_relations)
-                        if sub_parent_stage is not None
-                        else (local_reduction_size_hint, stage.lane_accesses)
+                if sub_parent_stage is not None:
+                    sub_parent_family = layout.make_sub_parent_family(
+                        sub_parent_stage.factor
                     )
-                    sub_parent_family = layout.make_sub_parent_family(factor)
                     value_resolver = _SubParentValueResolver(
                         V.get_ops_handler(),
                         kernel,
                         layout,
                         sub_parent_family,
-                        access_relations=relations,
-                        sub_parent_factor=factor,
+                        access_relations=sub_parent_stage.access_relations,
+                        sub_parent_factor=sub_parent_stage.factor,
                     )
                 with V.set_ops_handler(value_resolver or V.get_ops_handler()):
                     self._codegen_node_schedule_body(combined_schedule, kernel)
@@ -3870,12 +3813,11 @@ class SIMDScheduling(BaseScheduling):
                         pointwise_domain_by_node,
                         reduced_output_family,
                         parent_full_family,
-                        value_resolver=value_resolver if stage.lane_accesses else None,
                     )
                 if sub_parent_stage is not None:
                     if sub_parent_family is None or value_resolver is None:
                         raise AssertionError("sub-parent stage requires codegen state")
-                    value_resolver.check_sources(
+                    value_resolver.materialize_sources(
                         relation
                         for relation in sub_parent_stage.access_relations
                         if relation.parent_lane is not None
@@ -3944,8 +3886,6 @@ class SIMDScheduling(BaseScheduling):
         ],
         reduced_output_family,
         parent_full_family,
-        *,
-        value_resolver: _SubParentValueResolver | None = None,
     ) -> None:
         """Interpret the local reduction schedule with nested emitters.
 
@@ -3992,7 +3932,6 @@ class SIMDScheduling(BaseScheduling):
                     [sn],
                     reduced_output_family,
                     reduced_source,
-                    value_resolver=value_resolver,
                 )
                 continue
             elif (
@@ -4253,8 +4192,6 @@ class SIMDScheduling(BaseScheduling):
             "tiling_scores": tiling_score,
             "override_cooperative_reduction": False,
         }
-        if plan.requires_persistent:
-            kernel_kwargs["override_persistent_reduction"] = True
         kernels = cast(
             "list[TritonKernel]",
             self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
@@ -4286,7 +4223,7 @@ class SIMDScheduling(BaseScheduling):
                 if not required_lane_relations:
                     kernel.codegen_body()
                 else:
-                    value_resolver.check_sources(required_lane_relations)
+                    value_resolver.materialize_sources(required_lane_relations)
                 self._codegen_sub_parent_output_groups(
                     kernel,
                     stage,

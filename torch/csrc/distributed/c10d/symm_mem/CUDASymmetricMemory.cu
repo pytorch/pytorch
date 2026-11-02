@@ -238,7 +238,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   // The barrier state holds counters for groups of two or more ranks; see
   // alloc().
   if (get_multicast_ptr() != nullptr && world_size_ > 1) {
@@ -289,7 +289,7 @@ void CUDASymmetricMemory::put_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -325,7 +325,7 @@ void CUDASymmetricMemory::wait_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
