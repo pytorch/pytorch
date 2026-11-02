@@ -64,7 +64,7 @@ class _FakeProcess:
 class TunableOpWorkerTest(TestCase):
     """The worker is a subprocess holding process-global TunableOp state, so the
     things worth pinning are which GPU it lands on and when it gets replaced.
-    Neither needs a GPU to check, and a GPU-only test would not run in CI."""
+    Neither needs a real device, so these run wherever the suite does."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -466,6 +466,8 @@ class TunableOpWorkerTest(TestCase):
             ("empty env disables persistence", "", "", 0, "", False),
             ("parent's choice wins", "parent.csv", None, 0, "parent.csv", False),
         )
+        key = "PYTORCH_TUNABLEOP_FILENAME"
+        base = {k: v for k, v in os.environ.items() if k != key}
         for name, parent, env, device, expected, pinned in cases:
             with self.subTest(case=name):
                 tunableop._worker = None
@@ -474,21 +476,17 @@ class TunableOpWorkerTest(TestCase):
                 self.created.clear()
                 tunable = mock.Mock()
                 tunable.get_filename.return_value = parent
-                environ = {
-                    k: v
-                    for k, v in os.environ.items()
-                    if k != "PYTORCH_TUNABLEOP_FILENAME"
-                }
-                if env is not None:
-                    environ["PYTORCH_TUNABLEOP_FILENAME"] = env
+                environ = dict(base) if env is None else {**base, key: env}
                 expect = self.assertNoLogs if expected else self.assertLogs
                 with (
                     mock.patch("torch.cuda.current_device", return_value=device),
                     mock.patch("torch.cuda.tunable", tunable),
                     mock.patch.dict(os.environ, environ, clear=True),
-                    expect(tunableop.log, level="WARNING"),
+                    expect(tunableop.log, level="WARNING") as logs,
                 ):
                     tunableop.submit(tunableop.BenchmarkJob(None, tuning=False))
+                if not expected:
+                    self.assertIn(key, logs.output[0])
                 self.assertEqual(self._stamped().filename, expected)
                 self.assertEqual(tunableop._worker_key, (device, expected))
                 if pinned:
@@ -498,7 +496,7 @@ class TunableOpWorkerTest(TestCase):
                 else:
                     tunable.set_filename.assert_not_called()
 
-    def test_insert_device_ordinal_matches_cpp_rule(self):
+    def test_insert_device_ordinal_rule(self):
         self.assertEqual(tunableop._insert_device_ordinal("r%d.csv", 3), "r3.csv")
         self.assertEqual(tunableop._insert_device_ordinal("a.b.csv", 2), "a.b2.csv")
         self.assertEqual(tunableop._insert_device_ordinal("results", 0), "results0")
@@ -565,18 +563,10 @@ class BenchmarkJobCallTest(TestCase):
         # Device first, then filename, then flags; warm benchmark, tuning off,
         # measured benchmark; cudagraphs cleared.
         self.assertEqual(
-            [c[0] for c in calls],
-            [
-                "set_device",
-                "set_filename",
-                "enable",
-                "tuning_enable",
-                "_nearest_match_enable",
-                "_record_borrowed_enable",
-                "benchmark",
-                "tuning_enable",
-                "benchmark",
-            ],
+            " ".join(c[0] for c in calls),
+            "set_device set_filename enable tuning_enable "
+            "_nearest_match_enable _record_borrowed_enable benchmark "
+            "tuning_enable benchmark",
         )
         self.assertEqual(calls[0], ("set_device", 3))
         self.assertEqual(calls[1], ("set_filename", "w.csv", False))
@@ -679,10 +669,9 @@ class TunableopModeValidationTest(TestCase):
             with self.subTest(mode=mode, var=var):
                 is_mode = getattr(tunableop, f"is_{mode}_mode")
                 # Second pass must never warn: once per mode and variable.
-                for expect in (
-                    self.assertLogs if warns else self.assertNoLogs,
-                    self.assertNoLogs,
-                ):
+                for first_pass in (True, False):
+                    warn_now = warns and first_pass
+                    expect = self.assertLogs if warn_now else self.assertNoLogs
                     with (
                         inductor_config.patch({"cuda.autotune_tunableop_mode": mode}),
                         mock.patch("torch.cuda.is_available", return_value=True),
@@ -690,7 +679,7 @@ class TunableopModeValidationTest(TestCase):
                         expect(tunableop.log, level="WARNING") as logs,
                     ):
                         self.assertTrue(is_mode())
-                    if expect is self.assertLogs:
+                    if warn_now:
                         self.assertTrue(any(var in m for m in logs.output))
 
     def test_mode_is_case_normalized(self):
@@ -793,9 +782,9 @@ class TunableOpRealWorkerTest(TestCase):
     def test_job_with_settings_and_mask_survives_the_pipe(self):
         """A fully populated BenchmarkJob pickles and runs in the child.
 
-        The fake-process tests stop at what submit() stamps; without this,
-        nothing off ROCm checks that the stamped dict and the mask tuple
-        actually reach the child and that the job runs there.
+        The fake-process tests stop at what submit() stamps; this is the only
+        one recording what the child did with it -- the stamped setter calls and
+        a populated dyn_dims_mask, which nothing else sends through a worker.
         """
         with tempfile.TemporaryDirectory(prefix="tunableop_pipe_") as d:
             record = os.path.join(d, "calls.json")
@@ -826,14 +815,8 @@ class TunableOpRealWorkerTest(TestCase):
         )
         self.assertIn(["set_max_tuning_duration", [11], {}], calls)
         self.assertIn(["set_rotating_buffer_size", [13], {}], calls)
-        self.assertIn(
-            [
-                "dynamic_dims_mask",
-                [],
-                {"M": True, "N": False, "K": True, "BATCH": False},
-            ],
-            calls,
-        )
+        mask = {"M": True, "N": False, "K": True, "BATCH": False}
+        self.assertIn(["dynamic_dims_mask", [], mask], calls)
         self.assertIn("dynamic_dims_mask().__enter__", [c[0] for c in calls])
 
 
@@ -867,7 +850,7 @@ class TunableOpSettingsRoundTripTest(TestCase):
 class TunableOpRealGpuWorkerTest(TestCase):
     """Real BenchmarkJob through a real worker on a GPU.
 
-    Covers what the stubbed tests cannot: the pickle round trip, and the worker
+    Covers what no stubbed test can: real tuning on a device, and the worker
     appending to the file the parent's runtime reads. Not ROCm-gated -- the
     TunableOp GEMM dispatch and its signature are the same on cuBLASLt.
     """

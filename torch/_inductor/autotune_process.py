@@ -767,8 +767,7 @@ class _TestTunableOpJob:
     _TestBenchmarkRequest: the TuningProcess child has only torch on its path.
     Stubbing matters because the job drives real TunableOp entry points --
     set_device, the enable flags, the snapshotted setters -- and those need a
-    GPU, which the generic worker tests do not have. Without this the real job
-    only ever crosses the pipe on ROCm.
+    GPU, which the generic worker tests do not have.
     """
 
     def __init__(self, job: Any, record_path: str | None = None) -> None:

@@ -629,6 +629,10 @@ class GraphLowering(torch.fx.Interpreter):
         # Layout constraints for Triton template buffers.
         # Maps buffer name -> expected FixedLayout (computed speculatively without freezing)
         self.buffer_layout_constraints: dict[str, ir.FixedLayout] = {}
+        # Extern autotune winners awaiting the TunableOp ladder. Per graph, not
+        # global: a subgraph's _update_scheduler would otherwise drain its
+        # parent's winners before the parent's finalize() had decided layouts.
+        self.pending_tunableop_ladder: list[Any] = []
 
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
         # more aggressive prologue fusion
@@ -3071,9 +3075,13 @@ class GraphLowering(torch.fx.Interpreter):
         fusion decisions).
         """
         from .scheduler import Scheduler
+        from .tunableop import run_queued_pretunes
 
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
+        # Past finalize() and past the scheduler's own extern winners, so the
+        # queued ones now read decided layouts.
+        run_queued_pretunes(self)
 
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
