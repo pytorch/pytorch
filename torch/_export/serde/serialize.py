@@ -3528,6 +3528,13 @@ class GraphModuleDeserializer(metaclass=Final):
         spec_nodes = []
         for suffix, spec in specs.items():
             attr_name = f"{serialized_node.name}_{suffix}"
+            # A repeated name would let a later node replace specs that were
+            # already checked.
+            if hasattr(self.module, attr_name):
+                raise SerializeError(
+                    f"{where} needs the attribute name {attr_name}, which another "
+                    "node already uses"
+                )
             setattr(self.module, attr_name, spec)
             spec_nodes.append(
                 self.graph.create_node("get_attr", attr_name, name=attr_name)

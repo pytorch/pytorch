@@ -3356,6 +3356,20 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(self._index_in_vmap_artifact(), change)
 
+    def test_predispatch_flat_apply_load_rejects_repeated_name(self):
+        # The copy gets its own output, so only its repeated name is wrong. Its
+        # specs would replace those of the first node, which were checked.
+        artifact = self._index_in_vmap_artifact()
+        program = json.loads(artifact.exported_program)
+        graph = program["graph_module"]["graph"]
+        node = copy.deepcopy(self._flat_apply_node(program))
+        output = node["outputs"][0]["as_tensor"]
+        graph["tensor_values"]["copy"] = graph["tensor_values"][output["name"]]
+        output["name"] = "copy"
+        graph["nodes"].append(node)
+        with self.assertRaisesRegex(SerializeError, "which another node already uses"):
+            self._load_exported_program(artifact, json.dumps(program).encode())
+
     _OTHER_INPUTS_IN_GRAPH = {
         "keyword": (
             lambda node: node.update_kwarg("checked_output", False),
