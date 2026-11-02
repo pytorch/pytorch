@@ -13,6 +13,8 @@ import torch
 import torch.compiler.config as compiler_config
 import torch.distributed as dist
 import torch.nn as nn
+import torch.utils._pytree as pytree
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
@@ -32,6 +34,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._triton import has_triton
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -49,6 +52,25 @@ def extract_graph(fx_g, _, graph_cell):
     """Extract the FX graph code into a mutable cell."""
     graph_cell[0] = fx_g.code
     return fx_g
+
+
+class CaptureGraphs(CustomGraphPass):
+    """An inductor custom pass that records ``fn(graph)`` for every graph it sees."""
+
+    def __init__(self, fn=lambda graph: graph.python_code("self").src):
+        self.fn = fn
+        self.graphs = []
+
+    def __call__(self, graph):
+        self.graphs.append(self.fn(graph))
+
+    def uuid(self):
+        return None
+
+
+def device_operands(graph):
+    operands = pytree.tree_leaves([(n.args, n.kwargs) for n in graph.nodes])
+    return [a for a in operands if isinstance(a, torch.device)]
 
 
 class TestCompileOnOneRank(DTensorTestBase):
@@ -594,29 +616,57 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # The fx graph cache key hashes the graph before post_grad respecializes
         # current_device(), so a replacement that bakes the compiling rank's device
         # there is invisible in the output code but still splits the cache per rank.
-        from torch._inductor.custom_graph_pass import CustomGraphPass
         from torch._inductor.utils import fresh_cache
 
-        graphs = []
-
-        class Capture(CustomGraphPass):
-            def __call__(self, graph):
-                graphs.append(graph.python_code("self").src)
-
-            def uuid(self):
-                return None
-
         def graphs_on(dev):
-            graphs.clear()
+            capture = CaptureGraphs()
             torch._dynamo.reset()
             cfg = torch._inductor.config.patch(
                 align_random_eager=align_random_eager,
-                post_grad_custom_pre_pass=Capture(),
+                post_grad_custom_pre_pass=capture,
             )
             with torch.cuda.device(dev), cfg, fresh_cache():
                 x = torch.randn(64, 128, device=f"cuda:{dev}", requires_grad=True)
                 torch.compile(self._rng_fn, backend="inductor")(x).sum().backward()
-            return "\n".join(graphs)
+            return "\n".join(capture.graphs)
+
+        graph0, graph1 = graphs_on(0), graphs_on(1)
+        self.assertIn("coor.current_device", graph0)
+        self.assertNotIn("index=0", graph0)
+        self.assertEqual(graph0, graph1)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_constant_folding_and_sdpa_fusion_under_coor(self):
+        # The masked_fill fill value only matches the sfdp pattern once joint_graph's
+        # uniform-value constant folding has turned it into a full(); both the folding
+        # and the pattern's exact recheck have to accept a current_device() operand.
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        def f(query, key, value):
+            q, k, v = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
+            bs, k_len = q.size(0), k.size(-2)
+            mask = torch.ones(bs, k_len, dtype=torch.bool, device=query.device).tril()
+            scores = torch.matmul(q, k.transpose(-2, -1)) / 3.0
+            mask = (mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+            scores = scores.masked_fill(mask, -float("inf"))
+            return torch.matmul(torch.softmax(scores, dim=-1), v)
+
+        def graphs_on(dev):
+            capture = CaptureGraphs()
+            counters.clear()
+            torch._dynamo.reset()
+            cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=capture)
+            args = [
+                torch.randn(4, 2, 4, 16, device=f"cuda:{dev}", dtype=torch.half)
+                for _ in range(3)
+            ]
+            with torch.cuda.device(dev), cfg, fresh_cache(), torch.no_grad():
+                out = torch.compile(f, backend="inductor")(*args)
+            self.assertEqual(out, f(*args), atol=1e-2, rtol=1e-2)
+            self.assertEqual(counters["inductor"]["fuse_attention"], 1)
+            return "\n".join(capture.graphs)
 
         graph0, graph1 = graphs_on(0), graphs_on(1)
         self.assertIn("coor.current_device", graph0)
@@ -625,10 +675,170 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_constant_folding_feeds_backward_under_coor(self):
+        # The partitioner exempts a device node from the recompute ban only if it has
+        # a meta["val"], so a folded full() whose device node lacks one gets saved for
+        # the backward instead of recomputed there.
+        from torch._inductor.utils import fresh_cache
+
+        def f(x):
+            return x.sin() * (torch.zeros(x.shape, device=x.device) + 3)
+
+        torch._dynamo.reset()
+        x = torch.randn(8, 8, device="cuda", requires_grad=True)
+        ref = x.detach().clone().requires_grad_()
+        capture = CaptureGraphs()
+        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=capture)
+        with cfg, fresh_cache():
+            torch.compile(f, backend="inductor")(x).sum().backward()
+        f(ref).sum().backward()
+        self.assertEqual(x.grad, ref.grad)
+        _, bw = capture.graphs
+        self.assertIn("coor.current_device", bw)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("trace", ("fwd_only", "partial", "joint_fwd_bwd"))
+    @parametrize("search_has_device", (True, False))
+    def test_replacement_with_device_rank_agnostic_under_coor(
+        self, trace, search_has_device
+    ):
+        # trace_fns trace the replacement with CooR off, so its device has to be
+        # swapped for current_device() whatever the trace_fn -- including when the
+        # matched graph has no device operand, so no current_device() node, yet.
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            joint_fwd_bwd,
+            PatternMatcherPass,
+            register_replacement,
+        )
+        from torch._inductor.utils import fresh_cache
+
+        def search(x):
+            if search_has_device:
+                return (x * torch.full(x.shape, 2.0, device=x.device)).sin()
+            return (x * 2.0).sin()
+
+        def replace(x):
+            return (x + x * torch.ones(x.shape, device=x.device)).sin()
+
+        patterns = PatternMatcherPass()
+        trace_fn = {
+            "fwd_only": fwd_only,
+            "partial": functools.partial(fwd_only),
+            "joint_fwd_bwd": joint_fwd_bwd,
+        }[trace]
+        training = trace == "joint_fwd_bwd"
+        example = [torch.empty(4, device="cuda", requires_grad=training)]
+        register_replacement(search, replace, example, trace_fn, patterns)
+
+        current_device = torch.ops.coor.current_device.default
+
+        def apply(graph):
+            replaced = patterns.apply(graph)
+            nodes = graph.find_nodes(op="call_function", target=current_device)
+            return replaced, device_operands(graph), any(n.users for n in nodes)
+
+        torch._dynamo.reset()
+        x = torch.randn(4, device="cuda", requires_grad=training)
+        capture = CaptureGraphs(apply)
+        cfg = torch._inductor.config.patch(joint_custom_pre_pass=capture)
+        with cfg, fresh_cache(), torch.set_grad_enabled(training):
+            self.assertEqual(torch.compile(search, backend="inductor")(x), search(x))
+        self.assertEqual(capture.graphs, [(1, [], True)])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("other_index", (False, True))
+    def test_current_device_matches_only_this_ranks_pattern_device(self, other_index):
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            PatternMatcherPass,
+            register_graph_pattern,
+        )
+
+        def f(x):
+            return x * torch.full(x.shape, 2.0, device=x.device)
+
+        gm = make_fx(f)(torch.randn(4, device="cuda"))
+        index = torch.cuda.current_device() + other_index
+        pattern = CallFunction(
+            torch.ops.aten.full.default,
+            [4],
+            2.0,
+            device=torch.device("cuda", index),
+            pin_memory=False,
+        )
+        patterns = PatternMatcherPass()
+        matched = []
+        register_graph_pattern(pattern, pass_dict=patterns)(
+            lambda match: matched.append(match)
+        )
+        patterns.apply(gm.graph)
+        self.assertEqual(len(matched), 0 if other_index else 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("index_device", ("cpu", "cuda"))
+    def test_iota_device_fix_rank_agnostic_under_coor(self, index_device):
+        # fix_iota_device moves an index arange onto the indexed tensor's device during
+        # the joint graph passes, where the device must stay a current_device() node.
+        from torch._inductor.utils import fresh_cache
+
+        def f(x):
+            return x[torch.arange(4, device=index_device)]
+
+        def iota_devices(graph):
+            iota = torch.ops.prims.iota.default
+            nodes = graph.find_nodes(op="call_function", target=iota)
+            return [n.kwargs["device"] for n in nodes]
+
+        torch._dynamo.reset()
+        x = torch.randn(8, device="cuda")
+        capture = CaptureGraphs(iota_devices)
+        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=capture)
+        with cfg, fresh_cache():
+            self.assertEqual(torch.compile(f, backend="inductor")(x), f(x))
+        [[device]] = capture.graphs
+        self.assertIsInstance(device, torch.fx.Node)
+        self.assertIs(device.target, torch.ops.coor.current_device.default)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(
+        {"auto_chunker.enable": True, "auto_chunker.num_chunk": 4}
+    )
+    @torch._inductor.config.patch({"auto_chunker.output_size_threshold": 1024})
+    def test_auto_chunker_rank_agnostic_under_coor(self):
+        # The auto-chunker runs inside the joint graph passes and inserts factory nodes
+        # (the overridden tangent, the accumulators) on the device.
+        from torch._inductor import metrics
+        from torch._inductor.utils import fresh_cache
+
+        def f(x, w):
+            return ((x * 2) @ w).softmax(dim=-1).sum()
+
+        torch._dynamo.reset()
+        metrics.reset()
+        x = torch.randn(1024, 16, device="cuda", requires_grad=True)
+        w = torch.randn(16, 1024, device="cuda", requires_grad=True)
+        x_ref, w_ref = (t.detach().clone().requires_grad_() for t in (x, w))
+        capture = CaptureGraphs(device_operands)
+        cfg = torch._inductor.config.patch(joint_custom_post_pass=capture)
+        with cfg, fresh_cache():
+            torch.compile(f, backend="inductor")(x, w).backward()
+        f(x_ref, w_ref).backward()
+        self.assertEqual((x.grad, w.grad), (x_ref.grad, w_ref.grad))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+        devices = [d for graph_devices in capture.graphs for d in graph_devices]
+        self.assertEqual([d for d in devices if d.type == "cuda"], [])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_post_grad_replacement_with_device_under_coor(self):
         # pointless_cumsum_replacement builds an arange on the matched device, and it
-        # runs after respecialize_current_device_nodes. Tracing it with CooR live would
-        # splice in a current_device() node that nothing concretises before lowering.
+        # runs after respecialize_current_device_nodes, outside rank_agnostic_passes.
+        # A current_device() node spliced in there is never concretised before lowering.
         from torch._inductor.utils import fresh_cache, run_and_get_code
 
         def f(x):
@@ -663,6 +873,79 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             torch._dynamo.reset()
             x = torch.randn(8, device="cuda")
             self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @staticmethod
+    def _repro_storage_line(dev):
+        from torch._dynamo.debug_utils import InputWriter
+
+        with torch.cuda.device(dev):
+            w = InputWriter(None)
+            w.storage(torch.randn(4, device=f"cuda:{dev}").untyped_storage())
+            return "\n".join(w._lines)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_omits_current_device_index(self):
+        # fx_graph_runnable records each input storage's device. Writing the concrete
+        # index makes every rank's repro differ, and makes a rank-N repro unrunnable
+        # anywhere with fewer than N+1 GPUs. Under CooR the inputs are on the current
+        # accelerator by invariant, so an index-less device reproduces the same compile
+        # and is portable -- the reader puts the storage on whatever device is current.
+        self.assertNotIn("index=", self._repro_storage_line(0))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_storage_identical_across_devices(self):
+        self.assertEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
+    @requires_multigpu
+    def test_repro_writer_keeps_device_index_without_coor(self):
+        # Outside CooR several devices can be live, so the repro must say which one.
+        self.assertIn("index=0", self._repro_storage_line(0))
+        self.assertNotEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
+    # ---- the fx graph cache key must not encode which rank compiled ----
+    # The key is computed before post_grad runs, so the graph it hashes is the
+    # device-agnostic AOT one. The device index reaches the key only through
+    # example_inputs' TensorMetadata, which is what makes every rank miss on every
+    # other rank's entry.
+
+    @staticmethod
+    def _cache_key_meta_on(dev):
+        from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
+
+        with torch.cuda.device(dev):
+            return extract_tensor_metadata_for_cache_key(
+                torch.randn(4, 8, device=f"cuda:{dev}")
+            )
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cache_key_metadata_identical_across_devices(self):
+        # Same tensor, each rank on its own device: the cache-key metadata has to
+        # match, or one compiled artifact can never be reused by another rank.
+        self.assertEqual(self._cache_key_meta_on(0), self._cache_key_meta_on(1))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cache_key_metadata_drops_device_index(self):
+        self.assertIsNone(self._cache_key_meta_on(0).device.index)
+
+    @requires_multigpu
+    def test_cache_key_metadata_keeps_device_index_without_coor(self):
+        # Gating: outside CooR several devices can be live at once, so the index is
+        # real information and two devices must not collide in the cache.
+        self.assertEqual(self._cache_key_meta_on(0).device.index, 0)
+        self.assertNotEqual(self._cache_key_meta_on(0), self._cache_key_meta_on(1))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cache_key_metadata_cpu_unchanged(self):
+        # Single-accelerator invariant: cpu coexists and keeps its own metadata.
+        from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
+
+        meta = extract_tensor_metadata_for_cache_key(torch.randn(4, 8))
+        self.assertEqual(meta.device.type, "cpu")
 
     # ---- tensor guards must be rank-invariant without losing their teeth ----
     # A TENSOR_MATCH guard records the device as two independent pieces: the type
@@ -955,6 +1238,33 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             )
             compiled(torch.randn(4, device=f"{device_type}:1"))
             self.assertEqual(cnt.frame_count, before + 1)
+
+    @requires_multigpu
+    @unittest.skipIf(not has_triton(), "requires triton")
+    def test_synchronize_indexless_device_uses_caller_device_without_coor(self):
+        # Outside CooR an index-less synchronize means the caller's current device.
+        # Inductor runs the call under a guard for the graph's device, so the index
+        # has to be resolved at trace time rather than by the runtime.
+        from torch._inductor.utils import fresh_cache
+
+        def f(x):
+            y = x + 1
+            torch.get_device_module(device_type).synchronize(torch.device(device_type))
+            return y + 2
+
+        torch._dynamo.reset()
+        with fresh_cache(), torch.accelerator.device_index(0):
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            x = torch.zeros(1, device=f"{device_type}:1")
+            synced = []
+            with patch.object(
+                torch._C, "_accelerator_synchronizeDevice", side_effect=synced.append
+            ):
+                compiled(x)
+                with torch.accelerator.device_index(1):
+                    compiled(x)
+
+        self.assertEqual(synced, [0, 1])
 
     # ---- inductor codegen and launcher must be device-agnostic across ranks ----
     # A device-derived factory + a reduction, so inductor emits a real kernel.
@@ -1909,8 +2219,11 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_device_index_symbol_preserves_zero_one(self):
-        # Accelerator indices zero and one must remain valid symbolic values.
+    def test_device_index_symbol_is_not_size_like(self):
+        # The index is unbacked, but it is not a *size*. Allocating it with
+        # new_dynamic_size() files it under ShapeEnv.size_like, which carries the
+        # size-oblivious assumption that a value is never 0 or 1 -- here, that this
+        # rank is never cuda:0 or cuda:1.
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -1918,10 +2231,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with FakeTensorMode(shape_env=shape_env):
             index = torch.ops.coor.current_device_index.default()
 
-        index_range = shape_env.var_to_range[index.node.expr]
-        self.assertEqual(index_range.lower, 0)
-        self.assertIn(0, index_range)
-        self.assertIn(1, index_range)
+        self.assertEqual(shape_env.size_like, set())
+        # The >= 0 bound is the part worth keeping.
+        self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -2062,9 +2374,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
     @compiler_config.patch(compile_on_one_rank=True)
     @torch._inductor.config.patch({"triton.cudagraphs": True})
     def test_cudagraphs_under_coor_runs_on_nonzero_device(self):
-        # cudagraphs is not refused under CooR (see the guard in compile_fx.py): its
-        # device dependence lives in the wrapper-level artifact, which is not shared
-        # across ranks today. Pin that it works on a rank's own device.
+        # cudagraphs is not refused under CooR (see the guard in compile_fx.py). Pin
+        # that it works on a rank's own device.
         inp = torch.randn(2, 8, device=f"{device_type}:1")
         ref = self._coor_inductor_fn(inp)
         torch._dynamo.reset()
@@ -2098,14 +2409,14 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # correct result when the same code is compiled and run on cuda:1 with the on-disk
         # cache warm from the cuda:0 run.
         #
-        # NB: this does NOT yet exercise reload-of-the-cuda:0-artifact. The FX graph cache
-        # key embeds the input device (FxGraphCachePickler normalizes indices only under
-        # device_id_agnostic=True, which the real key does not use), so the cuda:1 compile
-        # misses and rebuilds. Cross-rank reuse of one artifact needs a device-agnostic
-        # key, which in turn needs CompiledFxGraph.device_idxs to stop carrying the
-        # compile-time index -- a follow-up, not something this PR implements. The
-        # miss is asserted below so that landing the device-agnostic key trips this test
-        # instead of silently changing what it covers.
+        # This now exercises reload of the cuda:0 artifact. The device index used to reach
+        # the FX graph cache key through example_inputs' TensorMetadata, so cuda:1 missed
+        # and rebuilt; extract_tensor_metadata_for_cache_key drops it under CooR, leaving
+        # a key that is byte-identical across ranks. The earlier revision of this test
+        # asserted the miss precisely so that landing that key would trip it rather than
+        # silently widen what it covers -- this is that landing. The hit is asserted
+        # alongside the device and value checks, since a shared artifact is only useful
+        # if it still runs on the reusing rank's own device.
         from torch._dynamo.utils import counters
         from torch._inductor.utils import clear_caches, fresh_cache
 
@@ -2130,9 +2441,41 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                     self._coor_inductor_fn, backend="inductor", fullgraph=True
                 )
                 out = compiled(inp1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(out.device, torch.device(f"{device_type}:1"))
+        self.assertEqual(out, ref)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("graph_partition", (False, True))
+    def test_cudagraphs_reuses_artifact_across_devices(self, graph_partition):
+        # cudagraphify takes its device from the loaded artifact, so an artifact that
+        # recorded the compiling rank's index would capture on cuda:0 for a cuda:1 rank.
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import clear_caches, fresh_cache
+
+        inp1 = torch.randn(2, 8, device="cuda:1")
+        ref = self._coor_inductor_fn(inp1)
+        cfg = {"triton.cudagraphs": True, "graph_partition": graph_partition}
+        with fresh_cache(), torch._inductor.config.patch(cfg):
+            with torch.cuda.device(0):
+                compiled = torch.compile(
+                    self._coor_inductor_fn, backend="inductor", fullgraph=True
+                )
+                compiled(torch.randn(2, 8, device="cuda:0"))
+            torch._dynamo.reset()
+            clear_caches()
+            counters.clear()
+            with torch.cuda.device(1):
+                compiled = torch.compile(
+                    self._coor_inductor_fn, backend="inductor", fullgraph=True
+                )
+                for _ in range(3):  # replay, not just record
+                    out = compiled(inp1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        self.assertEqual(out.device, torch.device("cuda:1"))
         self.assertEqual(out, ref)
 
     @requires_multigpu
