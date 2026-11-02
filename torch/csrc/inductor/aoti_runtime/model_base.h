@@ -321,6 +321,8 @@ int munmap(void* addr, size_t length) {
 #endif // USE_MPS
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
+#elif defined(USE_CUDA)
+#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif // USE_XPU
@@ -1405,6 +1407,10 @@ class AOTInductorModelBase {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
 #ifdef USE_CUDA
+    // The completion event is created and recorded outside run_impl's own
+    // guard; keep both on the model's device, whatever device the calling
+    // thread is on. The same guard as run_impl, so no extra shim is needed.
+    AOTICudaStreamGuard stream_guard(stream, this->device_idx_);
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
       AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
@@ -1459,6 +1465,7 @@ class AOTInductorModelBase {
       AOTIProxyExecutorHandle proxy_executor,
       bool initialization = false) {
 #ifdef USE_CUDA
+    AOTICudaStreamGuard stream_guard(stream, this->device_idx_);
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
       AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
