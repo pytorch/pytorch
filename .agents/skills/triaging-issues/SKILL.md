@@ -91,6 +91,9 @@ That issue belongs to the sub-oncall team. They own their queue.
 
 ### 1) Question vs Bug/Feature
 
+A substantive numerical investigation may be phrased as a question. Assess evidence and practical
+impact before classifying it as a usage question or stopping for missing information.
+
 - If it is a question (not a bug report or feature request): use `decision: "close_question"`, which closes the issue with the `redirect_to_forum` template.
 - If unclear whether it is a bug/feature vs a question: use `decision: "request_info"` with the `request_more_info` template and stop.
 
@@ -113,7 +116,13 @@ It uses a fixed URL policy; do not submit a rewritten body or download the files
 
 ### 1.55) Missing Reproduction — Other Cases
 
-Request a self-contained reproduction and stop when:
+Missing reproduction must not block escalation. For credible mechanistic or comparative
+evidence of a consequential correctness problem, add `triage review` and component labels
+alongside the information request; keep it open without adding `triaged`. Judge importance in
+context (widely used features, training workloads), not from an API list. For external files,
+this rule still applies; keep `decision: "request_reproduction"` so Step 1.5 redaction still runs.
+
+Otherwise, request a self-contained reproduction and stop when:
 - The user reports a hardware-specific issue (e.g., specific GPU model) without a self-contained repro script
 - The user references a specific model/checkpoint/dataset that is not publicly runnable in a few lines
 - The issue describes version-upgrade breakage but only provides a high-level description without a minimal script
@@ -142,10 +151,20 @@ Label based on the **root cause**, not keywords that appear in the error or titl
 Ask: "Where would the fix need to be made?" That determines the label.
 
 **Action:**
-1. Add `module: edge cases` label
-2. If from a fuzzer, also add `topic: fuzzer`
-3. Use the `numerical_accuracy` template from `templates.json` to link to the docs
-4. If the issue is clearly expected behavior per the docs, use `decision: "close_expected_behavior"`, which closes it with that template
+- These patterns warrant investigation, not dismissal. Use `module: edge cases` only when
+  inputs or usage justify it; add `topic: fuzzer` for fuzzing. Neither label justifies closing.
+- Use `decision: "triage_review"` plus component labels for substantive evidence needing numerical
+  judgment: controlled reference/backend/layout comparisons, unstable formulations, accuracy-contract concerns,
+  concrete non-rounding mechanisms, or meaningful model/training impact. Weigh evidence and
+  feature importance, not length or keywords. Plausible rounding amplification does not settle
+  a strong comparative study; review does not assert a proven bug or high priority.
+- Use `close_expected_behavior` with `numerical_accuracy` only when clearly documented behavior
+  explains the report, with no unresolved evidence or impact needing review. Explain the
+  mechanism and why the evidence fits in the plan reasoning. A simple bitwise CPU/GPU equality
+  question can qualify; a controlled study of substantial training divergence needs review.
+  When uncertain, leave it open for review.
+- Never send the numerical template to review-worthy reports or request normal-range inputs
+  when an adequate reproduction or control already exists.
 
 ### 2) Transfer (domain library or ExecuTorch)
 

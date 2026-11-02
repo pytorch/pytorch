@@ -139,6 +139,23 @@ class DynamicShapesTestCase(TestCase):
 
 
 class DynamicShapesOpTests:
+    # Reinplacing adds independent overlap guards for sizes 0/1.
+    @config.patch(disabled_passes="reinplace_inplaceable_ops")
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        def fn(x):
+            output = torch.zeros_like(x, dtype=torch.int32)
+            output[1:] = x[:-1]
+            return output
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (2, 0, 1, 7, 35):
+            with self.subTest(size=size):
+                x = torch.arange(size, dtype=torch.int64, device=self.device)
+                self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_prod_backward_keeps_input_shape_dynamic(self):
         def fn(x):
