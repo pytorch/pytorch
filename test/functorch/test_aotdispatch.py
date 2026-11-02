@@ -5565,8 +5565,8 @@ class TestAOTAutocastStates(AOTTestCase):
             collect(x)
         self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
 
-    def test_collect_metadata_ignores_autocast_enabled_mutation(self):
-        # Enabled TLS is restored by ExcludeDispatchKeyGuard; only dtype is checked.
+    def test_collect_metadata_rejects_autocast_enabled_mutation(self):
+        # Enabled must balance like dtype; TLS is restored after the reject.
         prior_enabled = torch.is_autocast_enabled("cpu")
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
@@ -5574,7 +5574,8 @@ class TestAOTAutocastStates(AOTTestCase):
             return [x + 1]
 
         collect, x = self._collect_metadata(f)
-        collect(x)
+        with self.assertRaisesRegex(RuntimeError, "cpu autocast enabled"):
+            collect(x)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
     def test_collect_metadata_restores_autocast_nesting(self):
@@ -5620,12 +5621,9 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     def test_enter_exit_autocast_graph_break_aot_eager(self):
-        # Unsupported and currently undetected: unmanaged _enter/_exit_autocast
-        # across a graph break. AOT does not replay autocast-enabled TLS at
-        # runtime, and ExcludeDispatchKeyGuard restores enabled after tracing,
-        # so the second graph can see BF16 x vs FP32 z (or silently diverge for
-        # other ops). The metadata pass does not reject this when ambient dtype
-        # is unchanged; nesting/enabled restore is compile-time cleanup only.
+        # Unmanaged _enter/_exit_autocast across a graph break leaves enabled
+        # unbalanced in the first AOT graph; metadata rejects it. Nesting and
+        # enabled TLS must still be restored for the caller.
         from torch.amp.autocast_mode import _get_autocast_nesting
 
         def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
@@ -5636,16 +5634,43 @@ class TestAOTAutocastStates(AOTTestCase):
             torch.amp.autocast_mode._exit_autocast(m)
             return x
 
+        torch._dynamo.reset()
         prior_nesting = _get_autocast_nesting()
         prior_enabled = torch.is_autocast_enabled("cpu")
         x = torch.randn(3, 3, dtype=torch.float32)
         y = torch.randn(3, 3, dtype=torch.float32)
         z = torch.randn(3, 3, dtype=torch.float32)
         compiled = torch.compile(f, backend="aot_eager", fullgraph=False)
-        # Pin the known pre-existing failure mode, then require TLS cleanup.
-        with self.assertRaisesRegex(RuntimeError, "same dtype"):
+        with self.assertRaisesRegex(RuntimeError, "autocast enabled"):
             compiled(x, y, z)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_autocast_context_manager_graph_break_aot_eager(self):
+        # Balanced with torch.autocast must still compile across graph breaks;
+        # Dynamo closes open autocast blocks before the break.
+        from torch.amp.autocast_mode import _get_autocast_dtypes, _get_autocast_nesting
+
+        def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            with torch.autocast("cpu", dtype=torch.float16):
+                x = x @ y
+                torch._dynamo.graph_break()
+                x = x @ z
+            return x
+
+        torch._dynamo.reset()
+        prior_nesting = _get_autocast_nesting()
+        prior_dtypes = _get_autocast_dtypes()
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        x = torch.randn(3, 3, dtype=torch.float32)
+        y = torch.randn(3, 3, dtype=torch.float32)
+        z = torch.randn(3, 3, dtype=torch.float32)
+        expected = f(x, y, z)
+        out = torch.compile(f, backend="aot_eager", fullgraph=False)(x, y, z)
+        self.assertEqual(out, expected)
+        self.assertEqual(out.dtype, expected.dtype)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+        self.assertEqual(_get_autocast_dtypes(), prior_dtypes)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     @parametrize("cache_enabled", [True, False])

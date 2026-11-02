@@ -85,6 +85,24 @@ def _preserve_autocast_dtypes() -> Iterator[dict[str, torch.dtype]]:
             torch.set_autocast_dtype(device_type, dtype)
 
 
+def _get_autocast_enabled() -> dict[str, bool]:
+    # Per-device autocast enabled TLS for every _autocast_supported_devices() entry.
+    return {
+        device_type: torch.is_autocast_enabled(device_type)
+        for device_type in torch._C._autocast_supported_devices()
+    }
+
+
+@contextlib.contextmanager
+def _preserve_autocast_enabled() -> Iterator[dict[str, bool]]:
+    prior = _get_autocast_enabled()
+    try:
+        yield prior
+    finally:
+        for device_type, enabled in prior.items():
+            torch.set_autocast_enabled(device_type, enabled)
+
+
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
     def decorate_autocast(*args, **kwargs):

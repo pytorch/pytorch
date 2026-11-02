@@ -25,7 +25,9 @@ from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTens
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.amp.autocast_mode import (
     _get_autocast_dtypes,
+    _get_autocast_enabled,
     _preserve_autocast_dtypes,
+    _preserve_autocast_enabled,
     _preserve_autocast_nesting,
 )
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
@@ -223,19 +225,19 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         # Autocast tracing-state contract for this metadata pass:
-        # - dtype: must balance across the traced region; mismatch raises. Prefer
-        #   `with torch.autocast(...)`. make_fx dtype safety relies on this check;
-        #   _create_graph restores nesting only, not dtypes.
-        # - enabled / cache / nesting: cleaned up after tracing only. Cleanup is
-        #   not runtime support across graph breaks (Dynamo may emit unbalanced
-        #   nesting; ExcludeDispatchKeyGuard restores enabled TLS; cache is
-        #   forced off by disable_autocast_cache). Unmanaged _enter/_exit_autocast
-        #   split by a graph break is unsupported and not detected when ambient
-        #   dtype is unchanged; compiled results may error or silently diverge.
+        # - dtype / enabled: must balance across the traced region; mismatch
+        #   raises. Prefer `with torch.autocast(...)`. make_fx dtype safety
+        #   relies on the dtype check; _create_graph restores nesting only.
+        # - cache / nesting: cleaned up after tracing only (cache forced off by
+        #   disable_autocast_cache; Dynamo may emit unbalanced nesting). Cleanup
+        #   is not runtime support across graph breaks.
+        # Unmanaged _enter/_exit_autocast split by a graph break leaves enabled
+        # unbalanced in the first graph and is rejected here.
         with (
             disable_above,
             _preserve_autocast_nesting(),
             _preserve_autocast_dtypes() as prior_autocast_dtypes,
+            _preserve_autocast_enabled() as prior_autocast_enabled,
             mode,
             suppress_pending,
             disable_autocast_cache(),
@@ -265,6 +267,28 @@ def run_functionalized_fw_and_collect_metadata(
             if fake_mode:
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
+
+            # Check before context managers exit so ExcludeDispatchKeyGuard /
+            # preserve helpers have not yet restored TLS.
+            current_autocast_enabled = _get_autocast_enabled()
+            enabled_mismatches = []
+            for device_type, prior_enabled in prior_autocast_enabled.items():
+                cur_enabled = current_autocast_enabled[device_type]
+                if prior_enabled != cur_enabled:
+                    enabled_mismatches.append(
+                        f"  {device_type} autocast enabled: was {prior_enabled!r}, became {cur_enabled!r}"
+                    )
+            if enabled_mismatches:
+                raise RuntimeError(
+                    "AOTAutograd detected that the traced graph left autocast enabled "
+                    "state changed:\n"
+                    + "\n".join(enabled_mismatches)
+                    + "\nPrefer `with torch.autocast(...)` so enabled state is restored "
+                    "before the graph exits, or avoid calling torch.set_autocast_enabled / "
+                    "unmanaged _enter_autocast inside the compiled region. If you hit this "
+                    "under torch.compile while using an autocast context manager, please "
+                    "file a bug."
+                )
 
             current_autocast_dtypes = _get_autocast_dtypes()
             mismatches = []
