@@ -514,6 +514,17 @@ class TestKernelRowTile(TestCase):
         )
         self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-5)
 
+    def test_ragged_vector_rejects_misaligned_rows(self):
+        """Refuse empty rows and rows not starting at r * N from an aligned base."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        base = torch.randn(34, 4100, device="cuda")
+        cases = (base.flatten()[1:4098].view(1, 4097), base[:, :4097], base[:, :0])
+        for x in cases:
+            with self.assertRaisesRegex(ValueError, "contiguous 16-byte aligned"):
+                rt.reduce_row_tile(
+                    trait, "ragged_misaligned", x, [torch.float32], ragged_vector=True
+                )
+
     @parametrize(
         "op,dtype,columns",
         [
