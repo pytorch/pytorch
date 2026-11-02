@@ -77,13 +77,12 @@ class Descriptor:
         if fields1 != fields2:
             return False
 
-        if "variant" in fields1:
-            if (
-                self.variant is not None
-                and other.variant is not None
-                and self.variant not in other.variant
-            ):
-                return False
+        if (
+            self.variant is not None
+            and other.variant is not None
+            and other.variant not in self.variant
+        ):
+            return False
 
         for f in fields1:
             if f.name == "variant":
@@ -210,14 +209,28 @@ class TestCase(PytorchTestCase):
 
             self.assertSameResult(expected, actual, **kwargs)
 
-    def check_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
+    def check_grad(
+        self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
+    ) -> None:
+        if variant not in {Variant.Op, Variant.OpInterleaved}:
+            raise AssertionError(
+                f"`check_grad` called with the wrong `variant`: {variant}"
+            )
         desc = Descriptor(
             op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
-            variant=Variant.GradCheck,
+            variant=Variant.GradCheck | variant,
         )
         self.conditional_skip(desc)
+        transform_fn = TRANSFORM_FUNCS[variant]
+
+        def transform(t: Any) -> Any:
+            # `InterleavedComplexTensor` wraps a detached view, so it is a fresh leaf.
+            out = transform_fn(t)
+            if out is not t and t.requires_grad and not out.requires_grad:
+                out.requires_grad_()
+            return out
 
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
 
@@ -227,23 +240,26 @@ class TestCase(PytorchTestCase):
             # `requires_grad` flag.
             args, kwargs = (sample_input.input, *sample_input.args), sample_input.kwargs
             args, kwargs = tree_map(
-                _as_complex_tensor,
+                transform,
                 (args, kwargs),
                 is_leaf=lambda x: isinstance(x, torch.Tensor) and x.dtype.is_complex,
             )
 
+            out_fn = sample_input.output_process_fn_grad
             if isinstance(args[0], torch.Tensor):
                 input_list = list(args)
 
                 def func(*t: torch.Tensor):
-                    return op(*t, **kwargs)
+                    return out_fn(op.gradcheck_wrapper(op, *t, **kwargs))
             else:
                 # For ops like `stack` and `cat`, we need to specify
                 # the list of inputs a bit differently
                 input_list = list(args[0])
 
                 def func(*t: torch.Tensor):
-                    return op(list(t), *args[1:], **kwargs)
+                    return out_fn(
+                        op.gradcheck_wrapper(op, list(t), *args[1:], **kwargs)
+                    )
 
             # Do the actual gradcheck
             self.assertTrue(
