@@ -687,6 +687,12 @@ def same_two_models(
 
 
 def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    half_to_float_ops = (
+        torch.ops.aten._softmax.default,
+        torch.ops.aten._softmax.out,
+        torch.ops.aten._log_softmax.default,
+        torch.ops.aten._log_softmax.out,
+    )
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
@@ -704,6 +710,14 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
                 new_kwargs = dict(node.kwargs)
                 new_kwargs["dtype"] = torch.float64
                 node.kwargs = new_kwargs
+        if node.op == "call_function" and node.target in half_to_float_ops:
+            # FP64 inputs are incompatible with half_to_float=True.
+            if bool(node.kwargs.get("half_to_float", False)):
+                new_kwargs = dict(node.kwargs)
+                new_kwargs["half_to_float"] = False
+                node.kwargs = new_kwargs
+            elif len(node.args) >= 3 and bool(node.args[2]):
+                node.args = (*node.args[:2], False, *node.args[3:])
 
     model.graph.lint()
     model.recompile()
@@ -1017,7 +1031,15 @@ class InputWriter:
                 raise AssertionError(
                     "device_hint must be provided when storage device is 'meta'"
                 )
-            device = device_hint  # type: ignore[assignment]
+            device = torch.device(device_hint)
+        # compile-on-one-rank: drop the index when it is the current accelerator's.
+        # Every rank's inputs sit there by invariant, so an index-less device replays
+        # the same compile while making the repro identical across ranks -- and
+        # runnable on a box with fewer GPUs than the rank that produced it.
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+        if _coor_device_index_is_current(device):
+            device = torch.device(device.type)
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()

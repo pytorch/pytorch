@@ -12,12 +12,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
-from typing import Any, cast, TYPE_CHECKING, TypeAlias
-from unittest import mock
-
-
-if TYPE_CHECKING:
-    import weakref
+from typing import Any, cast, TypeAlias
 
 import torch
 import torch._dynamo
@@ -71,11 +66,21 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_joint_with_descriptors,
 )
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+    is_fake_tensor,
+)
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
 from torch.export._unlift import _check_input_constraints_pre_hook
@@ -1476,50 +1481,63 @@ _EXPORT_FLAGS: set[str] | None = None
 _EXPORT_MODULE_HIERARCHY: dict[str, str] | None = None
 
 
+@contextmanager
+def _non_strict_export_compile_context(strict: bool):
+    if strict or CompileContext.current_compile_id() is not None:
+        yield
+        return
+
+    from torch._dynamo.convert_frame import get_compile_id
+
+    with compile_context(CompileContext(get_compile_id(frame_state={}))):
+        yield
+
+
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
-        try:
-            start = time.time()
-            ep = fn(*args, **kwargs)
-            end = time.time()
-            log_export_usage(
-                event="export.time",
-                metrics=end - start,
-                flags=_EXPORT_FLAGS,
-                **get_ep_stats(ep),
-            )
-        except Exception as e:
-            t = type(e)
-            error_type = t.__module__ + "." + t.__qualname__
-            case_name = get_class_if_classified_error(e)
-            if case_name is not None:
-                log.error(exportdb_error_message(case_name))
+        with _non_strict_export_compile_context(kwargs.get("strict", True)):
+            try:
+                start = time.time()
+                ep = fn(*args, **kwargs)
+                end = time.time()
                 log_export_usage(
-                    event="export.error.classified",
-                    type=error_type,
-                    message=str(e),
+                    event="export.time",
+                    metrics=end - start,
                     flags=_EXPORT_FLAGS,
+                    **get_ep_stats(ep),
                 )
-            else:
-                log_export_usage(
-                    event="export.error.unclassified",
-                    type=error_type,
-                    message=str(e),
-                    flags=_EXPORT_FLAGS,
-                )
+            except Exception as e:
+                t = type(e)
+                error_type = t.__module__ + "." + t.__qualname__
+                case_name = get_class_if_classified_error(e)
+                if case_name is not None:
+                    log.error(exportdb_error_message(case_name))
+                    log_export_usage(
+                        event="export.error.classified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
+                else:
+                    log_export_usage(
+                        event="export.error.unclassified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
 
-            if hasattr(e, "partial_fx_graph"):
-                print(
-                    e.partial_fx_graph,
-                    file=sys.stderr,
-                )
+                if hasattr(e, "partial_fx_graph"):
+                    print(
+                        e.partial_fx_graph,
+                        file=sys.stderr,
+                    )
 
-            raise e
-        finally:
-            _EXPORT_FLAGS = None
-            _EXPORT_MODULE_HIERARCHY = None
+                raise e
+            finally:
+                _EXPORT_FLAGS = None
+                _EXPORT_MODULE_HIERARCHY = None
 
         return ep
 
@@ -1866,7 +1884,7 @@ def _strict_export(
     with (
         dynamo_fake_mode,
         tracing(tx),
-        mock.patch.object(dynamo_fake_mode, "allow_non_fake_inputs", True),
+        allow_non_fake_inputs_temporarily(dynamo_fake_mode),
     ):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
@@ -2494,9 +2512,7 @@ def _export_for_training(
     # see fake tensor constants.
     if not strict and not has_ambient_mode:
         for const, val in export_artifact.aten.constants.items():
-            if isinstance(
-                val, torch._subclasses.fake_tensor.FakeTensor
-            ) and _is_bogus_const_name(const):
+            if is_fake_tensor(val) and _is_bogus_const_name(const):
                 error_msg = (
                     f"We found a fake tensor in the exported program constant's list. "
                     f"This typically means our tracing system encountered an op that "
@@ -2562,7 +2578,7 @@ def _export_for_training(
         )
 
         active_fakes = fake_tensor_tls.non_strict_export_fake_tensor_tracker
-        legit_leak: weakref.WeakSet = find_legit_leaks_from_referrers(active_fakes)
+        legit_leak = find_legit_leaks_from_referrers(active_fakes)
         leak_sources: list[str] = []
         if len(legit_leak) > 0:
             for fake_val in legit_leak:
