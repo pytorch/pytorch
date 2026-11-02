@@ -15,6 +15,7 @@ from torch._dynamo.device_interface import (
     XpuInterface,
 )
 from torch._dynamo.source import ConstantSource
+from torch._inductor import config as inductor_config
 from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.triton import (
@@ -173,6 +174,10 @@ class TestAllowTf32ExtraKwargs(TestCase):
         self._graph_ctx = V.set_graph_handler(self.graph)
         self._graph_ctx.__enter__()
         self.addCleanup(self._graph_ctx.__exit__, None, None, None)
+        # GEMM templates (and so ALLOW_TF32) only run under max-autotune.
+        config_ctx = inductor_config.patch(max_autotune=True)
+        config_ctx.__enter__()
+        self.addCleanup(config_ctx.__exit__, None, None, None)
 
     def tearDown(self):
         if self._prev_pua is None:
