@@ -79,6 +79,7 @@ from .dicts import (
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    NNModuleHooksOrderedDictVariable,
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable

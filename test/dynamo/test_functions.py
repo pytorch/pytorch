@@ -17,6 +17,7 @@ import operator
 import os
 import random
 import sys
+import time
 import types
 import typing
 import unittest
@@ -34,6 +35,7 @@ from torch import sub
 from torch._dynamo import decorators, trace_rules
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported, UserError
+from torch._dynamo.source import ConstDictKeySource, LocalSource
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -43,6 +45,8 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
+from torch._dynamo.variables.hashable import BuiltinMethodKeyTracker, HashableTracker
+from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -7356,23 +7360,313 @@ class GraphModule(torch.nn.Module):
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        for obj in (Mapping(a=1), Mapping(a=1)):
-            self.assertEqual(compiled(x, obj, obj.get), fn(x, obj, obj.get))
+        objects = [Mapping(a=1), Mapping(a=1)]
+        methods = [obj.get for obj in objects]
+        for obj, method in zip(objects, methods):
+            self.assertEqual(compiled(x, obj, method), fn(x, obj, method))
         self.assertEqual(counter.frame_count, 2 if prebound else 1)
+
+    def test_bound_builtin_method_tuple_subclass_key(self):
+        class Keys(tuple):
+            __slots__ = ()
+
+            def __iter__(self):
+                raise AssertionError("key hashability must not iterate tuple subclass")
+
+        def fn(x, mapping, key):
+            return x + (key in mapping)
+
+        receiver = {}
+        key = Keys([receiver.get])
+        x, mapping = torch.ones(1), {key: 1}
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping, key),
+            fn(x, mapping, key),
+        )
+
+    @parametrize("wrap", [lambda fn: fn, lambda fn: (fn,), lambda fn: frozenset([fn])])
+    def test_skipped_builtin_function_keys(self, wrap):
+        def fn(x, first, second):
+            return x + len({wrap(first), wrap(second)})
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for second in (time.perf_counter, time.time):
+            self.assertEqual(compiled(x, time.time, second), fn(x, time.time, second))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("wrap", [tuple, frozenset])
+    def test_constructed_container_keys_guard_lazy_elements(self, wrap):
+        def fn(x, first, second):
+            return x + len({wrap([first]): 1, wrap([second]): 2})
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for first, second in ((int, str), (int, int), (int, str)):
+            self.assertEqual(compiled(x, first, second), fn(x, first, second))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("local", [False, True])
+    @parametrize("key", [torch.float32, torch.device("cpu"), object()])
+    def test_bound_builtin_method_unrelated_key_containers(self, local, key):
+        table = {key: 3}
+
+        def fn(x, receiver):
+            if local:
+                receiver = []
+            method = list.append.__get__(receiver, list)
+            return x + len({method: 1}) + table[key]
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        receivers = [[], []]
+        for receiver in receivers:
+            self.assertEqual(compiled(x, receiver), fn(x, receiver))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "operation",
+        ["isdisjoint", "union", "intersection", "difference", "symmetric_difference"],
+    )
+    @parametrize("empty", [False, True])
+    def test_bound_builtin_method_iterable_set_operand(self, operation, empty):
+        def fn(x, receiver):
+            method = list.count.__get__(receiver, list)
+            values = set() if empty else {method}
+            result = getattr(values, operation)((method,))
+            if operation == "isdisjoint":
+                return x + result
+            return x + len(result), all(item.__self__ is receiver for item in result)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in ([1], [2]):
+            self.assertEqual(compiled(x, receiver), fn(x, receiver))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("wrap", [tuple, frozenset])
+    def test_bound_builtin_method_input_set_membership(self, wrap):
+        def fn(x, receiver, container):
+            method = list.count.__get__(receiver, list)
+            return x + (wrap((method,)) in container)
+
+        first, second = [1], [2]
+        method = first.count
+        container = {wrap((method,))}
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in (first, second, first):
+            self.assertEqual(
+                compiled(x, receiver, container), fn(x, receiver, container)
+            )
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_bound_builtin_method_metadata_avoids_metaclass_equality(self):
+        calls = []
+
+        class Meta(type):
+            def __eq__(cls, other):
+                calls.append(other)
+                return True
+
+            __hash__ = type.__hash__
+
+        class Key(metaclass=Meta):
+            def __hash__(self):
+                return 1
+
+        lazy = unittest.mock.Mock(spec=LazyVariableTracker)
+        lazy.source = ConstDictKeySource(LocalSource("mapping"), 0)
+        lazy.original_value.return_value = Key()
+        lazy.is_realized.return_value = False
+        lazy.is_hashable_lazy.return_value = True
+        with patch(
+            "torch._dynamo.symbolic_convert.InstructionTranslator.current_tx"
+        ) as current_tx:
+            current_tx.return_value.output.builtin_method_keys = (
+                BuiltinMethodKeyTracker()
+            )
+            self.assertEqual(hash(HashableTracker(lazy)), 1)
+        lazy.realize.assert_not_called()
+        self.assertEqual(calls, [])
+
+    @parametrize("mapping_protocol", [False, True])
+    def test_bound_builtin_method_update_collision(self, mapping_protocol):
+        first, second = {}, {}
+        method = first.get
+
+        class Key:
+            def __hash__(self):
+                return hash(method)
+
+            def __eq__(self, other):
+                return True
+
+        key = Key()
+
+        class Mapping:
+            def __init__(self, bound):
+                self.bound = bound
+
+            def keys(self):
+                return [key, self.bound]
+
+            def __getitem__(self, key):
+                return 1
+
+        def fn(x, receiver):
+            bound = dict.get.__get__(receiver, dict)
+            mapping = {}
+            mapping.update(
+                Mapping(bound) if mapping_protocol else [(key, 1), (bound, 1)]
+            )
+            return x + len(mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in (first, second, first):
+            self.assertEqual(compiled(x, receiver), fn(x, receiver))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("operation", ["move_to_end", "pop", "setitem"])
+    def test_bound_builtin_method_ordered_dict_collision(self, operation):
+        first, second = {}, {}
+        method = first.get
+
+        class Key:
+            def __hash__(self):
+                return hash(method)
+
+            def __eq__(self, other):
+                return True
+
+        key = Key()
+
+        def fn(x, receiver):
+            mapping = collections.OrderedDict([(key, 1)])
+            bound = dict.get.__get__(receiver, dict)
+            if operation == "setitem":
+                mapping[bound] = 2
+                return x + len(mapping)
+            try:
+                getattr(mapping, operation)(bound)
+                found = True
+            except KeyError:
+                found = False
+            return x + found
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in (second, first, second):
+            self.assertEqual(compiled(x, receiver), fn(x, receiver))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("container", [set, frozenset])
+    def test_bound_builtin_method_multi_operand_union(self, container):
+        first, second = {}, {}
+        method = first.get
+
+        class Key:
+            def __hash__(self):
+                return hash(method)
+
+            def __eq__(self, other):
+                return True
+
+        key = Key()
+
+        def fn(x, receiver):
+            bound = dict.get.__get__(receiver, dict)
+            return x + len(container().union({key}, {bound}))
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in (first, second, first):
+            self.assertEqual(compiled(x, receiver), fn(x, receiver))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize(
+        "operation",
+        ["lookup", "merge", "union", "intersection", "difference", "compare"],
+    )
+    def test_bound_builtin_method_cross_container_collisions(self, operation):
+        class Key:
+            def __init__(self, hash_value):
+                self.hash_value = hash_value
+
+            def __hash__(self):
+                return self.hash_value
+
+            def __eq__(self, other):
+                return True
+
+        def fn(x, receiver, key):
+            method = list.count.__get__(receiver, list)
+            if operation == "lookup":
+                return x + ({key: 1}.get(method, 0))
+            if operation == "merge":
+                mapping = {method: 1}
+                mapping.update({key: 2})
+                return x + len(mapping)
+            left, right = {method}, {key}
+            if operation == "compare":
+                return x + (left == right)
+            return x + len(getattr(left, operation)(right))
+
+        first, second = [], []
+        key = Key(hash(first.count))
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in (second, first, second):
+            self.assertEqual(compiled(x, receiver, key), fn(x, receiver, key))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_bound_builtin_method_frozenset_colliding_hashes(self):
+        def fn(x):
+            receiver = []
+            left = list.count.__get__(receiver, list)
+            right = list.index.__get__(receiver, list)
+            both, one = frozenset([left, right]), frozenset([left])
+            return x + len({both: 1, one: 2}), {both: 3}.get(frozenset([right, left]))
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_bound_builtin_method_frozenset_input_key(self):
+        def fn(x, receiver, mapping):
+            key = frozenset([list.append.__get__(receiver, list)])
+            return x + (key in mapping), mapping.get(key, -1)
+
+        first, second = [], []
+        mapping = {frozenset([first.append]): 7}
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for receiver in (first, second, first):
+            self.assertEqual(compiled(x, receiver, mapping), fn(x, receiver, mapping))
 
     @parametrize(
         "container_type, method_name", [(dict, "get"), (list, "count"), (set, "add")]
     )
     @parametrize("tuple_depth", (0, 1, 2))
+    @parametrize("wrap", [tuple, frozenset])
     def test_bound_builtin_method_key_alias_guards(
-        self, container_type, method_name, tuple_depth
+        self, container_type, method_name, tuple_depth, wrap
     ):
         def fn(x, left, right):
             descriptor = container_type.__dict__[method_name]
             left_key = descriptor.__get__(left, container_type)
             right_key = descriptor.__get__(right, container_type)
             for _ in range(tuple_depth):
-                left_key, right_key = (left_key,), (right_key,)
+                left_key, right_key = wrap([left_key]), wrap([right_key])
             return x + len({left_key, right_key})
 
         a, b, c, d = (container_type() for _ in range(4))
@@ -7583,14 +7877,15 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(compiled(x, first, second), fn(x, first, second))
         self.assertEqual(counter.frame_count, 2)
 
-    @parametrize("tuple_depth", (0, 1, 2))
-    def test_bound_builtin_method_hash_local_receiver(self, tuple_depth):
+    @parametrize("wrap", [tuple, frozenset])
+    @parametrize("depth", (0, 1, 2))
+    def test_bound_builtin_method_hash_local_receiver(self, wrap, depth):
         def fn(x):
             receiver = [1]
             left = list.count.__get__(receiver, list)
             right = list.index.__get__(receiver, list)
-            for _ in range(tuple_depth):
-                left, right = (left,), (right,)
+            for _ in range(depth):
+                left, right = wrap((left,)), wrap((right,))
             return (
                 x + 1,
                 hash(left) == hash(right),
@@ -7624,15 +7919,18 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    def test_bound_builtin_method_hash_input_identity(self):
+    @parametrize("wrap", [tuple, frozenset])
+    def test_bound_builtin_method_hash_input_identity(self, wrap):
         class Mapping(dict):
             pass
 
         def fn(x, obj):
-            return x + hash(obj.get)
+            return x + hash(wrap((obj.get,)))
 
         x = torch.ones(1)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "Failed to convert args/kwargs to proxy"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, Mapping(a=1))
         torch._dynamo.reset()
         compiled = torch.compile(fn, backend="eager")
@@ -7832,8 +8130,16 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("base", [dict, list, object])
     @parametrize("form", ["raw", "bound", "alias"])
-    @parametrize("case", ["missing", "extra", "keywords", "missing_and_keywords"])
-    def test_inherited_setattr_descriptor_arity(self, base, form, case):
+    @parametrize(
+        "args, kwargs",
+        [
+            (("value",), {}),
+            (("value", 1, 2), {}),
+            (("value", 1), {"extra": 2}),
+            (("value",), {"value": 1}),
+        ],
+    )
+    def test_inherited_setattr_descriptor_arity(self, base, form, args, kwargs):
         class Container(base):
             assign = object.__setattr__
 
@@ -7844,16 +8150,9 @@ class GraphModule(torch.nn.Module):
                 if form == "raw"
                 else getattr(obj, "assign" if form == "alias" else "__setattr__")
             )
-            args = (obj, "value") if form == "raw" else ("value",)
+            call_args = (obj, *args) if form == "raw" else args
             try:
-                if case == "missing":
-                    method(*args)
-                elif case == "extra":
-                    method(*args, 1, 2)
-                elif case == "keywords":
-                    method(*args, 1, extra=2)
-                else:
-                    method(*args, value=1)
+                method(*call_args, **kwargs)
             except TypeError as exc:
                 return x + 1, str(exc)
             return x - 1, "no error"
