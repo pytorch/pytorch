@@ -54,17 +54,17 @@ git fetch origin <baseBranch> --depth=1
 
 ## Review Philosophy
 
-One line can have deep cross-cutting effects: a missing device guard silently corrupts data on multi-GPU, a missing `Composite` dispatch key breaks every out-of-tree backend, a manual dtype check instead of `TensorIterator` silently skips type promotion. **Treat every line as potentially load-bearing.**
-
 1. **Only report problems** — No praise, nothing done correctly, no explaining why something is fine; omit sections without problems. The reader's time is precious: every sentence must point to something to fix or discuss.
 2. **Investigate, don't guess** — When unsure whether a checklist item applies, spawn a sub-agent to read the code. A wrong guess is negative value.
 3. **Review the design, not just the implementation** — A correct implementation of a bad design is still bad. Question side-channel communication and on/off private flags; demand concrete interface documentation for new contracts between components.
 4. **Focus on what CI cannot check** — Not formatting, linting, type errors, or CI failures; design quality, interface correctness, thread safety, BC, test patterns, and pattern adherence.
-5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing; every inconsistency degrades the codebase over time. The exception is a **Maintainer decision**: a change whose necessity hinges on a design or scope choice the author can't make alone (e.g. startup-only registration vs. runtime reconfiguration). State the question and what each answer requires; don't present it as author work.
-6. **Be specific and actionable** — Give file paths and line numbers. Name the function/class/file to use.
-7. **Match the immediate context** — Read how the same file implements similar features. A pattern mismatch within a file is always wrong.
-8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
-9. **No repetition** — Each observation appears in exactly one section of the output.
+5. **Block in proportion to stakes** — Weigh how irreversible and how silent a failure would be. Serialized formats are forever; public APIs can be deprecated; silent wrong results are serious; a crash in test or tooling code fails CI loudly, but tests that silently stop running are serious. A directory's `REVIEW.md` may say more. Request Changes when the stakes are high (wrong results, crashes users hit, security or BC breaks, new behavior with no test, tests that silently stop running, or a diff missing code or tests the description says it has); write "non-blocking" on everything else and keep it out of the Recommendation. **Needs Discussion** is for a direction question, not a defect. Mark a finding **Maintainer decision** when it is a change whose necessity hinges on a design or scope choice the author can't make alone (e.g. startup-only registration vs. runtime reconfiguration). State the question and what each answer requires; don't present it as author work.
+6. **Own bugs the PR touches, not ones it doesn't** — A bug this PR creates, exposes or changes the failure of is this PR's, even if the old code was also wrong. A bug in code the PR doesn't affect doesn't block, but report it and remind the author that fixing nearby bugs is good practice, in a separate PR stacked with this one rather than bundled in; an agent author not already allowed to make a stack should ask for permission.
+7. **Find the invariant before asking for a check** — If an invariant rules the case out, drop it. If you can name a concrete path that reaches it, report it (low confidence if unreproduced). If there is no clear invariant either way, raise that as a design question rather than asking for defensive code.
+8. **Be specific and actionable** — Give file paths and line numbers. Name the function/class/file to use.
+9. **Match the immediate context** — Read how the same file implements similar features. A pattern mismatch within a file is wrong unless there's a clear reason for the divergence.
+10. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
+11. **No repetition** — Each observation appears in exactly one section of the output.
 
 ### Using sub-agents
 
