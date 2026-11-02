@@ -475,6 +475,9 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             dot_join([bytearray(b"ab"), "cd", b"ef"])
 
     def test_join_iterator_errors(self):
+        class MyTypeError(TypeError):
+            pass
+
         class Items:
             def __init__(self, iter_error=None, next_error=None):
                 self.iter_error = iter_error
@@ -506,6 +509,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         cases = [
             # A TypeError from the first iter() becomes join's own error.
             lambda: Items(iter_error=TypeError("first iter")),
+            lambda: Items(iter_error=MyTypeError("first iter")),
             # Errors from the second iter() and from iteration propagate as is.
             lambda: Outer(Items(iter_error=TypeError("second iter"))),
             lambda: Items(next_error=TypeError("next")),

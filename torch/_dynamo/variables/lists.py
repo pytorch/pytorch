@@ -36,7 +36,6 @@ from ..bytecode_transformation import (
 from ..exc import (
     handle_observed_exception,
     ObservedException,
-    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -2639,10 +2638,12 @@ class ByteArrayVariable(VariableTracker):
                 # (default 8) and reads the items from the second.
                 try:
                     iterator = generic_getiter(tx, iterable)
-                except ObservedTypeError:
-                    # ObservedTypeError is only produced for TypeError itself, not
-                    # for subclasses, which CPython would also rewrite here; same
-                    # gap as call_length_hint.
+                except ObservedException:
+                    from ..symbolic_convert import pyerr_given_exception_match
+
+                    exc = tx.exn_vt_stack.get_raised_exception()
+                    if not pyerr_given_exception_match(exc, TypeError):
+                        raise
                     handle_observed_exception(tx)
                     raise_type_error(tx, "can only join an iterable")
                 inner = generic_getiter(tx, iterator)
