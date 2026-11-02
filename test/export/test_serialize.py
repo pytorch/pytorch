@@ -2639,6 +2639,64 @@ _FLAT_APPLY_HELPER = (
     "torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"
 )
 _MOD_INDEX = "torch._dynamo._trace_wrapped_higher_order_op.ModIndex"
+_OS_SYSTEM_OP = {"as_operator": "torch.os.system"}
+_COND_OP = {"as_operator": "torch.ops.higher_order.cond"}
+_DICT_WITH_OP = {"as_string_to_argument": {"f": _OS_SYSTEM_OP}}
+
+
+def _set_in_spec(args_and_kwargs):
+    def change(node):
+        node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(
+            pytree.tree_flatten(args_and_kwargs)[1]
+        )
+
+    return change
+
+
+def _set_escaped_enum_in_spec(node):
+    # Loading an enum would import its module. JSON allows other spellings of
+    # the key, which load decodes too.
+    class Color(enum.Enum):
+        RED = 0
+
+    _set_in_spec((("name", {Color.RED: 0}), {}))(node)
+    spec = node["inputs"][1]["arg"]
+    spec["as_string"] = spec["as_string"].replace("__enum__", "\\\\u005f_enum__")
+
+
+def _set_last_input(**fields):
+    def change(node):
+        node["inputs"][-1].update(fields)
+
+    return change
+
+
+def _call_helper_directly(node):
+    # The helper gets the name of the class to call as its first input.
+    node["target"] = _FLAT_APPLY_HELPER
+    node["inputs"] = node["inputs"][2:]
+    node["inputs"][0]["arg"] = {"as_string": "os.system"}
+
+
+def _call_helper_directly_with(arg, **fields):
+    # Its other inputs reach the autograd function.
+    def change(node):
+        node["target"] = _FLAT_APPLY_HELPER
+        node["inputs"] = node["inputs"][2:]
+        node["inputs"][-1].update(arg=arg, **fields)
+
+    return change
+
+
+def _call_helper_in_graph(args_of):
+    # The same direct call, made in the graph before it is saved.
+    def change(node):
+        node.target = (
+            torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        )
+        node.args = args_of(node.args)
+
+    return change
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -3201,173 +3259,134 @@ class TestPredispatchSerialization(TestCase):
             self._load_with_name(artifact, replaced, name)
         self.assertFalse(os.path.exists(ran))
 
-    def _bad_spec_changes(self):
-        def spec_of(args_and_kwargs):
-            return pytree.treespec_dumps(pytree.tree_flatten(args_and_kwargs)[1])
+    _BAD_SPECS = {
+        # The input spec decides which input the helper gets as the class name.
+        # For a dict, *args would pass its keys, not args[0].
+        "dict_args": (
+            _set_in_spec(({0: 0, 1: 0, 2: [0]}, {})),
+            "name as the first input",
+        ),
+        "not_a_pair": (_set_in_spec(((0, 0), {}, 0)), "name as the first input"),
+        "args_empty": (
+            _set_in_spec(((), {"a": 0, "b": 0, "c": 0})),
+            "name as the first input",
+        ),
+        "first_not_leaf": (_set_in_spec((((0, 0), 0), {})), "name as the first input"),
+        "escaped_enum": (
+            _set_escaped_enum_in_spec,
+            "Cannot load the input spec.*module of an enum",
+        ),
+        # FX writes attribute names into the code it generates.
+        "name_not_identifier": (
+            lambda node: node.update(name='x")\nimport os  # '),
+            "is not an identifier",
+        ),
+        "no_function": (
+            lambda node: node["inputs"].pop(0),
+            "does not start with its function",
+        ),
+        "only_function": (
+            lambda node: node.update(inputs=node["inputs"][:1]),
+            "does not start with its function",
+        ),
+        "function_not_a_string": (
+            lambda node: node["inputs"][0]["arg"].update(as_operator=5),
+            "does not start with its function",
+        ),
+    }
 
-        def set_spec(in_spec):
-            def change(node):
-                node["inputs"][1]["arg"]["as_string"] = in_spec
-
-            return change
-
-        class Color(enum.Enum):
-            RED = 0
-
-        enum_spec = spec_of((("name", {Color.RED: 0}), {}))
-        # JSON allows other spellings of the key, which load decodes too.
-        escaped_enum_spec = enum_spec.replace("__enum__", "\\\\u005f_enum__")
-        self.assertNotIn("__enum__", escaped_enum_spec)
-        return {
-            # The input spec decides which input the helper gets as the class
-            # name. For a dict, *args would pass its keys, not args[0].
-            "dict_args": set_spec(spec_of(({0: 0, 1: 0, 2: [0]}, {}))),
-            "not_a_pair": set_spec(spec_of(((0, 0), {}, 0))),
-            "args_empty": set_spec(spec_of(((), {"a": 0, "b": 0, "c": 0}))),
-            "first_not_leaf": set_spec(spec_of((((0, 0), 0), {}))),
-            # Loading an enum would import its module.
-            "escaped_enum": set_spec(escaped_enum_spec),
-            # FX writes attribute names into the code it generates.
-            "name_not_identifier": lambda node: node.update(name='x")\nimport os  # '),
-            "no_function": lambda node: node["inputs"].pop(0),
-            "only_function": lambda node: node.update(inputs=node["inputs"][:1]),
-            "function_not_a_string": lambda node: node["inputs"][0]["arg"].update(
-                as_operator=5
-            ),
-        }
-
-    @parametrize(
-        "case,reason",
-        [
-            ("dict_args", "name as the first input"),
-            ("not_a_pair", "name as the first input"),
-            ("args_empty", "name as the first input"),
-            ("first_not_leaf", "name as the first input"),
-            ("escaped_enum", "Cannot load the input spec.*module of an enum"),
-            ("name_not_identifier", "is not an identifier"),
-            ("no_function", "does not start with its function"),
-            ("only_function", "does not start with its function"),
-            ("function_not_a_string", "does not start with its function"),
-        ],
-        name_fn=lambda case, reason: case,
-    )
-    def test_predispatch_flat_apply_load_rejects_bad_specs(self, case, reason):
-        artifact = self._index_in_vmap_artifact()
+    @parametrize("case", list(_BAD_SPECS))
+    def test_predispatch_flat_apply_load_rejects_bad_specs(self, case):
+        change, reason = self._BAD_SPECS[case]
         with self.assertRaisesRegex(SerializeError, reason):
-            self._load_changed(artifact, self._bad_spec_changes()[case])
+            self._load_changed(self._index_in_vmap_artifact(), change)
 
-    @staticmethod
-    def _other_input_changes():
-        def set_last(**fields):
-            def change(node):
-                node["inputs"][-1].update(fields)
-
-            return change
-
-        def call_helper_directly(node):
-            # The helper gets the name of the class to call as its first input.
-            node["target"] = _FLAT_APPLY_HELPER
-            node["inputs"] = node["inputs"][2:]
-            node["inputs"][0]["arg"] = {"as_string": "os.system"}
-
-        def call_helper_directly_with(arg, **fields):
-            # Its other inputs reach the autograd function.
-            def change(node):
-                node["target"] = _FLAT_APPLY_HELPER
-                node["inputs"] = node["inputs"][2:]
-                node["inputs"][-1].update(arg=arg, **fields)
-
-            return change
-
-        cond = {"as_operator": "torch.ops.higher_order.cond"}
-
-        return {
-            # An input that names an operator would reach the function as a
-            # callable.
-            "torch_os_system": set_last(arg={"as_operator": "torch.os.system"}),
-            "unregistered_op": set_last(
+    _OTHER_INPUTS = {
+        # An input that names an operator would reach the function as a
+        # callable.
+        "torch_os_system": (_set_last_input(arg=_OS_SYSTEM_OP), "outside torch.ops"),
+        "unregistered_op": (
+            _set_last_input(
                 arg={"as_operator": "torch.ops.flat_apply_test_ns.op.default"}
             ),
-            "higher_order_op": set_last(arg=cond),
-            # A dict of arguments could hold one too, and export passes neither
-            # dicts nor keyword arguments through flat_apply.
-            "dict": set_last(
-                arg={"as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}}
-            ),
-            "keyword": set_last(arg={"as_int": 0}, kind=ArgumentKind.KEYWORD),
-            "named": set_last(name="checked_output"),
-            # Called directly, the helper would import the module of the class
-            # name it gets when the program runs.
-            "direct_helper_call": call_helper_directly,
-            "direct_helper_call_operator": call_helper_directly_with(
-                {"as_operator": "torch.os.system"}
-            ),
-            "direct_helper_call_dict": call_helper_directly_with(
-                {"as_string_to_argument": {"f": {"as_operator": "torch.os.system"}}}
-            ),
-            "direct_helper_call_keyword": call_helper_directly_with(
-                cond, name="f", kind=ArgumentKind.KEYWORD
-            ),
-            "direct_helper_call_dict_custom_obj": call_helper_directly_with(
+            "not registered",
+        ),
+        "higher_order_op": (_set_last_input(arg=_COND_OP), "not an operator overload"),
+        # A dict of arguments could hold one too, and export passes neither
+        # dicts nor keyword arguments through flat_apply.
+        "dict": (_set_last_input(arg=_DICT_WITH_OP), "of kind as_string_to_argument"),
+        "keyword": (
+            _set_last_input(arg={"as_int": 0}, kind=ArgumentKind.KEYWORD),
+            "keyword input",
+        ),
+        "named": (_set_last_input(name="checked_output"), "keyword input"),
+        # Called directly, the helper would import the module of the class name
+        # it gets when the program runs.
+        "direct_helper_call": (
+            _call_helper_directly,
+            "not a class or function defined",
+        ),
+        "direct_helper_call_operator": (
+            _call_helper_directly_with(_OS_SYSTEM_OP),
+            "outside torch.ops",
+        ),
+        "direct_helper_call_dict": (
+            _call_helper_directly_with(_DICT_WITH_OP),
+            "operator in a dict input",
+        ),
+        "direct_helper_call_keyword": (
+            _call_helper_directly_with(_COND_OP, name="f", kind=ArgumentKind.KEYWORD),
+            "not an operator overload",
+        ),
+        "direct_helper_call_dict_custom_obj": (
+            _call_helper_directly_with(
                 {
                     "as_string_to_argument": {
                         "o": {"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
                     }
                 }
             ),
-        }
+            "of kind as_custom_obj",
+        ),
+    }
 
-    @parametrize(
-        "case,reason",
-        [
-            ("torch_os_system", "outside torch.ops"),
-            ("unregistered_op", "not registered"),
-            ("higher_order_op", "not an operator overload"),
-            ("dict", "of kind as_string_to_argument"),
-            ("keyword", "keyword input"),
-            ("named", "keyword input"),
-            ("direct_helper_call", "not a class or function defined"),
-            ("direct_helper_call_operator", "outside torch.ops"),
-            ("direct_helper_call_dict", "operator in a dict input"),
-            ("direct_helper_call_keyword", "not an operator overload"),
-            ("direct_helper_call_dict_custom_obj", "of kind as_custom_obj"),
-        ],
-        name_fn=lambda case, reason: case,
-    )
-    def test_predispatch_flat_apply_load_rejects_other_inputs(self, case, reason):
-        artifact = self._index_in_vmap_artifact()
+    @parametrize("case", list(_OTHER_INPUTS))
+    def test_predispatch_flat_apply_load_rejects_other_inputs(self, case):
+        change, reason = self._OTHER_INPUTS[case]
         with self.assertRaisesRegex(SerializeError, reason):
-            self._load_changed(artifact, self._other_input_changes()[case])
+            self._load_changed(self._index_in_vmap_artifact(), change)
 
-    @parametrize(
-        "case,reason",
-        [
-            ("keyword", "keyword input"),
-            ("higher_order_op", "not an operator overload"),
-            ("direct_helper_call", "not a class or function defined"),
-            ("direct_helper_call_operator", "not an operator overload"),
-        ],
-        name_fn=lambda case, reason: case,
-    )
-    def test_predispatch_flat_apply_save_rejects_other_inputs(self, case, reason):
+    _OTHER_INPUTS_IN_GRAPH = {
+        "keyword": (
+            lambda node: node.update_kwarg("checked_output", False),
+            "keyword input",
+        ),
+        "higher_order_op": (
+            lambda node: node.update_arg(-1, torch.ops.higher_order.cond),
+            "not an operator overload",
+        ),
+        "direct_helper_call": (
+            _call_helper_in_graph(lambda args: ("os.system", *args[3:])),
+            "not a class or function defined",
+        ),
+        "direct_helper_call_operator": (
+            _call_helper_in_graph(
+                lambda args: (*args[2:-1], torch.ops.higher_order.cond)
+            ),
+            "not an operator overload",
+        ),
+    }
+
+    @parametrize("case", list(_OTHER_INPUTS_IN_GRAPH))
+    def test_predispatch_flat_apply_save_rejects_other_inputs(self, case):
         # Save refuses the same inputs and calls, so it never writes what load
         # refuses.
+        change, reason = self._OTHER_INPUTS_IN_GRAPH[case]
         ep = self._index_in_vmap_program()
         (node,) = ep.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.flat_apply
         )
-        if case == "keyword":
-            node.kwargs = {"checked_output": False}
-        elif case == "higher_order_op":
-            node.args = (*node.args[:-1], torch.ops.higher_order.cond)
-        else:
-            node.target = (
-                torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
-            )
-            if case == "direct_helper_call":
-                node.args = ("os.system", *node.args[3:])
-            else:
-                node.args = (*node.args[2:-1], torch.ops.higher_order.cond)
+        change(node)
         with self.assertRaisesRegex(SerializeError, reason):
             serialize(ep)
 
