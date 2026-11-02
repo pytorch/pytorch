@@ -1240,6 +1240,16 @@
       "Hints": []
     }
   ],
+  "GB0705": [
+    {
+      "Gb_type": "Custom metaclass metadata access",
+      "Context": "metadata={attr}, name={name}",
+      "Explanation": "Dynamo cannot safely construct a class metadata source through custom metaclass accessors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -5030,6 +5040,14 @@
     }
   ],
   "GB0279": [
+    {
+      "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo can only reconstruct an escaped torch.fx.traceback.annotate context when every annotation value is a constant it can embed in bytecode.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
       "Context": "str(self)",
