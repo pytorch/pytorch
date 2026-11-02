@@ -180,8 +180,10 @@ class TestTraitDevice(TestCase):
             def project(self, acc, n):
                 return acc[0]
 
-        x = torch.arange(-32768, 32768, device=device, dtype=torch.int32)
-        x = x.to(torch.int16).view(dtype).view(1, -1)
+        values = torch.arange(-32768, 32768, device=device, dtype=torch.int32)
+        # Zero rows add exactly, so each output is its value's widened square.
+        x = torch.zeros(65, values.numel(), device=device, dtype=dtype)
+        x[0] = values.to(torch.int16).view(dtype)
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
@@ -193,7 +195,6 @@ class TestTraitDevice(TestCase):
                 [torch.float32],
                 1,
                 allow_split=True,
-                column_pack=1,
             )[0]
             expected = x[0].float().abs().square()
             self.assertEqual(got.isnan(), expected.isnan())
