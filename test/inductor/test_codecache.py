@@ -4388,6 +4388,45 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details2),
         )
 
+    def test_hash_installs_tlx_before_reading_choices_class(self):
+        # Installing TLX replaces config.inductor_choices_class. The key must not
+        # depend on whether an earlier lowering already triggered that install.
+        import threading
+
+        from torch._inductor import virtualized
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.heuristics.template import tlx
+
+        class ModelChoices(InductorChoices):
+            def uuid(self):
+                return "model"
+
+        class TLXChoices(InductorChoices):
+            def uuid(self):
+                return "tlx"
+
+        def fake_install():
+            config.inductor_choices_class = TLXChoices
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output((graph.call_function(torch.ops.aten.sin.default, (x,)),))
+        gm = torch.fx.GraphModule({}, graph)
+        inputs = [torch.randn(2)]
+
+        patches = {"inductor_choices_class": ModelChoices, "triton.tlx_mode": "allow"}
+        with (
+            config.patch(patches),
+            mock.patch.object(tlx, "_install", side_effect=fake_install),
+        ):
+            # No choices handler exists yet, as in a process whose earlier
+            # graphs all hit the cache.
+            with mock.patch.object(virtualized, "threadlocal", threading.local()):
+                before, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
+            fake_install()
+            after, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
+        self.assertEqual(before, after)
+
     def test_hash_config_changes(self):
         """
         Test that different config settings affect hashes.

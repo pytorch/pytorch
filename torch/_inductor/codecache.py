@@ -1763,6 +1763,11 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
+        # Creating the choices handler installs TLX, which replaces
+        # config.inductor_choices_class. Otherwise that happens on the first
+        # lowering, and the key would depend on whether an earlier graph in
+        # this process missed the cache.
+        _ = V.choices
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
