@@ -455,6 +455,8 @@ def select_general_config(
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
     if num_o == 1:
         return _GeneralConfig(block=_K0_ALL_BLOCK, rule="general_one_output")
+    # Index and Welford keys come from internal kernel callers; the core overrides route
+    # only sum, mean, prod, amax and amin.
     strided_row = (
         cc == (10, 0)
         and dtype in (torch.float16, torch.bfloat16, torch.float32)
@@ -559,7 +561,7 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 # band, mean, prod, amax, amin, nansum, norm1/2 and count_nonzero (fp16/bf16/fp32) and
 # argmin, aminmax and max/min.dim (fp32) run 0.97-3.9x. Absmax and absmin (0.88-0.91x)
 # and general-p norms (0.57-0.92x; p = 3 and 0.5) lose at N = 255, so they start at
-# N = 1023.
+# N = 1023. The kernel bakes N, so each new width compiles once (0.17 s on B200).
 _RAGGED_ROW_MIN_N = 255
 _RAGGED_ROW_LATE_MIN_N = 1023
 _RAGGED_ROW_MAX_N = 16383

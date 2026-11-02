@@ -126,7 +126,7 @@ class TestColumnConfig(TestCase):
                 torch.float32,
                 "sum",
                 65536,
-                129,
+                256,
                 8,
                 1,
                 (torch.float32,),
@@ -134,24 +134,31 @@ class TestColumnConfig(TestCase):
             ),
             (
                 torch.float32,
-                "varmean0",
+                "var0",
                 16384,
                 1024,
                 2,
                 3,
-                (torch.float32, torch.float32),
+                (torch.float32,),
                 (0, 16),
             ),
             (
                 torch.bfloat16,
-                "mean",
+                "argmaxi32",
                 262144,
                 4096,
                 32,
-                1,
-                (torch.float32,),
-                (32, 32),
+                2,
+                (torch.int64,),
+                (64, 32),
             ),
+            # full_column_anchor, the 65536 x 1024 rule, the c256 Welford and bf16
+            # minimums, and a column_anchor seed for a simple trait.
+            (torch.float32, "mean", 262144, 256, 32, 1, (torch.float32,), (32, 16)),
+            (torch.float32, "var0", 65536, 1024, 8, 3, (torch.float32,), (64, 16)),
+            (torch.float32, "var0", 65536, 256, 8, 3, (torch.float32,), (0, 16)),
+            (torch.bfloat16, "sum", 131072, 256, 16, 1, (torch.float32,), (8, 16)),
+            (torch.float32, "mean", 524288, 1024, 64, 1, (torch.float32,), (32, 32)),
         ],
     )
     def test_sm107_ordered_profiles(
@@ -172,6 +179,24 @@ class TestColumnConfig(TestCase):
         )
         self.assertEqual((cfg.min_blocks, cfg.tile_columns), expected)
         self.assertEqual((cfg.worker_warps, cfg.full_tiles), (16, True))
+
+    @parametrize(
+        "dtype,size,columns,key,fields,order",
+        [
+            (torch.float32, 64, 256, "sum", 1, "inner_tree"),
+            (torch.bfloat16, 16, 256, "var0", 3, "inner_tree"),
+            (torch.float32, 16, 4096, "sum", 1, "inner_tree"),
+            (torch.bfloat16, 64, 4096, "mean", 1, "inner_tree"),
+            (torch.bfloat16, 64, 4096, "amax", 1, "linear"),
+            (torch.float32, 64, 1024, "var0", 3, "inner_tree"),
+        ],
+    )
+    def test_sm107_small_hand_offs(self, dtype, size, columns, key, fields, order):
+        """Pin which 16 and 64 MiB SM107 columns hand off to the ordered kernel."""
+        cfg = self.select(
+            dtype, size, columns, cc=(10, 7), trait_key=key, nfields=fields
+        )
+        self.assertEqual(cfg.kernel_order, order)
 
     def test_sm107_column_guards(self):
         """Keep incompatible SM107 calls on generic policies."""
@@ -207,8 +232,8 @@ class TestColumnConfig(TestCase):
             (torch.float32, "sum", 8192, 4096, 1, False, None),
             (torch.float16, "sum", 8192, 4096, 1, True, (0, 32)),
             (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
-            (torch.float32, "sum", 32768, 257, 4, True, (16, 16)),
-            (torch.float32, "sum", 131072, 257, 16, True, (16, 32)),
+            (torch.float32, "sum", 32768, 257, 4, True, (0, 16)),
+            (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
             (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
             (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
         ],
