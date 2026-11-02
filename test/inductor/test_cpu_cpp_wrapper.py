@@ -105,6 +105,7 @@ class TestCppWrapper(InductorTestCase):
                 actual, code = run_and_get_cpp_code(torch.compile(Model()), x)
                 self.assertEqual(actual, Model()(x))
 
+        second_output = r"(\w+) = torch::stable::detail::to<AtenTensorHandle>\(dispatch_vars\[1\]\);"
         calls = []
         in_custom_op = False
         for line in code.splitlines():
@@ -113,12 +114,7 @@ class TestCppWrapper(InductorTestCase):
                 calls.append((line, re.findall(r"&(\w+)_handle", line)[-1:]))
             elif 'aoti_torch_call_dispatcher("cpp_wrapper_unused_outputs::two"' in line:
                 in_custom_op = True
-            elif in_custom_op and (
-                m := re.search(
-            r"(\w+) = torch::stable::detail::to<AtenTensorHandle>\(dispatch_vars\[1\]\);",
-                    line,
-        )
-            ):
+            elif in_custom_op and (m := re.search(second_output, line)):
                 calls.append((line, [m.group(1)]))
                 in_custom_op = False
         self.assertEqual(len(calls), 2 * n_layers)
