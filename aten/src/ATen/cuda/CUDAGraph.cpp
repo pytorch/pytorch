@@ -12,6 +12,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <cstddef>
+#include <exception>
 #include <optional>
 
 namespace at::cuda {
@@ -432,6 +433,33 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
 }
 
 void CUDAGraph::reset() {
+  reset_impl(false);
+}
+
+void CUDAGraph::reset_after_replay_completion() {
+  try {
+    std::optional<c10::cuda::CUDAGuard> owner;
+    if (capture_dev_ != UNDEFINED_DEVICE) {
+      owner.emplace(capture_dev_);
+      cudaStreamCaptureStatus status{};
+      const auto error = cudaStreamIsCapturing(capture_stream_.stream(), &status);
+      if (error != cudaSuccess || status != cudaStreamCaptureStatusNone) {
+        C10_CUDA_CHECK_WARN(error);
+        TORCH_WARN("refusing completed-graph teardown on an unproved capture-owner stream");
+        std::terminate();
+      }
+    }
+    reset_impl(true);
+    // Completion was supplied by the owner, including on HIP. Do not run the
+    // legacy destructor's device-wide synchronization after this teardown.
+    capture_dev_ = UNDEFINED_DEVICE;
+  } catch (...) {
+    // Do not unwind into an unguarded legacy reset with a failed live handle.
+    std::terminate();
+  }
+}
+
+void CUDAGraph::reset_impl(bool replays_complete) {
   // These checks warn instead of throwing: reset() is called from the
   // destructor, and at least one CI build refuses to compile with a throwing
   // destructor. Resource cleanup lives here in C++ so it runs on garbage
@@ -482,11 +510,27 @@ void CUDAGraph::reset() {
     allocated_pool_ = false;
   }
   if (has_graph_) {
-    C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
+    if (replays_complete) {
+      try {
+        c10::cuda::CUDAStreamCaptureModeGuard guard(cudaStreamCaptureModeRelaxed);
+        const auto error = cudaGraphDestroy(graph_);
+        if (error != cudaSuccess) { C10_CUDA_CHECK_WARN(error); std::terminate(); }
+      } catch (...) { std::terminate(); }
+    } else {
+      C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
+    }
     has_graph_ = false;
   }
   if (has_graph_exec_) {
-    C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
+    if (replays_complete) {
+      try {
+        c10::cuda::CUDAStreamCaptureModeGuard guard(cudaStreamCaptureModeRelaxed);
+        const auto error = cudaGraphExecDestroy(graph_exec_);
+        if (error != cudaSuccess) { C10_CUDA_CHECK_WARN(error); std::terminate(); }
+      } catch (...) { std::terminate(); }
+    } else {
+      C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
+    }
     has_graph_exec_ = false;
   }
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
