@@ -4556,6 +4556,51 @@ def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
         _current_node.value = old
 
 
+def safe_repr(x: object) -> str:
+    """repr(x), falling back to reprs of the elements of a list, tuple or dict
+    when that raises, and to <ClassName> for an element whose repr raises, so
+    that one bad repr does not hide the others or the error being reported."""
+    try:
+        return repr(x)
+    except Exception:
+        pass
+    if isinstance(x, (list, tuple)):
+        items = ", ".join(safe_repr(e) for e in x)
+        if isinstance(x, list):
+            return f"[{items}]"
+        return f"({items},)" if len(x) == 1 else f"({items})"
+    if isinstance(x, dict):
+        items = ", ".join(f"{safe_repr(k)}: {safe_repr(v)}" for k, v in x.items())
+        return f"{{{items}}}"
+    if isinstance(x, BaseException):
+        # BaseException.__repr__ is ClassName(*args), with each arg repr'd
+        return f"{type(x).__name__}({', '.join(safe_repr(a) for a in x.args)})"
+    return f"<{type(x).__name__}>"
+
+
+def summarize_example_value(v: object) -> str:
+    """A short description of a graph input's example value for logs and
+    errors. Tensors, including those in a list or tuple, show their class and
+    size and, as a tensor's repr does, a non-default dtype or device and their
+    autograd state, without calling repr, since a fake tensor's repr can be
+    large or can raise."""
+    if isinstance(v, torch.Tensor):
+        fields = [f"size={tuple(v.shape)}"]
+        if v.dtype not in (torch.get_default_dtype(), torch.int64, torch.bool):
+            fields.append(f"dtype={v.dtype}")
+        if v.device.type != torch._C._get_default_device():
+            fields.append(f"device='{v.device}'")
+        if v.grad_fn is not None:
+            fields.append(f"grad_fn=<{type(v.grad_fn).__name__}>")
+        elif v.requires_grad:
+            fields.append("requires_grad=True")
+        return f"{type(v).__name__}(..., {', '.join(fields)})"
+    if isinstance(v, (list, tuple)):
+        items = ", ".join(summarize_example_value(e) for e in v)
+        return f"{type(v).__name__}[{items}]"
+    return safe_repr(v)
+
+
 def run_node(
     tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
 ) -> Any:
@@ -4579,8 +4624,8 @@ def run_node(
 
         def make_error_message(e: object) -> str:
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
-                + repr(e)
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{safe_repr(args)}, **{safe_repr(kwargs)}): got "
+                + safe_repr(e)
             )
 
         from .exc import Unsupported
