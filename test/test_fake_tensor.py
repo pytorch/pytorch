@@ -5459,6 +5459,76 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(ref())
         self.assertTrue(mode.allow_meta)
 
+    def test_from_meta_and_device(self):
+        mode, wrapper = self._make_mode()
+        # A plain meta tensor gets a new detached fake on device, as in Python,
+        # and is itself left unchanged
+        meta = torch.empty(2, 3, device="meta", requires_grad=True) * 2
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        self.assertIsNot(fake, meta)
+        self.assertTrue(torch._C._is_fake_tensor(fake))
+        self.assertEqual(fake.device, torch.device("cpu"))
+        self.assertEqual(fake.shape, (2, 3))
+        self.assertTrue(fake.requires_grad)
+        self.assertTrue(fake.is_leaf)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
+        self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        self.assertFalse(torch._C._is_fake_tensor(meta))
+        self.assertTrue(meta.is_meta)
+        self.assertIsNotNone(meta.grad_fn)
+
+        # A fake of the same mode that reads as meta gets a new detached fake
+        # on device, unseen by dispatch modes, and keeps its own device and
+        # real tensor
+        meta_fake = torch._C._from_meta_and_device(
+            torch.empty(2, 3, device="meta", requires_grad=True),
+            torch.device("meta"),
+            mode,
+        )
+        torch._C._set_real_tensor(meta_fake, torch.zeros(2, 3))
+        ops = []
+
+        class RecordingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordingMode():
+            moved = torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), mode)
+        self.assertEqual(ops, [])
+        self.assertIsNot(moved, meta_fake)
+        self.assertTrue(torch._C._is_fake_tensor(moved))
+        self.assertEqual(moved.device, torch.device("cpu"))
+        self.assertIs(torch._C._maybe_get_fake_mode(moved), wrapper)
+        self.assertIsNone(torch._C._get_real_tensor(moved))
+        self.assertTrue(moved.requires_grad)
+        self.assertTrue(moved.is_leaf)
+        self.assertFalse(moved._is_view())
+        self.assertEqual(meta_fake.device, torch.device("meta"))
+        self.assertIsNotNone(torch._C._get_real_tensor(meta_fake))
+        other_mode, _other_wrapper = self._make_mode()
+        with self.assertRaisesRegex(RuntimeError, "Expected a fake of the given mode"):
+            torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), other_mode)
+
+        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+            torch._C._from_meta_and_device(fake, torch.device("cpu"), mode)
+        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+            torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
+        meta_subclass = TwoTensor(
+            torch.empty(2, device="meta"), torch.empty(2, device="meta")
+        )
+        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+            torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
+
+        # allow_meta is enforced
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            strict_mode, _strict_wrapper = self._make_mode()
+        meta = torch.empty(2, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "allow_meta is False"):
+            torch._C._from_meta_and_device(meta, torch.device("meta"), strict_mode)
+        self.assertFalse(torch._C._is_fake_tensor(meta))
+        self.assertTrue(meta.is_meta)
+
 
 if __name__ == "__main__":
     run_tests()
