@@ -1125,11 +1125,26 @@ class CacheabilityValidator:
             self._check_cache_key_object(self.fx_kwargs)
 
     def validate_graph(self, include_constants: bool) -> None:
+        from torch._library.dispatchless import flat_dispatchless_graph_call
+
         for module in self.gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
                 target = node.target
+                if node.target is flat_dispatchless_graph_call:
+                    if not node.args or not isinstance(node.args[0], torch.fx.Node):
+                        self.bypass("Dispatchless cache requires a GraphModule body")
+                    body_node = node.args[0]
+                    if body_node.op != "get_attr":
+                        self.bypass("Dispatchless cache requires a GraphModule attribute")
+                    try:
+                        body = self._get_attr(module, body_node.target)
+                    except AttributeError:
+                        self.bypass("Dispatchless cache requires a GraphModule body")
+                    if not isinstance(body, torch.fx.GraphModule):
+                        self.bypass("Dispatchless cache requires a GraphModule body")
+                    self._check_dispatchless_body(body)
                 if (
                     isinstance(target, torch._ops.HigherOrderOperator)
                     and not target.cacheable()
@@ -1164,6 +1179,99 @@ class CacheabilityValidator:
                     except AttributeError:
                         continue
                     self._check_cache_key_object(attr)
+
+    def _check_dispatchless_body(self, body: torch.fx.GraphModule) -> None:
+        from collections import OrderedDict
+
+        from torch._functorch._aot_autograd.autograd_cache import (
+            BypassAOTAutogradCache,
+            check_node_safe,
+        )
+        from torch.fx.immutable_collections import immutable_dict, immutable_list
+
+        seen: set[tuple[int, bool]] = set()  # noqa: set_linter
+
+        def check_graph(value: torch.fx.GraphModule, path: str) -> None:
+            from torch.fx.graph import CodeGen
+
+            # The reducer recompiles the module; custom classes/codegen can run
+            # Python whose semantics are not represented by the graph's nodes.
+            codegen = value.graph._codegen
+            if type(value).__bases__ != (torch.fx.GraphModule,) or (
+                type(codegen) is not CodeGen
+                or set(vars(codegen)) != {"_body_transformer", "_func_name"}
+                or codegen._body_transformer is not None
+                or type(codegen._func_name) is not str
+                or codegen._func_name != "forward"
+            ):
+                self.bypass(
+                    f"Uncacheable dispatchless body at {path}: custom codegen or class"
+                )
+            for node in value.graph.nodes:
+                try:
+                    check_node_safe(node, allow_unsafe=False)
+                except BypassAOTAutogradCache as exc:
+                    self.bypass(f"Uncacheable dispatchless body at {path}: {exc}")
+                check(node.args, f"{path}.{node.name}.args", node_arg=True)
+                check(node.kwargs, f"{path}.{node.name}.kwargs", node_arg=True)
+            # AOT's reducer drops only _graph. In particular, nested module
+            # metadata is not sanitized by sanitize_gm_for_cache.
+            for name, attr in value.__dict__.items():
+                if name != "_graph":
+                    check(attr, f"{path}.{name}")
+
+        def check(value: object, path: str, *, node_arg: bool = False) -> None:
+            key = (id(value), node_arg)
+            if key in seen:
+                return
+            seen.add(key)
+            if type(value) in (
+                type(None),
+                bool,
+                int,
+                float,
+                complex,
+                str,
+                bytes,
+                range,
+                torch.dtype,
+                torch.device,
+                torch.layout,
+                torch.memory_format,
+            ):
+                return
+            if node_arg and isinstance(value, torch.fx.Node):
+                return
+            if isinstance(value, torch.fx.GraphModule):
+                check_graph(value, path)
+                return
+            if type(value) in (dict, OrderedDict, immutable_dict):
+                for name, item in value.items():
+                    check(name, f"{path}.key", node_arg=node_arg)
+                    check(item, f"{path}[{name!r}]", node_arg=node_arg)
+                return
+            if type(value) in (
+                list,
+                tuple,
+                set,
+                frozenset,
+                immutable_list,
+                torch.Size,
+            ):
+                for index, item in enumerate(value):
+                    check(item, f"{path}[{index}]", node_arg=node_arg)
+                return
+            if type(value) is slice:
+                for item in (value.start, value.stop, value.step):
+                    check(item, path, node_arg=node_arg)
+                return
+            # Retained tensors are deliberately excluded: AOT hashes their
+            # metadata, not their values. Explicit runtime operands are separate.
+            self.bypass(
+                f"Uncacheable dispatchless body at {path}: {type(value).__name__}"
+            )
+
+        check(body, "body")
 
     @staticmethod
     def check_tensor(t: Tensor) -> None:

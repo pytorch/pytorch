@@ -183,6 +183,10 @@ def dispatchless_custom_op(fn: Callable[_P, _R]) -> _DispatchlessCustomOp[_P, _R
     and storage-less tensor subclasses are not fully checked there. Both paths
     trust native operator schemas and implementations. Transform trace-through
     paths retain their native behavior.
+    Guarded Dynamo graphs can use persistent compilation caches when their
+    nested bodies contain only supported operators and serializable state.
+    Unsupported retained state bypasses caching; raw ``make_fx`` captures remain
+    uncacheable. This does not provide a semantic hash for arbitrary Python code.
     Schema-marked writes to input aliases are conservatively rejected, including
     metadata-only changes to local views of inputs.
     Autograd follows the backing function. AOTAutograd decomposes the operator
@@ -265,7 +269,7 @@ def _flat_graph_call(body, *flat_args):
 
 class _FlatDispatchlessGraphCall(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flat_dispatchless_graph_call")
+        super().__init__("flat_dispatchless_graph_call", cacheable=True)
         self.subgraph_indexes = [0]
 
     def __call__(self, body, *flat_args):

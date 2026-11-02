@@ -5062,6 +5062,284 @@ def _create_sac_ctx_fn(policy, cache_hash=None):
     return ctx_fn
 
 
+@inductor_config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+@functorch_config.patch(
+    {"enable_autograd_cache": True, "enable_remote_autograd_cache": False}
+)
+@instantiate_parametrized_tests
+class DispatchlessCacheTests(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+
+    @staticmethod
+    def graph_with_body():
+        from torch._library.dispatchless import flat_dispatchless_graph_call
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output((graph.call_function(torch.sin, (x,)),))
+        body = GraphModule({}, graph)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        body_ref = graph.get_attr("body")
+        graph.output(graph.call_function(flat_dispatchless_graph_call, (body_ref, x)))
+        return GraphModule({"body": body}, graph)
+
+    @parametrize(
+        "invalid_body", ["missing_arg", "literal", "non_attr", "missing_attr", "non_module"]
+    )
+    def test_dispatchless_invalid_body_bypasses(self, invalid_body):
+        from torch._inductor.codecache import BypassFxGraphCache, CacheabilityValidator
+        from torch._library.dispatchless import flat_dispatchless_graph_call
+
+        gm = self.graph_with_body()
+        call = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is flat_dispatchless_graph_call
+        )
+        body_node = call.args[0]
+        if invalid_body == "missing_arg":
+            call.args = ()
+        elif invalid_body == "literal":
+            call.args = (42, *call.args[1:])
+        elif invalid_body == "non_attr":
+            call.args = (gm.graph.find_nodes(op="placeholder")[0], *call.args[1:])
+        elif invalid_body == "missing_attr":
+            body_node.target = "missing_body"
+        else:
+            del gm.body
+            gm.body = 42
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "GraphModule"):
+            CacheabilityValidator(gm).validate_graph(include_constants=False)
+
+    @parametrize("nested", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @functorch_config.patch("strict_autograd_cache", True)
+    def test_dispatchless_cache_hit_and_invalidation(self, nested, requires_grad):
+        from torch._library.dispatchless import dispatchless_custom_op
+
+        offset = 2
+
+        @dispatchless_custom_op
+        def inner(x):
+            return x.sin() + offset
+
+        @dispatchless_custom_op
+        def op(x):
+            y = inner(x) if nested else x.sin() + offset
+            return {"value": y, "metadata": (offset, None)}
+
+        def fn(x):
+            return op(x)
+
+        x = torch.randn(8, requires_grad=requires_grad)
+        with fresh_cache():
+            for value, hits, misses in ((2, 0, 1), (2, 1, 1), (3, 1, 2), (3, 2, 2)):
+                offset = value
+                torch._dynamo.reset()
+                result = torch.compile(fn, fullgraph=True)(x)
+                self.assertEqual(result, fn(x))
+                if requires_grad:
+                    actual_grad = torch.autograd.grad(result["value"].sum(), x)[0]
+                    self.assertEqual(actual_grad, x.cos())
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+                self.assertEqual(
+                    counters["aot_autograd"]["autograd_cache_miss"], misses
+                )
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @parametrize(
+        "retained",
+        [
+            "callable",
+            "tree_spec",
+            "unknown",
+            "tensor",
+            "meta",
+            "nested",
+            "hook",
+            "module",
+        ],
+    )
+    def test_dispatchless_retained_state_bypasses(self, retained):
+        from torch._inductor.codecache import BypassFxGraphCache, CacheabilityValidator
+        from torch.utils import _pytree as pytree
+
+        gm = self.graph_with_body()
+        CacheabilityValidator(gm).validate_graph(include_constants=False)
+        value = {
+            "callable": lambda x: x,
+            "tree_spec": pytree.tree_structure((1,)),
+            "unknown": object(),
+            "tensor": torch.ones(2),
+            "meta": {"callable": lambda x: x},
+            "nested": [{"hidden": torch.ones(2)}],
+            "hook": [lambda *args: None],
+            "module": torch.nn.ReLU(),
+        }[retained]
+        if retained == "meta":
+            gm.body.meta.update(value)
+        elif retained == "hook":
+            gm.body._forward_hooks[0] = value[0]
+        else:
+            gm.body.retained = value
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Uncacheable dispatchless body"
+        ):
+            CacheabilityValidator(gm).validate_graph(include_constants=False)
+
+    @parametrize("escape", ["user_hash", "unsafe_config", "raw_hop"])
+    def test_dispatchless_nested_unsafe_target_bypasses(self, escape):
+        from torch._inductor.codecache import BypassFxGraphCache, CacheabilityValidator
+        from torch._library.dispatchless import flat_dispatchless_call
+
+        def opaque(x):
+            return x.sin()
+
+        gm = self.graph_with_body()
+        body_node = next(n for n in gm.body.graph.nodes if n.op == "call_function")
+        body_node.target = flat_dispatchless_call if escape == "raw_hop" else opaque
+        if escape == "user_hash":
+            body_node.meta.update(is_wrapped=True, user_cache_hash="trusted")
+        patches = {
+            "unsafe_marked_cacheable_functions": {
+                f"{opaque.__module__}.{opaque.__name__}"
+            }
+        }
+        with inductor_config.patch(patches if escape == "unsafe_config" else {}):
+            with self.assertRaisesRegex(
+                BypassFxGraphCache, "Uncacheable dispatchless body"
+            ):
+                CacheabilityValidator(gm).validate_graph(include_constants=False)
+        body_node.meta.clear()
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function"
+        ):
+            check_cacheable(gm)
+
+    def test_dispatchless_valid_graph_with_retained_state_runs_uncached(self):
+        from torch._library.dispatchless import dispatchless_custom_op
+
+        @dispatchless_custom_op
+        def op(x):
+            return x.sin()
+
+        def backend(gm, inputs):
+            for module in gm.modules():
+                if module is not gm:
+                    module.meta["uncacheable"] = object()
+            return compile_fx.compile_fx(gm, inputs)
+
+        x = torch.randn(8)
+        with fresh_cache(), functorch_config.patch("strict_autograd_cache", False):
+            for _ in range(2):
+                torch._dynamo.reset()
+                self.assertEqual(
+                    torch.compile(op, backend=backend, fullgraph=True)(x), op(x)
+                )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertGreaterEqual(
+                counters["aot_autograd"]["autograd_cache_bypass"], 2
+            )
+
+    @parametrize("customization", ["codegen", "transformer", "class"])
+    def test_dispatchless_custom_codegen_bypasses(self, customization):
+        from torch._inductor.codecache import BypassFxGraphCache, CacheabilityValidator
+        from torch.fx.graph import CodeGen
+
+        gm = self.graph_with_body()
+        if customization == "codegen":
+
+            class CustomCodeGen(CodeGen):
+                pass
+
+            gm.body.graph.set_codegen(CustomCodeGen())
+        elif customization == "transformer":
+            gm.body.graph._codegen._body_transformer = lambda body: body
+        else:
+
+            class CustomGraphModule(GraphModule):
+                pass
+
+            gm.body = CustomGraphModule({}, gm.body.graph)
+        with self.assertRaisesRegex(BypassFxGraphCache, "custom codegen or class"):
+            CacheabilityValidator(gm).validate_graph(include_constants=False)
+
+    def test_dispatchless_cache_hit_across_processes(self):
+        import json
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        from torch._inductor.utils import get_ld_library_path, python_subprocess_env
+
+        script = textwrap.dedent(
+            """
+            import json
+            import os
+            import torch
+            from torch._dynamo.utils import counters
+            from torch._functorch import config as functorch_config
+            from torch._inductor import config as inductor_config
+            from torch._library.dispatchless import dispatchless_custom_op
+
+            functorch_config.enable_autograd_cache = True
+            functorch_config.enable_remote_autograd_cache = False
+            functorch_config.strict_autograd_cache = True
+            inductor_config.fx_graph_cache = True
+            inductor_config.fx_graph_remote_cache = False
+            offset = int(os.environ["DISPATCHLESS_TEST_OFFSET"])
+
+            @dispatchless_custom_op
+            def inner(x):
+                return x.sin() + offset
+
+            @dispatchless_custom_op
+            def outer(values):
+                return {"result": inner(values[0]) * 2, "metadata": (offset, None)}
+
+            def fn(x):
+                return outer((x,))
+
+            x = torch.arange(8, dtype=torch.float32)
+            actual = torch.compile(fn, fullgraph=True)(x)
+            torch.testing.assert_close(actual, fn(x))
+            print(json.dumps(dict(counters["aot_autograd"])))
+            """
+        )
+        with tempfile.TemporaryDirectory() as cache_dir:
+            for seed, offset, miss, hit in (
+                (1, 2, 1, 0),
+                (2, 2, 0, 1),
+                (3, 3, 1, 0),
+                (4, 3, 0, 1),
+            ):
+                with self.subTest(seed=seed, offset=offset):
+                    env = {
+                        **python_subprocess_env(),
+                        "LD_LIBRARY_PATH": get_ld_library_path(),
+                        "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                        "PYTHONHASHSEED": str(seed),
+                        "DISPATCHLESS_TEST_OFFSET": str(offset),
+                    }
+                    result = subprocess.run(
+                        [sys.executable, "-c", script],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=180,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    counts = json.loads(result.stdout.splitlines()[-1])
+                    self.assertEqual(counts.get("autograd_cache_miss", 0), miss)
+                    self.assertEqual(counts.get("autograd_cache_hit", 0), hit)
+                    self.assertEqual(counts.get("autograd_cache_bypass", 0), 0)
+
+
 class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
