@@ -1725,6 +1725,26 @@ class TestMetaCore(TestCase):
         with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
             t.masked_fill_((t > 0).unsqueeze(0), 0.1)
 
+    def test_masked_scatter_mask_dtype_error(self):
+        # Like eager, masked_scatter only accepts bool masks, even for empty
+        # inputs
+        for n, op in itertools.product((3, 0), (torch.Tensor.masked_scatter_, torch.Tensor.masked_scatter)):
+            for device in ('cpu', 'meta'):
+                with self.subTest(n=n, op=op.__name__, device=device):
+                    with self.assertRaisesRegex(RuntimeError, "masked_scatter_ only supports boolean masks"):
+                        op(
+                            torch.zeros(n, device=device),
+                            torch.ones(n, dtype=torch.uint8, device=device),
+                            torch.ones(n, device=device),
+                        )
+                    # The self/source dtype check comes first, as in eager
+                    with self.assertRaisesRegex(RuntimeError, "expected self and source to have same dtypes"):
+                        op(
+                            torch.zeros(n, device=device),
+                            torch.ones(n, dtype=torch.uint8, device=device),
+                            torch.ones(n, dtype=torch.double, device=device),
+                        )
+
     def test_inplace_bin_ops_error(self):
         t = torch.randn(3, 3, device='meta')
         for op in (torch.Tensor.add_, torch.Tensor.sub_, torch.Tensor.mul_, torch.Tensor.div_,
@@ -2073,6 +2093,14 @@ class TestMetaCore(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res.untyped_storage().data_ptr(), 0)
 
+    def test_weight_int4pack_mm(self):
+        x = torch.empty(4, 64, device="meta", dtype=torch.bfloat16)
+        w = torch.empty(8, 2, 32, 4, device="meta", dtype=torch.int32)
+        q_scale_and_zeros = torch.empty(2, 64, 2, device="meta", dtype=torch.bfloat16)
+        res = torch.ops.aten._weight_int4pack_mm(x, w, 32, q_scale_and_zeros)
+        self.assertEqual(res.shape, (4, 64))
+        self.assertEqual(res.dtype, torch.bfloat16)
+
     def test_index_select_out(self):
         def f():
             input = torch.randn([8, 16], device='meta')
@@ -2296,6 +2324,45 @@ class TestMetaKernelConv(TestCase):
 @instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("tensor_lr", [False, True])
+    @parametrize("amsgrad", [False, True])
+    @parametrize("fake", [False, True])
+    def test_fused_adamw(self, tensor_lr, amsgrad, fake):
+        from contextlib import nullcontext
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        mode = FakeTensorMode(allow_fallback_kernels=False) if fake else nullcontext()
+        with mode:
+            device = "cpu" if fake else "meta"
+            parameter = torch.empty(2, 3, device=device)
+            gradient = torch.empty_like(parameter)
+            exp_avg = torch.empty_like(parameter)
+            exp_avg_sq = torch.empty_like(parameter)
+            max_exp_avg_sqs = [torch.empty_like(parameter)] if amsgrad else []
+            step = torch.empty((), device=device)
+            lr = torch.empty((), device=device) if tensor_lr else 0.001
+            operation = (
+                torch.ops.aten._fused_adamw_.tensor_lr
+                if tensor_lr
+                else torch.ops.aten._fused_adamw_.default
+            )
+            result = operation(
+                [parameter],
+                [gradient],
+                [exp_avg],
+                [exp_avg_sq],
+                max_exp_avg_sqs,
+                [step],
+                lr=lr,
+                beta1=0.9,
+                beta2=0.999,
+                weight_decay=0.01,
+                eps=1e-8,
+                amsgrad=amsgrad,
+                maximize=False,
+            )
+            self.assertIsNone(result)
 
     @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
     def test_arange_meta_barebones_unsigned(self, dtype):

@@ -41,7 +41,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
 try:
@@ -1136,13 +1136,23 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
+        # HIP and rocminfo identify a GPU by its KFD unique_id, which is not
+        # always the ASIC serial. Newer amdsmi reports it as hip_uuid.
         try:
-            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
-                2:
-            ]  # Removes 0x prefix from serial
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
-            return None
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(handler)
+            hip_uuid = str(info.get("hip_uuid", ""))
+        except (AttributeError, amdsmi.AmdSmiException):
+            hip_uuid = ""
+        if hip_uuid.startswith("GPU-"):
+            uuid = hip_uuid.removeprefix("GPU-")
+        else:
+            try:
+                uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                    2:
+                ]  # Removes 0x prefix from serial
+            except amdsmi.AmdSmiException:
+                warnings.warn("Cannot get uuid for amd device", stacklevel=2)
+                return None
         uuids.append(
             str(uuid).lower()
         )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
@@ -1632,14 +1642,15 @@ def _get_amdsmi_temperature(device: Device = None) -> int:
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
+    # AMD SMI reports socket power in watts; power_draw() is documented in mW.
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return socket_power * 1000
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return socket_power * 1000
         else:
             return 0
 
@@ -2194,6 +2205,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "execute_on_streams",
     "Stream",
     "StreamContext",
     "GreenContext",
