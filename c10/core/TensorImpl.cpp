@@ -366,7 +366,7 @@ std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
 
 void TensorImpl::set_fake_item_memo(
     std::shared_ptr<c10::SafePyObject> memo,
-    uint64_t epoch) {
+    std::optional<uint64_t> epoch) {
   // Like set_fake_sym_memo, read the version first, and drop the replaced
   // memo, which may be the last reference to a Python object, after unlocking.
   auto version = is_inference()
@@ -379,21 +379,21 @@ void TensorImpl::set_fake_item_memo(
       ExtraMeta::FakeItemMemo{std::move(memo), version, epoch});
 }
 
-std::optional<std::pair<std::shared_ptr<c10::SafePyObject>, uint64_t>>
-TensorImpl::fake_item_memo() {
+std::shared_ptr<c10::SafePyObject> TensorImpl::fake_item_memo(uint64_t epoch) {
   // Like the replaced memo in set_fake_item_memo, dropped after unlocking.
   std::optional<ExtraMeta::FakeItemMemo> dropped;
   std::lock_guard<std::mutex> lock(fake_memo_mutex());
   if (!extra_meta_ || !extra_meta_->fake_item_memo_) {
-    return std::nullopt;
+    return nullptr;
   }
   const auto& entry = *extra_meta_->fake_item_memo_;
-  if (entry.version.has_value() &&
-      *entry.version != version_counter().current_version()) {
+  bool mutated = entry.version.has_value() &&
+      *entry.version != version_counter().current_version();
+  if (mutated || (entry.epoch.has_value() && *entry.epoch != epoch)) {
     dropped = std::exchange(extra_meta_->fake_item_memo_, std::nullopt);
-    return std::nullopt;
+    return nullptr;
   }
-  return std::make_pair(entry.value, entry.epoch);
+  return entry.value;
 }
 
 void TensorImpl::release_resources() {

@@ -1150,7 +1150,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Read dynamically: the cached dict always has True, but
             # is_exporting() should only be True during torch.export.
             if self.value is torch.compiler.is_exporting:
-                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
+                return VariableTracker.build(tx, torch.compiler.is_exporting())
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
@@ -1843,7 +1843,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "torch.compile regions.",
                     ],
                 )
-            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+            if tx.output.current_tracer.is_export or torch.compiler.is_exporting():
                 unimplemented(
                     gb_type="COW tensor check during export",
                     context="torch._C._is_cow_tensor during export",
@@ -2158,8 +2158,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
-                fill_value.python_type(), torch.nn.Parameter
+            # Eager only accepts a 0-d tensor fill_value that does not require
+            # grad, and fill_ would make the result differentiable w.r.t. it.
+            if (
+                isinstance(fill_value, variables.TensorVariable)
+                and fill_value.ndim == 0
+                and not fill_value.requires_grad
             ):
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
