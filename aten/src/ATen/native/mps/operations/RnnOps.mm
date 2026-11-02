@@ -2,6 +2,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/Matmul.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -25,6 +26,14 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Rnn_metallib.h>
 #endif
+
+void lstm_mm(Tensor& out, const Tensor& a, const Tensor& b) {
+  if (a.size(0) > 1 && a.size(1) <= 512) {
+    metal_mm_out(a, b, out);
+  } else {
+    at::mm_out(out, a, b);
+  }
+}
 
 template <typename... Args>
 void lstm_cell(MTLComputePipelineState_t pso, const Tensor& cell, const Args&... args) {
@@ -83,7 +92,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       const auto recurrent_weight = params[param + 1].contiguous().t();
       auto recurrent_gates = at::empty({batch, 4 * hidden}, input.options());
       for (const auto step : c10::irange(seq_len)) {
-        at::mm_out(recurrent_gates, h[step], recurrent_weight);
+        lstm_mm(recurrent_gates, h[step], recurrent_weight);
         lstm_cell(pso, c[step], z[step], recurrent_gates, c[step], c[step + 1], h[step + 1], bias);
       }
       hy[index].copy_(h[seq_len]);
@@ -148,7 +157,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
       const auto recurrent_weight = params[param + 1].contiguous();
       for (int64_t step = seq_len - 1; step >= 0; --step) {
         lstm_cell(pso, dc, z[step], c[step], c[step + 1], dy[step], dh, dc, dg[step]);
-        at::mm_out(dh, dg[step], recurrent_weight);
+        lstm_mm(dh, dg[step], recurrent_weight);
       }
       auto dg_flat = dg.view({seq_len * batch, 4 * hidden});
       grad_params[param + 1] = dg_flat.t().mm(h.narrow(0, 0, seq_len).reshape({seq_len * batch, hidden}));
