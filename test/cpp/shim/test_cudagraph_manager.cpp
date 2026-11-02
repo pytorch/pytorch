@@ -274,6 +274,36 @@ TEST_F(CudaGraphManagerTest, NewThreadsWarmUpEvenWithAReusedId) {
   EXPECT_EQ(region.calls, 2);
 }
 
+TEST_F(CudaGraphManagerTest, ClonesOutputsWithTheirLayouts) {
+  // Dense outputs of two dtypes, one transposed, and one with gaps.
+  CudaGraphManager manager(0, no_warmup());
+  auto compute = [](const at::Tensor& x) {
+    return std::vector<at::Tensor>{
+        x * 2,
+        (x + 1).t(),
+        x.to(at::kHalf),
+        (x * 3).to(at::kHalf).t(),
+        (x - 1).narrow(1, 1, 2)};
+  };
+  Region region([&](AtenTensorHandle* inputs, AtenTensorHandle* outputs) {
+    auto results = compute(tensor_of(inputs[0]));
+    for (size_t i = 0; i < results.size(); ++i) {
+      outputs[i] = new_handle(results[i]);
+    }
+  });
+  run_with(manager, region, {at::randn({4, 6}, at::kCUDA)}, 5);
+  for (int i = 0; i < 2; ++i) {
+    auto x = at::randn({4, 6}, at::kCUDA);
+    auto out = run_with(manager, region, {x}, 5);
+    auto expected = compute(x);
+    for (size_t j = 0; j < expected.size(); ++j) {
+      EXPECT_TRUE((*out)[j].equal(expected[j])) << j;
+      EXPECT_EQ((*out)[j].strides(), expected[j].strides()) << j;
+    }
+  }
+  EXPECT_EQ(region.calls, 1);
+}
+
 TEST_F(CudaGraphManagerTest, ReturnsDuplicateAndNullOutputs) {
   CudaGraphManager manager(0);
   Region region([](AtenTensorHandle* inputs, AtenTensorHandle* outputs) {
@@ -665,6 +695,11 @@ TEST_F(CudaGraphManagerTest, KeysOnAllInputs) {
 TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
   CudaGraphManager manager(0, no_warmup());
   auto make_inputs = [] {
+    // float8_e8m0fnu is one the fused copy kernel can't take.
+    auto e8m0 = [](at::IntArrayRef sizes) {
+      auto bytes = at::TensorOptions(at::kCUDA).dtype(at::kByte);
+      return at::randint(0, 255, sizes, bytes).view(at::kFloat8_e8m0fnu);
+    };
     return std::vector<at::Tensor>{
         at::randn({8}, at::kCUDA),
         at::randn({6, 4}, at::kCUDA).t(),
@@ -673,18 +708,21 @@ TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
         at::randint(100, {5}, at::kCUDA),
         at::randn({7}, at::kCUDA).to(at::kHalf),
         at::randn({}, at::kCUDA),
-        at::randn({0, 4}, at::kCUDA)};
+        at::randn({0, 4}, at::kCUDA),
+        e8m0({8}),
+        e8m0({1, 6}).expand({4, 6})};
   };
   auto expected = [](const std::vector<at::Tensor>& xs) {
     std::vector<at::Tensor> flat;
     for (const auto& x : xs) {
-      flat.push_back(x.flatten().to(at::kFloat));
+      bool e8m0 = x.scalar_type() == at::kFloat8_e8m0fnu;
+      flat.push_back((e8m0 ? x.view(at::kByte) : x).flatten().to(at::kFloat));
     }
     return at::cat(flat);
   };
   Region region([&](AtenTensorHandle* inputs, AtenTensorHandle* outputs) {
     std::vector<at::Tensor> xs;
-    for (size_t i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 10; ++i) {
       xs.push_back(tensor_of(inputs[i]));
     }
     outputs[0] = new_handle(expected(xs));

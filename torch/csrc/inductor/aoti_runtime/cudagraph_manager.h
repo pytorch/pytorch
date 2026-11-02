@@ -252,6 +252,12 @@ class CudaGraphManager {
   // a slice, element by element.
   enum class InputCopy { kDense, kBlock, kElementwise };
 
+  // Same-dtype inputs, copied in with one fused _foreach_copy_.
+  struct CopyGroup {
+    std::vector<size_t> inputs;
+    std::vector<AtenTensorHandle> destinations;
+  };
+
   struct Graph {
     std::unique_ptr<CUDAGraphOpaque, DeleterFnPtr> graph{
         nullptr,
@@ -262,10 +268,18 @@ class CudaGraphManager {
     std::vector<RAIIAtenTensorHandle> static_inputs;
     std::vector<int64_t> input_extents;
     std::vector<InputCopy> input_copies;
+    std::vector<CopyGroup> copy_groups;
+    // Inputs copied one by one: gapped ones, and ones of dtypes the fused
+    // kernel can't take.
+    std::vector<size_t> separate_inputs;
     // Distinct outputs, and for each output slot its index into them, or
     // kNoOutput for a null output.
     std::vector<RAIIAtenTensorHandle> static_outputs;
     std::vector<size_t> output_slots;
+    // Dense outputs, by dtype, cloned with one fused _foreach_copy_ per
+    // group, and the others, cloned one by one.
+    std::vector<std::vector<size_t>> output_groups;
+    std::vector<size_t> separate_outputs;
   };
 
   struct TensorLayout {
@@ -319,6 +333,115 @@ class CudaGraphManager {
                                           : InputCopy::kDense;
   }
 
+  // The dtypes _foreach_copy_'s fused CUDA kernel dispatches; it throws for
+  // others, e.g. float8_e8m0fnu, instead of copying them one by one.
+  static bool fused_copy_dtype(int32_t dtype) {
+    for (int32_t fused :
+         {aoti_torch_dtype_bool(),
+          aoti_torch_dtype_uint8(),
+          aoti_torch_dtype_int8(),
+          aoti_torch_dtype_int16(),
+          aoti_torch_dtype_int32(),
+          aoti_torch_dtype_int64(),
+          aoti_torch_dtype_float16(),
+          aoti_torch_dtype_bfloat16(),
+          aoti_torch_dtype_float32(),
+          aoti_torch_dtype_float64(),
+          aoti_torch_dtype_complex64(),
+          aoti_torch_dtype_complex128(),
+          aoti_torch_dtype_float8_e4m3fn(),
+          aoti_torch_dtype_float8_e4m3fnuz(),
+          aoti_torch_dtype_float8_e5m2(),
+          aoti_torch_dtype_float8_e5m2fnuz()}) {
+      if (dtype == fused) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Groups the dense and overlapping inputs by dtype for _foreach_copy_; the
+  // others are copied one by one.
+  static void group_input_copies(
+      Graph& graph,
+      const std::vector<int32_t>& dtypes) {
+    std::map<int32_t, size_t> group_of_dtype;
+    for (size_t i = 0; i < graph.input_copies.size(); ++i) {
+      if (graph.input_copies[i] == InputCopy::kElementwise ||
+          !fused_copy_dtype(dtypes[i])) {
+        graph.separate_inputs.push_back(i);
+        continue;
+      }
+      auto [it, added] =
+          group_of_dtype.try_emplace(dtypes[i], graph.copy_groups.size());
+      if (added) {
+        graph.copy_groups.emplace_back();
+      }
+      auto& group = graph.copy_groups[it->second];
+      group.inputs.push_back(i);
+      group.destinations.push_back(
+          graph.input_copies[i] == InputCopy::kDense
+              ? graph.static_inputs[i].get()
+              : graph.input_buffers[i].get());
+    }
+  }
+
+  // Groups the dense outputs by dtype for _foreach_copy_.
+  static void group_output_copies(Graph& graph) {
+    std::map<int32_t, size_t> group_of_dtype;
+    for (size_t i = 0; i < graph.static_outputs.size(); ++i) {
+      auto layout = layout_of(graph.static_outputs[i]);
+      if (input_copy(layout) != InputCopy::kDense ||
+          !fused_copy_dtype(layout.dtype)) {
+        graph.separate_outputs.push_back(i);
+        continue;
+      }
+      auto [it, added] =
+          group_of_dtype.try_emplace(layout.dtype, graph.output_groups.size());
+      if (added) {
+        graph.output_groups.emplace_back();
+      }
+      graph.output_groups[it->second].push_back(i);
+    }
+  }
+
+  // Clones, so later replays can't overwrite the returned outputs, with the
+  // captured outputs' sizes and strides.
+  std::vector<RAIIAtenTensorHandle> clone_outputs(Graph& graph) {
+    std::vector<RAIIAtenTensorHandle> clones(graph.static_outputs.size());
+    std::vector<AtenTensorHandle> destinations;
+    std::vector<AtenTensorHandle> sources;
+    for (const auto& group : graph.output_groups) {
+      destinations.clear();
+      sources.clear();
+      for (size_t i : group) {
+        auto layout = layout_of(graph.static_outputs[i]);
+        AtenTensorHandle clone = nullptr;
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+            layout.dim,
+            layout.sizes,
+            layout.strides,
+            layout.dtype,
+            aoti_torch_device_type_cuda(),
+            device_index_,
+            &clone));
+        clones[i] = RAIIAtenTensorHandle(clone);
+        destinations.push_back(clone);
+        sources.push_back(graph.static_outputs[i].get());
+      }
+      auto n = static_cast<int64_t>(sources.size());
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
+          destinations.data(), n, sources.data(), n, 0));
+    }
+    for (size_t i : graph.separate_outputs) {
+      AtenTensorHandle clone = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_clone_preserve_strides(graph.static_outputs[i], &clone));
+      clones[i] = RAIIAtenTensorHandle(clone);
+    }
+    return clones;
+  }
+
   // An overlapping input's view overlaps itself, so copy the block it covers.
   static RAIIAtenTensorHandle block_of(
       AtenTensorHandle input,
@@ -331,15 +454,31 @@ class CudaGraphManager {
   }
 
   static void copy_inputs(Graph& graph, AtenTensorHandle* inputs) {
-    for (size_t i = 0; i < graph.input_copies.size(); ++i) {
+    std::vector<RAIIAtenTensorHandle> blocks;
+    std::vector<AtenTensorHandle> sources;
+    for (auto& group : graph.copy_groups) {
+      sources.clear();
+      for (size_t i : group.inputs) {
+        if (graph.input_copies[i] == InputCopy::kDense) {
+          sources.push_back(inputs[i]);
+          continue;
+        }
+        blocks.push_back(block_of(inputs[i], graph.input_extents[i]));
+        sources.push_back(blocks.back().get());
+      }
+      auto n = static_cast<int64_t>(sources.size());
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
+          group.destinations.data(), n, sources.data(), n, 0));
+    }
+    for (size_t i : graph.separate_inputs) {
       if (graph.input_copies[i] == InputCopy::kBlock) {
         auto block = block_of(inputs[i], graph.input_extents[i]);
         AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_copy_(graph.input_buffers[i], block.get(), 0));
-      } else {
-        AOTI_TORCH_ERROR_CODE_CHECK(
-            aoti_torch_copy_(graph.static_inputs[i], inputs[i], 0));
+        continue;
       }
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_copy_(graph.static_inputs[i], inputs[i], 0));
     }
   }
 
@@ -575,6 +714,7 @@ class CudaGraphManager {
       AOTICudaStreamGuard stream_guard(stream, device_index_);
       std::vector<AtenTensorHandle> input_handles;
       input_handles.reserve(num_inputs);
+      std::vector<int32_t> dtypes;
       for (size_t i = 0; i < num_inputs; ++i) {
         auto layout = layout_of(inputs[i]);
         int64_t extent = storage_extent(layout);
@@ -597,8 +737,10 @@ class CudaGraphManager {
         graph->static_inputs.emplace_back(view);
         graph->input_extents.push_back(extent);
         graph->input_copies.push_back(input_copy(layout));
+        dtypes.push_back(layout.dtype);
         input_handles.push_back(view);
       }
+      group_input_copies(*graph, dtypes);
 
       // The region's allocations come from the pool.
       AOTICudaStreamGuard capture_guard(capture_stream_, device_index_);
@@ -637,6 +779,7 @@ class CudaGraphManager {
         AOTI_RUNTIME_CHECK(false, region_error);
       }
     }
+    group_output_copies(*graph);
 
     // capture_begin may allocate on the capture stream outside the pool, so
     // the caller's stream waits for that work.
@@ -661,15 +804,7 @@ class CudaGraphManager {
       copy_inputs(graph, inputs);
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_cuda_graph_replay(graph.graph.get()));
-      // Clones, so later replays can't overwrite the returned outputs.
-      std::vector<RAIIAtenTensorHandle> clones;
-      clones.reserve(graph.static_outputs.size());
-      for (auto& output : graph.static_outputs) {
-        AtenTensorHandle clone = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK(
-            aoti_torch_clone_preserve_strides(output, &clone));
-        clones.emplace_back(clone);
-      }
+      auto clones = clone_outputs(graph);
       for (size_t i = 0; i < num_outputs; ++i) {
         if (graph.output_slots[i] != kNoOutput) {
           AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
