@@ -223,7 +223,7 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
     return False
 
 
-def check_node_safe(node: Node) -> None:
+def check_node_safe(node: Node, *, allow_unsafe: bool = True) -> None:
     """
     Checks that the node only uses supported operators. We are starting with very
     conservative cacheability constraints, and incrementally adding more support as we expand.
@@ -273,7 +273,7 @@ def check_node_safe(node: Node) -> None:
 
     def is_public_torch_api(target: Callable[..., Any]) -> bool:
         # Don't blindly allow private functions in the torch namespace
-        is_private = target.__name__.startswith("_")
+        is_private = getattr(target, "__name__", "_").startswith("_")
 
         return (
             getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
@@ -281,7 +281,7 @@ def check_node_safe(node: Node) -> None:
 
     def is_safe_torch_function(target: Callable[..., Any]) -> bool:
         """Allowlisted torch functions"""
-        function_name = f"{target.__module__}.{target.__name__}"
+        function_name = f"{getattr(target, '__module__', None)}.{getattr(target, '__name__', None)}"
         # Allow torch.autograd.function.FunctionCtx if custom autograd functions are allowed
         if function_name == "torch.autograd.function.FunctionCtx":
             return (
@@ -294,7 +294,11 @@ def check_node_safe(node: Node) -> None:
         return (
             function_name in torch_non_c_binding_in_graph_functions
             or function_name in SAFE_TORCH_FUNCTIONS
-            or function_name in torch._inductor.config.unsafe_marked_cacheable_functions
+            or (
+                allow_unsafe
+                and function_name
+                in torch._inductor.config.unsafe_marked_cacheable_functions
+            )
         )
 
     def is_cacheable_function(target: Callable[..., Any]) -> bool:
@@ -313,7 +317,7 @@ def check_node_safe(node: Node) -> None:
             return True
         if is_safe_torch_function(target):
             return True
-        function_name = f"{target.__module__}.{target.__name__}"
+        function_name = f"{getattr(target, '__module__', None)}.{getattr(target, '__name__', None)}"
         if function_name in SAFE_NON_TORCH_FUNCTIONS:
             return True
         return False
@@ -324,7 +328,7 @@ def check_node_safe(node: Node) -> None:
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
-        if node.meta and node.meta.get("is_wrapped", False):
+        if allow_unsafe and node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
             # But if user explicitly specified cache hash - allow caching it.
@@ -384,7 +388,6 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     """
     Checks that the graph module only uses supported operators
     """
-    nodes = gm.graph.nodes
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -398,8 +401,9 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         raise BypassAOTAutogradCache(
             "Won't cache a graph with fakify_first_call enabled"
         )
-    for node in nodes:
-        check_node_safe(node)
+    for module in _iter_graph_modules(gm):
+        for node in module.graph.nodes:
+            check_node_safe(node)
 
     # Saved tensors hooks are globally set subgraphs,
     # that are not used explicitly in the main graph.
