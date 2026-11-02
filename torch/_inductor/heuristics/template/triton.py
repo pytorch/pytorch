@@ -2448,16 +2448,10 @@ def mm_allow_tf32(
         else:
             allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda" and allow_tf32:
-        # CUDA applies a shape threshold on top of the backend flag.
-        # Based on reverse engineering H100 CUDA 12.8 behavior. For fp32 inputs,
-        # backed dynamic dims follow their hint and get a guard, so a later
-        # shape on the other side of the threshold recompiles. Unbacked dims
-        # fall back to no TF32. AOT mode never checks the guard at runtime, so
-        # it needs a proof (standalone_compile can also skip the guard, so the
-        # decision there is hint-only). Other dtypes ignore ALLOW_TF32, so they
-        # keep the guard-free proof. Known limitation: the guard narrows the
-        # dim's range, so a ranged mark_dynamic (min/max) spanning the
-        # threshold raises ConstraintViolationError.
+        # Match when cuBLAS uses TF32 (reverse engineered on H100, CUDA 12.8).
+        # Only fp32 dots read ALLOW_TF32. Backed dynamic dims follow their hint
+        # and get a guard; unbacked dims and AOT mode (no runtime guard check)
+        # need a proof.
         size_threshold = sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         fp32_tf32 = (
             dtype == torch.float32
@@ -2513,9 +2507,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
         dtype = kernel_inputs.mat1mat2()[0].get_dtype()
-        extra_kwargs = {
-            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type, dtype),
-        }
+        # Skip the gate (and its guard) when this template yields no configs.
+        allow_tf32 = self.should_run(kernel_inputs) and mm_allow_tf32(
+            m, n, k, kernel_inputs.device_type, dtype
+        )
+        extra_kwargs = {"ALLOW_TF32": allow_tf32}
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
         # triton_mm.py.jinja already renders ascending unconditionally.
