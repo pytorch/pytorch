@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    serialTest,
 )
 
 
@@ -263,6 +264,7 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @serialTest()
     @largeTensorTest("5GB", device="mps", inductor=True)
     @largeMPSBufferTest(int(4.5 * 1024**3), device="mps")
     def test_clone_over_uint32_threads(self):

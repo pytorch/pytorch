@@ -642,7 +642,7 @@ class MetalKernel(SIMDKernel):
     max_threadgroup_size = 1024
     simd_group_size = 32
     # thread_position_in_grid is 32-bit per axis; Metal silently truncates larger grids
-    max_grid_size = 2**32 - 1
+    max_grid_size = torch.iinfo(torch.uint32).max
     # Power-of-two stride of the in-kernel loop over ranges that may not fit the grid
     grid_stride = 2**31
     # Device that generated kernels are launched on. Subclasses reusing the
