@@ -5,6 +5,7 @@ FlexibleLayout are provisional (freezing may reorder or pad them), so they
 must be frozen before being persisted anywhere. See #192575.
 """
 
+import unittest
 from unittest.mock import Mock, patch
 
 import torch
@@ -13,14 +14,14 @@ from torch._inductor import ir, metrics
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED,
     onlyAccelerator,
-    onlyCPU,
-    skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -28,6 +29,8 @@ from torch.testing._internal.common_utils import (
 
 @instantiate_parametrized_tests
 class TestLayoutFreezing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _flexible_buffer(self, size=(8, 128)):
         layout = ir.FlexibleLayout(
             device=torch.device("cpu"), dtype=torch.float32, size=list(size)
@@ -210,12 +213,16 @@ class TestLayoutFreezing(TestCase):
                 self.assertIsInstance(buf.get_layout(), ir.FixedLayout)
 
 
-class TestLayoutFreezingDevice(TestCase):
-    @onlyCPU
-    @skipCPUIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
+@instantiate_parametrized_tests
+class TestLayoutFreezingCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @unittest.skipIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
     @parametrize("input_index", [0, 1, 2])
-    def test_flex_attention_strided_last_dim(self, device, input_index):
+    def test_flex_attention_strided_last_dim(self, input_index):
         from torch.nn.attention.flex_attention import flex_attention
+
+        device = "cpu"
 
         args = [torch.randn(1, 2, 32, 16, device=device) for _ in range(3)]
         args[input_index] = torch.randn(1, 2, 32, 32, device=device)[..., ::2]
@@ -223,11 +230,12 @@ class TestLayoutFreezingDevice(TestCase):
         actual = torch.compile(flex_attention, fullgraph=True)(*args)
         self.assertEqual(actual, expected)
 
-    @onlyCPU
-    @skipCPUIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
+    @unittest.skipIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
     @parametrize("input_index", [0, 1, 2])
-    def test_flex_attention_computed_transpose(self, device, input_index):
+    def test_flex_attention_computed_transpose(self, input_index):
         from torch.nn.attention.flex_attention import flex_attention
+
+        device = "cpu"
 
         def fn(x, q, k, v):
             args = [q, k, v]
@@ -241,6 +249,107 @@ class TestLayoutFreezingDevice(TestCase):
         expected = torch.nn.functional.scaled_dot_product_attention(*args)
         actual = torch.compile(fn, fullgraph=True)(x, q, k, v)
         self.assertEqual(actual, expected)
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class TestLayoutFreezingCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires FP8")
+    def test_scaled_mm_flexible_operand(self):
+        # The scaled_mm layout constraint must not trust a flexible A's
+        # provisional row-major strides; finalize could still transpose it.
+        import torch.nn.functional as F
+
+        device = "cuda"
+
+        M, K, N = 256, 512, 384
+        ys = [torch.randn(M, K, device=device) for _ in range(5)]
+        w = torch.randn(N, K, device=device).to(torch.float8_e4m3fn)
+        scale = torch.ones((), device=device)
+
+        def fn(x, w):
+            # many reads plus a second user: realized with a flexible layout
+            a = (x * 2 + ys[0] + ys[1] + ys[2] + ys[3] + ys[4]).to(torch.float8_e4m3fn)
+            tensorwise = F.ScalingType.TensorWise
+            out = F.scaled_mm(
+                a,
+                w.t(),
+                scale,
+                tensorwise,
+                scale,
+                tensorwise,
+                output_dtype=torch.bfloat16,
+            )
+            return out, a.float().sum(0)
+
+        x = torch.randn(M, K, device=device)
+        self.assertEqual(torch.compile(fn)(x, w), fn(x, w))
+
+    @unittest.skipIf(not SM90OrLater, "requires sm90+ grouped mm")
+    def test_grouped_mm_flexible_operand(self):
+        device = "cuda"
+        G, M, K, N = 4, 512, 256, 384
+        ys = [torch.randn(M, K, device=device, dtype=torch.bfloat16) for _ in range(5)]
+        w = torch.randn(G, K, N, device=device, dtype=torch.bfloat16)
+        offs = torch.tensor([128, 256, 384, 512], device=device, dtype=torch.int32)
+
+        def fn(x):
+            a = x * 2 + ys[0] + ys[1] + ys[2] + ys[3] + ys[4]
+            return torch._grouped_mm(a, w, offs=offs), a.sum(0)
+
+        x = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        with inductor_config.patch(
+            max_autotune=True, max_autotune_gemm_backends="ATEN,TRITON"
+        ):
+            actual = torch.compile(fn)(x)
+        # bf16 outputs of magnitude ~100 (ulp 0.5); compiled and eager round differently
+        self.assertEqual(actual, fn(x), atol=2.0, rtol=2e-2)
+
+    def test_custom_op_autotune_input_gen_fn_flexible_input(self):
+        from torch._inductor.kernel.custom_op import (
+            CustomOpConfig,
+            register_custom_op_autotuning,
+        )
+
+        device = "cuda"
+
+        @torch.library.custom_op(
+            "test_layout_freezing::mulw",
+            mutates_args=(),
+            tags=(torch.Tag.flexible_layout,),
+        )
+        def mulw(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+            return x * w
+
+        @mulw.register_fake
+        def _(x, w):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            mulw,
+            configs=[
+                CustomOpConfig(lambda x, w: x * w),
+                CustomOpConfig(lambda x, w: (x * 2) * w * 0.5),
+            ],
+            name="mulw_autotuned",
+            input_gen_fns={"x": lambda t: torch.randn_like(t, device=device)},
+        )
+
+        def fn(a, b, c, d, e, w):
+            # many reads plus a second user: realized with a flexible layout
+            x = (a.t() + b.t() + c.t() + d.t() + e.t()).relu()
+            return mulw(x, w), x + 1
+
+        args = [torch.randn(256, 512, device=device) for _ in range(5)]
+        args.append(torch.randn(256, device=device))
+        with inductor_config.patch(max_autotune=True):
+            actual = torch.compile(fn)(*args)
+        self.assertEqual(actual, fn(*args))
+
+
+class TestLayoutFreezingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     @parametrize("width", [342, 347])

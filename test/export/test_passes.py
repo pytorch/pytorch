@@ -1447,7 +1447,7 @@ def forward(self, arg0_1):
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestMoveToDevicePassCuda(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass_recompiles_graph_module(self):
@@ -1603,10 +1603,11 @@ class TestMoveToDevicePassCuda(TestCase):
             self.assertEqual(out.device, torch.device("meta"))
 
 
+# except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
 instantiate_device_type_tests(
     TestMoveToDevicePassDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 

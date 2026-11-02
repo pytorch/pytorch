@@ -7,6 +7,7 @@ import functools
 import gc
 import gzip
 import io
+import linecache
 import os
 import pathlib
 import pickle
@@ -16,6 +17,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import traceback
 import unittest
 import warnings
 import zipfile
@@ -917,6 +919,10 @@ class serialization_method:
 
 Point = namedtuple('Point', ['x', 'y'])
 
+class ListSubclass(list):
+    pass
+
+
 class ClassThatUsesBuildInstruction:
     def __init__(self, num):
         self.num = num
@@ -1057,6 +1063,13 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertTrue(torch.equal(b, b_loaded))
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
+
+    def test_set_from_file_invalid_size(self):
+        # 2**61 + 1 elements of size 8 wraps around to 8 bytes
+        for size, msg in ((2, "wrong byte size"), (2**61 + 1, "overflows"), (-1, "invalid storage size")):
+            buf = io.BytesIO(size.to_bytes(8, "little", signed=True) + b"\x00" * 8)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.UntypedStorage(8)._set_from_file(buf, None, False, 8)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
@@ -1370,6 +1383,54 @@ class TestSerialization(TestCase, SerializationMixin):
             with safe_globals([os.execv]):
                 with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
                     torch.load(f, weights_only=True)
+
+    def test_weights_only_list_subclass_append(self):
+        # APPEND/APPENDS would call overridden methods of list subclasses.
+        with BytesIOContext() as f:
+            torch.save(ListSubclass([1, 2]), f)
+            f.seek(0)
+            with safe_globals([ListSubclass]):
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Can only extend lists"):
+                    torch.load(f, weights_only=True)
+
+    @parametrize("module", ["traceback", "linecache"])
+    def test_weights_only_traceback_blocklist(self, module):
+        # traceback.FrameSummary and linecache.getline read arbitrary files.
+        if module == "traceback":
+            func, args = traceback.FrameSummary, (__file__, 1, "attacker")
+        else:
+            func, args = linecache.getline, (__file__, 1)
+
+        class ReadFileLine:
+            def __reduce__(self):
+                return func, args
+
+        full_path = f"{module}.{func.__qualname__}"
+        with BytesIOContext() as f:
+            torch.save(ReadFileLine(), f)
+            # safe_globals doesn't work even with allowlist
+            with safe_globals([func]):
+                f.seek(0)
+                self.assertIn(
+                    full_path,
+                    torch.serialization.get_unsafe_globals_in_checkpoint(f),
+                )
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError, full_path):
+                    torch.load(f, weights_only=True)
+
+        # Allowlisting under an alias doesn't work either.
+        alias = f"{__name__}.alias"
+        data = pickle.dumps(ReadFileLine(), protocol=2).replace(
+            f"c{module}\n{func.__qualname__}\n".encode(),
+            f"c{__name__}\nalias\n".encode(),
+        )
+        with safe_globals([(func, alias)]):
+            self.assertNotIn(
+                alias, torch._weights_only_unpickler._get_user_allowed_globals()
+            )
+            with self.assertRaisesRegex(pickle.UnpicklingError, alias):
+                torch._weights_only_unpickler.load(io.BytesIO(data))
 
     @parametrize("unsafe_global", [True, False])
     def test_weights_only_error(self, unsafe_global):

@@ -200,6 +200,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
         )
+        # Donation indices use the parent graph's placeholder ordering, not ours
+        # (same as SubgraphLowering).
+        bm_graph_lowering.bw_donated_idxs = None
 
         for sym_inp in self.sym_inputs:
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
@@ -607,7 +610,10 @@ class SubgraphTemplate(KernelTemplate):
             example_inputs = []
             for i, inp in enumerate(input_nodes):
                 if input_gen_fns and i in input_gen_fns:
-                    fake_tensor = input_gen_fns[i](inp)
+                    # only drives benchmarking: the winning decomposition is
+                    # re-inlined and the fallback layout is recomputed later
+                    with ir.allow_layout_analysis():
+                        fake_tensor = input_gen_fns[i](inp)
                 else:
                     # the inferred output layout below persists as the choice's
                     # layout, so it must be derived from final input strides
