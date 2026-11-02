@@ -336,7 +336,7 @@ class NNModuleVariable(VariableTracker):
         # implement list/iter/tuple/etc calls
         base = tx.output.get_submodule(self.module_key)
         result: list[VariableTracker] = []
-        if isinstance(base, torch.nn.ModuleDict):
+        if isinstance(base, (torch.nn.BufferDict, torch.nn.ModuleDict)):
             for name, submod in base.items():
                 name_var = VariableTracker.build(tx, name)
                 tx.output.register_attr_or_module(

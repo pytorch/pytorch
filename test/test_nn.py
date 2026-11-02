@@ -1424,16 +1424,42 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(clone[key], buffers[key])
             self.assertIsNot(clone[key], buffers[key])
 
-    def test_BufferDict_parameter_and_alias(self):
+    def test_BufferDict_assert_equal(self):
+        buffers = nn.BufferDict({"a": torch.ones(2), "empty": None})
+        self.assertEqual(buffers, nn.BufferDict({"a": torch.ones(2), "empty": None}))
+        self.assertEqual(buffers, {"a": torch.ones(2), "empty": None})
+        self.assertEqual({"nested": buffers}, {"nested": buffers.copy()})
+        self.assertNotEqual(buffers, nn.BufferDict({"a": torch.zeros(2), "empty": None}))
+        self.assertNotEqual(buffers, nn.BufferDict({"b": torch.ones(2), "empty": None}))
+        self.assertNotEqual(buffers, nn.BufferDict({"a": torch.ones(2)}))
+
+    @parametrize_test("operation", ["construct", "setitem", "update", "setdefault", "fromkeys"])
+    def test_BufferDict_rejects_parameter(self, operation):
         parameter = Parameter(torch.ones(2))
-        buffer = Buffer(torch.ones(2), persistent=False)
-        buffers = nn.BufferDict({"parameter": parameter, "a": buffer, "b": buffer})
-        self.assertIs(buffers["parameter"], parameter)
-        self.assertTrue(buffers["parameter"].requires_grad)
+        original = Buffer(torch.zeros(2), persistent=False)
+        buffers = nn.BufferDict({"a": original})
+        with self.assertRaisesRegex(TypeError, "BufferDict.*Parameter"):
+            if operation == "construct":
+                nn.BufferDict({"a": parameter})
+            elif operation == "setitem":
+                buffers["a"] = parameter
+            elif operation == "update":
+                buffers.update({"a": parameter})
+            elif operation == "setdefault":
+                buffers.setdefault("b", parameter)
+            else:
+                buffers.fromkeys(["b"], parameter)
+        self.assertEqual(list(buffers), ["a"])
+        self.assertIs(buffers["a"], original)
+        self.assertEqual(buffers.state_dict(), {})
         self.assertEqual(list(buffers.parameters()), [])
+
+    def test_BufferDict_alias(self):
+        buffer = Buffer(torch.ones(2), persistent=False)
+        buffers = nn.BufferDict({"a": buffer, "b": buffer})
         self.assertIs(buffers["a"], buffers["b"])
-        self.assertEqual(len(list(buffers.buffers())), 2)
-        self.assertEqual(len(list(buffers.named_buffers(remove_duplicate=False))), 3)
+        self.assertEqual(len(list(buffers.buffers())), 1)
+        self.assertEqual(len(list(buffers.named_buffers(remove_duplicate=False))), 2)
 
     def test_BufferDict_repr(self):
         buffers = nn.BufferDict(OrderedDict([("x", torch.zeros(2, 3)), ("empty", None)]))
@@ -1441,6 +1467,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertIn("(x): Buffer containing:", repr(buffers))
         self.assertIn("2x3", repr(buffers))
         self.assertIn("(empty): None", repr(buffers))
+        self.assertEqual(
+            buffers.extra_repr(),
+            "  (x): Buffer containing: [torch.float32 of size 2x3]\n  (empty): None",
+        )
 
     def test_ParameterDict(self):
         parameters = OrderedDict([
@@ -7300,6 +7330,53 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+
+    def test_BufferDict_parametrization(self, device):
+        class Double(nn.Module):
+            def forward(self, value):
+                return value * 2
+
+            def right_inverse(self, value):
+                return value / 2
+
+        tensor = torch.ones(2, device=device)
+        buffers = nn.BufferDict({"a": tensor.clone(), "empty": None})
+        keys, items, values = buffers.keys(), buffers.items(), buffers.values()
+        nn.utils.parametrize.register_parametrization(buffers, "a", Double())
+        self.assertEqual(list(buffers), ["a", "empty"])
+        self.assertEqual(list(reversed(buffers)), ["empty", "a"])
+        self.assertEqual(len(buffers), 2)
+        self.assertIn("a", buffers)
+        self.assertEqual(buffers["a"], buffers.a)
+        self.assertEqual(buffers.get("a"), buffers.a)
+        self.assertEqual(list(keys), ["a", "empty"])
+        self.assertEqual(list(items), [("a", buffers.a), ("empty", None)])
+        self.assertEqual(list(values), [buffers.a, None])
+        self.assertEqual(buffers.copy(), buffers)
+        buffers["a"] = tensor * 3
+        self.assertEqual(buffers["a"], tensor * 3)
+        buffers.update(nn.BufferDict({"a": tensor * 5}))
+        self.assertEqual(buffers["a"], tensor * 5)
+        self.assertEqual(buffers.parametrizations.a.original, tensor * 2.5)
+        with self.assertRaisesRegex(TypeError, "BufferDict.*Parameter"):
+            buffers["a"] = Parameter(tensor)
+        buffers["b"] = tensor
+        self.assertEqual(list(keys), ["a", "empty", "b"])
+        self.assertEqual(list(values), [tensor * 5, None, tensor])
+        nn.utils.parametrize.remove_parametrizations(buffers, "a")
+        self.assertEqual(buffers.pop("a"), tensor * 5)
+        self.assertEqual(list(buffers), ["empty", "b"])
+        buffers.clear()
+        self.assertEqual(list(keys), [])
+        self.assertEqual(list(items), [])
+        self.assertEqual(list(values), [])
+
+    def test_BufferDict_repr_device(self, device):
+        tensor = torch.zeros(2, 3, device=device)
+        buffers = nn.BufferDict({"x": tensor})
+        expected = nn.ParameterList([tensor]).extra_repr()
+        expected = expected.replace("(0)", "(x)").replace("Parameter containing", "Buffer containing")
+        self.assertEqual(buffers.extra_repr(), expected)
 
     @dtypes(torch.float32, torch.float64, torch.int64, torch.bool)
     @dtypesIfMPS(torch.float32, torch.int64, torch.bool)

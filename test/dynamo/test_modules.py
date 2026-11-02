@@ -1511,6 +1511,46 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 model.offsets["left"] = torch.full((3,), 2.0)
                 self.assertEqual(compiled(x, "left"), model(x, "left"))
 
+    @parametrize("install_free_tensors", [False, True])
+    @parametrize("iteration", ["direct", "keys", "items", "values"])
+    def test_bufferdict_export(self, install_free_tensors, iteration):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.offsets = torch.nn.BufferDict(
+                    {"a": torch.ones(3), "b": torch.full((3,), 2.0), "empty": None}
+                )
+
+            def forward(self, x):
+                if "a" in self.offsets and "missing" not in self.offsets:
+                    x = x + self.offsets["a"]
+                if iteration == "direct":
+                    for key in self.offsets:
+                        if self.offsets[key] is not None:
+                            x = x + self.offsets[key]
+                elif iteration == "keys":
+                    keys = self.offsets.keys()
+                    for key in keys:
+                        if self.offsets[key] is not None:
+                            x = x + self.offsets[key]
+                elif iteration == "items":
+                    for key, value in self.offsets.items():
+                        if value is not None:
+                            x = x + value
+                else:
+                    for value in self.offsets.values():
+                        if value is not None:
+                            x = x + value
+                return x
+
+        model = Model()
+        x = torch.randn(2, 3)
+        with torch._dynamo.config.patch(
+            install_free_tensors_for_export=install_free_tensors
+        ):
+            graph, _ = torch._dynamo.export(model)(x)
+        self.assertEqual(graph(x), model(x))
+
     def test_bufferdict_iteration_and_mutation(self):
         class Model(torch.nn.Module):
             def __init__(self):
