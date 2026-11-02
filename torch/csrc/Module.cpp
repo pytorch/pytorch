@@ -2949,6 +2949,10 @@ Call this whenever a new thread is created in order to propagate values from
           py::init([](const py::object& converter,
                       const py::object& shape_env,
                       const py::object& wrapper) {
+            TORCH_CHECK(!converter.is_none(), "Expected a FakeTensorConverter");
+            TORCH_CHECK(
+                !wrapper.is_none(),
+                "Expected the CppFakeTensorMode that owns this mode as wrapper");
             std::shared_ptr<c10::SafePyObject> shape_env_obj;
             if (!shape_env.is_none()) {
               shape_env_obj = std::make_shared<c10::SafePyObject>(
@@ -2965,7 +2969,6 @@ Call this whenever a new thread is created in order to propagate values from
                 functorch_config
                     .attr("fake_tensor_allow_unsafe_data_ptr_access")
                     .cast<bool>();
-            TORCH_CHECK(!wrapper.is_none(), "Expected a Python wrapper");
             PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
             if (weakref == nullptr) {
               throw py::error_already_set();
@@ -2977,38 +2980,55 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("converter"),
           py::arg("shape_env"),
           py::arg("wrapper"))
-      .def_readonly("allow_meta", &c10::FakeTensorMode::allow_meta_)
+      .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_)
       .def_readwrite(
           "allow_unsafe_data_ptr_access",
           &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
 
-  // Turns a meta tensor into a C++ fake of mode on device, in place, like
-  // Python's FakeTensorConverter.from_meta_and_device.
+  // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
+  // A plain meta tensor is turned into a fake of mode on device in place.
   py_module.def(
       "_from_meta_and_device",
       [](const at::Tensor& meta,
          c10::Device device,
          const std::shared_ptr<c10::FakeTensorMode>& mode) {
         TORCH_CHECK(mode != nullptr, "Expected a C++ FakeTensorMode");
-        // A C++ fake is itself meta-backed but reports its fake device, so
-        // check the backing storage rather than is_meta().
         TORCH_CHECK(
-            meta.key_set().has_backend(c10::BackendComponent::MetaBit),
-            "Expected a meta tensor");
-        auto* impl = meta.unsafeGetTensorImpl();
-        TORCH_CHECK(
-            !impl->is_fake() || impl->fake_tensor_mode() == mode,
-            "Expected a meta tensor or a fake of the given mode");
+            meta.is_meta(),
+            "tensor's device must be 'meta', got ",
+            meta.device().type());
         // Check before mutating meta, so a failure leaves it untouched.
         TORCH_CHECK(
             device.type() != c10::DeviceType::Meta || mode->allow_meta_,
             "device.type must not be 'meta' when allow_meta is False");
+        auto* impl = meta.unsafeGetTensorImpl();
+        // A fake reads as meta on the meta device or inside a kernel, as in
+        // Python, which wraps it in a new FakeTensor via _make_subclass. So a
+        // fake of this mode gets a new detached fake on device, made without
+        // dispatching, and is itself left unchanged.
+        if (impl->is_fake()) {
+          TORCH_CHECK(
+              impl->fake_tensor_mode() == mode,
+              "Expected a fake of the given mode");
+          c10::intrusive_ptr<c10::TensorImpl> out_impl;
+          {
+            // Otherwise an active dispatch mode would run the detach
+            c10::impl::ExcludeDispatchKeyGuard no_python(
+                c10::DispatchKey::Python);
+            out_impl = impl->shallow_copy_and_detach(
+                impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          }
+          out_impl->set_real_tensor(nullptr);
+          at::set_and_normalize_fake_device(out_impl.get(), device);
+          at::Tensor out(std::move(out_impl));
+          out.set_requires_grad(meta.requires_grad());
+          return out;
+        }
+        TORCH_CHECK(
+            !meta.key_set().has(c10::DispatchKey::Python),
+            "Expected a plain meta tensor");
         at::set_and_normalize_fake_device(impl, device);
         impl->set_fake_tensor_mode(mode);
-        // Like a fresh Python FakeTensor, the result shadows no real tensor.
-        if (impl->real_tensor()) {
-          impl->set_real_tensor(nullptr);
-        }
         return meta;
       },
       py::arg("meta"),
