@@ -407,9 +407,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
-        # User CuTeDSL kernels exported for this wrapper (prefix -> header + object,
-        # linked into the model .so); only CppWrapperGpu exports them.
-        self.cutedsl_exported_kernels: dict[str, Any] = {}
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}

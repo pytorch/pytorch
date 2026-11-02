@@ -340,7 +340,8 @@ class _ScriptPickler(pickle.Pickler):
     that module: refuses the classes and functions of the compiling process's
     __main__, which that run cannot import."""
 
-    def reducer_override(self, obj: Any) -> Any:
+    @staticmethod
+    def reducer_override(obj: Any, /) -> Any:
         by_reference = inspect.isclass(obj) or inspect.isfunction(obj)
         if by_reference and obj.__module__ == "__main__":
             raise pickle.PicklingError(f"{obj.__qualname__} is defined in __main__")
@@ -2415,6 +2416,9 @@ class PythonWrapperCodegen(CodeGen):
         # the generated Python module is loaded with.
         self.user_defined_cutedsl_kernel_cache: dict[tuple[Any, ...], str] = {}
         self.user_defined_cutedsl_launchers: dict[str, Any] = {}
+        # and the C++ wrapper's exports of them (prefix -> header + object), linked
+        # into the model .so or the JIT module (see CppWrapperGpu.cutedsl_link_args).
+        self.cutedsl_exported_kernels: dict[str, Any] = {}
         self.unbacked_symbol_decls: OrderedSet[str] = (
             OrderedSet()
         )  # str of sympy.Symbol

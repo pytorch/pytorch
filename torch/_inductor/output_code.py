@@ -645,7 +645,7 @@ class CompiledFxGraph(OutputCode):
         self.process_local_kernels = sorted(
             [
                 *graph.wrapper_code.user_defined_cutedsl_launchers,
-                *getattr(graph.wrapper_code, "cutedsl_exported_kernels", {}),
+                *graph.wrapper_code.cutedsl_exported_kernels,
             ]
         )
         self.output_strides = output_strides

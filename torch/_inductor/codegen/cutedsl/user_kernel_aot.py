@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -414,7 +414,7 @@ def _check_object_symbols(path: str, prefix: str) -> None:
         )
 
 
-def _is_dsl_function(obj: object) -> bool:
+def _is_dsl_function(obj: object) -> TypeGuard[Callable[..., Any]]:
     # @cute.jit and @cute.kernel return functools.wraps wrappers; both the wrapper and
     # the user function carry ``_dsl_cls`` (a CuTeDSL subclass).
     return callable(obj) and getattr(obj, "_dsl_cls", None) is not None
@@ -612,15 +612,18 @@ def _fake_args(specs: Sequence[ParamSpec]) -> list[Any]:
 # names it declares there itself (4.4.2: the module parameter, the ret and args
 # locals). Those and the C++ keywords that are not Python keywords do not compile.
 _UNEXPORTABLE_NAMES = frozenset(
-    """module ret args alignas alignof and_eq asm auto bitand bitor bool case catch
-    char char8_t char16_t char32_t compl concept const consteval constexpr constinit
-    const_cast co_await co_return co_yield decltype default delete do double
-    dynamic_cast enum explicit export extern false float friend goto inline int long
-    mutable namespace new noexcept not_eq nullptr operator or_eq private protected
-    public register reinterpret_cast requires short signed sizeof static
-    static_assert static_cast struct switch template this thread_local throw true
-    typedef typeid typename union unsigned using virtual void volatile wchar_t xor
-    xor_eq""".split()
+    ["module", "ret", "args"]
+    + ["alignas", "alignof", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "case"]
+    + ["catch", "char", "char8_t", "char16_t", "char32_t", "compl", "concept", "const"]
+    + ["consteval", "constexpr", "constinit", "const_cast", "co_await", "co_return"]
+    + ["co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast"]
+    + ["enum", "explicit", "export", "extern", "false", "float", "friend", "goto"]
+    + ["inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not_eq"]
+    + ["nullptr", "operator", "or_eq", "private", "protected", "public", "register"]
+    + ["reinterpret_cast", "requires", "short", "signed", "sizeof", "static"]
+    + ["static_assert", "static_cast", "struct", "switch", "template", "this"]
+    + ["thread_local", "throw", "true", "typedef", "typeid", "typename", "union"]
+    + ["unsigned", "using", "virtual", "void", "volatile", "wchar_t", "xor", "xor_eq"]
 )
 
 
@@ -849,15 +852,28 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
     the export_to_c header, ``<prefix>_module_ref`` and ``<prefix>_module()``, which
     returns the module.
 
-    Module_Load loads the library on every visible device and keeps the kernel
-    handles in globals of the object, so every launch from the library the object
-    is linked into uses one load. ``<prefix>_module_ref`` objects hold it: the first
-    loads it and the last unloads it. With ``aot``, each model instance holds one
-    (a member of AOTInductorModelKernels named ``<prefix>_ref``), so the library is
-    released with the last instance, as their Triton modules are, even when dlclose
-    leaves the model .so mapped. Otherwise (the JIT wrapper) ``<prefix>_module()``
-    holds one from the first launch until the wrapper is unloaded or the process
-    exits.
+    Module_Load loads the library and keeps the kernel handles in globals of the
+    object, so every launch from the library the object is linked into uses one
+    load. ``<prefix>_module_ref`` objects hold it: the first loads it and the last
+    unloads it. With ``aot``, each model instance holds one (a member of
+    AOTInductorModelKernels named ``<prefix>_ref``), so the library is released with
+    the last instance, as their Triton modules are, even when dlclose leaves the
+    model .so mapped. Otherwise (the JIT wrapper) ``<prefix>_module()`` holds one
+    from the first launch until the wrapper is unloaded or the process exits.
+
+    Module_Load resolves the kernels and sets their attributes on every device
+    cudaGetDeviceCount reports, not only on the one the model runs on, passing each
+    device to the CUDA calls it makes: it neither changes the current device nor
+    creates a CUDA context. The object holds a cubin for one architecture (the C++
+    wrapper exports for config.cuda.arch, or for that of the first visible GPU), so
+    where a visible GPU cannot run it, the load fails, and with it the construction
+    of the model (``aot``) or the first launch, even for a model that runs on a GPU
+    that can; hide such GPUs with CUDA_VISIBLE_DEVICES. When the load throws
+    (CPP_CUDA_ERROR_CHECK), ``<prefix>_module_ref`` unloads what it loaded and, as
+    C10_CUDA_CHECK does, clears the CUDA runtime's last error before rethrowing (a
+    failed unload clears it too): where the object's CUDA calls go to PyTorch's
+    libcudart, PyTorch's next kernel launch check would otherwise report it. The
+    next reference (a new model instance, or the next launch) loads again.
     """
     p = exported.prefix
     abi = exported.abi
@@ -881,7 +897,16 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
         f"  {p}_module_ref() {{",
         f"    std::lock_guard<std::mutex> lock({p}_module_mutex);",
         f"    if ({p}_module_refs == 0) {{",
-        f"      {abi.load_fn}(&{p}_loaded_module);",
+        f"      {p}_loaded_module = {{}};",
+        "      try {",
+        f"        {abi.load_fn}(&{p}_loaded_module);",
+        "      } catch (...) {",
+        f"        if ({p}_loaded_module.module != nullptr) {{",
+        f"          cudaLibraryUnload({p}_loaded_module.module);",
+        "        }",
+        "        (void)cudaGetLastError();",
+        "        throw;",
+        "      }",
         "    }",
         f"    ++{p}_module_refs;",
         "  }",
@@ -893,6 +918,7 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
         "      }",
         "    } catch (const std::exception& e) {",
         f"      std::cerr << {unload_error} << e.what() << '\\n';",
+        "      (void)cudaGetLastError();",
         "    }",
         "  }",
         "};",
@@ -927,7 +953,8 @@ def emit_cpp_launch(
 
     The block checks alignment and that every value fits the narrower C type the ABI
     uses (int32 dynamic sizes, Int32 scalars...), fills the tensor structs, launches
-    with ``<prefix>_module()`` and turns a non-zero launch status into an exception.
+    with ``<prefix>_module()`` and turns a non-zero launch status into an exception,
+    after clearing the CUDA runtime's last error (see emit_cpp_declarations).
     """
     abi = exported.abi
     p = exported.prefix
@@ -1053,6 +1080,7 @@ def emit_cpp_launch(
     )
     status = "static_cast<cudaError_t>(cutedsl_status)"
     message = _cpp_str(f"CuTeDSL kernel {p}: launch failed: ")
+    lines += ["  if (cutedsl_status != 0) {", "    (void)cudaGetLastError();", "  }"]
     lines.append(
         f"  AOTI_RUNTIME_CHECK(cutedsl_status == 0, std::string({message}) + "
         f'cudaGetErrorName({status}) + ": " + cudaGetErrorString({status}));'
@@ -1098,9 +1126,11 @@ def cutedsl_runtime_archive() -> str:
 
 def cutedsl_link_inputs(kernels: Iterable[CuteDSLExportedKernel]) -> list[str]:
     """Files to add to the model .so link after the wrapper objects: every exported
-    object once, then the runtime archive (it must follow the objects using it)."""
+    object once, then the runtime archive (it must follow the objects using it).
+    Like cutedsl_link_flags, returns shell fragments: each path is quoted."""
     objects = list(dict.fromkeys(k.object_path for k in kernels))
-    return [*objects, cutedsl_runtime_archive()] if objects else []
+    paths = [*objects, cutedsl_runtime_archive()] if objects else []
+    return [shlex.quote(path) for path in paths]
 
 
 def cutedsl_link_flags(out_dir: str, prefixes: Iterable[str]) -> list[str]:

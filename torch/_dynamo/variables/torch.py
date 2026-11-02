@@ -1538,8 +1538,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            from torch._library.cutedsl import is_cutedsl_jit_function
-
             from .cutedsl import CuteDSLKernelVariable
 
             if len(args) != 1 or set(kwargs) != {"mutates_args"}:
@@ -1551,11 +1549,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
             host_fn = args[0]
-            fn = host_fn.as_python_constant() if host_fn.is_python_constant() else None
-            if is_cutedsl_jit_function(fn):
-                # Read without a source (a staticmethod of an object made in the region,
-                # say), so VariableBuilder did not make it a CuteDSLKernelVariable.
-                host_fn = CuteDSLKernelVariable(fn, None, None)
             if not isinstance(host_fn, CuteDSLKernelVariable) or host_fn.is_wrapper:
                 unimplemented(
                     gb_type="wrap_cutedsl: host_fn is not a @cute.jit function",

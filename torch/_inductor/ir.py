@@ -9205,7 +9205,7 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
         )
         self.codegen_comment(wrapper, name)
         wrapper.generate_user_defined_cutedsl_kernel_call(
-            name, self.kernel, runtime_args, self.get_device()
+            name, self.kernel, runtime_args, self.get_device_or_error()
         )
 
 
