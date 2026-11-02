@@ -4572,15 +4572,29 @@ def safe_repr(x: object) -> str:
     if isinstance(x, dict):
         items = ", ".join(f"{safe_repr(k)}: {safe_repr(v)}" for k, v in x.items())
         return f"{{{items}}}"
+    if isinstance(x, BaseException):
+        # BaseException.__repr__ is ClassName(*args), with each arg repr'd
+        return f"{type(x).__name__}({', '.join(safe_repr(a) for a in x.args)})"
     return f"<{type(x).__name__}>"
 
 
 def summarize_example_value(v: object) -> str:
     """A short description of a graph input's example value for logs and
-    errors: tensors, including those in a list or tuple, show only their class
-    and size, since a fake tensor's repr can be large or can raise."""
+    errors. Tensors, including those in a list or tuple, show their class and
+    size and, as a tensor's repr does, a non-default dtype or device and their
+    autograd state, without calling repr, since a fake tensor's repr can be
+    large or can raise."""
     if isinstance(v, torch.Tensor):
-        return f"{type(v).__name__}(..., size={tuple(v.shape)})"
+        fields = [f"size={tuple(v.shape)}"]
+        if v.dtype not in (torch.get_default_dtype(), torch.int64, torch.bool):
+            fields.append(f"dtype={v.dtype}")
+        if v.device.type != torch._C._get_default_device():
+            fields.append(f"device='{v.device}'")
+        if v.grad_fn is not None:
+            fields.append(f"grad_fn=<{type(v.grad_fn).__name__}>")
+        elif v.requires_grad:
+            fields.append("requires_grad=True")
+        return f"{type(v).__name__}(..., {', '.join(fields)})"
     if isinstance(v, (list, tuple)):
         items = ", ".join(summarize_example_value(e) for e in v)
         return f"{type(v).__name__}[{items}]"
@@ -4611,7 +4625,7 @@ def run_node(
         def make_error_message(e: object) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{safe_repr(args)}, **{safe_repr(kwargs)}): got "
-                + repr(e)
+                + safe_repr(e)
             )
 
         from .exc import Unsupported
