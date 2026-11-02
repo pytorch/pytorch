@@ -6,6 +6,7 @@
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -68,7 +69,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
           [=] FUNCAPI (int64_t nnz_idx) -> int64_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = static_cast<int64_t>(0);
-          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+          for (const auto dim : c10::irange(sparse_dim)) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
