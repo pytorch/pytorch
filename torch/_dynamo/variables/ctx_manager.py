@@ -176,6 +176,11 @@ class ContextWrappingVariable(VariableTracker):
             raise AssertionError("Unexpected arg type")
 
     def supports_graph_breaks(self) -> bool:
+        r"""Whether this context can be reconstructed and re-entered in resume bytecode.
+
+        True requires reconstruct_type() and ReenterWith to restore the context;
+        False disallows checkpoints while the context is active.
+        """
         return True
 
     def exit_on_graph_break(self) -> bool:
@@ -1736,7 +1741,8 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
-            explanation="Dynamo can only resume torch.fx.traceback.annotate after a graph break when every annotation value is a constant it can embed in bytecode.",
+            explanation="Dynamo can only reconstruct an escaped torch.fx.traceback.annotate "
+            "context when every annotation value is a constant it can embed in bytecode.",
             hints=[
                 *graph_break_hints.SUPPORTABLE,
             ],
