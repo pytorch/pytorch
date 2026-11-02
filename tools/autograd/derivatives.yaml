@@ -1159,7 +1159,7 @@
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      # Avoid division by zero before expansion for empty inputs.
+      # Keep double backward finite for empty reductions.
       self: (grad / self.sym_numel().max(1)).expand_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
