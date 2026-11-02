@@ -2023,15 +2023,23 @@ Tensor asarray(
     // Given a defined tensor, we copy it if either we have to (copy=True) or
     // if we need to (copy=None) because of mismatched device or dtype.
     if (force_copy || needs_copying) {
-      if (wrong_device || wrong_dtype) {
-        tensor = tensor.to(
-            device.value_or(tensor.device()),
-            dtype.value_or(tensor.scalar_type()),
-            /*non_blocking=*/false,
-            /*copy=*/force_copy);
-      } else {
-        tensor = tensor.clone();
+      // As in internal_new_from_data. The source may be a DLPack import, so it
+      // is only released once the GIL is back.
+      Tensor copied;
+      {
+        pybind11::gil_scoped_release no_gil;
+        maybe_initialize_device(device);
+        if (wrong_device || wrong_dtype) {
+          copied = tensor.to(
+              device.value_or(tensor.device()),
+              dtype.value_or(tensor.scalar_type()),
+              /*non_blocking=*/false,
+              /*copy=*/force_copy);
+        } else {
+          copied = tensor.clone();
+        }
       }
+      tensor = std::move(copied);
     } else {
       // If we are not copying, we have to check whether we have the tensor
       // in the right device, with the right dtype.
