@@ -643,8 +643,10 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         def fn(x):
             it = reversed([x, x + 2, x + 5])
             last = next(it)
-            middle = next(iter(it))
-            return last - middle
+            it2 = iter(it)
+            middle = next(it2)
+            first = next(it)
+            return last - middle, first, it2 is it
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.tensor([3.0, 7.0])
