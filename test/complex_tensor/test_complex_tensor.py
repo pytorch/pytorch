@@ -227,6 +227,35 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(xc.re.shape, (2,))
         self.assertEqual(xc.im.shape, (2,))
 
+    def test_out_overload_writes_destination(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        t = torch.randn(4, dtype=torch.complex64)
+        out = ComplexTensor.from_interleaved(torch.zeros(4, dtype=torch.complex64))
+        result = torch.fft.fft(ComplexTensor.from_interleaved(t), out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(out.as_interleaved(), torch.fft.fft(t))
+
+    def test_out_overload_writes_multiple_destinations(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, 3, dtype=torch.complex128)
+        lu = ComplexTensor.from_interleaved(torch.zeros(3, 3, dtype=torch.complex128))
+        pivots = torch.zeros(3, dtype=torch.int32)
+        info = torch.ones((), dtype=torch.int32)
+        result = torch.linalg.lu_factor_ex(
+            ComplexTensor.from_interleaved(a), out=(lu, pivots, info)
+        )
+
+        self.assertIs(result[0], lu)
+        self.assertIs(result[1], pivots)
+        self.assertIs(result[2], info)
+        expected = torch.linalg.lu_factor_ex(a)
+        self.assertEqual(lu.as_interleaved(), expected.LU)
+        self.assertEqual(pivots, expected.pivots)
+        self.assertEqual(info, expected.info)
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
