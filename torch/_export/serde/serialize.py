@@ -910,13 +910,19 @@ def _find_flat_apply_func(
 ) -> Any:
     """
     Find the function of a flat_apply call and check that it is a kind that
-    export produces. Save and load both use this one rule. Two kinds are
-    accepted. One is a traceable wrapper tensor subclass with an ``__init__``
-    decorated for export, in its class or in a base class. The other is the
-    helper that calls custom autograd functions. It gets its class by name, as
-    its first argument, so that name must find a torch.autograd.Function. Both
-    names are found with ``_find_imported``.
+    export produces, and that the input spec has one leaf per flat input. Save
+    and load both use this one rule. Two kinds are accepted. One is a traceable
+    wrapper tensor subclass with an ``__init__`` decorated for export, in its
+    class or in a base class. The other is the helper that calls custom
+    autograd functions. It gets its class by name, as its first argument, so
+    that name must find a torch.autograd.Function. Both names are found with
+    ``_find_imported``.
     """
+    if in_spec.num_leaves != len(flat_args):
+        raise SerializeError(
+            f"The call has {len(flat_args)} flat inputs, but its input spec has "
+            f"{in_spec.num_leaves} leaves"
+        )
     func = _find_imported(name)
     if isinstance(func, type) and is_traceable_wrapper_subclass_type(func):
         # Export records the class of the object that a marked __init__
@@ -3542,11 +3548,6 @@ class GraphModuleDeserializer(metaclass=Final):
             ) from e
         where = f"flat_apply node {serialized_node.name}"
         _check_flat_apply_inputs(where, flat_inputs)
-        if in_spec.num_leaves != len(flat_inputs):
-            raise SerializeError(
-                f"{where} has {len(flat_inputs)} flat inputs, but its input spec "
-                f"has {in_spec.num_leaves} leaves"
-            )
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
         _check_operator_inputs(where, flat_inputs, args, kwargs)
         func = _find_flat_apply_func(func_name, in_spec, args)
