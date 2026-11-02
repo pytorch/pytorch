@@ -89,6 +89,8 @@ def reduce_col_tile(
     vec: int | None = None,
 ) -> torch.Tensor:
     """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
+    if x.dim() != 2:
+        raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -111,6 +113,8 @@ def reduce_col_tile_2out(
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 0 of contiguous 2D x to two outputs per column, like reduce_col_tile."""
+    if x.dim() != 2:
+        raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -134,6 +138,8 @@ def reduce_batched_col_tile(
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 1 of contiguous 3D x to nouts (B, C) outputs."""
+    if x.dim() != 3:
+        raise AssertionError(f"want 3D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
         trait, trait_key, x, out_dtypes, nouts, threads_per_block, npar, vec
     )
@@ -281,7 +287,7 @@ def _reduce_col_tile(
     if single:
         return tuple(outs)
 
-    # Fold npar partials and project with true R; use threads per column only when C fills the GPU.
+    # Fold npar partials and project with true R; use threads per column only when B * C fills the GPU.
     if not pc:
         s2 = ReduceBlock(
             trait,
