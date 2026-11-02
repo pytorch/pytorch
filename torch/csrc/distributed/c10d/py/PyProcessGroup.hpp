@@ -26,6 +26,27 @@ class PyProcessGroup : public ProcessGroup {
           timeout);
     }
 
+    bool isCompleted() override {
+      PYBIND11_OVERRIDE_NAME(bool, Work, "is_completed", isCompleted);
+    }
+
+    void synchronize() override {
+      PYBIND11_OVERRIDE(void, Work, synchronize);
+    }
+
+    int sourceRank() const override {
+      PYBIND11_OVERRIDE_NAME(int, Work, "source_rank", sourceRank);
+    }
+
+    std::vector<at::Tensor> result() override {
+      PYBIND11_OVERRIDE(std::vector<at::Tensor>, Work, result);
+    }
+
+    void blockCurrentStream() override {
+      PYBIND11_OVERRIDE_NAME(
+          void, Work, "block_current_stream", blockCurrentStream);
+    }
+
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
       // We cannot use PYBIND11_OVERRIDE because:
       // 1. We have to >MANUALLY< unwrap the PyFutureWrapper and

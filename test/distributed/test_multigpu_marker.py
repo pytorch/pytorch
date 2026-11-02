@@ -24,7 +24,6 @@ from unittest.mock import patch
 import torch
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    nccl_skip_if_lt_x_gpu,
     require_n_gpus_for_nccl_backend,
     requires_world_size,
     skip_if_lt_x_gpu,
@@ -66,7 +65,7 @@ class TestMultiGpuMarker(TestCase):
         def nccl_needs4(self):
             pass
 
-        @nccl_skip_if_lt_x_gpu("nccl", 8)
+        @require_n_gpus_for_nccl_backend(8, "nccl")
         def nccl_needs8(self):
             pass
 
@@ -206,13 +205,6 @@ class TestSkippedReason(TestCase):
                 skip_if_no_gpu(_noop)._skipped_reason,
                 TEST_SKIPS["no_accelerator"].message,
             )
-            self.assertEqual(
-                skip_if_lt_x_gpu(2)(_noop)._skipped_reason,
-                TEST_SKIPS["multi-device-2"].message,
-            )
-            self.assertFalse(
-                hasattr(skip_if_lt_x_gpu(2, allow_cpu=True)(_noop), "_skipped_reason")
-            )
 
         with patch.object(
             torch.accelerator,
@@ -220,7 +212,6 @@ class TestSkippedReason(TestCase):
             return_value=torch.device("cuda"),
         ):
             self.assertFalse(hasattr(skip_if_no_gpu(_noop), "_skipped_reason"))
-            self.assertFalse(hasattr(skip_if_lt_x_gpu(2)(_noop), "_skipped_reason"))
 
     @unittest.skipIf(IS_SANDCASTLE, "Sandcastle leaves skips to the ranks")
     def test_dist_backend_skips_before_spawn(self):

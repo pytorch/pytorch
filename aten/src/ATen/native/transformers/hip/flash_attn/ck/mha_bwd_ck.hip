@@ -221,7 +221,9 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     float p_undrop = 1.0 - p_dropout;
 
     aiter::mha_bwd_args args{};
-    args.use_asm_v3     = hdim <= 192; // ASM v3 only supports head dim <= 192
+    // ASM v3 only supports head dim <= 192. On gfx950 its hd128 kernel (used for head
+    // dims 65..128) returns wrong dq/dk/dv at seqlen_q == 1; use CK tile for any seqlen_q == 1.
+    args.use_asm_v3     = hdim <= 192 && seqlen_q > 1;
     args.v3_atomic_fp32 = true;
     args.v3_bf16_cvt    = 1;
     args.v3_api_check   = false;

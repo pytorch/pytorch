@@ -31,7 +31,18 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+from torch.utils._triton import (
+    has_triton_cuda_tma_device,
+    has_triton_stable_tma_api,
+    has_triton_tma_device,
+)
+
+
+# has_triton_tma_device() is also true on a pre-SM90 CUDA GPU when Triton has a
+# CPU backend, so CUDA needs the stricter check.
+HAS_GPU_TMA = has_triton_tma_device() and (
+    GPU_TYPE != "cuda" or has_triton_cuda_tma_device()
+)
 
 
 class TestBase(TestCase):
@@ -569,9 +580,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @inductor_config.patch(
         {
@@ -646,9 +655,7 @@ class MixOrderReductionTest(TestBase):
                 .run(bwd_wrapper)
             )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @parametrize("shape", ((32768, 256), (32768 + 1023, 768)))
     @inductor_config.patch(
