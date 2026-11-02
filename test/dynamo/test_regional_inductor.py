@@ -772,6 +772,29 @@ def forward(self, tangents_0):
         self.assertEqual(len(codes), 1)
         self.assertEqual(result, fn(c))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_symbol_sum_size_input(self):
+        # The region input is sized u0 + u1, so the region also needs the
+        # SymInts u0 and u1 as inputs even though it doesn't use them.
+        def fn(x, counts):
+            a, b = counts.tolist()
+            for n in (a, b):
+                torch._check(n >= 0)
+                torch._check(n <= x.size(0))
+            y = torch.cat([x[:a], x[:b]])
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                return y.sin() * 2
+
+        x = torch.randn(4, 3, device=device_type, requires_grad=True)
+        counts = torch.tensor([2, 3], device=device_type)
+        opt_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(serialize=False), fullgraph=True
+        )
+
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, counts))
+        self.assertEqual(len(codes), 2)
+        self.assertEqual(result, fn(x, counts))
+
     @parametrize("serialize", [False])
     def test_repeated_blocks(self, serialize):
         nested_config = get_invoke_subgraph_compile_options()
