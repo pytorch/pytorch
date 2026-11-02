@@ -2450,6 +2450,12 @@ class triton:
     # NOTE: This also indirectly controls the size of workspace buffer required
     min_split_scan_rblock = 256
 
+    # ROCm only: size- and load-aware default configs for column (OUTER) reductions
+    # and many-load persistent row reductions, instead of the fixed 64x8 tile.
+    rocm_reduction_heuristic = (
+        os.environ.get("TORCHINDUCTOR_ROCM_REDUCTION_HEURISTIC", "1") == "1"
+    )
+
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
 
