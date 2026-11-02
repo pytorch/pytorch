@@ -102,10 +102,15 @@ def sequence_fast(iterable: Iterable[T], message: str) -> list[T]:
     # Mirrors CPython's PySequence_Fast for an argument that is not a list or
     # tuple. list(it) is spelled out because it calls iter() again and asks
     # the first iterator for a length hint before reading the items.
+    # CPython replaces the TypeError instead of chaining to it, so raise
+    # outside the handler.
+    failed = False
     try:
         it = iter(iterable)
     except TypeError:
-        raise TypeError(message) from None
+        failed = True
+    if failed:
+        raise TypeError(message)
     inner = iter(it)
     length_hint(it, 8)
     items: list[T] = []

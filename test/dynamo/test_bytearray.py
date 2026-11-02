@@ -498,12 +498,21 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             def __iter__(self):
                 return self.inner
 
-        def f(make_items, x):
+        def join_error(make_items):
             try:
                 bytearray(b",").join(make_items())
             except Exception as e:
-                return type(e), str(e), x + 1
-            return None, None, x + 1
+                return type(e), str(e), type(e.__context__), e.__suppress_context__
+            return None
+
+        def f(make_items, outer, x):
+            if outer:
+                # Errors raised while another exception is handled chain to it.
+                try:
+                    raise ValueError("outer")
+                except ValueError:
+                    return join_error(make_items), x + 1
+            return join_error(make_items), x + 1
 
         x = torch.ones(1)
         cases = [
@@ -515,9 +524,13 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             lambda: Items(next_error=TypeError("next")),
             lambda: Items(next_error=ValueError("next")),
         ]
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
         for make_items in cases:
-            self.assertEqual(compiled(make_items, x), f(make_items, x))
+            torch._dynamo.reset()
+            compiled = torch.compile(f, backend="eager", fullgraph=True)
+            for outer in (False, True):
+                self.assertEqual(
+                    compiled(make_items, outer, x), f(make_items, outer, x)
+                )
 
     def test_join_length_hint_first_iterator(self):
         seen = []
