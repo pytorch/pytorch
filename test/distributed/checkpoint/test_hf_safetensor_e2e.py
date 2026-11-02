@@ -99,6 +99,31 @@ class TestSingleRankSaveLoad(TestCase):
         )
 
     @with_temp_dir
+    def test_save_consolidated_skips_unsaved_mapping_entries(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        dist_cp.save(
+            state_dict={"weight": torch.rand(4, 4)},
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=CHECKPOINT_DIR,
+                fqn_to_index_mapping={"weight": 1, "mtp.weight": 1},
+                save_distributed=True,
+                enable_consolidation=True,
+            ),
+        )
+
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
+        self.assertEqual(loaded.keys(), {"weight"})
+        with open(CHECKPOINT_DIR + "/model.safetensors.index.json") as f:
+            self.assertEqual(json.load(f)["weight_map"].keys(), {"weight"})
+
+    @with_temp_dir
     def test_load(self) -> None:
         try:
             from safetensors.torch import save_file
