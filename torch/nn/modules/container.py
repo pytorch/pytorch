@@ -1128,6 +1128,18 @@ class BufferDict(Module):
     def __delitem__(self, key: str) -> None:
         if key not in self._keys:
             raise KeyError(key)
+        if isinstance(getattr(type(self), key, None), property):
+            from torch.nn.utils.parametrize import (
+                ParametrizationList,
+                remove_parametrizations,
+            )
+
+            parametrizations = cast(ModuleDict, self.parametrizations)
+            parametrization = cast(ParametrizationList, parametrizations[key])
+            # Avoid modifying the original tensor; multiple originals require materialization.
+            remove_parametrizations(
+                self, key, leave_parametrized=not parametrization.is_tensor
+            )
         delattr(self, key)
         del self._keys[key]
 

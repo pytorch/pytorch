@@ -7371,6 +7371,79 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(list(items), [])
         self.assertEqual(list(values), [])
 
+    @parametrize_test("operation", ["del", "pop", "popitem", "clear"])
+    @parametrize_test("multiple_originals", [False, True])
+    def test_BufferDict_parametrized_deletion(self, device, operation, multiple_originals):
+        class Square(nn.Module):
+            def forward(self, value):
+                return value.square()
+
+        class Sum(nn.Module):
+            def forward(self, left, right):
+                return left + right
+
+            def right_inverse(self, value):
+                return value / 2, value / 2
+
+        tensor = torch.full((2,), 2.0, device=device)
+        buffers = nn.BufferDict({
+            "plain": Buffer(tensor.clone(), persistent=False),
+            "remaining": tensor.clone(),
+            "target": tensor.clone().requires_grad_(),
+        })
+        nn.utils.parametrize.register_parametrization(buffers, "remaining", nn.Identity())
+        nn.utils.parametrize.register_parametrization(
+            buffers, "target", Sum() if multiple_originals else Square()
+        )
+        originals = tuple(buffers.parametrizations.target.buffers())
+        saved = tuple(value.detach().clone() for value in originals)
+        expected = buffers["target"].detach().clone()
+        keys, items, values = buffers.keys(), buffers.items(), buffers.values()
+        if operation == "del":
+            del buffers["target"]
+        elif operation == "clear":
+            self.assertIsNone(buffers.clear())
+        else:
+            if operation == "pop":
+                result = buffers.pop("target")
+            else:
+                key, result = buffers.popitem()
+                self.assertEqual(key, "target")
+            self.assertEqual(result, expected)
+            gradients = torch.autograd.grad(result.sum(), originals)
+            expected_gradients = tuple(
+                torch.ones_like(value) if multiple_originals else 2 * value for value in saved
+            )
+            self.assertEqual(gradients, expected_gradients)
+
+        self.assertEqual(originals, saved)
+        self.assertNotIn("target", buffers)
+        self.assertFalse(hasattr(buffers, "target"))
+        self.assertFalse(nn.utils.parametrize.is_parametrized(buffers, "target"))
+        if operation == "clear":
+            self.assertEqual(list(keys), [])
+            self.assertEqual(list(items), [])
+            self.assertEqual(list(values), [])
+            self.assertEqual(buffers._buffers, {})
+            self.assertEqual(buffers._non_persistent_buffers_set, set())
+            self.assertEqual(buffers.state_dict(), {})
+        else:
+            self.assertEqual(list(keys), ["plain", "remaining"])
+            self.assertEqual(list(items), [("plain", tensor), ("remaining", tensor)])
+            self.assertEqual(list(values), [tensor, tensor])
+            self.assertEqual(list(buffers.state_dict()), ["parametrizations.remaining.original"])
+            self.assertTrue(nn.utils.parametrize.is_parametrized(buffers, "remaining"))
+            del buffers["remaining"]
+        self.assertIs(type(buffers), nn.BufferDict)
+        self.assertFalse(hasattr(buffers, "parametrizations"))
+        self.assertEqual(list(buffers.parameters()), [])
+        buffers["target"] = tensor
+        self.assertIs(buffers["target"], tensor)
+        self.assertEqual(list(buffers.state_dict()), ["target"])
+        buffers.clear()
+        self.assertEqual(list(keys), [])
+        self.assertEqual(list(buffers.buffers()), [])
+
     def test_BufferDict_repr_device(self, device):
         tensor = torch.zeros(2, 3, device=device)
         buffers = nn.BufferDict({"x": tensor})
