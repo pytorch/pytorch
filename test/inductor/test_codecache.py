@@ -18,7 +18,7 @@ import types
 import unittest
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack, nullcontext
 from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
@@ -31,6 +31,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor import config, config_comms, metrics
 from torch._inductor.async_compile import CompiledTritonKernels
 from torch._inductor.cache_key import (
@@ -42,10 +43,12 @@ from torch._inductor.cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from torch._inductor.codecache import (
+    _relocatable_command_line,
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
     compiled_fx_graph_hash,
+    CppCodeCache,
     CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
@@ -55,7 +58,6 @@ from torch._inductor.codecache import (
     StaticAutotunerFuture,
     TensorMetadata,
     TensorMetadataAndValues,
-    triton_key,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
@@ -78,6 +80,7 @@ from torch._inductor.triton_bundler import (
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -97,6 +100,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -135,12 +139,6 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
-    def setUp(self):
-        super().setUp()
-        # These tests expect triton_key to be recomputed under their patches;
-        # an earlier compile may have cached (or be prefetching) the real value.
-        triton_key.clear()
-
     @parametrize("backend_precision", ("bfx9", "tf32"))
     def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
@@ -764,6 +762,25 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_bundled_autotune_remote_cache_flag_is_not_in_the_cache_key(self):
+        # Precompile capture and CompilePackage.install() turn the flag off; a
+        # hashed flag would make them miss entries a flag-on compile wrote.
+        def fn(x, y):
+            return x * 2 + (y @ y).view(25)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+        with config.patch(bundled_autotune_remote_cache=True):
+            torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.reset()
+        with config.patch(bundled_autotune_remote_cache=False):
+            self.assertEqual(torch.compile(fn)(a, b), fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
@@ -2230,6 +2247,90 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    @parametrize("requires_grad", (False, True))
+    def test_with_effects_custom_op_cache_hit(self, requires_grad):
+        """
+        with_effects wrapping a custom OpOverload is as cacheable as the op
+        itself, and the effectful op still runs in program order on a hit.
+        """
+        logged = []
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::log", "(Tensor x, str tag) -> ()", lib=lib)
+            lib.impl(
+                "log",
+                lambda x, tag: logged.append((tag, x.sum().item())),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("log", lambda x, tag: None, "Meta")
+            torch.library._register_effectful_op(
+                "mylib::log", _EffectType.ORDERED, lib=lib
+            )
+
+            class LogGrad(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    torch.ops.mylib.log(grad, "grad")
+                    return grad
+
+            def fn(x):
+                if requires_grad:
+                    x = LogGrad.apply(x)
+                y = x.sin()
+                torch.ops.mylib.log(y, "a")
+                z = y.cos()
+                torch.ops.mylib.log(z, "b")
+                return z.sum()
+
+            def run():
+                logged.clear()
+                x = torch.arange(8.0, requires_grad=requires_grad)
+                out = torch.compile(fn)(x)
+                if requires_grad:
+                    out.backward()
+                return out.detach(), list(logged)
+
+            num_graphs = 2 if requires_grad else 1
+            out1, log1 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            counters.clear()
+            self.reset()
+            out2, log2 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            self.assertEqual(out1, out2)
+            self.assertEqual(log1, log2)
+            expected = ["a", "b", "grad"] if requires_grad else ["a", "b"]
+            self.assertEqual([tag for tag, _ in log2], expected)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_with_effects_noncacheable_hop_bypass(self):
+        """
+        with_effects wrapping a non-cacheable HOP still bypasses the cache.
+        """
+
+        def fn(x):
+            torch._higher_order_ops.print("x: {}", x)
+            return x.sin()
+
+        torch.compile(fn)(torch.randn(4))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
     @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -2593,6 +2694,7 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @skipIfCppFakeTensor("no nestedtensor support")
     def test_cache_with_nt(self):
         def gen_nt(r):
             values = torch.randn(r, 16)
@@ -3434,7 +3536,10 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         self.assertEqual(seen_ignore_shape_env, [True])
         self.assertIsNot(seen_fake_modes[0], fake_mode)
-        self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
+        self.assertIs(
+            maybe_get_fake_mode(seen_fake_modes[0].from_tensor(torch.ones(1))),
+            seen_fake_modes[0],
+        )
         self.assertIsNotNone(seen_fake_modes[0].shape_env)
 
     def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
@@ -3457,7 +3562,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         self.assertIsInstance(value_node, torch.fx.Node)
         output_example_value = value_node.meta["example_value"]
         self.assertIsInstance(output_example_value, TwoTensor)
-        fake_mode = output_example_value.a.fake_mode
+        fake_mode = maybe_get_fake_mode(output_example_value.a)
+        self.assertIsNotNone(fake_mode)
 
         seen_fake_modes = []
 
@@ -4136,7 +4242,12 @@ class TestFxGraphCacheHashing(TestCase):
         pickler = FxGraphCachePickler(gm)
         with torch._subclasses.FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
-            data = pickler.dumps(torch.randn(1))
+            with mock.patch.object(
+                pickler,
+                "_reduce_constant_tensor",
+                side_effect=AssertionError("fake tensor serialized as a constant"),
+            ):
+                data = pickler.dumps(torch.randn(1))
             self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
             # Different shapes:
@@ -5623,6 +5734,23 @@ class TestUtils(TestCase):
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
 
+    def test_skip_in_setup_exits_fresh_cache(self):
+        # A fresh_cache() leaked by a skip in setUp exits whenever the garbage
+        # collector finalizes it, which can deadlock on locks clear_caches() takes.
+        class SkipsInSetUp(TestCase):
+            def setUp(self):
+                super().setUp()
+                self.skipTest("skip after entering fresh_cache()")
+
+            def test_nothing(self):
+                pass
+
+        prior = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+        result = unittest.TestResult()
+        SkipsInSetUp("test_nothing").run(result)
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(os.environ.get("TORCHINDUCTOR_CACHE_DIR"), prior)
+
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
     @requires_gpu_and_triton
@@ -5640,6 +5768,256 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+
+class TestCppCodeCacheKey(TestCase):
+    CODE = 'extern "C" int f() { return 0; }'
+
+    def setUp(self):
+        super().setUp()
+        from torch.compiler import _runtime_cache
+
+        # Frozen C++ kernels another test installed would make every kernel compute
+        # its relocatable key.
+        patcher = mock.patch.dict(_runtime_cache._frozen_cpp_kernels, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _key(self) -> str:
+        CppCodeCache.load_async(self.CODE)
+        (key,) = CppCodeCache.cache
+        return key
+
+    def _frozen_key(self) -> str:
+        """The key a capture records the kernel under; call inside capture_scope()."""
+        from torch.compiler import _runtime_cache
+
+        CppCodeCache.load_async(self.CODE)
+        (key,) = _runtime_cache._capture.cpp_kernels
+        return key
+
+    @contextmanager
+    def _torch_root(self, root: str):
+        # Moves every root the build command's -I and -L flags are derived from.
+        from torch._inductor import cpp_builder
+        from torch.utils import cpp_extension
+
+        torch_path = os.path.join(root, "torch")
+        with (
+            mock.patch.object(cpp_extension, "_TORCH_PATH", torch_path),
+            mock.patch.object(
+                cpp_extension, "TORCH_LIB_PATH", os.path.join(torch_path, "lib")
+            ),
+            mock.patch.object(cpp_builder, "_TORCH_PATH", torch_path),
+        ):
+            yield
+
+    def test_frozen_key_ignores_install_path(self):
+        from torch.compiler._runtime_cache import capture_scope
+
+        keys, paths = [], []
+        for root in ("/install/a", "/install/b"):
+            with fresh_cache(), self._torch_root(root), capture_scope():
+                keys.append(self._frozen_key())
+                (key,) = CppCodeCache.cache
+                binary = CppCodeCache._binary_paths[key]
+                paths.append(os.path.relpath(binary, cache_dir()))
+        self.assertEqual(keys[0], keys[1])
+        # Each install still builds and stores its own binary, so another build
+        # sharing the cache dir never loads it.
+        self.assertNotEqual(paths[0], paths[1])
+
+    def test_key_keeps_install_path(self):
+        from torch.compiler._runtime_cache import capture_scope
+
+        for scope in (nullcontext, capture_scope):
+            keys = []
+            for root in ("/install/a", "/install/b"):
+                with fresh_cache(), self._torch_root(root), scope():
+                    keys.append(self._key())
+            self.assertNotEqual(keys[0], keys[1])
+
+    def test_frozen_key_tracks_torch_build(self):
+        from torch.compiler._runtime_cache import capture_scope
+
+        with fresh_cache(), capture_scope():
+            key = self._frozen_key()
+        with (
+            fresh_cache(),
+            capture_scope(),
+            mock.patch(
+                "torch._inductor.codecache.torch_key", return_value=b"other build"
+            ),
+        ):
+            self.assertNotEqual(self._frozen_key(), key)
+
+    def test_relocation_replaces_whole_path_components(self):
+        from torch._inductor.cpp_builder import normalize_path_separator
+        from torch.utils import cpp_extension
+
+        torch_dir = normalize_path_separator(cpp_extension._TORCH_PATH)
+        parent = os.path.dirname(torch_dir)
+        cache = normalize_path_separator(cache_dir())
+        cmd = _relocatable_command_line(
+            f"cc -I{torch_dir}/include -I{torch_dir}-ext/inc -I/x{torch_dir}/include "
+            f"-L'{torch_dir}/lib' -I{parent}/other_pkg/include "
+            f'/I "{torch_dir}/msvc" /LIBPATH:"{torch_dir}/lib" '
+            f"-I{cache}/include {cache}/halide/libStandaloneHalideRuntime.so"
+        )
+        self.assertIn("-I<torch>/include", cmd)
+        self.assertIn("-L<torch>/lib", cmd)
+        self.assertIn("/I <torch>/msvc", cmd)
+        self.assertIn("/LIBPATH:<torch>/lib", cmd)
+        self.assertIn(f"-I{torch_dir}-ext/inc", cmd)
+        self.assertIn(f"-I/x{torch_dir}/include", cmd)
+        # A package installed next to torch (an SDK wheel, say) keeps its path.
+        self.assertIn(f"-I{parent}/other_pkg/include", cmd)
+        # A library in the cache dir that the kernel links against is named by
+        # absolute path in the binary.
+        self.assertIn(f"-I{cache}/include", cmd)
+        self.assertIn(f" {cache}/halide/libStandaloneHalideRuntime.so", cmd)
+
+    def test_relocation_ignores_whether_the_torch_path_needs_quoting(self):
+        import shlex
+
+        from torch._inductor import cpp_builder
+        from torch.utils import cpp_extension
+
+        cmds = []
+        # The builder quotes the first root's paths and not the second's.
+        for root in ("/srv/job~1/torch", "/srv/job_2/torch"):
+            with (
+                mock.patch.object(cpp_builder, "_TORCH_PATH", root),
+                mock.patch.object(cpp_extension, "_TORCH_PATH", root),
+            ):
+                include = shlex.quote(f"{root}/include")
+                lib = shlex.quote(f"{root}/lib")
+                cmds.append(_relocatable_command_line(f"cc -I{include} -L{lib}"))
+        self.assertEqual(cmds[0], cmds[1])
+
+    def test_relocation_replaces_both_torch_trees(self):
+        from torch._inductor import cpp_builder
+        from torch.utils import cpp_extension
+
+        # cpp_extension's tree follows torch_parent, so it can sit inside
+        # cpp_builder's or next to it.
+        for layout in ("{root}/torch/shared", "{root}/site/torch"):
+            cmds = []
+            for root in ("/install/a", "/install/b"):
+                builder, extension = f"{root}/torch", layout.format(root=root)
+                with (
+                    mock.patch.object(cpp_builder, "_TORCH_PATH", builder),
+                    mock.patch.object(cpp_extension, "_TORCH_PATH", extension),
+                ):
+                    cmds.append(
+                        _relocatable_command_line(
+                            f"cc -I{builder}/include -I{extension}/include "
+                            f"-L{extension}/lib"
+                        )
+                    )
+                self.assertNotIn(root, cmds[-1])
+            self.assertEqual(cmds[0], cmds[1])
+
+    def test_a_load_a_capture_opens_during_is_recorded(self):
+        from torch.compiler import _runtime_cache
+
+        def capture_opens():
+            # Asked as the uncached load starts, before the kernel is built.
+            scope.enter_context(_runtime_cache.capture_scope())
+            return False
+
+        with (
+            fresh_cache(),
+            mock.patch.object(_runtime_cache, "has_frozen_cpp_kernels", capture_opens),
+            ExitStack() as scope,
+        ):
+            CppCodeCache.load_async(self.CODE)
+            self.assertTrue(_runtime_cache.capturing())
+            recorded = len(_runtime_cache._capture.cpp_kernels)
+        self.assertEqual(recorded, 1)
+
+    def test_relocatable_key_only_for_a_capture_or_replay(self):
+        from torch._inductor import codecache
+        from torch.compiler import _runtime_cache
+
+        def relocations():
+            return mock.patch.object(
+                codecache,
+                "_relocatable_command_line",
+                wraps=codecache._relocatable_command_line,
+            )
+
+        with fresh_cache(), relocations() as relocate:
+            CppCodeCache.load_async(self.CODE)
+            relocate.assert_not_called()
+            # A capture records memoized loads too, computing the key once.
+            with _runtime_cache.capture_scope():
+                CppCodeCache.load_async(self.CODE)
+                CppCodeCache.load_async(self.CODE)
+                self.assertEqual(len(_runtime_cache._capture.cpp_kernels), 1)
+            relocate.assert_called_once()
+        # A replay looks up a kernel this process has not loaded yet.
+        with (
+            fresh_cache(),
+            relocations() as relocate,
+            mock.patch.dict(_runtime_cache._frozen_cpp_kernels, {"other": b""}),
+        ):
+            CppCodeCache.load_async(self.CODE)
+            CppCodeCache.load_async(self.CODE)
+            relocate.assert_called_once()
+
+    @unittest.skipIf(
+        sys.platform == "win32", "creating symlinks needs extra privileges on Windows"
+    )
+    def test_frozen_kernel_replays_after_relocation(self):
+        from torch._inductor.cpp_builder import CppBuilder
+        from torch.compiler import _runtime_cache
+        from torch.compiler._runtime_cache import _freeze_cpp_kernels, capture_scope
+        from torch.utils import cpp_extension
+
+        class TorchCppCodeCache(CppCodeCache):
+            cache = {}
+            cpp_compile_command_flags = {"include_pytorch": True}
+
+        # A kernel that includes no torch header, and one that links libtorch_cpu.
+        torch_code = """
+            #include <ATen/Parallel.h>
+            extern "C" int f() { return at::get_num_threads() < 1; }
+        """
+        for cache, code in ((CppCodeCache, self.CODE), (TorchCppCodeCache, torch_code)):
+            with self.subTest(cache=cache.__name__):
+                # The capture and the replay hosts install the same torch at
+                # different roots, and the capture host's is gone by the replay.
+                capture_root, replay_root = tempfile.mkdtemp(), tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, capture_root, ignore_errors=True)
+                self.addCleanup(shutil.rmtree, replay_root)
+                for root in (capture_root, replay_root):
+                    os.symlink(cpp_extension._TORCH_PATH, os.path.join(root, "torch"))
+                cache.cache.clear()
+                with fresh_cache(), self._torch_root(capture_root), capture_scope():
+                    cache.load_async(code)()
+                    payload = _freeze_cpp_kernels(
+                        {
+                            key: path
+                            for key, (path, _) in (
+                                _runtime_cache._capture.cpp_kernels.items()
+                            )
+                        }
+                    )
+                shutil.rmtree(capture_root)
+                cache.cache.clear()
+                # The replay host's Inductor cache is elsewhere too.
+                with (
+                    fresh_cache(),
+                    self._torch_root(replay_root),
+                    mock.patch.dict(
+                        _runtime_cache._frozen_cpp_kernels, pickle.loads(payload)
+                    ),
+                    mock.patch.object(
+                        CppBuilder, "build", side_effect=AssertionError("rebuilt")
+                    ),
+                ):
+                    self.assertEqual(cache.load_async(code)().f(), 0)
 
 
 class TestVecISACheckBuild(TestCase):
@@ -5976,6 +6354,7 @@ class TestCompilationEventLogging(TestCase):
         )
 
 
+@instantiate_parametrized_tests
 class TestAutotuneCacheExtraOptions(TestCase):
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
@@ -5984,6 +6363,121 @@ class TestAutotuneCacheExtraOptions(TestCase):
     options alongside the standard Triton config. These tests verify that
     extra_options is correctly preserved when saving and loading from cache.
     """
+
+    @requires_triton()
+    @parametrize("other_options", [None, {"tile": (8, 16)}])
+    def test_cache_hit_returns_original_extra_options_winner(self, other_options):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for options in (other_options, {"tile": (2, 4)}):
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            cfg.extra_options = options
+            configs.append(cfg)
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIs(result, configs[1])
+        self.assertEqual(result.num_ctas, 2)
+        self.assertEqual(result.extra_options, {"tile": [2, 4]})
+
+    @requires_triton()
+    def test_cache_hit_restores_tuned_extra_options(self):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        initial = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+        initial.extra_options = {"option": 2}
+        configs_hash = hash_configs([initial])
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "kernel.py")
+            cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+            self.assertIsNotNone(cache)
+            initial.extra_options = {"option": 4}
+            cache.save(initial, time_taken_ns=1000)
+
+            candidate = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            candidate.extra_options = {"option": 2}
+            cache = AutotuneCache.create(
+                inductor_meta, filename, hash_configs([candidate])
+            )
+            self.assertIsNotNone(cache)
+            result = cache.read_best(inductor_meta, [candidate])
+
+        self.assertIs(result, candidate)
+        self.assertEqual(result.extra_options, {"option": 4})
+        self.assertEqual(result.num_ctas, 2)
+
+    @requires_triton()
+    @parametrize(
+        "options, winner_options",
+        [
+            ([{"option": 2}, {"option": 3}], {"option": 4}),
+            ([None, None], {"option": 4}),
+            ([None, None], None),
+            ([{"option": 4}, {"option": 4}], {"option": 4}),
+        ],
+    )
+    def test_conflicting_or_ambiguous_extra_options_reconstruct(
+        self, options, winner_options
+    ):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for extra_options in options:
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+            cfg.extra_options = extra_options
+            configs.append(cfg)
+        winner = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        winner.extra_options = winner_options
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(winner, time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.kwargs, winner.kwargs)
+        self.assertEqual(result.num_warps, winner.num_warps)
+        self.assertEqual(result.num_stages, winner.num_stages)
+        self.assertEqual(result.extra_options, winner_options)
+        for cfg in configs:
+            self.assertIsNot(result, cfg)
+        self.assertEqual([cfg.extra_options for cfg in configs], options)
 
     @requires_triton()
     def test_load_cached_autotuning_preserves_extra_options_with_coordesc(self):

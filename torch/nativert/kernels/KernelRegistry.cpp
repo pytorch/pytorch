@@ -116,7 +116,7 @@ static Tensor& c2_argmin_out(
           // input is a [prev_size, n] tensor.
           // output is a [prev_size,] tensor.
           // Thus, access is contiguous/coalesced.
-          for (int i = 0; i < prev_size; ++i) {
+          for (const auto i : c10::irange(prev_size)) {
             auto v = std::min_element(
                 in_ptr + i * n,
                 in_ptr + (i + 1) * n,
@@ -145,10 +145,10 @@ static Tensor& c2_argmin_out(
 
           std::memset(out_ptr, 0, prev_size * next_size * sizeof(int64_t));
 
-          for (int i = 0; i < prev_size; ++i) {
+          for (const auto i : c10::irange(prev_size)) {
             const scalar_t* cur_in_ptr = in_ptr + i * n * next_size + next_size;
             for (int k = 1; k < n; ++k) {
-              for (int j = 0; j < next_size; ++j) {
+              for (const auto j : c10::irange(next_size)) {
                 int64_t* cur_out_ptr = out_ptr + i * next_size + j;
                 if (less_or_nan(
                         *cur_in_ptr,
@@ -215,7 +215,7 @@ static at::Tensor& mul_out(
         const void* self_ptr = self.data_ptr();
 
         at::parallel_for(0, num_elements, 1, [&](int64_t start, int64_t end) {
-          for (int64_t i = start; i < end; ++i) {
+          for (const auto i : c10::irange(start, end)) {
             AT_DISPATCH_ALL_TYPES_AND3(
                 kHalf,
                 kBFloat16,
