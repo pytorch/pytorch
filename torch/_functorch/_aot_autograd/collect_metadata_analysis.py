@@ -24,10 +24,9 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.amp.autocast_mode import (
-    _get_autocast_dtypes,
+    _check_autocast_dtype_enabled_balanced,
     _get_autocast_enabled,
     _preserve_autocast_dtypes,
-    _preserve_autocast_enabled,
     _preserve_autocast_nesting,
 )
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
@@ -237,11 +236,14 @@ def run_functionalized_fw_and_collect_metadata(
             disable_above,
             _preserve_autocast_nesting(),
             _preserve_autocast_dtypes() as prior_autocast_dtypes,
-            _preserve_autocast_enabled() as prior_autocast_enabled,
             mode,
             suppress_pending,
             disable_autocast_cache(),
         ):
+            # Snapshot enabled after ExcludeDispatchKeyGuard enters. Enabled is
+            # the Autocast* excluded-key bit; disable_above restores the full
+            # local excluded set on exit, so no separate enabled preserve.
+            prior_autocast_enabled = _get_autocast_enabled()
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
@@ -270,44 +272,9 @@ def run_functionalized_fw_and_collect_metadata(
 
             # Check before context managers exit so ExcludeDispatchKeyGuard /
             # preserve helpers have not yet restored TLS.
-            current_autocast_enabled = _get_autocast_enabled()
-            enabled_mismatches = []
-            for device_type, prior_enabled in prior_autocast_enabled.items():
-                cur_enabled = current_autocast_enabled[device_type]
-                if prior_enabled != cur_enabled:
-                    enabled_mismatches.append(
-                        f"  {device_type} autocast enabled: was {prior_enabled!r}, became {cur_enabled!r}"
-                    )
-            if enabled_mismatches:
-                raise RuntimeError(
-                    "AOTAutograd detected that the traced graph left autocast enabled "
-                    "state changed:\n"
-                    + "\n".join(enabled_mismatches)
-                    + "\nPrefer `with torch.autocast(...)` so enabled state is restored "
-                    "before the graph exits, or avoid calling torch.set_autocast_enabled / "
-                    "unmanaged _enter_autocast inside the compiled region. If you hit this "
-                    "under torch.compile while using an autocast context manager, please "
-                    "file a bug."
-                )
-
-            current_autocast_dtypes = _get_autocast_dtypes()
-            mismatches = []
-            for device_type, prior_dtype in prior_autocast_dtypes.items():
-                cur_dtype = current_autocast_dtypes[device_type]
-                if prior_dtype != cur_dtype:
-                    mismatches.append(
-                        f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
-                    )
-            if mismatches:
-                raise RuntimeError(
-                    "AOTAutograd detected that the traced graph left autocast dtype "
-                    "changed:\n"
-                    + "\n".join(mismatches)
-                    + "\nPrefer `with torch.autocast(...)` so dtype is restored before "
-                    "the graph exits, or avoid calling torch.set_autocast_dtype inside "
-                    "the compiled region. If you hit this under torch.compile while "
-                    "using an autocast context manager, please file a bug."
-                )
+            _check_autocast_dtype_enabled_balanced(
+                prior_autocast_dtypes, prior_autocast_enabled
+            )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version

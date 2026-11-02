@@ -3,7 +3,8 @@ import collections
 import contextlib
 import functools
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from functools import cache, partial
 from typing import Any
 
 import torch
@@ -87,20 +88,96 @@ def _preserve_autocast_dtypes() -> Iterator[dict[str, torch.dtype]]:
 
 def _get_autocast_enabled() -> dict[str, bool]:
     # Per-device autocast enabled TLS for every _autocast_supported_devices() entry.
+    # Enabled is the Autocast* dispatch-key excluded bit; ExcludeDispatchKeyGuard
+    # restores the full local excluded set on exit, so callers that only need
+    # restore can snapshot with this getter and rely on that guard.
     return {
         device_type: torch.is_autocast_enabled(device_type)
         for device_type in torch._C._autocast_supported_devices()
     }
 
 
-@contextlib.contextmanager
-def _preserve_autocast_enabled() -> Iterator[dict[str, bool]]:
-    prior = _get_autocast_enabled()
-    try:
-        yield prior
-    finally:
-        for device_type, enabled in prior.items():
-            torch.set_autocast_enabled(device_type, enabled)
+def _autocast_dtype_enabled_mismatches(
+    prior_dtypes: dict[str, torch.dtype],
+    prior_enabled: dict[str, bool],
+) -> list[str]:
+    # Report every per-device dtype/enabled mismatch in one list.
+    current_dtypes = _get_autocast_dtypes()
+    current_enabled = _get_autocast_enabled()
+    mismatches: list[str] = []
+    for device_type, prior_enabled_state in prior_enabled.items():
+        cur_enabled = current_enabled[device_type]
+        if prior_enabled_state != cur_enabled:
+            mismatches.append(
+                f"  {device_type} autocast enabled: was {prior_enabled_state!r}, became {cur_enabled!r}"
+            )
+    for device_type, prior_dtype in prior_dtypes.items():
+        cur_dtype = current_dtypes[device_type]
+        if prior_dtype != cur_dtype:
+            mismatches.append(
+                f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
+            )
+    return mismatches
+
+
+def _check_autocast_dtype_enabled_balanced(
+    prior_dtypes: dict[str, torch.dtype],
+    prior_enabled: dict[str, bool],
+) -> None:
+    mismatches = _autocast_dtype_enabled_mismatches(prior_dtypes, prior_enabled)
+    if not mismatches:
+        return
+    raise RuntimeError(
+        "AOTAutograd detected that the traced graph left autocast state changed:\n"
+        + "\n".join(mismatches)
+        + "\nPrefer `with torch.autocast(...)` so dtype and enabled are restored before "
+        "the graph exits, or avoid calling torch.set_autocast_dtype / "
+        "torch.set_autocast_enabled / unmanaged _enter_autocast inside the compiled "
+        "region. If you hit this under torch.compile while using an autocast context "
+        "manager, please file a bug."
+    )
+
+
+_AutocastStateSpec = tuple[str, Callable[[], Any], Callable[[Any], None]]
+_AutocastState = tuple[Any, ...]
+
+
+@cache
+def _autocast_state_specs() -> tuple[_AutocastStateSpec, ...]:
+    # Enabled state and dtype are per-device; cache and nesting are shared.
+    device_specs = tuple(
+        spec
+        for device in torch._C._autocast_supported_devices()
+        for spec in (
+            (
+                f"{device} autocast enabled state",
+                partial(torch.is_autocast_enabled, device),
+                partial(torch.set_autocast_enabled, device),
+            ),
+            (
+                f"{device} autocast dtype",
+                partial(torch.get_autocast_dtype, device),
+                partial(torch.set_autocast_dtype, device),
+            ),
+        )
+    )
+    return device_specs + (
+        (
+            "autocast cache enabled state",
+            torch.is_autocast_cache_enabled,
+            torch.set_autocast_cache_enabled,
+        ),
+        ("autocast nesting depth", _get_autocast_nesting, _set_autocast_nesting),
+    )
+
+
+def _snapshot_autocast_state() -> _AutocastState:
+    return tuple(get() for _, get, _ in _autocast_state_specs())
+
+
+def _restore_autocast_state(snapshot: _AutocastState) -> None:
+    for (_, _, set_), value in zip(_autocast_state_specs(), snapshot):
+        set_(value)
 
 
 def autocast_decorator(autocast_instance, func):

@@ -74,6 +74,12 @@ from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
+from torch.amp.autocast_mode import (
+    _get_autocast_dtypes,
+    _get_autocast_nesting,
+    _restore_autocast_state,
+    _snapshot_autocast_state,
+)
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
     _ModuleStackTracer,
@@ -5505,13 +5511,9 @@ class TestAOTAutocastStates(AOTTestCase):
 
     def setUp(self):
         super().setUp()
-        from torch._dynamo.test_case import _snapshot_autocast_state
-
         self._prior_autocast_state = _snapshot_autocast_state()
 
     def tearDown(self):
-        from torch._dynamo.test_case import _restore_autocast_state
-
         try:
             super().tearDown()
         finally:
@@ -5534,8 +5536,6 @@ class TestAOTAutocastStates(AOTTestCase):
 
     @parametrize("device_type", list(torch._C._autocast_supported_devices()))
     def test_collect_metadata_detects_autocast_dtype_mutation(self, device_type: str):
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
         prior_dtype = torch.get_autocast_dtype(device_type)
         prior_nesting = _get_autocast_nesting()
         new_dtype = torch.bfloat16 if prior_dtype != torch.bfloat16 else torch.float16
@@ -5565,22 +5565,41 @@ class TestAOTAutocastStates(AOTTestCase):
             collect(x)
         self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
 
-    def test_collect_metadata_rejects_autocast_enabled_mutation(self):
-        # Enabled must balance like dtype; TLS is restored after the reject.
-        prior_enabled = torch.is_autocast_enabled("cpu")
+    @parametrize("device_type", list(torch._C._autocast_supported_devices()))
+    def test_collect_metadata_rejects_autocast_enabled_mutation(self, device_type: str):
+        # Enabled must balance like dtype; ExcludeDispatchKeyGuard restores TLS.
+        prior_enabled = torch.is_autocast_enabled(device_type)
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
-            torch.set_autocast_enabled("cpu", not prior_enabled)
+            torch.set_autocast_enabled(device_type, not prior_enabled)
             return [x + 1]
 
         collect, x = self._collect_metadata(f)
-        with self.assertRaisesRegex(RuntimeError, "cpu autocast enabled"):
+        with self.assertRaisesRegex(RuntimeError, f"{device_type} autocast enabled"):
             collect(x)
+        self.assertEqual(torch.is_autocast_enabled(device_type), prior_enabled)
+
+    def test_collect_metadata_rejects_enabled_and_dtype_together(self):
+        # One raise lists every mismatch when both enabled and dtype change.
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        prior_dtype = torch.get_autocast_dtype("cpu")
+        new_dtype = torch.float16 if prior_dtype != torch.float16 else torch.bfloat16
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.set_autocast_enabled("cpu", not prior_enabled)
+            torch.set_autocast_dtype("cpu", new_dtype)
+            return [x + 1]
+
+        collect, x = self._collect_metadata(f)
+        with self.assertRaisesRegex(RuntimeError, "autocast state changed") as ctx:
+            collect(x)
+        msg = str(ctx.exception)
+        self.assertIn("cpu autocast enabled", msg)
+        self.assertIn("cpu autocast dtype", msg)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
+        self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
 
     def test_collect_metadata_restores_autocast_nesting(self):
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
         prior_nesting = _get_autocast_nesting()
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
@@ -5592,8 +5611,6 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     def test_collect_metadata_restores_autocast_nesting_when_forward_raises(self):
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
         prior_nesting = _get_autocast_nesting()
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
@@ -5606,8 +5623,6 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     def test_aot_function_restores_autocast_nesting(self):
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
         prior_nesting = _get_autocast_nesting()
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -5624,8 +5639,6 @@ class TestAOTAutocastStates(AOTTestCase):
         # Unmanaged _enter/_exit_autocast across a graph break leaves enabled
         # unbalanced in the first AOT graph; metadata rejects it. Nesting and
         # enabled TLS must still be restored for the caller.
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
         def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
             m = torch.amp.autocast_mode._enter_autocast("cpu")
             x = x @ y
@@ -5649,8 +5662,6 @@ class TestAOTAutocastStates(AOTTestCase):
     def test_autocast_context_manager_graph_break_aot_eager(self):
         # Balanced with torch.autocast must still compile across graph breaks;
         # Dynamo closes open autocast blocks before the break.
-        from torch.amp.autocast_mode import _get_autocast_dtypes, _get_autocast_nesting
-
         def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
             with torch.autocast("cpu", dtype=torch.float16):
                 x = x @ y
@@ -5685,8 +5696,6 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(torch.is_autocast_cache_enabled(), cache_enabled)
 
     def test_aot_function_allows_balanced_cpu_autocast(self):
-        from torch.amp.autocast_mode import _get_autocast_dtypes, _get_autocast_nesting
-
         # Use a non-default dtype so a balanced region actually mutates then
         # restores autocast dtype TLS (ambient dtype alone would be a no-op).
         def f(x: torch.Tensor) -> torch.Tensor:
