@@ -602,15 +602,23 @@ class TestOrderedColDevice(TestCase):
         # The gate admits 4096 outputs, but the kernel declines fewer than 32 columns.
         x = torch.randn(256, 128, 16, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
-        real = kg._try_indexed_itree
+        real, ordered = kg._try_indexed_itree, ct.reduce_ordered_col
+        served = []
+
+        def record(*args, **kwargs):
+            served.append(ordered(*args, **kwargs))
+            return served[-1]
+
         ccs = (torch.cuda.get_device_capability(device),)
         with (
             mock.patch.object(kg, "_ORDERED_COL_CCS", ccs),
+            mock.patch.object(ct, "reduce_ordered_col", record),
             mock.patch.object(kg, "_try_indexed_itree", wraps=real) as fallback,
         ):
             got = kg.reduce_dim(
                 trait, "fallback", x, 1, torch.float32, order="inner_tree"
             )
+        self.assertEqual(served, [None])
         fallback.assert_called_once()
         self.assertEqual(got, x.sum(dim=1), atol=1e-4, rtol=1e-4)
 
