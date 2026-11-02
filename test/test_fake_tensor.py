@@ -99,7 +99,11 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    BaseTorchDispatchMode,
+    TorchDispatchMode,
+)
 
 
 aten = torch.ops.aten
@@ -5529,17 +5533,27 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertTrue(meta.is_meta)
 
     def test_unsafe_data_ptr_access(self):
-        mode, _ = self._make_mode()
-        self.assertEqual(
-            mode.allow_unsafe_data_ptr_access,
-            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access,
-        )
-        mode.allow_unsafe_data_ptr_access = False
-        fake = torch._C._from_meta_and_device(
-            torch.empty(2, device="meta"), torch.device("cpu"), mode
-        )
+        def make_fake(mode):
+            meta = torch.empty(2, device="meta")
+            return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            strict_mode, _ = self._make_mode()
+        self.assertFalse(strict_mode.allow_unsafe_data_ptr_access)
         with self.assertRaisesRegex(RuntimeError, "data pointer"):
-            fake.data_ptr()
+            make_fake(strict_mode).data_ptr()
+
+        mode, _ = self._make_mode()
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
+        fake = make_fake(mode)
+        fake.data_ptr()
+
+        # Reassigning applies to fakes created afterwards
+        mode.allow_unsafe_data_ptr_access = False
+        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+            make_fake(mode).data_ptr()
+        fake.data_ptr()
 
     def test_fake_dispatch_mode_slot(self):
         _, wrapper = self._make_mode()
@@ -5548,6 +5562,10 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
         torch._C._set_dispatch_mode(wrapper)
         try:
+            self.assertEqual(self._installed(), (wrapper, True))
+            _, other_wrapper = self._make_mode()
+            with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                torch._C._set_dispatch_mode(other_wrapper)
             self.assertEqual(self._installed(), (wrapper, True))
             self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
             self.assertEqual(self._installed(), (None, False))
@@ -5569,10 +5587,22 @@ class TestCppFakeTensorModeBindings(TestCase):
             with unset_fake_temporarily() as old:
                 self.assertIs(old, wrapper)
                 self.assertEqual(self._installed(), (None, False))
+                self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
             self.assertEqual(self._installed(), (wrapper, True))
-            with torch.utils._python_dispatch._disable_current_modes():
-                self.assertEqual(self._installed(), (None, False))
-            self.assertEqual(self._installed(), (wrapper, True))
+            # Python modes on the stack are suspended and restored with it
+            with BaseTorchDispatchMode() as py_mode:
+                with torch.utils._python_dispatch._disable_current_modes():
+                    self.assertEqual(self._installed(), (None, False))
+                    self.assertEqual(torch._C._len_torch_dispatch_stack(), 0)
+                    self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
+                self.assertEqual(self._installed(), (wrapper, True))
+                self.assertIs(_get_current_dispatch_mode(), py_mode)
+                # A failed C++ mode restore still restores the Python modes
+                _, other_wrapper = self._make_mode()
+                with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                    with torch.utils._python_dispatch._disable_current_modes():
+                        torch._C._set_dispatch_mode(other_wrapper)
+                self.assertIs(_get_current_dispatch_mode(), py_mode)
         finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 

@@ -1648,6 +1648,9 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   TORCH_CHECK(!Py_IsNone(mode));
 
   if (PyObject_HasAttrString(mode, "_cpp_mode")) {
+    TORCH_CHECK(
+        c10::impl::FakeTensorModeTLS::get_state() == nullptr,
+        "trying to set the current FAKE, but one already exists");
     auto cpp_mode = py::cast<std::shared_ptr<c10::FakeTensorMode>>(
         py::handle(mode).attr("_cpp_mode"));
     c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
@@ -1700,8 +1703,9 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
     if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
       auto cpp_mode = c10::impl::FakeTensorModeTLS::get_state();
       if (cpp_mode != nullptr) {
-        auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
+        // Clear first: a failed wrapper rebuild must not leave it installed
         c10::impl::FakeTensorModeTLS::reset_state();
+        auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
         return py_mode.release().ptr();
       }
     }
