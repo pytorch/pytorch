@@ -1,6 +1,6 @@
 // Standalone Python extension (torch._nccl_ep) for the NCCL EP bindings.
 //
-// _token_switch.py loads the external EP runtime before importing this module.
+// _token_switch.py prepares the external runtime when EP is not embedded.
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
 #include <torch/csrc/utils/pybind.h>
 
@@ -10,6 +10,8 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(_nccl_ep, m) {
   using namespace c10d::nccl_ep;
+
+  m.attr("_use_system_nccl_ep") = bool(USE_SYSTEM_NCCL_EP);
 
   py::enum_<NcclEpLayout>(m, "Layout")
       .value("FLAT", NcclEpLayout::Flat)

@@ -49,6 +49,8 @@
 #   USE_GLOO=0                disables the gloo backend
 #   USE_MPI=0                 disables the MPI backend
 #   USE_SYSTEM_NCCL=0         use the submoduled nccl instead of system nccl
+#   USE_SYSTEM_NCCL_EP=1      load nccl-extensions instead of embedding NCCL EP;
+#                            defaults to USE_SYSTEM_NCCL when USE_NCCL_EP=1
 #   USE_OPENMP=0              disables OpenMP parallelization
 #   USE_MKLDNN=0              disables MKLDNN
 #   USE_MKLDNN_ACL           enables Compute Library backend for MKLDNN on Arm

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
 
-def _prepare_nccl_ep() -> None:
+def _prepare_nccl_extensions() -> None:
     try:
         # pyrefly: ignore [missing-import]  # optional nccl-extensions package
         import nccl.ep as ep
@@ -21,7 +21,7 @@ def _prepare_nccl_ep() -> None:
         if e.name not in ("nccl", "nccl.ep"):
             raise
         raise ImportError(
-            "TokenSwitchNCCL requires the nccl-extensions package. "
+            "This TokenSwitchNCCL build requires the nccl-extensions package. "
             "Install it with `pip install nccl-extensions==0.1.0`."
         ) from e
 
@@ -32,9 +32,16 @@ def _prepare_nccl_ep() -> None:
 def _import_nccl_ep() -> Any:
     if importlib.util.find_spec("torch._nccl_ep") is None:
         raise ImportError("TokenSwitchNCCL requires PyTorch built with USE_NCCL_EP=1.")
-    _prepare_nccl_ep()
-    # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
-    import torch._nccl_ep as _ep
+    try:
+        # Embedded EP imports without the external Python package.
+        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
+        import torch._nccl_ep as _ep
+    except ImportError as e:
+        if "undefined symbol: ncclEp" not in str(e):
+            raise
+        _prepare_nccl_extensions()
+        # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
+        import torch._nccl_ep as _ep
 
     return _ep
 

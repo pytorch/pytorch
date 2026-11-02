@@ -67,6 +67,10 @@ def requires_nccl_ep():
 class TokenSwitchNCCLLoadingTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    def setUp(self):
+        super().setUp()
+        self.use_system_nccl_ep = _import_nccl_ep()._use_system_nccl_ep
+
     def _run_script(self, script):
         result = subprocess.run(
             [sys.executable, "-c", script],
@@ -78,6 +82,8 @@ class TokenSwitchNCCLLoadingTest(TestCase):
 
     @parametrize("prepare_first", [False, True])
     def test_import_external_library(self, prepare_first):
+        if not self.use_system_nccl_ep:
+            self.skipTest("Test requires USE_SYSTEM_NCCL_EP=1")
         self._run_script(f"""
 import ctypes
 
@@ -106,17 +112,26 @@ expected = ep.get_lib_version()
 checks.assertEqual(version.value, expected.major * 10000 + expected.minor * 100 + expected.micro)
 """)
 
-    def test_missing_runtime_package(self):
-        self._run_script("""
+    def test_without_runtime_package(self):
+        self._run_script(f"""
+import os
 import sys
 from unittest.mock import patch
 
 from torch.distributed._token_switch import _import_nccl_ep
 from torch.testing._internal.common_utils import TestCase
 
-with patch.dict(sys.modules, {"nccl.ep": None}):
-    with TestCase().assertRaisesRegex(ImportError, "nccl-extensions"):
-        _import_nccl_ep()
+checks = TestCase()
+original_env = dict(os.environ)
+with patch.dict(sys.modules, {{"nccl": None, "nccl.ep": None}}):
+    if {self.use_system_nccl_ep!r}:
+        with checks.assertRaisesRegex(ImportError, "nccl-extensions"):
+            _import_nccl_ep()
+    else:
+        native = _import_nccl_ep()
+        checks.assertTrue(hasattr(native, "_NcclEpGroup"))
+        checks.assertFalse(native._use_system_nccl_ep)
+        checks.assertEqual(dict(os.environ), original_env)
 """)
 
 

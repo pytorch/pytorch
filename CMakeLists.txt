@@ -429,9 +429,11 @@ cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
-# The nccl-extensions package supplies the NCCL EP runtime.
+# EP can be embedded or loaded from the nccl-extensions package.
 cmake_dependent_option(USE_NCCL_EP "Build NCCL EP bindings" OFF
                        "USE_NCCL;USE_CUDA" OFF)
+cmake_dependent_option(USE_SYSTEM_NCCL_EP "Use externally provided NCCL EP"
+                       "${USE_SYSTEM_NCCL}" "USE_NCCL_EP" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
@@ -694,6 +696,9 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_PYBIND11 ON)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
+  endif()
+  if(USE_NCCL_EP)
+    set(USE_SYSTEM_NCCL_EP ON)
   endif()
   set(USE_SYSTEM_NVTX ON)
 endif()

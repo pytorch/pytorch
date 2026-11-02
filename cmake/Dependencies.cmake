@@ -1229,8 +1229,7 @@ if(USE_NCCL)
 endif()
 
 # ---[ NCCL EP
-# The header-only target is used by the optional torch._nccl_ep bindings.
-# The nccl-extensions package supplies the runtime library and JIT headers.
+# The optional torch._nccl_ep bindings use embedded or external NCCL EP.
 if(USE_NCCL_EP)
   message(STATUS "USE_NCCL_EP is ON")
   include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
