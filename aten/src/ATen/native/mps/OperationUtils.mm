@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -1621,7 +1622,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
                                              const std::string& name,
                                              std::optional<c10::Scalar> alpha,
-                                             std::optional<c10::ScalarType> scalar_arg_type) {
+                                             std::optional<c10::ScalarType> scalar_arg_type,
+                                             std::optional<c10::Scalar> beta) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1637,7 +1639,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type, beta);
     }
     return;
   }
@@ -1670,7 +1672,8 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
-  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
+  const auto alpha_suffix =
+      alpha.has_value() ? fmt::format("_{}{}", scalarToMetalTypeString(alpha_type), beta ? "_pair" : "") : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto direct_name = fmt::format(
       "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
@@ -1696,7 +1699,16 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
       // everything that follows one slot down, so keep the index runtime
       unsigned idx = 4;
       if (alpha) {
-        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), idx++);
+        const auto a = getMPSScalar(*alpha, alpha_type);
+        if (beta) {
+          const auto b = getMPSScalar(*beta, alpha_type);
+          std::array<uint8_t, 2 * sizeof(a.value)> params;
+          std::memcpy(params.data(), &a.value, a.size);
+          std::memcpy(params.data() + a.size, &b.value, b.size);
+          [computeEncoder setBytes:params.data() length:a.size + b.size atIndex:idx++];
+        } else {
+          mtl_setBytes(computeEncoder, a, idx++);
+        }
       }
       const std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
                                         static_cast<int>(other1.scalar_type()),
