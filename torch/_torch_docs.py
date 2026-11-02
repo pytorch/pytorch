@@ -1418,10 +1418,18 @@ memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
 a gradient, and if :attr:`obj` is also a tensor with an autograd history then the
 returned tensor will have the same history.
 
-When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support (or its
-``__dlpack__`` export fails) but implements Python's buffer protocol then the buffer is
-interpreted as an array of bytes grouped according to the size of the datatype passed to
-the :attr:`dtype` keyword argument. If no :attr:`dtype` is passed then it is inferred from
+An object with a ``__dlpack__`` method is read through DLPack, even if it also implements
+Python's buffer protocol or ``__cuda_array_interface__``. By default it may export a copy
+when it cannot share its memory. With ``copy=False`` it is asked not to, and the error it
+raises is propagated; a ``__dlpack__`` method without a ``copy`` parameter cannot be asked,
+so it is trusted to share its memory. If reading :attr:`obj` through DLPack fails and
+:attr:`copy` is not ``False``, then a C-contiguous buffer, as described below, or
+``__cuda_array_interface__`` is used instead if :attr:`obj` has one, and otherwise the
+error is propagated.
+
+When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support but implements
+Python's buffer protocol then the buffer is interpreted as an array of bytes grouped
+according to the size of the datatype passed to the :attr:`dtype` keyword argument. If no :attr:`dtype` is passed then it is inferred from
 the buffer's format, and an error is raised if the format cannot be mapped to a PyTorch
 datatype, in which case :attr:`dtype` must be passed explicitly. The returned tensor will
 have the specified (or inferred) datatype and, by default, be on the CPU device and share
