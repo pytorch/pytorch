@@ -66,7 +66,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
 
     std::vector<int64_t> new_shape;
     new_shape.reserve(l_diff);
-    for (size_t i = 0; i < l_diff; i ++) {
+    for (const auto i : c10::irange(l_diff)) {
         new_shape.emplace_back(input_sizes[i]);
     }
 

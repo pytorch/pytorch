@@ -8236,60 +8236,15 @@ for shape in [(1,), ()]:
             checkpoint_sequential(modules_list, 3, a)
 
     @skipIfTorchDynamo("GraphExecGroup does not support compile")
-    def test_checkpoint_graph_execution_group(self):
-        def run(use_graph_execution_group):
-            counter = [0]
-
-            def fn(x):
-                counter[0] += 1
-                y = x.sin().cos()
-                z = y.sin().cos()
-                return y, z
-
-            x = torch.randn(3, 3, requires_grad=True)
-
-            y, z = checkpoint(fn, x, use_reentrant=False)
-
-            group = torch.utils.checkpoint.GraphExecGroup()
-
-            ctx = contextlib.nullcontext()
-            if use_graph_execution_group:
-                ctx = group
-
-            with ctx:
-                (grad_y,) = torch.autograd.grad(
-                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3),)
-                )
-
-                (grad_x,) = torch.autograd.grad(
-                    y,
-                    inputs=(x,),
-                    grad_outputs=(grad_y,),
-                )
-
-            if use_graph_execution_group:
-                self.assertEqual(counter[0], 2)
-            else:
-                self.assertEqual(counter[0], 3)
-
-        run(use_graph_execution_group=True)
-        run(use_graph_execution_group=False)
-
-        # Test the not actually disjoint case (using retain_graph=True since
-        # otherwise autograd itself will catch this)
-        def fn(x):
-            return x.sin().cos()
-
-        x = torch.randn(3, 3, requires_grad=True)
-        out = checkpoint(fn, x, use_reentrant=False)
-        with torch.utils.checkpoint.GraphExecGroup():
-            # Under this context, we will enforce that two backward are disjoint
-            # even if retain_graph=True.
-            out.sum().backward(retain_graph=True)
-            with self.assertRaisesRegex(
-                RuntimeError, "Performing two backward calls that overlap"
-            ):
-                out.sum().backward()
+    def test_graph_exec_group_inference_mode(self):
+        group = torch.utils.checkpoint.GraphExecGroup()
+        with group:
+            self.assertIs(torch._C._get_graph_exec_group(), group)
+            for enabled in (True, False):
+                with torch.inference_mode(enabled):
+                    self.assertIs(torch._C._get_graph_exec_group(), group)
+                self.assertIs(torch._C._get_graph_exec_group(), group)
+        self.assertIsNone(torch._C._get_graph_exec_group())
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
@@ -13756,11 +13711,28 @@ class TestAutogradDeviceType(TestCase):
         t4 = t1 * t1
         t5 = TestAutograd.SimulateBackwardError.apply(t4)
 
-        # Child gpu graph (much longer than parent graph).
+        # Child gpu graph.
         prev = t2 * t2
         for _ in range(10):
             prev = prev * t2
         reentrant_root = prev
+
+        # The parent's error does not cancel a reentrant child graph that has
+        # already started, so start the child before the parent errors and
+        # hold it until the parent has raised.
+        child_started = threading.Event()
+        parent_errored = threading.Event()
+        child_done = threading.Event()
+
+        def hold_child(grad):
+            child_started.set()
+            parent_errored.wait(timeout=60)
+
+        def wait_for_child(grad):
+            child_started.wait(timeout=60)
+
+        reentrant_root.register_hook(hold_child)
+        t5.register_hook(wait_for_child)
 
         class ReentrantFunc(Function):
             @staticmethod
@@ -13769,23 +13741,29 @@ class TestAutogradDeviceType(TestCase):
 
             @staticmethod
             def backward(ctx, grad):
-                # Reentrant backward in child will take much longer.
                 reentrant_root.backward(grad)
+                child_done.set()
                 return grad
 
         # Parent gpu graph.
         t6 = ReentrantFunc.apply(t3)
         t7 = t6 * t6
 
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
+        try:
+            # The parent raises without waiting for the held child.
+            with self.assertRaisesRegex(Exception, "Simulate error"):
+                torch.autograd.backward([t5.sum(), t7.sum()])
+            self.assertFalse(child_done.is_set())
+        finally:
+            parent_errored.set()
 
-        # No grads should be accumulated since child graph will stop execution
-        # after parent receives error.
-        self.assertIsNone(t2.grad)
-        self.assertIsNone(t1.grad)
+        self.assertTrue(child_started.is_set())
+        # The child is its own graph task and runs to completion.
+        self.assertTrue(child_done.wait(timeout=60))
+        self.assertIsNotNone(t2.grad)
+        # The parent errored, so it must not run the rest of its graph.
         self.assertIsNone(t3.grad)
+        self.assertIsNone(t1.grad)
 
     @onlyAccelerator
     def test_reentrant_parent_error_on_cpu(self, device):
@@ -15034,6 +15012,68 @@ class TestAutogradDeviceType(TestCase):
             # Without saving + recasting the autocast type, would raise error in autograd
             # about mismatched dtypes.
             loss.backward()  # triggers recomputation to check it runs in bfloat
+
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
+    def test_checkpoint_graph_execution_group(self, device):
+        # Backward on an accelerator runs on an autograd device worker thread,
+        # so the checkpoint unpack hook only sees the group via ThreadLocalState.
+        def run(use_graph_execution_group):
+            counter = [0]
+            tids = set()
+
+            def fn(x):
+                counter[0] += 1
+                tids.add(threading.get_ident())
+                y = x.sin().cos()
+                z = y.sin().cos()
+                return y, z
+
+            x = torch.randn(3, 3, device=device, requires_grad=True)
+
+            y, z = checkpoint(fn, x, use_reentrant=False)
+
+            group = torch.utils.checkpoint.GraphExecGroup()
+
+            ctx = contextlib.nullcontext()
+            if use_graph_execution_group:
+                ctx = group
+
+            with ctx:
+                (grad_y,) = torch.autograd.grad(
+                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3, device=device),)
+                )
+
+                (grad_x,) = torch.autograd.grad(
+                    y,
+                    inputs=(x,),
+                    grad_outputs=(grad_y,),
+                )
+
+            if use_graph_execution_group:
+                self.assertEqual(counter[0], 2)
+            else:
+                self.assertEqual(counter[0], 3)
+            if device != "cpu":
+                self.assertGreater(len(tids), 1)
+
+        run(use_graph_execution_group=True)
+        run(use_graph_execution_group=False)
+
+        # Test the not actually disjoint case (using retain_graph=True since
+        # otherwise autograd itself will catch this)
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        out = checkpoint(fn, x, use_reentrant=False)
+        with torch.utils.checkpoint.GraphExecGroup():
+            # Under this context, we will enforce that two backward are disjoint
+            # even if retain_graph=True.
+            out.sum().backward(retain_graph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, "Performing two backward calls that overlap"
+            ):
+                out.sum().backward()
 
 
 class TestAllowMutationOnSaved(TestCase):
