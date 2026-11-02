@@ -7855,6 +7855,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True
+            inductor_meta["rocm_reduction_heuristic"] = (
+                config.triton.rocm_reduction_heuristic
+            )
         if config.is_fbcode():
             inductor_meta["is_fbcode"] = True
         if config.profile_bandwidth:

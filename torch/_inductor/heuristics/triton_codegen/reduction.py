@@ -748,7 +748,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
 @register_codegen_heuristic("reduction", "hip", register=torch.version.hip is not None)
 class ROCmReductionHeuristic(ReductionHeuristic):
-    """Reduction configs for ROCm/HIP devices."""
+    """Reduction configs for ROCm/HIP devices (wave64, MI300-class CUs)."""
 
     def _max_r0_block(self, device_major: int | None) -> int:
         # gfx major is not an NVIDIA SM version, so keep the default cap.
@@ -763,8 +763,40 @@ class ROCmReductionHeuristic(ReductionHeuristic):
         num_dynamic,
         register_intensive,
     ):
-        # HIP uses simple outer config (no outer_config_opt)
-        return make_config(64, 8, register_intensive=register_intensive)
+        if not inductor_meta.get("rocm_reduction_heuristic", False):
+            # HIP uses simple outer config (no outer_config_opt)
+            return make_config(64, 8, register_intensive=register_intensive)
+        # Column reductions are bandwidth bound. Shrink XBLOCK until the grid has at
+        # least one program per CU.
+        x = size_hints["x"]
+        num_load = max(inductor_meta.get("num_load", 1), 1)
+        if num_load == 1 and 64 * 64 <= x < 512 * 1024:
+            # Mid-size x: fewer than 1024 programs at 512 wide is too few waves to
+            # hide latency, so keep XBLOCK=64 (RBLOCK=16 once x reaches 128K).
+            r_block = 16 if x >= 64 * 2048 else 8
+            return make_config(
+                64, r_block, num_warps=4, register_intensive=register_intensive
+            )
+        if num_load == 1:
+            # Wide x tile with RBLOCK=8: stays fast when the runtime number of rows
+            # per split is small (a tall RBLOCK would be mostly masked).
+            x_block = 512
+            while x_block > 1 and (x + x_block - 1) // x_block < 256:
+                x_block //= 2
+            r_block = max(min(4096 // x_block, next_power_of_2(rnumel), 2048), 8)
+            num_warps = 2 if x_block >= 256 else 8
+        else:
+            # Multi-load: scale the tile down with the number of loads to keep VGPR
+            # pressure in check (never below the old 64x8 tile).
+            tile = max(4096 // next_power_of_2(num_load), 512)
+            x_block = 64
+            while x_block > 1 and (x + x_block - 1) // x_block < 256:
+                x_block //= 2
+            r_block = max(min(tile // x_block, next_power_of_2(rnumel), 2048), 8)
+            num_warps = max(tile // 512, 4)
+        return make_config(
+            x_block, r_block, num_warps=num_warps, register_intensive=register_intensive
+        )
 
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
         hip_configs = [
@@ -784,6 +816,42 @@ class ROCmReductionHeuristic(ReductionHeuristic):
 
     def _persistent_xblock_vals(self) -> list[int]:
         return [1, 4, 8, 16, 32, 64, 128, 256]
+
+    def _persistent_inner_config(
+        self,
+        size_hints,
+        rnumel,
+        xnumel,
+        inductor_meta,
+        reduction_hint,
+        warp_size: int = 32,
+    ) -> list[Config]:
+        if (
+            inductor_meta.get("rocm_reduction_heuristic", False)
+            and inductor_meta.get("num_load", 0) >= 8
+        ):
+            from torch._inductor.runtime.triton_heuristics import (
+                triton_config_reduction,
+            )
+
+            # Rows that read many inputs (e.g. a LayerNorm backward fused with the
+            # sum of several matmul outputs) run out of VGPRs at XBLOCK=4 with one
+            # wave64 warp; one row per program with two warps keeps occupancy up.
+            return [
+                triton_config_reduction(
+                    size_hints,
+                    1,
+                    rnumel,
+                    register_intensive=True,
+                    num_warps=2,
+                    min_num_warps=1,
+                    reduction_hint=reduction_hint,
+                    warp_size=warp_size,
+                )
+            ]
+        return super()._persistent_inner_config(
+            size_hints, rnumel, xnumel, inductor_meta, reduction_hint, warp_size
+        )
 
     def _persistent_max_autotune_extras(self, configs, tiny_configs):
         for conf in tiny_configs:
