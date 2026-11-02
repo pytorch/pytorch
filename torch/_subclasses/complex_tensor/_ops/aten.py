@@ -232,9 +232,7 @@ INDUCTOR_OPS = [
 ]
 
 for inductor_op in INDUCTOR_OPS:
-    globals()[_get_func_name(inductor_op)] = register_force_test(
-        inductor_op, register_inductor(inductor_op)
-    )
+    globals()[_get_func_name(inductor_op)] = register_inductor(inductor_op)
 
 del inductor_op
 
