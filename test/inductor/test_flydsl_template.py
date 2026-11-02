@@ -21,13 +21,21 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
-from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+from torch._inductor.runtime.flydsl_cache import (
+    LazyFlyDSLLauncher,
+    precompile_flydsl_template,
+    run_cached_flydsl,
+    run_flydsl_template,
+)
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_quantized import _floatx_unpacked_to_f32, to_mxfp
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -597,6 +605,86 @@ class TestFlyDSLTemplate(TestCase):
         cache_lock.__enter__.assert_not_called()
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
+
+    def test_lazy_template_launcher(self):
+        launchers = [object(), object(), object()]
+        factory = mock.Mock(side_effect=launchers)
+        lazy_launcher = LazyFlyDSLLauncher(factory)
+        device_0 = SimpleNamespace(type="cuda", index=0)
+        device_1 = SimpleNamespace(type="cuda", index=1)
+        with mock.patch("os.getpid", return_value=100):
+            self.assertIs(lazy_launcher.get(device_0), launchers[0])
+            self.assertIs(lazy_launcher.get(device_0), launchers[0])
+            self.assertIs(lazy_launcher.get(device_1), launchers[1])
+        with mock.patch("os.getpid", return_value=101):
+            self.assertIs(lazy_launcher.get(device_0), launchers[2])
+        self.assertEqual(factory.call_count, 3)
+
+    @parametrize("compile_only", (False, True))
+    def test_run_flydsl_template(self, compile_only):
+        jit_func = SimpleNamespace()
+        dispatch = mock.Mock()
+
+        def compiler(_jit_func, *args):
+            if not compile_only:
+                dispatch(*args)
+            return dispatch
+
+        compiler_mock = mock.Mock(side_effect=compiler)
+        converted = []
+
+        def convert(tensor):
+            converted.append(tensor)
+            return _CacheParam(str(id(tensor)))
+
+        tensor = SimpleNamespace(device=SimpleNamespace(index=0))
+        args = (tensor, object(), 0)
+        env = {
+            "COMPILE_ONLY": "1" if compile_only else "0",
+            "FLYDSL_COMPILE_ONLY": "1" if compile_only else "0",
+        }
+        with mock.patch.dict(os.environ, env):
+            run_flydsl_template(
+                jit_func,
+                args,
+                compiler=compiler_mock,
+                tensor_converter=convert,
+            )
+            run_flydsl_template(
+                jit_func,
+                args,
+                compiler=compiler_mock,
+                tensor_converter=convert,
+            )
+        self.assertEqual(compiler_mock.call_count, 2 if compile_only else 1)
+        self.assertEqual(dispatch.call_count, 0 if compile_only else 2)
+        self.assertEqual(len(converted), 4 if compile_only else 3)
+
+    def test_precompile_flydsl_template(self):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        def kernel(mat1, bias, output, stream):
+            self.assertIsInstance(mat1, FakeTensor)
+            self.assertEqual(mat1.shape, (2, 3))
+            self.assertEqual(bias.dtype, torch.float32)
+            self.assertEqual(output.stride(), (3, 1))
+            self.assertEqual(stream, 0)
+            self.assertEqual(os.environ["COMPILE_ONLY"], "1")
+            self.assertEqual(os.environ["FLYDSL_COMPILE_ONLY"], "1")
+
+        metadata = {
+            "mat1": ((2, 3), (4, 1), "bfloat16"),
+            "bias": ((3,), (1,), "float32"),
+            "output": ((2, 3), (3, 1), "bfloat16"),
+        }
+        precompile_flydsl_template(
+            kernel,
+            ("mat1", "bias"),
+            {name: values[0] for name, values in metadata.items()},
+            {name: values[1] for name, values in metadata.items()},
+            {name: values[2] for name, values in metadata.items()},
+            "gfx950",
+        )
 
     def test_compiled_cache_compiles_for_device_arch(self):
         """A cold compile targets the dispatch device's arch, not a guess."""
@@ -2090,6 +2178,80 @@ def _scaled_mm_mxfp(
     )
 
 
+class TestFlyDSLHTIDevice(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not torch.version.hip or not flydsl_utils.runtime_available():
+            self.skipTest("requires ROCm and FlyDSL")
+        if torch.cuda.get_device_properties().gcnArchName.split(":")[0] != "gfx950":
+            self.skipTest("requires gfx950")
+        torch.manual_seed(2026)
+
+    @largeTensorTest("2GB", device="cuda")
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_hti_two_k_tiles_with_concurrent_copy(self, device, dtype):
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+            GEMM_DTYPE_BF16,
+            GEMM_DTYPE_FP16,
+            gemm_gfx950,
+            make_gemm_gfx950_param,
+        )
+
+        # Two K tiles skip the main loop; concurrent memory traffic exposes
+        # the leading wave group's outstanding stage-1 A-half-0 copies.
+        m = n = 8192
+        k = 128
+        param = make_gemm_gfx950_param(
+            dtype_id=GEMM_DTYPE_BF16 if dtype == torch.bfloat16 else GEMM_DTYPE_FP16,
+            tile_m=256,
+            tile_n=256,
+            tile_k=64,
+            m_waves=2,
+            n_waves=4,
+            use_half_tile_interleaved=True,
+            a_is_transposed=False,
+            b_is_transposed=True,
+        )
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(n, k, device=device, dtype=dtype).t()
+        out = torch.empty(m, n, device=device, dtype=dtype)
+        args = [flyc.from_torch_tensor(t).mark_layout_dynamic() for t in (out, a, b)]
+        args.extend((param, fx.Stream(torch.cuda.current_stream(device).cuda_stream)))
+        launch = flyc.compile(gemm_gfx950, *args)
+        launch(*args)
+        golden = out.clone()
+        self.assertEqual(golden, torch.mm(a, b), atol=3e-2, rtol=2e-1)
+        torch.cuda.synchronize(device)
+
+        src = torch.empty(256 << 20, dtype=torch.uint8, device=device)
+        dst = torch.empty_like(src)
+        side_stream = torch.cuda.Stream(device=device)
+        bad_launches = torch.zeros((), dtype=torch.int64, device=device)
+        launches = 1000
+        side_stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            for _ in range(launches):
+                with torch.cuda.stream(side_stream):
+                    dst.copy_(src)
+                out.fill_(float("nan"))
+                launch(*args)
+                bad_launches += (out != golden).any()
+        finally:
+            torch.cuda.synchronize(device)
+        bad_launches = bad_launches.item()
+        self.assertEqual(
+            bad_launches,
+            0,
+            msg=f"{bad_launches} of {launches} launches differ from the idle-GPU output",
+        )
+
+
+instantiate_device_type_tests(TestFlyDSLHTIDevice, globals(), only_for="cuda")
+
+
 class TestFlyDSLMXFPDevice(TestCase):
     def setUp(self):
         super().setUp()
@@ -2119,8 +2281,15 @@ class TestFlyDSLMXFPDevice(TestCase):
         )
         self.assertEqual(param.scale_chunk_tiles, max(2, 65536 // (tile_m * tile_k)))
         self.assertEqual(param.scale_row_bytes, tile_k * param.scale_chunk_tiles // 32)
-        # Even/odd double tiles and a tail after repeatedly recycling both slots.
-        for k in (2 * tile_k, 3 * tile_k, 5 * tile_k * param.scale_chunk_tiles + 128):
+        # Include even tails away from scale-chunk boundaries, including
+        # after both scale slots have been recycled.
+        for k in (
+            2 * tile_k,
+            3 * tile_k,
+            4 * tile_k,
+            5 * tile_k * param.scale_chunk_tiles,
+            5 * tile_k * param.scale_chunk_tiles + 128,
+        ):
             with (
                 self.subTest(k=k),
                 inductor_config.patch(

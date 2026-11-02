@@ -14,6 +14,7 @@ from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -21,6 +22,8 @@ from torch.testing._internal.common_utils import (
 
 @instantiate_parametrized_tests
 class TestLayoutFreezing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _flexible_buffer(self, size=(8, 128)):
         layout = ir.FlexibleLayout(
             device=torch.device("cpu"), dtype=torch.float32, size=list(size)
