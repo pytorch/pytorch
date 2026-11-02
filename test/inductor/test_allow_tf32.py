@@ -105,7 +105,9 @@ class TestAllowTf32Interface(TestCase):
 
 @instantiate_parametrized_tests
 class TestAllowTf32DynamicShapes(TestCase):
-    def _gate(self, m, *, aot_mode=False, precision="tf32"):
+    def _gate(
+        self, m, *, aot_mode=False, precision="tf32", dtype=torch.float32, tf32=True
+    ):
         shape_env = ShapeEnv()
         if m == "unbacked":
             sym_m = shape_env.create_unbacked_symint().node.expr
@@ -116,8 +118,15 @@ class TestAllowTf32DynamicShapes(TestCase):
         orig = torch.backends.cuda.matmul.fp32_precision
         try:
             torch.backends.cuda.matmul.fp32_precision = precision
-            with V.set_graph_handler(graph):
-                result = mm_allow_tf32(sym_m, 512, 512, "cuda")
+            with (
+                V.set_graph_handler(graph),
+                mock.patch("torch.cuda.is_available", return_value=True),
+                mock.patch("torch.cuda.is_tf32_supported", return_value=tf32),
+                mock.patch(
+                    f"{mm_allow_tf32.__module__}.using_b200", return_value=False
+                ),
+            ):
+                result = mm_allow_tf32(sym_m, 512, 512, "cuda", dtype)
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
         return result, [
@@ -133,6 +142,14 @@ class TestAllowTf32DynamicShapes(TestCase):
 
     def test_cuda_gate_no_guard_without_tf32(self):
         self.assertEqual(self._gate(1024, precision="ieee"), (False, []))
+
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_cuda_gate_no_guard_for_non_fp32(self, dtype):
+        # ALLOW_TF32 only affects fp32 dots, so other dtypes keep the proof.
+        self.assertEqual(self._gate(1024, dtype=dtype), (False, []))
+
+    def test_cuda_gate_no_guard_without_tf32_hardware(self):
+        self.assertEqual(self._gate(1024, tf32=False), (False, []))
 
     def test_cuda_gate_aot_mode_needs_proof(self):
         # AOT mode never checks guards at runtime, so a hint alone is not enough.
@@ -160,16 +177,21 @@ class TestAllowTf32ExtraKwargs(TestCase):
         super().tearDown()
 
     def _mm_kernel_inputs(
-        self, device_type: str, m: int = 2, n: int = 2, k: int = 2
+        self,
+        device_type: str,
+        m: int = 2,
+        n: int = 2,
+        k: int = 2,
+        dtype: torch.dtype = torch.float32,
     ) -> MMKernelInputs:
         device = torch.device(device_type)
         mat1 = Buffer(
             name="mat1",
-            layout=FixedLayout(device, torch.float32, (m, k)),
+            layout=FixedLayout(device, dtype, (m, k)),
         )
         mat2 = Buffer(
             name="mat2",
-            layout=FixedLayout(device, torch.float32, (k, n)),
+            layout=FixedLayout(device, dtype, (k, n)),
         )
         return MMKernelInputs([mat1, mat2])
 
@@ -215,26 +237,30 @@ class TestAllowTf32ExtraKwargs(TestCase):
             torch.backends.cuda.matmul.fp32_precision = orig
 
     @parametrize(
-        "b200,hip,mnk,expected",
+        "b200,hip,mnk,dtype,expected",
         [
-            (False, None, (16, 512, 512), True),
-            (False, None, (1365, 512, 320), False),
-            (False, None, (15, 4096, 4096), False),
-            (True, None, (1365, 512, 320), True),
-            (True, None, (16, 128, 128), True),
-            (True, None, (15, 4096, 4096), False),
-            (True, "7.0", (1365, 512, 320), False),
+            (False, None, (16, 512, 512), torch.float32, True),
+            (False, None, (1365, 512, 320), torch.float32, False),
+            (False, None, (15, 4096, 4096), torch.float32, False),
+            (True, None, (1365, 512, 320), torch.float32, True),
+            (True, None, (16, 128, 128), torch.float32, True),
+            (True, None, (15, 4096, 4096), torch.float32, False),
+            (True, "7.0", (1365, 512, 320), torch.float32, False),
+            (True, None, (1365, 512, 320), torch.bfloat16, False),
         ],
     )
-    def test_cuda_shape_threshold_b200(self, b200, hip, mnk, expected):
-        # B200 drops the min(N, K) >= 512 term. Other GPUs and ROCm keep it.
-        kernel_inputs = self._mm_kernel_inputs("cuda", *mnk)
+    def test_cuda_shape_threshold_b200(self, b200, hip, mnk, dtype, expected):
+        # B200 drops the min(N, K) >= 512 term for fp32. Other GPUs, ROCm and
+        # non-fp32 dtypes keep it.
+        kernel_inputs = self._mm_kernel_inputs("cuda", *mnk, dtype=dtype)
         orig = torch.backends.cuda.matmul.fp32_precision
         try:
             torch.backends.cuda.matmul.fp32_precision = "tf32"
             with (
                 mock.patch(f"{mm_allow_tf32.__module__}.using_b200", return_value=b200),
                 mock.patch("torch.version.hip", hip),
+                mock.patch("torch.cuda.is_available", return_value=True),
+                mock.patch("torch.cuda.is_tf32_supported", return_value=True),
             ):
                 extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
         finally:

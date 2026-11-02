@@ -1718,13 +1718,15 @@ class TestMaxAutotune(TestCase):
         compiled = torch.compile(fn, backend=cnt)
 
         def run(m):
-            a = torch.randn(*b.shape[:-2], m, b.shape[-2], device=GPU_TYPE)
+            a = torch.randn(
+                *b.shape[:-2], m, b.shape[-2], device=GPU_TYPE, dtype=b.dtype
+            )
             mark(a, a.dim() - 2)
             codes = []
             with mock.patch.object(GraphLowering, "save_output_code", codes.append):
                 out = compiled(a, b)
             ref = fn(a.double(), b.double())
-            err = ((out - ref).abs().max() / ref.abs().max()).item()
+            err = ((out.double() - ref).abs().max() / ref.abs().max()).item()
             return err, codes
 
         return cnt, run
@@ -1794,6 +1796,30 @@ class TestMaxAutotune(TestCase):
         err, codes = run(8)
         self.assertEqual(codes, [])
         self.assertLessEqual(err, 1e-5)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @parametrize("op,max_autotune", [("mm", True), ("bmm", True), ("bmm", False)])
+    @config.patch({"test_configs.max_mm_configs": 1, "fx_graph_cache": False})
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_dynamic_m_bf16_no_guard(self, op, max_autotune):
+        # ALLOW_TF32 only affects fp32 dots, so bf16 adds no guard even with TF32 on.
+        torch._dynamo.reset()
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        fn = torch.mm if op == "mm" else torch.bmm
+        b = torch.randn(
+            *(() if op == "mm" else (2,)),
+            512,
+            512,
+            device=GPU_TYPE,
+            dtype=torch.bfloat16,
+        )
+        with config.patch(max_autotune=max_autotune):
+            cnt, run = self._compile_mm_counting(fn, b, torch._dynamo.mark_dynamic)
+            for m in (1024, 8, 2048):
+                run(m)
         self.assertEqual(cnt.frame_count, 1)
 
     @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
