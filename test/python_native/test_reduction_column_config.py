@@ -6,10 +6,7 @@ from unittest.mock import patch
 
 import torch
 from torch import _native as native
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -57,6 +54,9 @@ class TestColumnConfig(TestCase):
         cfg = self.select(dtype=torch.float16, size=16, columns=256)
         self.assertEqual(cfg.npar, 512)
         self.assertEqual(cfg.vec, 4)
+        # Partition-major partials start at B * C >= 8192 kept outputs.
+        for kw in ({"columns": 8192}, {"columns": 1024, "batches": 8}):
+            self.assertEqual(self.select(**kw).partial_layout, "partition")
 
     def test_partitions_keep_int32_partial_indices(self):
         """Cap default partitions at Int32 partial indices; reject explicit overflow."""
@@ -86,18 +86,19 @@ class TestColumnConfig(TestCase):
 class TestColumnCombine(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @onlyCUDA
     @parametrize(
-        "dtype,op,pattern,tile_columns",
+        "dtype,op,pattern,width,shape",
         [
-            (torch.float32, "sum", "signed", 8),
-            (torch.bfloat16, "argmax", "nonfinite_ties", 8),
-            (torch.float32, "var_mean", "offset", 32),
+            (torch.float32, "sum", "signed", 8, (257, 260)),
+            (torch.bfloat16, "argmax", "nonfinite_ties", 8, (257, 260)),
+            (torch.float32, "var_mean", "offset", 32, (257, 260)),
+            (torch.float32, "var_mean", "offset", 16, (3, 257, 36)),
+            (torch.float32, "mean", "signed", 16, (3, 257, 36)),
         ],
     )
-    def test_tiled_combine_numerics(self, device, dtype, op, pattern, tile_columns):
-        """Validate one-field, indexed, and multi-output tiled combines."""
-        x = torch.randn((257, 260), device=device, dtype=dtype)
+    def test_tiled_combine_numerics(self, device, dtype, op, pattern, width, shape):
+        """Validate one-field, indexed, multi-output, and batched tiled combines."""
+        x = torch.randn(shape, device=device, dtype=dtype)
         if pattern == "offset":
             x.mul_(8).add_(1024)
         elif pattern == "nonfinite_ties":
@@ -111,22 +112,21 @@ class TestColumnCombine(TestCase):
             "sum": T.SumOps,
             "argmax": T.ArgMaxOps,
             "var_mean": T.VarMeanOps,
+            "mean": T.MeanOps,
         }
         kw = {"correction": 0} if op == "var_mean" else {}
         trait = traits[op](acc=cutlass.Float32, **kw)
         nouts = 2 if op == "var_mean" else 1
         odt = torch.int64 if op == "argmax" else torch.float32
-        cfg = ct.ColConfig("test_tiled", 64, 7, 4, "partition", tile_columns)
+        cfg = ct.ColConfig("test_tiled", 64, 7, 4, "partition", width)
 
         def reference():
             with (
                 native._unconditional_masked(),
                 torch.backends.python_native.cutedsl.disabled(),
             ):
-                kw = {"correction": 0} if op == "var_mean" else {}
-                if op == "sum":
-                    kw["dtype"] = torch.float32
-                result = getattr(torch, op)(x, dim=0, **kw)
+                ref_kw = dict(kw, dtype=torch.float32) if op == "sum" else kw
+                result = getattr(torch, op)(x, dim=x.dim() - 2, **ref_kw)
             return tuple(result) if nouts == 2 else (result,)
 
         def run():
@@ -144,7 +144,27 @@ class TestColumnCombine(TestCase):
         tol = 0 if op == "argmax" else 0.016 if dtype == torch.bfloat16 else 1e-4
         with patch.object(ct, "select_col_config", return_value=cfg):
             got = run()
+        self.assertIn(("coltile2t", f"test_tiled_{op}"), {k[:2] for k in ct._CACHE})
         self.assertEqual(got, reference(), rtol=tol, atol=tol, equal_nan=True)
+
+    @parametrize(
+        "layout,width,error",
+        [
+            ("column", 8, "partition-major"),
+            ("rows", 0, "unknown partial layout"),
+            ("partition", 64, "combine_columns must be"),
+        ],
+        name_fn=lambda layout, width, error: f"{layout}_{width}",
+    )
+    def test_invalid_partial_config(self, device, layout, width, error):
+        """Reject partial configs before stage one launches."""
+        x = torch.randn((257, 260), device=device)
+        cfg = ct.ColConfig("test_tiled", 64, 7, 4, layout, width)
+        trait = T.SumOps(acc=cutlass.Float32)
+        args = (trait, "tiled_layout", x, [torch.float32], 1, None, None, None)
+        with patch.object(ct, "select_col_config", return_value=cfg):
+            with self.assertRaisesRegex(ValueError, error):
+                ct._reduce_col_tile(*args)
 
 
 instantiate_parametrized_tests(TestColumnConfig)
