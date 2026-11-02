@@ -7749,28 +7749,30 @@ class ExternKernel(InputsKernel):
         if buf is None:
             raise AssertionError("Expected buf is not None")
         x_unwrap_view_fx_node = buf.get_origin_node()
-        # Prefer channels last format according to how the format is set from eager.
-        if (
-            x_unwrap_view_fx_node is not None
-            and "val" in x_unwrap_view_fx_node.meta
-            and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
-            and isinstance(x_unwrap_view.layout, FlexibleLayout)
-            and (
-                is_contiguous_for_memory_format_or_false(
-                    x_unwrap_view_fx_node.meta["val"],
-                    memory_format=torch.channels_last,
+        padding_fx_node = x_unwrap_view_fx_node or V.get_current_node()
+        with V.set_current_node(padding_fx_node):
+            # Prefer channels last format according to how the format is set from eager.
+            if (
+                x_unwrap_view_fx_node is not None
+                and "val" in x_unwrap_view_fx_node.meta
+                and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
+                and isinstance(x_unwrap_view.layout, FlexibleLayout)
+                and (
+                    is_contiguous_for_memory_format_or_false(
+                        x_unwrap_view_fx_node.meta["val"],
+                        memory_format=torch.channels_last,
+                    )
+                    or is_contiguous_for_memory_format_or_false(
+                        x_unwrap_view_fx_node.meta["val"],
+                        memory_format=torch.channels_last_3d,
+                    )
                 )
-                or is_contiguous_for_memory_format_or_false(
-                    x_unwrap_view_fx_node.meta["val"],
-                    memory_format=torch.channels_last_3d,
+            ):
+                x_unwrap_view.freeze_layout_with_same_order(
+                    make_channels_last_strides_for(x_unwrap_view.get_size())
                 )
-            )
-        ):
-            x_unwrap_view.freeze_layout_with_same_order(
-                make_channels_last_strides_for(x_unwrap_view.get_size())
-            )
-        else:
-            x_unwrap_view.freeze_layout()
+            else:
+                x_unwrap_view.freeze_layout()
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"

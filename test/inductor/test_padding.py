@@ -600,8 +600,14 @@ class PaddingTest(TestCaseBase):
 
         x = torch.randn(2, 16, 2047)
         y = torch.randn(2047, 2047)
-        self.common_numeric_check(f, x, y, tol=1e-2)
-        self.assertTrue(metrics.num_comprehensive_padding > 0)
+        expected = f(x, y)
+
+        metrics.reset()
+        actual = torch.compile(f)(x, y)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertGreater(metrics.num_comprehensive_padding, 0)
 
     def test_conv(self):
         """
