@@ -1,27 +1,23 @@
 from __future__ import annotations
 
-import importlib.metadata
 import hashlib
+import importlib.metadata
 import platform
 import re
 import shlex
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.external_aot import (
+    export_external_aot_files,
     ExternalAOTArtifact,
-    ExternalAOTBackend,
     ExternalAOTBuildSpec,
     ExternalAOTTensorArg,
-    get_external_aot_backend,
     publish_external_aot_artifact,
-    register_external_aot_backend,
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
-
-_compile_lock = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -30,7 +26,9 @@ class CuteDSLAOTExportRequest:
     prefix: str
 
 
-class CuteDSLAOTBackend(ExternalAOTBackend):
+class CuteDSLAOTBackend:
+    """Export CuteDSL objects and bridge their generated C ABI to AOTI."""
+
     kind = "cutedsl"
 
     _STRUCT = re.compile(
@@ -51,24 +49,20 @@ class CuteDSLAOTBackend(ExternalAOTBackend):
         output_dir: str,
     ) -> ExternalAOTArtifact:
         output = Path(output_dir)
-        output.mkdir(parents=True, exist_ok=True)
-        object_path = output / f"{request.prefix}.o"
-        header_path = output / f"{request.prefix}.h"
-        request.compiled.export_to_c(
-            file_path=str(output),
-            file_name=request.prefix,
-            function_prefix=request.prefix,
+        object_path, header_path = export_external_aot_files(
+            output,
+            request.prefix,
+            lambda directory: request.compiled.export_to_c(
+                file_path=str(directory),
+                file_name=request.prefix,
+                function_prefix=request.prefix,
+            ),
         )
-        if not object_path.is_file() or not header_path.is_file():
-            raise RuntimeError(
-                "CuteDSL export_to_c did not produce a C object and header"
-            )
         artifact = ExternalAOTArtifact.from_files(
             spec=spec,
             object_path=object_path,
             header_path=header_path,
-            link_libraries=(),
-            link_options=(),
+            link_args=(),
             payload={
                 "prefix": request.prefix,
                 "calling_convention": "typed_header",
@@ -78,17 +72,8 @@ class CuteDSLAOTBackend(ExternalAOTBackend):
                         "source": arg.source,
                         "dynamic_sizes": list(arg.dynamic_sizes),
                         "dynamic_strides": list(arg.dynamic_strides),
-                        "read_only": arg.read_only,
                     }
                     for arg in spec.tensor_args
-                ],
-                "scalar_args": [
-                    {
-                        "name": arg.name,
-                        "ctype": arg.ctype,
-                        "source": arg.source,
-                    }
-                    for arg in spec.scalar_args
                 ],
             },
             runtime_versions={
@@ -112,8 +97,10 @@ class CuteDSLAOTBackend(ExternalAOTBackend):
             for match in self._STRUCT.finditer(header)
         }
         prefix = str(artifact.payload["prefix"])
+        expected_types = [f"{prefix}_Kernel_Module_t"]
         for arg in spec.tensor_args:
             type_name = f"{prefix}_Tensor_{arg.name}_t"
+            expected_types.append(type_name)
             body = structs.get(type_name)
             if body is None:
                 raise RuntimeError(f"{artifact.header_path}: missing {type_name}")
@@ -140,6 +127,25 @@ class CuteDSLAOTBackend(ExternalAOTBackend):
                 len(arg.dynamic_strides),
                 shape=False,
             )
+        expected_types.append("cudaStream_t")
+        call = re.search(
+            rf"\bcute_dsl_{re.escape(prefix)}_wrapper\s*" r"\((?P<params>.*?)\)\s*;",
+            header,
+            re.DOTALL,
+        )
+        if call is None:
+            raise RuntimeError(
+                f"{artifact.header_path}: missing CuteDSL wrapper declaration"
+            )
+        actual_params = call.group("params").split(",")
+        if len(actual_params) != len(expected_types) or any(
+            expected not in actual
+            for expected, actual in zip(expected_types, actual_params)
+        ):
+            raise RuntimeError(
+                f"{artifact.header_path}: wrapper parameters do not match "
+                f"builder order {expected_types}"
+            )
 
     def make_deferred_call(self, artifact: ExternalAOTArtifact) -> Any:
         return CuteDSLDeferredCall(artifact)
@@ -159,12 +165,8 @@ class CuteDSLAOTBackend(ExternalAOTBackend):
         tensor_args = [
             binding[arg["source"]] for arg in artifact.payload["tensor_args"]
         ]
-        scalar_args = [
-            binding[arg["source"]] for arg in artifact.payload["scalar_args"]
-        ]
         args = [
             *(arg.codegen_reference() for arg in tensor_args),
-            *(str(arg) for arg in scalar_args),
             stream,
         ]
         wrapper.writeline(f"launch_{prefix}({', '.join(args)});")
@@ -176,15 +178,14 @@ class CuteDSLDeferredCall:
 
     def generate(self, wrapper) -> None:
         wrapper.include_extra_header("c10/util/CallOnce.h")
+        wrapper.include_extra_header("stdexcept")
         wrapper.prefix.splice(Path(self.artifact.header_path).read_text())
         prefix = str(self.artifact.payload["prefix"])
         tensor_args = self.artifact.payload["tensor_args"]
-        scalar_args = self.artifact.payload["scalar_args"]
         template_types = [f"typename T{index}" for index in range(len(tensor_args))]
         parameters = [
             f"const T{index}& {arg['name']}" for index, arg in enumerate(tensor_args)
         ]
-        parameters.extend(f"{arg['ctype']} {arg['name']}" for arg in scalar_args)
         parameters.append("cudaStream_t stream")
         fills = []
         call_args = []
@@ -199,10 +200,9 @@ class CuteDSLDeferredCall:
                 )
             for slot, dim in enumerate(arg["dynamic_strides"]):
                 fills.append(
-                    f"  {name}_s.dynamic_strides[{slot}] = " f"{name}.stride({dim});"
+                    f"  {name}_s.dynamic_strides[{slot}] = {name}.stride({dim});"
                 )
             call_args.append(f"&{name}_s")
-        call_args.extend(arg["name"] for arg in scalar_args)
         call_args.append("stream")
         fills_code = "\n".join(fills)
         wrapper.prefix.splice(f"""
@@ -259,38 +259,16 @@ def _distribution_version(name: str) -> str | None:
         return None
 
 
-register_external_aot_backend(CuteDSLAOTBackend())
-
-
-def export_cutedsl_compiled(
-    wrapper,
-    kernel_name: str,
-    compiled: Any,
-    spec: ExternalAOTBuildSpec,
-    output_dir: str,
-) -> ExternalAOTArtifact:
-    backend = get_external_aot_backend("cutedsl")
-    artifact = backend.export(
-        CuteDSLAOTExportRequest(compiled=compiled, prefix=kernel_name),
-        spec,
-        output_dir,
-    )
-    deferred = backend.make_deferred_call(artifact)
-    return publish_external_aot_artifact(
-        wrapper,
-        kernel_name,
-        artifact,
-        deferred,
-    )
+_CUTEDSL_AOT_BACKEND = CuteDSLAOTBackend()
 
 
 def compile_cutedsl_external_source(
     kernel_name: str,
     source_code: str,
     precompile_metadata: dict[str, Any],
+    *,
+    aot_arg_names: tuple[str, ...] | None,
 ) -> tuple[ExternalAOTArtifact, ExternalAOTBuildSpec]:
-    import cutlass.cute as cute
-
     from torch._inductor.codecache import PyCodeCache
 
     key, source_path = PyCodeCache.write(source_code)
@@ -300,58 +278,43 @@ def compile_cutedsl_external_source(
         raise NotImplementedError(
             "CuteDSL AOT requires a generated precompile entry point"
         )
-    compiled_functions = []
-    original_compile = cute.compile
-
-    def capture_compile(*args, **kwargs):
-        options = [
-            option
-            for option in shlex.split(kwargs.get("options", ""))
-            if option != "--enable-tvm-ffi"
-        ]
-        if not any(option.startswith("--host-target") for option in options):
-            host_targets = {
-                "x86_64": "llvm -mtriple=x86_64-unknown-linux-gnu -mcpu=x86-64",
-                "aarch64": "llvm -mtriple=aarch64-unknown-linux-gnu",
-            }
-            machine = platform.machine()
-            if machine not in host_targets:
-                raise RuntimeError(
-                    f"CuteDSL AOT has no generic host target for {machine!r}"
-                )
-            options.extend(["--host-target", host_targets[machine]])
-        capability = precompile_metadata.get("device_capability")
-        if capability is not None:
-            options.extend(["--gpu-arch", f"sm_{capability[0]}{capability[1]}a"])
-        kwargs["options"] = shlex.join(options)
-        compiled = original_compile(*args, **kwargs)
-        compiled_functions.append(compiled)
-        return compiled
-
-    with _compile_lock:
-        cute.compile = capture_compile
-        try:
-            precompile(
-                precompile_metadata["precompile_shapes"],
-                precompile_metadata["precompile_strides"],
-                precompile_metadata["precompile_dtypes"],
-                device_index=precompile_metadata.get("device_index", 0),
-                device_capability=precompile_metadata.get("device_capability"),
-                hw_info=precompile_metadata.get("hw_info"),
-            )
-        finally:
-            cute.compile = original_compile
-    if len(compiled_functions) != 1:
-        raise NotImplementedError(
-            "CuteDSL AOT currently requires one compiled entry, got "
-            f"{len(compiled_functions)}"
+    options = []
+    host_targets = {
+        "x86_64": "llvm -mtriple=x86_64-unknown-linux-gnu -mcpu=x86-64",
+        "aarch64": "llvm -mtriple=aarch64-unknown-linux-gnu",
+    }
+    machine = platform.machine()
+    if machine not in host_targets:
+        raise RuntimeError(f"CuteDSL AOT has no generic host target for {machine!r}")
+    options.extend(["--host-target", host_targets[machine]])
+    capability = precompile_metadata.get("device_capability")
+    if capability is not None:
+        options.extend(["--gpu-arch", f"sm_{capability[0]}{capability[1]}a"])
+    with CUTEDSL_COMPILE_LOCK:
+        compiled = precompile(
+            precompile_metadata["precompile_shapes"],
+            precompile_metadata["precompile_strides"],
+            precompile_metadata["precompile_dtypes"],
+            device_index=precompile_metadata.get("device_index", 0),
+            device_capability=precompile_metadata.get("device_capability"),
+            hw_info=precompile_metadata.get("hw_info"),
+            aot_options=shlex.join(options),
         )
-    spec = _build_spec(kernel_name, source_code, precompile_metadata)
+    if compiled is None:
+        raise NotImplementedError(
+            "CuteDSL AOT precompile entry must return its compiled artifact"
+        )
+    spec = _build_spec(
+        kernel_name,
+        source_code,
+        precompile_metadata,
+        aot_arg_names=aot_arg_names,
+    )
     output_dir = str(Path(cache_dir()) / "external_aot" / "cutedsl")
-    backend = get_external_aot_backend("cutedsl")
+    backend = _CUTEDSL_AOT_BACKEND
     artifact = backend.export(
         CuteDSLAOTExportRequest(
-            compiled=compiled_functions[0],
+            compiled=compiled,
             prefix=f"cutedsl_{spec.digest[:24]}",
         ),
         spec,
@@ -360,15 +323,39 @@ def compile_cutedsl_external_source(
     return artifact, spec
 
 
+def register_cutedsl_external_artifact(
+    wrapper,
+    kernel_name: str,
+    artifact: ExternalAOTArtifact,
+) -> ExternalAOTArtifact:
+    return publish_external_aot_artifact(
+        wrapper,
+        kernel_name,
+        artifact,
+        _CUTEDSL_AOT_BACKEND.make_deferred_call(artifact),
+    )
+
+
+def emit_cutedsl_external_call(wrapper, artifact, binding, *, device) -> None:
+    _CUTEDSL_AOT_BACKEND.emit_call(
+        wrapper,
+        artifact,
+        binding,
+        device=device,
+    )
+
+
 def _build_spec(
     kernel_name: str,
     source_code: str,
     metadata: dict[str, Any],
+    *,
+    aot_arg_names: tuple[str, ...] | None,
 ) -> ExternalAOTBuildSpec:
     shapes = metadata["precompile_shapes"]
     strides = metadata["precompile_strides"]
     sources = (*metadata["tensor_names"], "output")
-    arg_names = metadata.get("aot_arg_names")
+    arg_names = aot_arg_names
     if arg_names is None or len(arg_names) != len(sources):
         raise NotImplementedError(
             "CuteDSL AOT requires template AOT_ARG_NAMES matching "
@@ -382,20 +369,23 @@ def _build_spec(
             ExternalAOTTensorArg(
                 name=name,
                 source=source,
+                dtype=str(metadata["precompile_dtypes"][source]),
                 dynamic_sizes=tuple(range(len(shape))),
                 dynamic_strides=tuple(
                     index for index, value in enumerate(stride) if value != 1
                 ),
-                read_only=source != "output",
-                mutated=source == "output",
             )
         )
     capability = metadata.get("device_capability")
-    target = f"sm_{capability[0]}{capability[1]}" if capability is not None else "cuda"
+    target = f"sm_{capability[0]}{capability[1]}a" if capability is not None else "cuda"
     return ExternalAOTBuildSpec(
         kind="cutedsl",
         kernel_name=kernel_name,
         target=target,
         source_hash=hashlib.sha256(source_code.encode("utf-8")).hexdigest(),
         tensor_args=tuple(tensor_args),
+        options=(
+            f"nvidia-cutlass-dsl={_distribution_version('nvidia-cutlass-dsl')}",
+            f"apache-tvm-ffi={_distribution_version('apache-tvm-ffi')}",
+        ),
     )

@@ -21,6 +21,7 @@ from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 
+
 log = logging.getLogger(__name__)
 
 
@@ -62,7 +63,11 @@ class CuteDSLScheduling(BaseScheduling):
         return False
 
     def define_kernel(
-        self, src_code_str: str, node_schedule, precompile_metadata=None
+        self,
+        src_code_str: str,
+        node_schedule,
+        precompile_metadata=None,
+        aot_arg_names=None,
     ) -> str:
         """Produce the kernel string
         Args:
@@ -77,8 +82,14 @@ class CuteDSLScheduling(BaseScheduling):
         wrapper = V.graph.wrapper_code
 
         # Use the string as the key for caching
-        if src_code_str in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code_str]
+        source_cache_key = src_code_str
+        if getattr(V.graph, "aot_mode", False) and precompile_metadata is not None:
+            specialization = hashlib.sha256(
+                repr(precompile_metadata).encode("utf-8")
+            ).hexdigest()
+            source_cache_key = f"{src_code_str}\n# aot-specialization:{specialization}"
+        if source_cache_key in wrapper.src_to_kernel:
+            kernel_name = wrapper.src_to_kernel[source_cache_key]
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
@@ -86,12 +97,14 @@ class CuteDSLScheduling(BaseScheduling):
                 else ""
             )
 
-            kernel_hash = hashlib.sha256(src_code_str.encode("utf-8")).hexdigest()[:8]
+            kernel_hash = hashlib.sha256(source_cache_key.encode("utf-8")).hexdigest()[
+                :8
+            ]
             if fused_name == "fused":
                 kernel_name = f"cutedsl_{kernel_hash}"
             else:
                 kernel_name = f"cutedsl_{fused_name}_{kernel_hash}"
-            wrapper.src_to_kernel[src_code_str] = kernel_name
+            wrapper.src_to_kernel[source_cache_key] = kernel_name
             src_code_str = src_code_str.replace(
                 str(Placeholder.KERNEL_NAME), kernel_name
             )
@@ -105,26 +118,19 @@ class CuteDSLScheduling(BaseScheduling):
                     )
                 from .aot import (
                     compile_cutedsl_external_source,
+                    register_cutedsl_external_artifact,
                 )
 
                 artifact, _spec = compile_cutedsl_external_source(
                     kernel_name,
                     src_code_str,
                     precompile_metadata,
+                    aot_arg_names=aot_arg_names,
                 )
-                # compile_cutedsl_external_source already exported; publish it
-                # through the shared graph-local path.
-                from torch._inductor.codegen.external_aot import (
-                    get_external_aot_backend,
-                    publish_external_aot_artifact,
-                )
-
-                backend = get_external_aot_backend("cutedsl")
-                publish_external_aot_artifact(
+                register_cutedsl_external_artifact(
                     wrapper,
                     kernel_name,
                     artifact,
-                    backend.make_deferred_call(artifact),
                 )
             else:
                 compile_wrapper = IndentedBuffer()
@@ -180,11 +186,15 @@ class CuteDSLScheduling(BaseScheduling):
             src_code_str = src_code
 
         precompile_metadata = self._build_precompile_metadata(kernel, ctb)
+        aot_arg_names = getattr(kernel, "_external_aot_arg_names", None)
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(
-                src_code_str, node_schedule, precompile_metadata
+                src_code_str,
+                node_schedule,
+                precompile_metadata,
+                aot_arg_names=aot_arg_names,
             )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
@@ -237,7 +247,6 @@ class CuteDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
-            "template_name": ctb.template.name,
             "tensor_names": tuple(
                 arg_name.removeprefix("arg_")
                 for arg_name, _ in kernel._template_input_args
@@ -248,11 +257,6 @@ class CuteDSLScheduling(BaseScheduling):
             "device_index": device_index,
             "device_capability": device_capability,
         }
-        template_kwargs = getattr(kernel, "_template_kwargs", {})
-        if "AOT_ARG_NAMES" in template_kwargs:
-            metadata["aot_arg_names"] = tuple(
-                template_kwargs["AOT_ARG_NAMES"]
-            )
 
         hw_info = self._build_hw_info(kernel)
         if hw_info is not None:

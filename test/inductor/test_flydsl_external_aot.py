@@ -11,10 +11,33 @@ from torch._inductor.codegen.flydsl.aot_backend import (
     FlyDSLAOTBackend,
     FlyDSLAOTExportRequest,
 )
+from torch._inductor.runtime.flydsl_cache import (
+    capture_flydsl_compiles,
+    compile_flydsl,
+    is_capturing_flydsl_compiles,
+)
 from torch._inductor.test_case import TestCase
 
 
 class TestFlyDSLExternalAOT(TestCase):
+    def test_compile_capture_is_context_local(self):
+        calls = []
+
+        def compiler(jit_func, *args, **kwargs):
+            return (jit_func, args, kwargs)
+
+        def observer(compiler_fn, jit_func, args, kwargs):
+            calls.append((jit_func, args, kwargs))
+            return compiler_fn(jit_func, *args, **kwargs)
+
+        self.assertFalse(is_capturing_flydsl_compiles())
+        with capture_flydsl_compiles(observer):
+            self.assertTrue(is_capturing_flydsl_compiles())
+            result = compile_flydsl(compiler, "kernel", 1, option=2)
+        self.assertFalse(is_capturing_flydsl_compiles())
+        self.assertEqual(calls, [("kernel", (1,), {"option": 2})])
+        self.assertEqual(result, ("kernel", (1,), {"option": 2}))
+
     def test_export_header_validation(self):
         spec = ExternalAOTBuildSpec(
             kind="flydsl",
@@ -25,10 +48,9 @@ class TestFlyDSLExternalAOT(TestCase):
                 ExternalAOTTensorArg(
                     name="out",
                     source="output",
+                    dtype="float32",
                     dynamic_sizes=(0,),
                     dynamic_strides=(0,),
-                    read_only=False,
-                    mutated=True,
                 ),
             ),
         )
@@ -59,11 +81,19 @@ static inline int32_t {function_prefix}_call_auto(
                 directory,
             )
             backend.validate_abi(artifact, spec)
-            self.assertEqual(artifact.link_libraries, ("libamdhip64.so",))
             self.assertEqual(
-                artifact.link_options,
-                ("-lamdhip64", "-pthread", "-ldl"),
+                artifact.link_args,
+                ("-l:libamdhip64.so", "-pthread", "-ldl"),
             )
+            header_path = Path(artifact.header_path)
+            header_path.write_text(
+                header_path.read_text().replace(
+                    "void* out_data,\n    const fly_kernel_out_layout_t* out_layout",
+                    "const fly_kernel_out_layout_t* out_layout,\n    void* out_data",
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "parameters"):
+                backend.validate_abi(artifact, spec)
 
 
 if __name__ == "__main__":

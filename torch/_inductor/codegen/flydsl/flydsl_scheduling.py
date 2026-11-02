@@ -18,6 +18,7 @@ from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 
+
 log = logging.getLogger(__name__)
 
 
@@ -61,12 +62,22 @@ class FlyDSLScheduling(BaseScheduling):
         return False
 
     def define_kernel(
-        self, src_code_str: str, node_schedule, precompile_metadata=None
+        self,
+        src_code_str: str,
+        node_schedule,
+        precompile_metadata=None,
+        template_name=None,
     ) -> str:
         wrapper = V.graph.wrapper_code
 
-        if src_code_str in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code_str]
+        source_cache_key = src_code_str
+        if getattr(V.graph, "aot_mode", False) and precompile_metadata is not None:
+            specialization = hashlib.sha256(
+                repr(precompile_metadata).encode("utf-8")
+            ).hexdigest()
+            source_cache_key = f"{src_code_str}\n# aot-specialization:{specialization}"
+        if source_cache_key in wrapper.src_to_kernel:
+            kernel_name = wrapper.src_to_kernel[source_cache_key]
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
@@ -74,12 +85,14 @@ class FlyDSLScheduling(BaseScheduling):
                 else ""
             )
 
-            kernel_hash = hashlib.sha256(src_code_str.encode("utf-8")).hexdigest()[:8]
+            kernel_hash = hashlib.sha256(source_cache_key.encode("utf-8")).hexdigest()[
+                :8
+            ]
             if fused_name == "fused":
                 kernel_name = f"flydsl_{kernel_hash}"
             else:
                 kernel_name = f"flydsl_{fused_name}_{kernel_hash}"
-            wrapper.src_to_kernel[src_code_str] = kernel_name
+            wrapper.src_to_kernel[source_cache_key] = kernel_name
             src_code_str = src_code_str.replace(
                 str(Placeholder.KERNEL_NAME), kernel_name
             )
@@ -100,6 +113,7 @@ class FlyDSLScheduling(BaseScheduling):
                     kernel_name,
                     src_code_str,
                     precompile_metadata,
+                    template_name=template_name,
                 )
                 register_flydsl_external_artifact(wrapper, kernel_name, artifact)
             else:
@@ -153,7 +167,10 @@ class FlyDSLScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(
-                src_code_str, node_schedule, precompile_metadata
+                src_code_str,
+                node_schedule,
+                precompile_metadata,
+                template_name=ftb.template.name,
             )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ftb)
@@ -202,7 +219,6 @@ class FlyDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
-            "template_name": ftb.template.name,
             "tensor_names": tuple(
                 arg_name.removeprefix("arg_")
                 for arg_name, _ in kernel._template_input_args
