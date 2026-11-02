@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 
 
@@ -167,6 +168,7 @@ class TestLayoutFreezingCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires FP8")
+    @skipIfRocm  # hipBLASLt does not support e4m3fn scaled_mm on MI300
     def test_scaled_mm_flexible_operand(self):
         # The scaled_mm layout constraint must not trust a flexible A's
         # provisional row-major strides; finalize could still transpose it.
