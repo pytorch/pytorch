@@ -2069,5 +2069,79 @@ class TestConstantSubclassHash(TestCase):
 instantiate_parametrized_tests(TestObjectConstruction)
 
 
+class _InitOnly:
+    def __init__(self, a):
+        self.a = a
+
+
+class _SuperInitExtraArg:
+    def __init__(self, a):
+        super().__init__(a)
+
+
+class _NewOnly:
+    def __new__(cls, *args):
+        return super().__new__(cls)
+
+
+# object_init: extra arguments are an error unless the type overrides __new__
+# but not __init__.
+_OBJECT_INIT_CASES = {
+    "explicit_on_new_override": lambda: object.__init__(_NewOnly(), 1),
+    "explicit_on_init_override": lambda: object.__init__(_InitOnly(1), 1),
+    "explicit_on_plain": lambda: object.__init__(Plain(), 1),
+    "explicit_kwargs_on_plain": lambda: object.__init__(Plain(), k=1),
+    "bound_on_plain": lambda: Plain().__init__(1),
+    "super_with_extra_arg": lambda: _SuperInitExtraArg(1),
+}
+
+
+class TestObjectInit(TestCase):
+    @parametrize("case", list(_OBJECT_INIT_CASES))
+    def test_object_init(self, case):
+        def fn(x):
+            try:
+                _OBJECT_INIT_CASES[case]()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+
+instantiate_parametrized_tests(TestObjectInit)
+
+
+# type_init (a class's tp_init) accepts 1 or 3 arguments and no keywords.
+_TYPE_INIT_CASES = {
+    "builtin_class_no_args": lambda: type.__init__(int),
+    "builtin_class_three_args": lambda: type.__init__(int, "n", (), {}),
+    "builtin_class_kwargs": lambda: type.__init__(int, x=1),
+    "user_class_no_args": lambda: type.__init__(Plain),
+    "user_class_three_args": lambda: type.__init__(Plain, "P", (), {}),
+    "non_class_receiver": lambda: type.__init__(1),
+}
+
+
+class TestTypeInit(TestCase):
+    @parametrize("case", list(_TYPE_INIT_CASES))
+    def test_type_init(self, case):
+        def fn(x):
+            try:
+                _TYPE_INIT_CASES[case]()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+
+instantiate_parametrized_tests(TestTypeInit)
+
+
 if __name__ == "__main__":
     run_tests()
