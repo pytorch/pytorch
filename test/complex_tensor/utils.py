@@ -164,7 +164,7 @@ class TestCase(PytorchTestCase):
                 f"`check_consistency` called with the wrong `variant`: {variant}"
             )
         desc = Descriptor(
-            op=get_overload_packet_from_name(op.name),
+            op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
             variant=variant,
@@ -198,7 +198,7 @@ class TestCase(PytorchTestCase):
 
     def check_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
         desc = Descriptor(
-            op=get_overload_packet_from_name(op.name),
+            op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
             variant=Variant.GradCheck,
@@ -266,12 +266,12 @@ implemented_op_names = (
     set(map(_get_op_name, COMPLEX_OPS_TABLE.keys())) - force_test_names
 )
 implemented_op_db = tuple(
-    filter(lambda op: op.name in implemented_op_names, complex_op_db)
+    filter(lambda op: op.aten_name in implemented_op_names, complex_op_db)
 )
-force_test_op_db = tuple(filter(lambda op: op.name in force_test_names, op_db))
+force_test_op_db = tuple(filter(lambda op: op.aten_name in force_test_names, op_db))
 
-tested_op_names = {op.name for op in implemented_op_db} | {
-    op.name for op in force_test_op_db
+tested_op_names = {op.aten_name for op in implemented_op_db} | {
+    op.aten_name for op in force_test_op_db
 }
 non_tested_ops = {
     op for op in COMPLEX_OPS_TABLE if _get_op_name(op) not in tested_op_names
