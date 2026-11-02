@@ -2432,7 +2432,11 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 # Template-specific mixin classes
 def mm_allow_tf32(
-    m: Any, n: Any, k: Any, device_type: str | None, dtype: torch.dtype
+    m: Any,
+    n: Any,
+    k: Any,
+    device_type: str | None,
+    dtype: torch.dtype | None = None,
 ) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
     allow_tf32 = False

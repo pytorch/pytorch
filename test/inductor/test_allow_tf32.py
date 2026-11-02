@@ -126,7 +126,8 @@ class TestAllowTf32DynamicShapes(TestCase):
                     f"{mm_allow_tf32.__module__}.using_b200", return_value=False
                 ),
             ):
-                result = mm_allow_tf32(sym_m, 512, 512, "cuda", dtype)
+                dtype_arg = () if dtype is None else (dtype,)
+                result = mm_allow_tf32(sym_m, 512, 512, "cuda", *dtype_arg)
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
         return result, [
@@ -147,6 +148,10 @@ class TestAllowTf32DynamicShapes(TestCase):
     def test_cuda_gate_no_guard_for_non_fp32(self, dtype):
         # ALLOW_TF32 only affects fp32 dots, so other dtypes keep the proof.
         self.assertEqual(self._gate(1024, dtype=dtype), (False, []))
+
+    def test_cuda_gate_no_guard_without_dtype(self):
+        # Callers that don't pass a dtype (4-arg form) keep the guard-free check.
+        self.assertEqual(self._gate(1024, dtype=None), (False, []))
 
     def test_cuda_gate_no_guard_without_tf32_hardware(self):
         self.assertEqual(self._gate(1024, tf32=False), (False, []))
