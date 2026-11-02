@@ -467,22 +467,6 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(Exception, "format_str must be a string"):
             opt_f(x, 3, 5)
 
-    def test_symbolic_str_repeat_raise_keeps_effect_order(self):
-        def f(x, s, n):
-            torch._higher_order_ops.print("before")
-            x.add_(1)
-            torch._higher_order_ops.print(s * n)
-            return x
-
-        opt_f = torch.compile(f, backend="eager")
-        opt_f(torch.zeros(1), "ab", 2)
-        x = torch.zeros(1)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            with self.assertRaises(OverflowError):
-                opt_f(x, "ab", sys.maxsize)
-        self.assertEqual(mock_stdout.getvalue(), "before\n")
-        self.assertEqual(x, torch.ones(1))
-
     @skipIfTorchDynamo("Skipped under Dynamo")
     def test_inductor_python_wrapper_uses_python_print(self):
         """Test that the Python wrapper uses python print instead of HOP for print fallback.

@@ -3764,7 +3764,8 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     == ctor_info
                 ):
                     return proxy
-        vt._ensure_type_guard()
+        # Ensure type guards are installed
+        vt.python_type()
         return tx.output.synthetic_graph_input(
             OpaqueStr, (value,), ctor_arg_sources=(vt.source if is_lazy else vt,)
         ).as_proxy()
