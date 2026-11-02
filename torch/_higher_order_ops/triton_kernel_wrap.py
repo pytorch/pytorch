@@ -21,6 +21,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
     functional_hop_dense,
     functional_hop_fake,
@@ -2916,11 +2917,6 @@ class TraceableTritonKernelWrapper:
 
     def specialize_symbolic(self, arg: Sequence[Any]) -> Any:
         return specialize_symbolic(arg)
-
-
-# Imported after every definition: importing torch._dynamo imports TritonHOPifier and
-# other names from this module.
-from torch._dynamo.utils import ReInplaceTrigger
 
 
 register_user_kernel_hop(

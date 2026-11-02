@@ -30,6 +30,7 @@ from torch._library.cutedsl import wrap_cutedsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -292,7 +293,36 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
-    # A Constexpr tuple read on the host: out = x * scales[0].
+    # A kernel object whose @cute.jit __call__ is its host code, as in the CUTLASS
+    # examples, and a host function that takes one as a Constexpr and calls it:
+    # out = x * alpha.
+    class MulKernel:
+        def __init__(self, alpha):
+            self.alpha = alpha
+
+        @cute.jit
+        def __call__(
+            self,
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+        ):
+            _mul_const_k(mX, mOut, n, self.alpha).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+    @cute.jit
+    def call_mul_kernel(
+        kernel: cutlass.Constexpr,
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        kernel(mX, mOut, n, stream)
+
+    # A Constexpr container read on the host: out = x * scales[0].
     @cute.jit
     def scale_by_first_kernel(
         mX: cute.Tensor,
@@ -445,6 +475,8 @@ def _add_kwargs(x, y, out, n=None):
 
 @requires_cutedsl
 class CuteDSLToyKernelTests(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_toy_kernels_plain_cutedsl(self):
         # The toy kernels themselves, through plain CuTeDSL (no PT2): if this fails
         # the environment is broken, not the PT2 integration.
@@ -465,6 +497,8 @@ class CuteDSLToyKernelTests(TestCase):
 @requires_cutedsl
 class CuteDSLHOPTests(TestCase):
     """Direct use of the HOPs, the side table and the eager launch."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_side_table_dedupes_constant_args(self):
         # The table is never reset and every eager launch through the HOP adds its
@@ -1206,6 +1240,8 @@ def forward(self, x_1, y_1):
         def overlapping_columns(x, y):
             # Rows 1 to 3 of column 2 are in both: each row of out starts inside a
             # row of the other, though not inside the first one.
+            # TODO(zoranzhao): refused only with the fix in
+            # https://github.com/pytorch/pytorch/pull/202848 (see _may_overlap).
             base = x.view(10, 100)
             out = base[1:5, 2:5]
             cutedsl_kernel_wrapper_mutation(
@@ -1481,6 +1517,8 @@ def _scalar_args(node):
 class CuteDSLWrapTests(TestCase):
     """wrap_cutedsl: eager launches, make_fx / non-strict export capture, errors."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def test_wrap_cutedsl_mutates_args_iterator(self):
         # A one-shot iterable is read once, not consumed by its validation.
         for names in ((n for n in ["mOut"]), iter(["mOut"]), map(str, ["mOut"])):
@@ -1488,22 +1526,40 @@ class CuteDSLWrapTests(TestCase):
             self.assertEqual(w.mutates_args, ("mOut",))
 
     def test_wrap_cutedsl_make_fx_nested_symint_specialized(self):
-        # A SymInt inside a Constexpr tuple is specialized like a bare one, so the
-        # side table only holds concrete values.
+        # A SymInt inside a Constexpr container is specialized like a bare one, so the
+        # side table only holds concrete values. Containers are the ones the side
+        # table walks (see constant_contents), subclasses of tuple (such as
+        # torch.Size), list and dict included.
+        class Scales(list):
+            pass
+
+        class ScaleMap(dict):
+            pass
+
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
 
-        def f(x):
+        def f(x, make_scales):
             out = torch.empty_like(x)
-            w(x, out, x.numel(), (x.shape[0] // 250,))
+            w(x, out, x.numel(), make_scales(x.shape[0] // 250))
             return out
 
         x = _rand(1000)
-        gm = make_fx(f, tracing_mode="symbolic")(x)
-        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
-        scales = _scalar_args(node)["scales"]
-        self.assertEqual(scales, (4,))
-        self.assertIs(type(scales[0]), int)
-        self.assertEqual(gm(x), 4 * x)
+        cases = (
+            (lambda s: (s,), (4,)),
+            (lambda s: torch.Size([s]), torch.Size([4])),
+            (lambda s: Scales([s]), Scales([4])),
+            (lambda s: ScaleMap({0: s}), ScaleMap({0: 4})),
+        )
+        for make_scales, expected in cases:
+            fn = functools.partial(f, make_scales=make_scales)
+            with self.subTest(container=type(expected).__name__):
+                gm = make_fx(fn, tracing_mode="symbolic")(x)
+                (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+                scales = _scalar_args(node)["scales"]
+                self.assertIs(type(scales), type(expected))
+                self.assertEqual(scales, expected)
+                self.assertIs(type(scales[0]), int)
+                self.assertEqual(gm(x), 4 * x)
 
     def test_wrap_cutedsl_make_fx_symint_in_object_specialized(self):
         # The side table keys a dataclass instance or plain object by its contents
@@ -1540,11 +1596,33 @@ class CuteDSLWrapTests(TestCase):
         self.assertEqual(gm(x), (4 * x, 2 * x))
 
     def test_wrap_cutedsl_error_tensor_in_container(self):
-        # Only top-level tensors become graph arguments.
+        # Only top-level tensors become graph arguments; one inside a container would
+        # be a trace-time constant. Containers are the ones the side table walks (see
+        # constant_contents): subclasses of list too, and dicts, keys included.
+        class Scales(list):
+            pass
+
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x, make_scales):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), make_scales(x))
+            return out
+
         x = _rand(1000)
-        with self.assertRaisesRegex(RuntimeError, "inside a container"):
-            w(x, torch.empty_like(x), 1000, (x,))
+        error = "'scales' holds a tensor inside a container"
+        cases = {
+            "tuple": lambda x: (x,),
+            "list subclass": lambda x: Scales([x]),
+            "dict key": lambda x: {x: 1},
+        }
+        for case, make_scales in cases.items():
+            fn = functools.partial(f, make_scales=make_scales)
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    make_fx(fn, tracing_mode="fake")(x)
+                with self.assertRaisesRegex(RuntimeError, error):
+                    fn(x)
 
     def test_wrap_cutedsl_error_tensor_in_object(self):
         # A dataclass instance or plain object is a container too: a tensor inside
@@ -1586,10 +1664,10 @@ class CuteDSLWrapTests(TestCase):
 
     def test_wrap_cutedsl_error_cyclic_constant(self):
         # A constant that refers to itself (a config object with a back-pointer, one
-        # holding a logging.Logger, whose manager leads back to it, or a list holding
-        # itself) is refused instead of walked until a RecursionError: under make_fx,
-        # before a SymInt in it is specialized in a copy, and eagerly, also on the
-        # fast path.
+        # that is a key of a dict it holds, one holding a logging.Logger, whose
+        # manager leads back to it, or a list holding itself) is refused instead of
+        # walked until a RecursionError: under make_fx, before a SymInt in it is
+        # specialized in a copy, and eagerly, also on the fast path.
         from torch._library.triton import set_wrap_triton_enabled
 
         class Parent:
@@ -1600,6 +1678,11 @@ class CuteDSLWrapTests(TestCase):
             def __init__(self, alpha):
                 self.alpha = alpha
                 self.parent = Parent(self)
+
+        class KeyCfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.lookup = {self: 1}
 
         class LoggingCfg:
             def __init__(self, alpha):
@@ -1621,6 +1704,7 @@ class CuteDSLWrapTests(TestCase):
         x = _rand(1000)
         cases = (
             (Cfg, "Cfg -> Parent -> Cfg"),
+            (KeyCfg, "KeyCfg -> dict -> KeyCfg"),
             (LoggingCfg, ""),
             (self_list, "list -> list"),
         )
@@ -1898,6 +1982,36 @@ class CuteDSLWrapTests(TestCase):
         # A @cute.kernel device function is not a host function either.
         with self.assertRaisesRegex(RuntimeError, r"(?i)cute\.jit"):
             wrap_cutedsl(_add_k, mutates_args=["gOut"])
+
+    def test_wrap_cutedsl_error_bound_method(self):
+        # A bound @cute.jit method, or a kernel object standing for its bound
+        # __call__ as in cute.compile, is refused with an error that names the method
+        # and a workaround, which works: a host function that takes the object as a
+        # Constexpr and calls it. An object whose __call__ is not @cute.jit is not
+        # a kernel object.
+        kernel = MulKernel(3.0)
+        error = (
+            r"does not support bound methods or kernel objects \(got "
+            r"MulKernel\.__call__\): instead, wrap a @cute\.jit function that takes "
+            r"the object as a cutlass\.Constexpr"
+        )
+        for host_fn in (kernel.__call__, kernel):
+            with self.subTest(host_fn=type(host_fn).__name__):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    wrap_cutedsl(host_fn, mutates_args=["mOut"])
+        with self.assertRaisesRegex(RuntimeError, r"only works on host functions"):
+            wrap_cutedsl(add_w, mutates_args=["mOut"])
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        self.assertEqual(f(x), 3 * x)
+        self.assertEqual(make_fx(f)(x)(x), 3 * x)
 
     def test_wrap_cutedsl_error_unwrapped_host_fn(self):
         # inspect.unwrap(host_fn) is the user's undecorated function. Whether it
