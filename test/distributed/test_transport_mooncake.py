@@ -85,8 +85,8 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
 
     def make_transport_pair(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
-            first = new_transport("mooncake", host="::1")
-            second = new_transport("mooncake", host="::1")
+            first = new_transport("mooncake", host="127.0.0.1")
+            second = new_transport("mooncake", host="127.0.0.1")
         self.addCleanup(second.close)
         self.addCleanup(first.close)
         self.assertEqual(first.connect(second.bind()), 0)
@@ -100,11 +100,23 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
     def test_initialize_uses_p2p_handshake(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
             transport = new_transport(
-                "mooncake", "cpu", host="::1", protocol="tcp", device_name="mlx5_0"
+                "mooncake", host="127.0.0.1", protocol="tcp", device_name="mlx5_0"
             )
         self.addCleanup(transport.close)
         self.assertEqual(transport._engine.options, ("P2PHANDSHAKE", "tcp", "mlx5_0"))
-        self.assertTrue(transport._endpoint.startswith("[::1]:"))
+        self.assertTrue(transport._endpoint.startswith("127.0.0.1:"))
+
+    def test_ipv6_host_requires_mc_use_ipv6(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            with patch.dict(os.environ, {"MC_USE_IPV6": "1"}):
+                transport = new_transport("mooncake", host="::1")
+            self.addCleanup(transport.close)
+            self.assertTrue(transport._endpoint.startswith("[::1]:"))
+            with patch.dict(os.environ):
+                os.environ.pop("MC_USE_IPV6", None)
+                with self.assertRaises(RuntimeError) as ctx:
+                    new_transport("mooncake", host="::1")
+        self.assertIsInstance(ctx.exception.__cause__, ValueError)
 
     def test_initialization_failure_raises(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -42,7 +43,11 @@ def _load_backend() -> Any:
 
 def _format_host(host: str) -> str:
     host = host.strip("[]")
-    return f"[{host}]" if ":" in host else host
+    if ":" not in host:
+        return host
+    if "MC_USE_IPV6" not in os.environ:
+        raise ValueError("Mooncake requires MC_USE_IPV6 to be set for IPv6 hosts")
+    return f"[{host}]"
 
 
 class MooncakeTransport(Transport):
