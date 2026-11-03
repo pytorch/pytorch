@@ -3,6 +3,31 @@
 #include <metal_stdlib>
 using namespace metal;
 
+struct addr_functor {
+  template <typename T, typename A>
+  inline T operator()(const T a, const T b, const T c, const A params) {
+    const auto alpha = params[0];
+    const auto beta = params[1];
+    const auto prod = c10::metal::mul(c10::metal::mul(alpha, b), c);
+    return all(beta == 0) ? prod : c10::metal::mul(beta, a) + prod;
+  }
+};
+
+#define REGISTER_ADDR(DTYPE)            \
+  using DTYPE##_pair = array<DTYPE, 2>; \
+  REGISTER_TERNARY_ALPHA_OP(addr, DTYPE, DTYPE##_pair, DTYPE)
+
+REGISTER_ADDR(float);
+REGISTER_ADDR(half);
+REGISTER_ADDR(bfloat);
+REGISTER_ADDR(float2);
+REGISTER_ADDR(long);
+REGISTER_ADDR(int);
+REGISTER_ADDR(short);
+REGISTER_ADDR(char);
+REGISTER_ADDR(uchar);
+REGISTER_ADDR(bool);
+
 // Both functors mirror the CPU kernels: the products are evaluated at opmath
 // precision and in the same order, i.e. `value` is folded into tensor1 first.
 // `fma` is deliberately not used, as CPU does not use it either.
