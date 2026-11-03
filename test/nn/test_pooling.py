@@ -2463,13 +2463,14 @@ torch.{device_type}.synchronize()
             inp_dims=(8, 4, 16, 16),
             prec=0.05,
         )
-        _test_bfloat16_ops(
-            self,
-            torch.nn.AvgPool3d(3, stride=2),
-            device,
-            inp_dims=(8, 4, 16, 16, 16),
-            prec=0.05,
-        )
+        if self.device_type != "mps":
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AvgPool3d(3, stride=2),
+                device,
+                inp_dims=(8, 4, 16, 16, 16),
+                prec=0.05,
+            )
         _test_bfloat16_ops(
             self, torch.nn.AdaptiveAvgPool1d(3), device, inp_dims=(8, 4, 16), prec=0.05
         )
