@@ -10,7 +10,7 @@ from torch.overrides import resolve_name
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._pytree import tree_map, tree_map_only, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
-from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
+from torch._subclasses.meta_utils import MetaConverter, MetaTensorDescriber, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
@@ -351,6 +351,61 @@ class TestMetaConverter(TestCase):
         y = m(x)
         del m
         self.assertIs(ref(), None)
+
+    def test_describe_real_sparse_with_fake_included(self):
+        # A C++ fake mode includes the Fake key in TLS; describing a real
+        # tensor must not send its metadata queries to Fake.
+        fake = torch._C.DispatchKey.Fake
+        coo = torch.randn(4, 4).to_sparse()
+        csr = torch.randn(4, 4).to_sparse_csr()
+        describer = MetaTensorDescriber()
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        with torch._C._IncludeDispatchKeyGuard(fake):
+            coo_desc = describer.describe_tensor(coo)
+            csr_desc = describer.describe_tensor(csr)
+            # Also inside a functional wrapper or a traceable wrapper subclass
+            functional = torch._to_functional_tensor(coo)
+            functional_desc = describer.describe_tensor(functional)
+            subclass_desc = describer.describe_tensor(TwoTensor(coo, coo))
+            self.assertTrue(torch._C._dispatch_tls_is_dispatch_key_included(fake))
+        self.assertTrue(functional_desc.is_functional)
+        self.assertTrue(subclass_desc.is_traceable_wrapper_subclass)
+        self.assertEqual(coo_desc.sparse_dim, coo.sparse_dim())
+        self.assertEqual(coo_desc.dense_dim, coo.dense_dim())
+        self.assertEqual(coo_desc.is_coalesced, coo.is_coalesced())
+        self.assertEqual(csr_desc.sparse_dim, csr.sparse_dim())
+        self.assertEqual(csr_desc.dense_dim, csr.dense_dim())
+        self.assertEqual(csr_desc.crow_indices.size, csr.crow_indices().size())
+        self.assertEqual(csr_desc.col_indices.size, csr.col_indices().size())
+        self.assertEqual(csr_desc.values.size, csr.values().size())
+
+    def test_describe_cpp_fake_dispatches_to_fake(self):
+        # A C++ fake's metadata queries still reach the Fake key while it is
+        # described, through the key in its own key set
+        fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        t = torch.randn(4, 4).to_sparse().to("meta")
+        torch._C._set_fake_device(t, torch.device("cpu"))
+        calls = []
+
+        def spy(op):
+            def kernel(x):
+                calls.append(op)
+                with torch._C._ExcludeDispatchKeyGuard(fake_key):
+                    return getattr(x, op)()
+
+            return kernel
+
+        with torch.library._scoped_library("aten", "IMPL") as lib:
+            for op in ("sparse_dim", "dense_dim", "is_coalesced"):
+                lib.impl(op, spy(op), "Fake")
+            with torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Fake):
+                desc = MetaTensorDescriber().describe_tensor(t)
+        self.assertEqual(set(calls), {"sparse_dim", "dense_dim", "is_coalesced"})
+        self.assertEqual(desc.sparse_dim, 2)
+        self.assertEqual(desc.dense_dim, 0)
+        self.assertTrue(desc.is_coalesced)
+
 
 aten = torch.ops.aten
 
