@@ -851,6 +851,8 @@ def _constrain_user_specified_dimhint_range(
         else:
             range_constraints[symint.node.expr] &= user_vr
             shape_env.var_to_range[symint.node._expr] &= user_vr
+            shape_env._var_to_range_version_counter += 1
+            shape_env._update_version_counter()
             out_vr = range_constraints[symint.node.expr]
 
         # check for Dim.DYNAMIC specializations; special case error message on 0/1
