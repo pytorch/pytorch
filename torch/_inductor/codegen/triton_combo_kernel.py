@@ -1665,6 +1665,10 @@ class ComboKernel(Kernel):
 
     def codegen_kernel(self, name: str | None = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
+        if any(k.atomic_minmax_found for k in self.sub_kernels):
+            self.block_size_1d = max(
+                self.block_size_1d, config.reduction_atomic_epilogue_min_block
+            )
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
         for subkernel in self.sub_kernels:

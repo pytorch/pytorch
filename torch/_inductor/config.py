@@ -1231,6 +1231,14 @@ do_not_emit_runtime_assertions = False
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# Lower a full fp32 amax/amin of an unrealized pointwise producer to an atomic
+# max/min epilogue of that producer instead of a separate reduction kernel.
+# Max/min are order-independent, so the result stays deterministic.
+reduction_atomic_epilogue = False
+# Minimum elements per program for combo/foreach kernels carrying such an
+# epilogue; smaller blocks issue more same-address atomics, which serialize.
+reduction_atomic_epilogue_min_block = 4096
+
 # enable the combo kernel that combines data-independent kernels (additional
 # to foreach kernels) into a single one (Experimental)
 combo_kernels = False
