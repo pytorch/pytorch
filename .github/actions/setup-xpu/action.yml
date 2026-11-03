@@ -43,9 +43,12 @@ runs:
         ngpu=$(timeout 30 xpu-smi discovery | grep -c -E 'Device Name' || true)
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
         if [[ $ngpu -eq 0 ]]; then
-          echo "Error: Failed to detect any GPUs on the runner"
-          echo "$msg"
-          exit 1
+          ntiles=$(timeout 10s clinfo -l 2>/dev/null | awk '/Platform/ {show=($0 ~ "Graphics")} show && /Device #/ {count++} END {print count+0}' || true)
+          if [[ $ntiles -eq 0 ]]; then
+            echo "Error: Failed to detect any GPUs or GPU tiles on the runner"
+            echo "$msg"
+            exit 1
+          fi
         fi
 
     - name: Runner diskspace health check
