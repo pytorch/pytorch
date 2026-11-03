@@ -666,7 +666,9 @@ def sole_outputs(case: unittest.TestCase, written: str) -> dict:
     return dict(pairs)
 
 
-def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
+def run_step(
+    text: str, marker: str, td: str, env: dict, stubs: dict, rewrite=None
+) -> tuple:
     """Extract the `run:` body of the step NAMED `marker` and EXECUTE it.
 
     Text assertions establish that a guard is written down. Only running it
@@ -688,6 +690,9 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     inherited from whoever ran the suite. It is NOT a model of a runner's
     environment — callers must pass what the step's own `env:` declares.
 
+    `rewrite`, if given, maps the extracted body to the one executed, e.g. to
+    point `/tmp/` at the temp directory.
+
     Returns `(CompletedProcess, Path to the step's $GITHUB_OUTPUT)`.
     """
     hits = list(re.finditer(rf"(?m)^      - name: {re.escape(marker)}[ \t]*$", text))
@@ -697,6 +702,8 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     body = textwrap.dedent(
         scalar_block(rest if nxt is None else rest[: nxt.start() + 1], "run")
     )
+    if rewrite is not None:
+        body = rewrite(body)
     bin_dir = Path(td) / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name, script in stubs.items():
@@ -1699,7 +1706,8 @@ class TestCredentialDuration(unittest.TestCase):
 
     `prepare` and `publish` take the 900s STS minimum. The review job takes
     3600s, the role's ceiling, because its model step may run for 55 minutes; its
-    role is Bedrock-only. Omitting the line does not fail anything — it silently
+    role grants Bedrock and S3 writes under `pr_review_traces/`. Omitting the
+    line does not fail anything — it silently
     defaults the credential to an hour — so every value is pinned.
     """
 
@@ -2693,6 +2701,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "HARNESS",
             "HARNESS_VERSION",
             "HEAD_SHA",
+            "HEAD_TREE_SHA",
             "IS_FORK",
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
@@ -4892,46 +4901,46 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         self.assertLess(names.index("Write the PR conversation"), here)
         self.assertLess(here, names.index('"Stage A: pr-review"'))
 
-    def _run(self, aws_exit: int, present=INPUTS):
-        # Sliced from the raw job with its indentation, the way `run_step` does.
-        raw = job_block(STAGE2.read_text(), "review")
-        rest = raw[raw.index(f"      - name: {self.NAME}\n") :]
-        nxt = re.search(r"(?m)^      - ", rest[1:])
-        rest = rest if nxt is None else rest[: nxt.start() + 1]
-        body = textwrap.dedent(scalar_block(rest, "run"))
-        body = re.sub(r"\$\{\{[^}]*\}\}", "CTX", body)
+    def _run(self, aws_exit: int, present=INPUTS, block_staging=False):
         with tempfile.TemporaryDirectory() as td:
-            body = body.replace("/tmp/", f"{td}/")
             for f in present:
                 Path(td, f).write_text(f"content of {f}")
-            bin_dir = Path(td) / "bin"
-            bin_dir.mkdir()
+            if block_staging:
+                Path(td, "pr-review-input").write_text("a file, not a directory")
             log = Path(td) / "argv.log"
-            # Records what it was ASKED to upload: the source must be the
-            # staging directory, and each file is logged with its content.
-            (bin_dir / "aws").write_text(
-                f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
-                f'[ "$4" = "{td}/pr-review-input" ] || exit 3\n'
-                f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
-                f"exit {aws_exit}\n"
-            )
-            (bin_dir / "aws").chmod(0o755)
-            proc = subprocess.run(
-                ["bash", "-c", body],
-                capture_output=True,
-                text=True,
-                cwd=td,
-                env={
-                    "PATH": f"{bin_dir}:/usr/bin:/bin",
+            # `timeout` records its limit and runs the rest; `aws` records what
+            # it was ASKED to upload: the source must be the staging directory,
+            # and each file is logged with its content.
+            stubs = {
+                "timeout": f'#!/bin/bash\necho "timeout $*" >> {log}\nshift\nexec "$@"\n',
+                "aws": (
+                    f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
+                    f'[ "$4" = "{td}/pr-review-input" ] || exit 3\n'
+                    f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
+                    f"exit {aws_exit}\n"
+                ),
+            }
+            proc, _ = run_step(
+                STAGE2.read_text(),
+                self.NAME,
+                td,
+                {
                     "S3_BUCKET": "b",
                     "HEAD_SHA": "h" * 40,
                     "BASE_SHA": "b" * 40,
                     "MERGE_BASE_SHA": "m" * 40,
+                    "HEAD_TREE_SHA": "t" * 40,
                 },
+                stubs,
+                rewrite=lambda body: re.sub(r"\$\{\{[^}]*\}\}", "CTX", body).replace(
+                    "/tmp/", f"{td}/"
+                ),
             )
             staged = Path(td, "pr-review-input")
-            manifest = json.loads((staged / "manifest.json").read_text())
-            uploaded = sorted(p.name for p in staged.iterdir())
+            manifest, uploaded = None, []
+            if staged.is_dir():
+                manifest = json.loads((staged / "manifest.json").read_text())
+                uploaded = sorted(p.name for p in staged.iterdir())
             recorded = log.read_text() if log.exists() else ""
         return proc, manifest, uploaded, recorded
 
@@ -4939,14 +4948,23 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         proc, manifest, uploaded, recorded = self._run(0)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(uploaded, sorted([*self.INPUTS, "manifest.json"]))
-        self.assertIn("s3 cp --recursive", recorded.splitlines()[0] if recorded else "")
+        lines = recorded.splitlines()
+        # The upload itself runs under the timeout, not just after one.
+        self.assertTrue(
+            lines[0].startswith("timeout 120 aws s3 cp --recursive "), recorded
+        )
         self.assertIn("s3://b/pr_review_traces/CTX/CTX_CTX_input/", recorded)
         for f in self.INPUTS:
             self.assertIn(f"{f}=content of {f}\n", recorded)
         self.assertIn("manifest.json={\n", recorded)
         self.assertEqual(
-            (manifest["head_sha"], manifest["base_sha"], manifest["merge_base_sha"]),
-            ("h" * 40, "b" * 40, "m" * 40),
+            (
+                manifest["head_sha"],
+                manifest["base_sha"],
+                manifest["merge_base_sha"],
+                manifest["head_tree_sha"],
+            ),
+            ("h" * 40, "b" * 40, "m" * 40, "t" * 40),
         )
         self.assertNotIn("::warning::", proc.stdout)
 
@@ -4957,6 +4975,65 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         proc, _, _, _ = self._run(1)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("::warning::review input upload failed", proc.stdout)
+
+    def test_a_staging_failure_only_warns_and_uploads_nothing(self):
+        proc, _, _, recorded = self._run(0, block_staging=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertNotIn("s3 cp", recorded)
+
+    def test_the_tree_sha_comes_from_the_diff_step(self):
+        self.assertIn(
+            "HEAD_TREE_SHA: ${{ steps.diff.outputs.head_tree_sha }}", self.step
+        )
+
+    def test_merge_base_plus_the_diff_rebuilds_the_recorded_tree(self):
+        """The replay recipe, on a real repo: merge base + pr-diff.txt from the
+        real diff step gives head_tree_sha (an edit, add, delete, rename, chmod)."""
+        with tempfile.TemporaryDirectory() as td:
+            # No developer git config (hooks, signing) reaches the fixture.
+            env = {"PATH": "/usr/bin:/bin", "HOME": td, "GIT_CONFIG_NOSYSTEM": "1"}
+            env["GIT_CONFIG_GLOBAL"] = os.devnull
+
+            def sh(script):
+                return subprocess.run(
+                    ["bash", "-ec", script],
+                    cwd=td,
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            base = sh(
+                "git init -q pr; cd pr; git config user.email t@t; git config user.name t\n"
+                "seq 20 > a.py; seq 30 > old.py; echo bye > gone.py; echo hi > run.sh\n"
+                "git add -A; git commit -qm base; git rev-parse HEAD"
+            )
+            sh(
+                "cd pr; echo 21 >> a.py; echo new > new.py; git rm -q gone.py\n"
+                "git mv old.py moved.py; chmod +x run.sh; git add -A; git commit -qm head"
+            )
+            proc, out = run_step(
+                STAGE2.read_text(),
+                "Build the diff and apply the size gate",
+                f"{td}/pr",
+                {
+                    "MERGE_BASE_SHA": base,
+                    "MAX_CHANGED_FILES": "100",
+                    "MAX_DIFF_BYTES": "9999",
+                },
+                {},
+                rewrite=lambda body: body.replace("/tmp/", f"{td}/"),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            tree = sole_outputs(self, out.read_text())["head_tree_sha"]
+            self.assertEqual(tree, sh("git -C pr rev-parse 'HEAD^{tree}'"))
+            replayed = sh(
+                f"git -C pr worktree add -q --detach ../replay {base}; cd replay\n"
+                "git apply --index ../pr-diff.txt; git write-tree"
+            )
+            self.assertEqual(replayed, tree)
 
 
 class TestPublishMovesNoLabels(unittest.TestCase):
