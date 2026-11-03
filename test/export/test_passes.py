@@ -1066,8 +1066,25 @@ def forward(self, sin, cos):
         m, inp = IndexInVmap(), (torch.arange(4.0), torch.tensor([3, 1]))
         ep = export(m, inp)
         region = torch.ops.higher_order.wrap_with_set_grad_enabled
-        self.assertEqual(nodes_count(ep.graph.nodes, lambda n: n.target is region), 1)
+        (region_node,) = ep.graph.find_nodes(op="call_function", target=region)
+        body = torch.fx.graph_module._get_attr(
+            ep.graph_module, region_node.args[1].target
+        )
+        self.assertTrue(
+            body.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.flat_apply
+            )
+        )
+        specs = [
+            n
+            for n in body.graph.find_nodes(op="get_attr")
+            if isinstance(
+                torch.fx.graph_module._get_attr(body, n.target), pytree.TreeSpec
+            )
+        ]
+        self.assertTrue(specs)
         self.assertEqual(ep.module()(*inp), m(*inp))
+        self.assertEqual(ep.run_decompositions().module()(*inp), m(*inp))
 
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted
