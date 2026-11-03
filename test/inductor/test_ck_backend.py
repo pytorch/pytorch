@@ -22,9 +22,8 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     subtest,
 )
@@ -32,11 +31,11 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     HAS_CPU,
-    HAS_TRITON,
+    HAS_CUDA_AND_TRITON,
 )
 
 
-if HAS_TRITON:
+if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 log = logging.getLogger(__name__)
@@ -57,10 +56,8 @@ _parametrize_dtype = parametrize(
 )
 
 
-@unittest.skipIf(not torch.version.hip, "ROCM only")
+@instantiate_parametrized_tests
 class TestCKBackend(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     def setUp(self):
         # The new inductor cache refresh mechanism
         # introduced with https://github.com/pytorch/pytorch/pull/122661
@@ -85,6 +82,7 @@ class TestCKBackend(TestCase):
                 old_disable_fresh_cache_envvar
             )
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends,dtype",
@@ -100,7 +98,7 @@ class TestCKBackend(TestCase):
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, device, max_autotune_gemm_backends, dtype, autotune_in_subproc, use_aoti
+        self, max_autotune_gemm_backends, dtype, autotune_in_subproc, use_aoti
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -109,7 +107,7 @@ class TestCKBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {"device": device, "dtype": dtype}
+        tensor_options = {"device": "cuda", "dtype": dtype}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
@@ -147,6 +145,7 @@ class TestCKBackend(TestCase):
             Y = mm(a=a, b=b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
@@ -155,13 +154,13 @@ class TestCKBackend(TestCase):
     )
     @parametrize("autotune_in_subproc", (True,))
     def test_max_autotune_precompile_matmul_dynamic(
-        self, device, max_autotune_gemm_backends, autotune_in_subproc
+        self, max_autotune_gemm_backends, autotune_in_subproc
     ):
         """
         Test matmul with dynamic shapes
         """
 
-        tensor_options = {"device": device, "dtype": torch.bfloat16}
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
@@ -199,16 +198,17 @@ class TestCKBackend(TestCase):
             Y1 = a1 @ b
             torch.testing.assert_close(Y1_compiled, Y1)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
-    def test_max_autotune_ck_backend_cpp_wrapper(self, device, num_gemms):
+    def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
         """
         Verify that CK GEMM templates work under JIT cpp_wrapper mode.
         ``num_gemms=2`` chains a second GEMM of a different shape so the
         wrapper has to link against multiple distinct .so files.
         """
         M, N, K = 2240, 2048, 256
-        tensor_options = {"device": device, "dtype": torch.bfloat16}
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c):
@@ -253,13 +253,14 @@ class TestCKBackend(TestCase):
             # AOT-only `kernels.` member.
             FileCheck().check("rocm_").check_not("kernels.rocm_").run(codes[0])
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
         ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
-    def test_max_autotune_precompile_preselected(self, device, max_autotune_gemm_backends):
+    def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
         """
         End to end test for picking preselected ck instances
         """
@@ -267,7 +268,7 @@ class TestCKBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {"device": device, "dtype": torch.float16}
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(2048, 256, **tensor_options).transpose(0, 1)
@@ -292,14 +293,15 @@ class TestCKBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("Aten,CK",))
-    def test_max_autotune_precompile_non_contiguous(self, device, max_autotune_gemm_backends):
+    def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
         """
         Make sure the matmul with non-contiguous inputs can fallback
         """
 
-        tensor_options = {"device": device, "dtype": torch.float16}
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
 
         a = torch.empty_strided((50257, 32768), (1, 50304), **tensor_options)
         b = torch.empty_strided((32768, 768), (768, 1), **tensor_options)
@@ -330,6 +332,7 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
@@ -342,11 +345,11 @@ class TestCKBackend(TestCase):
         name_fn=lambda x_shape: f"x_shape_{'x'.join(map(str, x_shape))}",
     )
     @_parametrize_dtype
-    def test_max_autotune_addmm(self, device, max_autotune_gemm_backends, x_shape, dtype):
+    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
-        tensor_options = {"device": device, "dtype": dtype}
+        tensor_options = {"device": "cuda", "dtype": dtype}
         x = torch.ones(x_shape, **tensor_options)
         a = torch.randn(m, k, **tensor_options)
         b = torch.randn(k, n, **tensor_options)
@@ -380,6 +383,7 @@ class TestCKBackend(TestCase):
     @unittest.skip(
         "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
     )
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
@@ -389,7 +393,7 @@ class TestCKBackend(TestCase):
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
     @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
-        self, device, max_autotune_gemm_backends, quantize_type, has_bias
+        self, max_autotune_gemm_backends, quantize_type, has_bias
     ):
         use_fast_accum = False
         runtime_arch = torch.cuda.get_device_properties(0).gcnArchName
@@ -397,7 +401,7 @@ class TestCKBackend(TestCase):
             self.skipTest(f"Unsupported arch {runtime_arch}")
         # output dtype
         dtype = torch.bfloat16
-        tensor_options = {"device": device, "dtype": dtype}
+        tensor_options = {"device": "cuda", "dtype": dtype}
 
         M = 2240
         N = 2048
@@ -473,6 +477,7 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(
         os.environ,
         {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
@@ -482,8 +487,8 @@ class TestCKBackend(TestCase):
         ("CK", "ATEN,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
-    def test_max_autotune_conv2d(self, device, max_autotune_conv_backends):
-        tensor_options = {"device": device, "dtype": torch.float32}
+    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
 
         x = torch.randn(1, 8, 224, 224, **tensor_options)
         w = torch.randn(64, 8, 7, 7, **tensor_options)
@@ -516,12 +521,13 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(
         os.environ,
         {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
     )
-    def test_max_autotune_conv_transpose2d_skips_forward_ck(self, device):
-        tensor_options = {"device": device, "dtype": torch.float32}
+    def test_max_autotune_conv_transpose2d_skips_forward_ck(self):
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
         x = torch.randn(1, 64, 32, 32, **tensor_options).to(
             memory_format=torch.channels_last
         )
@@ -553,6 +559,7 @@ class TestCKBackend(TestCase):
             self.assertFalse(any("async_compile.rocm" in c for c in codes))
             torch.testing.assert_close(y_compiled, y_eager, atol=2e-4, rtol=2e-4)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
@@ -561,7 +568,6 @@ class TestCKBackend(TestCase):
     )
     def test_max_autotune_precompile_bmm(
         self,
-        device,
         max_autotune_gemm_backends,
     ):
         """
@@ -571,7 +577,7 @@ class TestCKBackend(TestCase):
         def bmm(a, b):
             return torch.bmm(a, b)
 
-        tensor_options = {"device": device, "dtype": torch.bfloat16}
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         a = torch.randn(16, 2240, 256, **tensor_options)
         b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
@@ -640,10 +646,9 @@ struct UniversalGemmPipelineProblem
 """
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(not torch.version.hip, "ROCM only")
 class TestCKTileUniversalGemmTemplate(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     _MODULE = "torch._inductor.codegen.rocm.ck_tile_universal_gemm_template"
 
     def setUp(self):
@@ -654,8 +659,8 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         # _ck_tile_universal_gemm_v2_api is functools.cache'd on the search path.
         self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
 
-    def _make_template(self, device, m=2048, n=2048, k=2048, *, dtype):
-        device = torch.device(device)
+    def _make_template(self, m=2048, n=2048, k=2048, *, dtype):
+        device = torch.device("cuda")
         X = Buffer(name="X", layout=FixedLayout(device, dtype, [m, k]))
         W = Buffer(name="W", layout=FixedLayout(device, dtype, [k, n]))
         return self._ck_tile.CKTileGemmTemplate(
@@ -735,15 +740,15 @@ class TestCKTileUniversalGemmTemplate(TestCase):
             rocm_home, config.rocm.ck_dir
         )
 
-    def test_header_probe_legacy_api(self, device):
+    def test_header_probe_legacy_api(self):
         with self._probe_env(rocm_home_header=_LEGACY_PIPELINE_HEADER) as rocm_home:
             self.assertFalse(self._probe(rocm_home))
 
-    def test_header_probe_v2_api(self, device):
+    def test_header_probe_v2_api(self):
         with self._probe_env(rocm_home_header=_V2_PIPELINE_HEADER) as rocm_home:
             self.assertTrue(self._probe(rocm_home))
 
-    def test_header_probe_prefers_ck_dir_over_rocm_home(self, device):
+    def test_header_probe_prefers_ck_dir_over_rocm_home(self):
         """
         The compiler searches the CK directory before $ROCM_HOME, so the probe
         has to resolve the header the same way.
@@ -754,7 +759,7 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         ) as rocm_home:
             self.assertTrue(self._probe(rocm_home))
 
-    def test_header_probe_on_installed_header(self, device):
+    def test_header_probe_on_installed_header(self):
         """
         The synthetic headers above cannot catch the probe silently failing to
         classify the real thing, which is how this shipped broken once already.
@@ -771,7 +776,7 @@ class TestCKTileUniversalGemmTemplate(TestCase):
             f"could not classify the universal GEMM API in {header_path}",
         )
 
-    def test_header_probe_handles_long_template_clause(self, device):
+    def test_header_probe_handles_long_template_clause(self):
         padding = "".join(f"          typename Unused{i}_ = void,\n" for i in range(64))
         header_text = _V2_PIPELINE_HEADER.replace(
             "          typename AElementWise_",
@@ -781,7 +786,7 @@ class TestCKTileUniversalGemmTemplate(TestCase):
             self._ck_tile._header_has_v2_universal_gemm_pipeline(header_text)
         )
 
-    def test_header_probe_does_not_use_later_flatmm_signature(self, device):
+    def test_header_probe_does_not_use_later_flatmm_signature(self):
         header_text = """
 template <typename AsDataType_,
           typename BsDataType_,
@@ -812,31 +817,29 @@ struct FlatmmPipelineProblem
         )
 
     @patch(f"{_MODULE}.torch.version.hip", "7.14.0")
-    def test_header_probe_fallback_v2_when_header_missing(self, device):
+    def test_header_probe_fallback_v2_when_header_missing(self):
         with self._probe_env() as rocm_home:
             self.assertTrue(self._probe(rocm_home))
 
     @patch(f"{_MODULE}.torch.version.hip", "7.2.0")
-    def test_header_probe_fallback_v1_when_header_missing(self, device):
+    def test_header_probe_fallback_v1_when_header_missing(self):
         with self._probe_env() as rocm_home:
             self.assertFalse(self._probe(rocm_home))
 
     @patch(f"{_MODULE}.torch.version.hip", "7.14.0")
-    def test_header_probe_fallback_v2_when_header_unrecognized(self, device):
+    def test_header_probe_fallback_v2_when_header_unrecognized(self):
         header = "struct UniversalGemmPipelineProblem\n{\n};\n"
         with self._probe_env(rocm_home_header=header) as rocm_home:
             self.assertTrue(self._probe(rocm_home))
 
     @patch(f"{_MODULE}.torch.version.hip", "7.rc1")
-    def test_header_probe_fallback_tolerates_malformed_hip_version(self, device):
+    def test_header_probe_fallback_tolerates_malformed_hip_version(self):
         with self._probe_env() as rocm_home:
             self.assertFalse(self._probe(rocm_home))
 
-    def test_ops_dtype_labels_agree_with_maps(self, device):
+    def test_ops_dtype_labels_agree_with_maps(self):
         template_cls = self._ck_tile.CKTileGemmTemplate
-        globals_src = (
-            self._make_template(device, dtype=torch.float16).globals().getvalue()
-        )
+        globals_src = self._make_template(dtype=torch.float16).globals().getvalue()
         cpp_aliases = set(re.findall(r"using (\w+) =", globals_src))
         labels = {
             dt
@@ -852,8 +855,8 @@ struct FlatmmPipelineProblem
 
     @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
-    def test_emit_v1_legacy_instance(self, device, dtype, epilogue):
-        code = self._make_template(device, dtype=dtype).emit_ck_instance(
+    def test_emit_v1_legacy_instance(self, dtype, epilogue):
+        code = self._make_template(dtype=dtype).emit_ck_instance(
             self._find_ck_tile_op(epilogue=epilogue, dtype=dtype), use_v2_api=False
         )
         self.assertIn("has_hot_loop_v", code)
@@ -864,8 +867,8 @@ struct FlatmmPipelineProblem
 
     @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
-    def test_emit_v2_simplified_instance(self, device, dtype, epilogue):
-        code = self._make_template(device, dtype=dtype).emit_ck_instance(
+    def test_emit_v2_simplified_instance(self, dtype, epilogue):
+        code = self._make_template(dtype=dtype).emit_ck_instance(
             self._find_ck_tile_op(epilogue=epilogue, dtype=dtype), use_v2_api=True
         )
         self.assertNotIn("has_hot_loop_v", code)
@@ -875,7 +878,7 @@ struct FlatmmPipelineProblem
             code,
         )
 
-    def test_kernel_launch_v1_has_tail_handler(self, device):
+    def test_kernel_launch_v1_has_tail_handler(self):
         tmpl = self._ck_tile.CKTileGemmTemplate
         code = tmpl._template_from_string(tmpl.gemm_kernel_launch).render(
             instance_namespace="test_ns", use_v2_api=False
@@ -883,7 +886,7 @@ struct FlatmmPipelineProblem
         self.assertIn("BaseGemmPipeline::TailHandler", code)
         self.assertIn("has_hot_loop_v", code)
 
-    def test_kernel_launch_v2_no_tail_handler(self, device):
+    def test_kernel_launch_v2_no_tail_handler(self):
         tmpl = self._ck_tile.CKTileGemmTemplate
         code = tmpl._template_from_string(tmpl.gemm_kernel_launch).render(
             instance_namespace="test_ns", use_v2_api=True
@@ -894,14 +897,12 @@ struct FlatmmPipelineProblem
 
     @_parametrize_dtype
     @parametrize("use_v2_api", (True, False))
-    def test_cshuffle_epilogue_offered_only_with_v2_api(
-        self, device, dtype, use_v2_api
-    ):
+    def test_cshuffle_epilogue_offered_only_with_v2_api(self, dtype, use_v2_api):
         """
         Pre-change ck_tile cannot compile the CShuffle epilogue we emit, so those
         instances must not reach autotuning and burn a compile each.
         """
-        template = self._make_template(device, dtype=dtype)
+        template = self._make_template(dtype=dtype)
         with (
             config.patch({"rocm.ck_tile_max_profiling_configs": None}),
             patch.object(
@@ -917,7 +918,7 @@ struct FlatmmPipelineProblem
     @_parametrize_dtype
     @parametrize("pipeline", ("CompV3", "CompV4", "Mem"))
     @parametrize("epilogue", ("Default", "CShuffle"))
-    def test_offered_instance_compiles(self, device, dtype, epilogue, pipeline):
+    def test_offered_instance_compiles(self, dtype, epilogue, pipeline):
         """
         Every instance filter_op accepts must compile against the ck_tile headers
         installed on this host, whichever universal GEMM API they expose.
@@ -925,7 +926,7 @@ struct FlatmmPipelineProblem
         rocm = config.rocm
         if self._ck_tile._find_ck_tile_header(rocm.rocm_home, rocm.ck_dir) is None:
             raise unittest.SkipTest("ck_tile headers are not installed")
-        template = self._make_template(device, dtype=dtype)
+        template = self._make_template(dtype=dtype)
         op = self._find_ck_tile_op(pipeline=pipeline, epilogue=epilogue, dtype=dtype)
         if template.filter_op(op) is None:
             raise unittest.SkipTest(f"{pipeline}/{epilogue} not offered on this ROCm")
@@ -941,14 +942,9 @@ struct FlatmmPipelineProblem
         )
 
 
-instantiate_device_type_tests(TestCKBackend, globals(), only_for="cuda")
-instantiate_device_type_tests(
-    TestCKTileUniversalGemmTemplate, globals(), only_for="cuda"
-)
-
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_TRITON and HAS_CPU and is_big_gpu():
+    if HAS_CUDA_AND_TRITON and HAS_CPU and is_big_gpu():
         run_tests()
