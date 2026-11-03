@@ -4,7 +4,7 @@ from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
-from torch._decomp import get_decompositions
+from torch._decomp import decomposition_table
 from torch._ops import OpOverload, OpOverloadPacket
 from torch._refs import is_complex as _is_complex
 from torch.types import Number
@@ -13,6 +13,8 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from .._core import ComplexTensor
 
+
+aten = torch.ops.aten
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -124,7 +126,58 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
-DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
+# Only decompositions verified by `test_decompositions` in `test/complex_tensor`.
+DECOMPOSED_OPS: set[OpType] = {
+    aten.addcdiv,
+    aten.addcmul,
+    aten.alias_copy,
+    aten.arange,
+    aten.block_diag,
+    aten.count_nonzero,
+    aten.diagonal_copy,
+    aten.empty_strided,
+    aten.expand_copy,
+    aten.eye,
+    aten.full,
+    aten.item,
+    aten.ldexp,
+    aten.lerp,
+    aten.linspace,
+    aten.logaddexp,
+    aten.logspace,
+    aten.logsumexp,
+    aten.meshgrid,
+    aten.mv,
+    aten.new_empty,
+    aten.new_full,
+    aten.new_ones,
+    aten.ones,
+    aten.ones_like,
+    aten.permute_copy,
+    aten.randn,
+    aten.renorm,
+    aten.roll,
+    aten.rot90,
+    aten.sinc,
+    aten.split_with_sizes_copy,
+    aten.squeeze_copy,
+    aten.std,
+    aten.t_copy,
+    aten.transpose_copy,
+    aten.tril,
+    aten.triu,
+    aten.unsafe_split,
+    aten.unsqueeze_copy,
+    aten.vdot,
+    aten.view_copy,
+    aten.zeros,
+}
+
+DECOMPOSITIONS = {
+    op: fn
+    for op, fn in decomposition_table.items()
+    if isinstance(op, OpOverload) and op.overloadpacket in DECOMPOSED_OPS
+}
 
 
 def lookup_complex(
