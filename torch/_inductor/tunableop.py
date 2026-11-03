@@ -132,6 +132,54 @@ def is_enabled() -> bool:
     return is_tune_mode() or is_reuse_mode()
 
 
+def graph_has_routable_gemm(gm: Any) -> bool:
+    """Whether any node is a CUDA GEMM a TunableOp pass would act on.
+
+    The cache bypass costs a full recompile, so it must not fire for graphs
+    that do no compile-time TunableOp work at all -- CPU-only ones, and ones
+    with no GEMM. Keyed on the aten overload packet, the op the choice names
+    in _TUNABLEOP_ROUTING_CHOICES lower to.
+    """
+    aten = torch.ops.aten
+    # Packets, not overloads: mm_dtype is aten.mm.dtype_out and bias_addmm
+    # lowers from an addmm node, so the packet covers both.
+    routable = {
+        aten.mm,
+        aten.addmm,
+        aten.bmm,
+        aten.baddbmm,
+        aten._scaled_mm,
+        aten._scaled_mm_v2,
+    }
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            if getattr(node.target, "overloadpacket", None) not in routable:
+                continue
+            val = node.meta.get("val")
+            if getattr(getattr(val, "device", None), "type", None) == "cuda":
+                return True
+    return False
+
+
+def routes_to_worker(choices: list[Any]) -> bool:
+    """Whether any choice would be benchmarked in the TunableOp worker.
+
+    Mirrors the gate in ExternKernelCaller.benchmark, device included: submit()
+    runs the job on a CUDA worker, so a CPU extern candidate is timed inline
+    and must keep its cache entry. A non-extern choice has no .choice.
+    """
+    if not is_enabled():
+        return False
+    return any(
+        is_tunableop_gemm(getattr(getattr(c, "choice", None), "name", ""))
+        and getattr(getattr(c, "layout", None), "device", None) is not None
+        and c.layout.device.type == "cuda"
+        for c in choices
+    )
+
+
 def is_tunableop_gemm(choice_name: str) -> bool:
     """Whether an extern choice may be routed to the TunableOp worker.
 

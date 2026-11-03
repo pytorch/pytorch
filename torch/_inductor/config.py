@@ -3020,11 +3020,11 @@ class cuda(cutlass):
     # through the worker. With max-autotune off there is only the aten choice,
     # autotune returns without benchmarking, and the shape is covered only with
     # PYTORCH_TUNABLEOP_ENABLED set on a later run. Tuning happens while
-    # lowering, so a warm FxGraphCache or AOTAutogradCache hit tunes nothing at
-    # all: a tune pass needs a cold cache, or force_disable_caches. "reuse"
-    # instead borrows the nearest recorded shape, benchmarks it against the
-    # default kernel, and records the winner. Run as separate passes: "tune"
-    # builds the results file, "reuse" consumes it.
+    # lowering, so a graph that routes a CUDA GEMM skips the FX and autotune
+    # caches while a mode is set, and pipelined autotuning is turned off.
+    # "reuse" instead borrows the nearest recorded shape, benchmarks it against
+    # the default kernel, and records the winner. Run as separate passes:
+    # "tune" builds the results file, "reuse" consumes it.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"

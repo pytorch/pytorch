@@ -490,7 +490,21 @@ class PersistentCache(CacheBase):
                     break
             return hit
 
-        local_cache = self.get_local_cache() if config.autotune_local_cache else {}
+        # TunableOp works inside benchmark(), which a cached timing skips, and
+        # the mode is in neither cache key. An empty cache rather than an early
+        # return: the missing-choices assertion below still runs, and the
+        # precompile lookup (benchmark=None) misses too, so its choices are
+        # precompiled instead of being skipped and compiled one at a time.
+        # Not written either -- the timing is of a tuned kernel a plain run
+        # would not get, and update_local_cache rewrites the whole file, so a
+        # partial dict would discard the machine's cache.
+        from torch._inductor import tunableop
+
+        bypass = tunableop.routes_to_worker(choices)
+        if bypass or not config.autotune_local_cache:
+            local_cache = {}
+        else:
+            local_cache = self.get_local_cache()
         if (not check_cache(local_cache)) and (benchmark is not None):
             # re-benchmark everything to try to get consistent numbers from the same machine
             timings = benchmark(choices)
@@ -504,7 +518,8 @@ class PersistentCache(CacheBase):
             for choice, timing in timings.items():
                 local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
-            self.update_local_cache(local_cache)
+            if not bypass:
+                self.update_local_cache(local_cache)
 
         return timings
 
@@ -1117,6 +1132,7 @@ class CacheabilityValidator:
         self._check_nested_region_inductor_config_patches()
         self._check_frozen_params()
         self._check_runtime_constant_folding()
+        self._check_tunableop_enabled()
         self._check_compiler_bisector()
         self._check_shape_env()
         self.validate_graph(include_constants=True)
@@ -1252,6 +1268,17 @@ class CacheabilityValidator:
                 "Runtime constant folding can introduce constants that aren't "
                 "static across runs"
             )
+
+    def _check_tunableop_enabled(self) -> None:
+        # Both passes do their work while lowering -- tune records solutions,
+        # reuse borrows and validates one -- so a cache hit does neither and a
+        # rerun against a warm cache silently writes an empty results file.
+        # Only for graphs that would actually do that work: bypassing on the
+        # mode alone recompiles CPU-only and GEMM-free graphs for nothing.
+        from torch._inductor import tunableop
+
+        if tunableop.is_enabled() and tunableop.graph_has_routable_gemm(self.gm):
+            self.bypass("TunableOp tune and reuse modes must lower every GEMM")
 
     def _check_compiler_bisector(self) -> None:
         from torch._inductor.compiler_bisector import CompilerBisector
