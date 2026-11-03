@@ -850,7 +850,6 @@
   "test/torch_np/test_unary_ufuncs.py",
   "test/torchci/test_populate_clickhouse_owners.py",
   "test/torchci/test_testing.py",
-  "test/typing/test_python_operators.py",
   "test/xpu/test_conv.py",
   "test/xpu/test_fusion.py",
   "test/xpu/test_gemm.py",
