@@ -884,7 +884,8 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                 new_target_name = new_node.target
                 # Several get_attr nodes can read one attribute, such as a pytree
                 # spec, so reuse it and rename only when the name is taken.
-                if not _is_free_attr_name(gm, new_target_name) and not (
+                is_free = _is_free_attr_name(gm, new_target_name)
+                if not is_free and not (
                     _has_attr(gm, new_target_name)
                     and _get_attr(gm, new_target_name) is attr
                 ):
@@ -894,7 +895,8 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     while _has_attr(gm, new_target_name):
                         i += 1
                         new_target_name = f"submod_{i}"
-                if _is_free_attr_name(gm, new_target_name):
+                    is_free = True
+                if is_free:
                     *prefix, field = new_target_name.split(".")
                     owner = gm
                     for item in prefix:
