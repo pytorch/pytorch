@@ -156,7 +156,7 @@ class CuteDSLDeferredCall:
     artifact: ExternalAOTArtifact
 
     def generate(self, wrapper) -> None:
-        wrapper.include_extra_header("c10/util/CallOnce.h")
+        wrapper.include_extra_header("mutex")
         wrapper.include_extra_header("stdexcept")
         wrapper.prefix.splice(Path(self.artifact.header_path).read_text())
         prefix = str(self.artifact.payload["prefix"])
@@ -186,11 +186,11 @@ class CuteDSLDeferredCall:
         fills_code = "\n".join(fills)
         wrapper.prefix.splice(f"""
 {prefix}_Kernel_Module_t {prefix}_module;
-c10::once_flag {prefix}_loaded;
+std::once_flag {prefix}_loaded;
 
 template <{", ".join(template_types)}>
 static void launch_{prefix}({", ".join(parameters)}) {{
-  c10::call_once({prefix}_loaded, [] {{
+  std::call_once({prefix}_loaded, [] {{
     {prefix}_Kernel_Module_Load(&{prefix}_module);
   }});
 {fills_code}

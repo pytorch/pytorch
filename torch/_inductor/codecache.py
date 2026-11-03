@@ -4551,6 +4551,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         num_outputs: int = -1,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
+        extra_link_flags: Sequence[str] = (),
         kernel_code: str | None = None,
     ) -> Any:
         """
@@ -4589,6 +4590,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             device_type,
             submit_fn=submit_fn,
             extra_flags=extra_flags,
+            extra_link_flags=extra_link_flags,
             optimized_code=kernel_code,
             needs_vec_isa=needs_vec_isa,
             kernel_needs_vec_isa=kernel_needs_vec_isa,
