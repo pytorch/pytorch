@@ -868,13 +868,96 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def f(ba, x):
             ba[0] = ord("x")
-            ba[1:3] = b"YZW"
-            del ba[-1]
+            ba[1:3] = b"YZ"
+            ba[::2] = b"PQ"
             return x + 1
 
         b = bytearray(b"abcd")
         self.assertEqual(f(b, torch.ones(1)), torch.ones(1) + 1)
-        self.assertEqual(b, bytearray(b"xYZW"))
+        self.assertEqual(b, bytearray(b"PYQd"))
+
+    def test_setitem_delitem_input_resize(self):
+        def f(ba, key, value, x):
+            try:
+                if value is None:
+                    delitem(ba, key)
+                else:
+                    setitem(ba, key, value)
+            except BufferError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        def run(fn, key, value, exported):
+            ba = bytearray(b"abcd")
+            view = memoryview(ba) if exported else None
+            result = fn(ba, key, value, torch.ones(1))
+            if view is not None:
+                view.release()
+            return result, ba
+
+        cases = [
+            (slice(0, 1), b"XY"),
+            (slice(0, 2), b""),
+            (0, None),
+            (slice(None, None, 2), None),
+            # An empty extended slice still resizes.
+            (slice(5, 5, 2), None),
+            (slice(5, 5, 2), b""),
+        ]
+        for key, value in cases:
+            for exported in (False, True):
+                with self.subTest(key=key, value=value, exported=exported):
+                    torch._dynamo.reset()
+                    compiled = torch.compile(f, backend="eager")
+                    self.assertEqual(
+                        run(compiled, key, value, exported),
+                        run(f, key, value, exported),
+                    )
+
+        # A resizing store on an input may hit a live export: left to eager.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "bytearray resize of a possibly exported input",
+        ):
+            torch.compile(delitem, backend="eager", fullgraph=True)(bytearray(b"ab"), 0)
+
+    def test_setslice_python_index_bounds(self):
+        class Bound:
+            def __init__(self, name, value, log):
+                self.name = name
+                self.value = value
+                self.log = log
+
+            def __index__(self):
+                self.log.append(self.name)
+                return self.value
+
+        def f(ba, start, stop, step, value, x):
+            ba[start:stop:step] = value
+            return x + 1
+
+        def run(fn, value):
+            log = []
+            ba = bytearray(b"abcd")
+            bounds = [Bound(name, i, log) for name, i in (("start", 0), ("stop", 2))]
+            fn(ba, *bounds, Bound("step", 1, log), value, torch.ones(1))
+            return ba, log
+
+        # CPython unpacks the slice step first, and again for a value that
+        # is not a bytearray.
+        for value in (b"XY", bytearray(b"XY"), [88, 89]):
+            with self.subTest(value=value):
+                torch._dynamo.reset()
+                compiled = torch.compile(f, backend="eager")
+                self.assertEqual(run(compiled, value), run(f, value))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "bytearray slice store with Python __index__ bounds",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(
+                bytearray(b"ab"), Indexable(0), 1, None, b"X", torch.ones(1)
+            )
 
     def test_setslice_input_values(self):
         @torch.compile(backend="eager", fullgraph=True)

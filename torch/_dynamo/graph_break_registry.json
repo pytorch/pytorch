@@ -39,6 +39,26 @@
       ]
     }
   ],
+  "GB5813": [
+    {
+      "Gb_type": "bytearray resize of a possibly exported input",
+      "Context": "bytearray: {self}",
+      "Explanation": "A store that resizes a bytearray raises BufferError in eager while the buffer is exported, e.g. by a memoryview. Dynamo cannot see exports of an input bytearray, so the store is left to eager.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3084": [
+    {
+      "Gb_type": "bytearray slice store with Python __index__ bounds",
+      "Context": "slice: {key}",
+      "Explanation": "CPython calls the __index__ of bytearray slice store bounds in step, start, stop order, twice for a value that is not a bytearray. Dynamo does not model that order, so bounds that define __index__ in Python are left to eager.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0003": [
     {
       "Gb_type": "Attempt to trace generator",

@@ -15,8 +15,11 @@ variable tracking system.
 """
 
 import collections
+import inspect
 import operator
 import sys
+import types
+from collections.abc import Callable
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
@@ -2203,6 +2206,19 @@ class ByteArrayVariable(VariableTracker):
             # Explicit unbound dispatch: the value is checked before the bounds.
             return ByteArrayVariable.sq_ass_item_impl(self, tx, index, value)
         elif pyslice_check(key):
+            # PySlice_Unpack calls the bounds' __index__ in step, start, stop
+            # order, and a value that is not a bytearray makes CPython unpack
+            # the slice a second time. Leave Python-level __index__ to eager.
+            if any(self._has_python_index(member) for member in key.items):
+                unimplemented(
+                    gb_type="bytearray slice store with Python __index__ bounds",
+                    context=f"slice: {key}",
+                    explanation="CPython calls the __index__ of bytearray slice "
+                    "store bounds in step, start, stop order, twice for a value "
+                    "that is not a bytearray. Dynamo does not model that order, so "
+                    "bounds that define __index__ in Python are left to eager.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             index = key.as_index_slice(tx)
             if value is not None:
                 value = value.realize()
@@ -2217,16 +2233,14 @@ class ByteArrayVariable(VariableTracker):
                 src = value.as_python_constant()
             else:
                 self._unsupported_store_value(value)
-            new_data = bytearray(self.data)
-            try:
+
+            def store(data: bytearray) -> None:
                 if value is None:
-                    del new_data[index]
+                    del data[index]
                 else:
-                    new_data[index] = src
-            except (TypeError, ValueError) as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            tx.output.side_effects.mutation(self)
-            self.data = new_data
+                    data[index] = src
+
+            self._store_on_copy(tx, store)
             return ConstantVariable.create(None)
         else:
             raise_type_error(
@@ -2246,12 +2260,14 @@ class ByteArrayVariable(VariableTracker):
             return super().sq_ass_item_impl(tx, key, value)
         # value=None signals delete (CPython NULL sentinel).
         index = key.nb_index_impl(tx).as_python_constant()
+        byte = None
         if value is not None:
             # The value is checked before the index (gh-91153).
-            value = pynumber_index(tx, value)
-            if not value.is_python_constant():
+            byte_value = pynumber_index(tx, value)
+            if not byte_value.is_python_constant():
                 self._unsupported_store_value(value)
-            if not 0 <= value.as_python_constant() < 256:
+            byte = byte_value.as_python_constant()
+            if not 0 <= byte < 256:
                 raise_observed_exception(
                     ValueError, tx, args=["byte must be in range(0, 256)"]
                 )
@@ -2261,15 +2277,67 @@ class ByteArrayVariable(VariableTracker):
             raise_observed_exception(
                 IndexError, tx, args=["bytearray index out of range"]
             )
-        new_data = bytearray(self.data)
-        if value is None:
-            del new_data[index]
-        else:
-            new_data[index] = value.as_python_constant()
-        tx.output.side_effects.mutation(self)
-        # New buffer: do not mutate a sourced live object during tracing.
-        self.data = new_data
+
+        def store(data: bytearray) -> None:
+            if byte is None:
+                del data[index]
+            else:
+                data[index] = byte
+
+        self._store_on_copy(tx, store)
         return ConstantVariable.create(None)
+
+    def _store_on_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        store: Callable[[bytearray], None],
+    ) -> None:
+        # The store runs on a new buffer, so a sourced live object is not
+        # mutated during tracing, and side-effect replay updates it after the
+        # frame. Eager raises BufferError for a resize while the buffer is
+        # exported, which replay would raise outside the user's code. Only a
+        # sourced bytearray can have a live export, as Dynamo does not trace
+        # memoryview(): give the copy an export so that the real store shows
+        # whether it resizes, and leave such stores to eager.
+        new_data = bytearray(self.data)
+        view = memoryview(new_data) if self.source is not None else None
+        try:
+            store(new_data)
+        except BufferError:
+            unimplemented(
+                gb_type="bytearray resize of a possibly exported input",
+                context=f"bytearray: {self}",
+                explanation="A store that resizes a bytearray raises BufferError "
+                "in eager while the buffer is exported, e.g. by a memoryview. "
+                "Dynamo cannot see exports of an input bytearray, so the store "
+                "is left to eager.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        finally:
+            if view is not None:
+                view.release()
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+
+    @staticmethod
+    def _has_python_index(member: VariableTracker) -> bool:
+        from .tensor import SymNodeVariable
+
+        # Dynamo handles SymInt.__index__ itself; any other __index__ that is
+        # not a C slot is user code.
+        if isinstance(member, (ConstantVariable, SymNodeVariable)):
+            return False
+        index = inspect.getattr_static(maybe_get_python_type(member), "__index__", None)
+        return index is not None and not isinstance(
+            index,
+            (
+                types.WrapperDescriptorType,
+                types.MethodDescriptorType,
+                types.BuiltinFunctionType,
+            ),
+        )
 
     @staticmethod
     def _unsupported_store_value(value: VariableTracker) -> NoReturn:
