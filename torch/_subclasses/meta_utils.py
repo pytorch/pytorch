@@ -310,10 +310,11 @@ class MetaTensorDescriber:
         # queries on a real tensor (e.g. sparse_dim) would fail. Take Fake out
         # of the include set while describing. A real tensor then reaches its
         # backend kernels, while a C++ fake, including one inside a wrapper or
-        # subclass, still reaches the fake fallback through its own Fake key.
-        # The TLS exclude set is left as the caller set it. A Python fake mode
-        # only intercepts while it is on the mode stack, so this does not
-        # affect it.
+        # subclass, still reaches the fake fallback through its own Fake key,
+        # unless the caller excluded Fake (e.g. to_meta_tensor, no_dispatch()).
+        # The TLS exclude set is left as the caller set it. Python FakeTensor
+        # and FakeTensorMode never carry or include the Fake key, so this does
+        # not affect them.
         fake = torch._C.DispatchKey.Fake
         included = torch._C._dispatch_tls_is_dispatch_key_included(fake)
         torch._C._dispatch_tls_set_dispatch_key_included(fake, False)
