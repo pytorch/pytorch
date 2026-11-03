@@ -91,6 +91,8 @@ unpadded prompts:
   --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
 ```
 
+Prefill and decode require Transformers 5.14.1 or newer.
+
 Prefill measures one forward over the prompt, returning last-position logits and
 populating a reusable static cache. The cache holds `prompt_length + 1999`
 positions, the capacity `generate` allocates for its first forward, so attention
@@ -184,8 +186,8 @@ The process-group timeout covers hangs that do not raise an exception.
 TP requires `--disable-cudagraphs` and rejects `--backend=cudagraphs` until CUDA
 graphs are validated with it.
 Multi-node runs, several TP groups, and other parallelism styles are
-unsupported. Inductor TP requires CUDA/NCCL. On machines without an
-accelerator, `-dcpu` supports TP diagnostics with `--backend=eager` or
+unsupported. Inductor TP requires CUDA/NCCL. With a CPU-only PyTorch build,
+`-dcpu` supports TP diagnostics with `--backend=eager` or
 `--backend=aot_eager`. CPU Inductor TP is rejected because concurrent Gloo
 all-gathers can corrupt memory; this was reproduced without a model or
 compilation and is not specific to Qwen3.5.
