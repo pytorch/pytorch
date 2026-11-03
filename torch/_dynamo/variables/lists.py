@@ -2130,10 +2130,12 @@ class ByteArrayVariable(VariableTracker):
         else "{!r} is not in bytearray"
     )
 
-    # Note [bytearray copy on write]: mutators build a new bytearray and
-    # assign it to self.data instead of changing it in place, so a sourced
-    # object is not mutated during tracing. bytearray_join relies on this to
-    # detect a separator mutated during iteration.
+    # Note [bytearray copy on write]
+    #
+    # Mutators build a new bytearray and assign it to self.data instead of
+    # changing it in place, so a sourced object is not mutated during tracing.
+    # bytearray_join relies on this to detect a separator mutated during
+    # iteration.
     _nonvar_fields = {
         "data",
         *VariableTracker._nonvar_fields,
@@ -2632,8 +2634,8 @@ class ByteArrayVariable(VariableTracker):
         else:
             # CPython exports the separator's buffer for the whole call, so
             # resizing it raises BufferError. A changed self.data means the
-            # separator was mutated (Note [bytearray copy on write]): leave
-            # that to eager, also when iteration raised.
+            # separator was mutated (see Note [bytearray copy on write]):
+            # leave that to eager, also when iteration raised.
             try:
                 items = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.sequence_fast),
@@ -2667,7 +2669,8 @@ class ByteArrayVariable(VariableTracker):
                     gb_type="bytearray.join with an unsupported item",
                     context=f"item: {item}",
                     explanation="Dynamo only traces bytearray.join over items that "
-                    "are plain constants or bytearrays.",
+                    "are plain constants or bytearrays. Other items run in eager, "
+                    "which raises TypeError for items without the buffer protocol.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
         try:

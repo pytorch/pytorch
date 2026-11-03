@@ -715,16 +715,22 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 return str(e), x + 1
             return None, x + 1
 
-        for make_item in (lambda: iter(b"ab"), lambda: iter("ab")):
-            torch._dynamo.reset()
-            torch._dynamo.utils.counters.clear()
-            compiled = torch.compile(f, backend="eager")
-            self.assertEqual(
-                compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
-            )
-            self.assertGraphBreakReason("join with an unsupported item")
+        for name, make_item in (
+            ("bytes_iterator", lambda: iter(b"ab")),
+            ("str_iterator", lambda: iter("ab")),
+        ):
+            with self.subTest(item=name):
+                torch._dynamo.reset()
+                torch._dynamo.utils.counters.clear()
+                compiled = torch.compile(f, backend="eager")
+                self.assertEqual(
+                    compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
+                )
+                self.assertGraphBreakReason("join with an unsupported item")
 
     def test_join_buffer_subclass_item(self):
+        if sys.version_info < (3, 12):
+            self.skipTest("a Python __buffer__ needs PEP 688, Python 3.12+")
         log = []
 
         class BufStr(str):
@@ -742,6 +748,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(BufStr("q"), torch.ones(1))[0], b"S-c")
         # __buffer__ runs on every call, as in eager.
         self.assertEqual(log, ["buffer", "buffer"])
+        self.assertGraphBreakReason("join with an unsupported item")
 
     def test_join_separator_mutation_then_raise(self):
         class NextRaises:
@@ -808,14 +815,17 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             except BufferError as e:
                 return str(e), x + 1
 
-        # A resize raises BufferError in eager while join holds the export.
+        # Resizing mutators raise BufferError in eager while join holds the
+        # export; the others do not, but Dynamo still leaves them to eager.
         mutators = {
             "extend": lambda b: b.extend(b""),
+            "iadd": lambda b: operator.iadd(b, b""),
+            "imul": lambda b: operator.imul(b, 1),
             "append": lambda b: b.append(0x2C),
             "insert": lambda b: b.insert(0, 0x2C),
             "pop": lambda b: b.pop(),
-            "iadd": lambda b: operator.iadd(b, b""),
-            "imul": lambda b: operator.imul(b, 1),
+            "iadd_resize": lambda b: operator.iadd(b, b"x"),
+            "imul_resize": lambda b: operator.imul(b, 2),
         }
         for name, mutate in mutators.items():
             with self.subTest(mutator=name):
