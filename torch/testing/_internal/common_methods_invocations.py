@@ -4994,7 +4994,7 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
                        requires_grad=requires_grad, low=-5, high=5)
     return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
-def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True, **kwargs):
+def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
     batch_options: list[list[int]] = [
         [],  # no batch
@@ -5021,13 +5021,8 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
     # in_features == 0, used to abort the process on MPS, see https://github.com/pytorch/pytorch/issues/190050
-    # Callers that forward these to gradcheck forward-mode AD (e.g.
-    # linear_cross_entropy) opt out via include_empty=False: gradcheck collapses
-    # its tolerance to 0 for zero-element inputs, see
-    # https://github.com/pytorch/pytorch/issues/190436
-    if include_empty:
-        yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
-        yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
 
     # 1D weight contracts away the last input dim (out_features == 1 with the
     # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
@@ -5040,11 +5035,10 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
         yield SampleInput(create_tensor(8, 3), create_tensor(3))
         yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
         yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
-        if include_empty:
-            # An empty reduction dim and an empty batch, where the shortcuts taken for
-            # zero-element tensors still have to drop the 1D weight's output dim.
-            yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
-            yield SampleInput(create_tensor(0, 8), create_tensor(8))
+        # An empty reduction dim and an empty batch, where the shortcuts taken for
+        # zero-element tensors still have to drop the 1D weight's output dim.
+        yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
+        yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -7411,46 +7405,23 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                  weight="<to be initialized>", reduction="sum"),
         ]
 
+    # (input, linear_weight) shapes: unbatched, 2-D batch, and N-D linear_weight (K-dim loss)
+    shapes = (((3,), (4, 3)), ((8, 3), (4, 3)), ((4, 3), (2, 3, 3)))
+    make_linear_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-2, high=2)
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
-        for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad, include_empty=False):
-            linear_input = linear_sample.input
-            if len(linear_sample.args) == 1:
-                linear_weight = linear_sample.args[0]
+        # ignore_index is not supported for probabilities target, and linear_bias is independent of the target type
+        if probabilities_target and ("ignore_index" in kwargs or "linear_bias" in kwargs):
+            continue
+        for input_shape, weight_shape in shapes:
+            linear_input = make_linear_arg(input_shape)
+            linear_weight = make_linear_arg(weight_shape)
+            num_classes = weight_shape[0]
+            out_features = weight_shape[1:-1]
+            num_batches = input_shape[:-1]
+            if probabilities_target:
+                target_shape = (*num_batches, num_classes, *out_features)
             else:
-                # skip samples with linear bias as unsupported
-                continue
-
-            if linear_weight.dim() == 1:
-                # linear_cross_entropy requires a linear weight of rank >= 2
-                continue
-
-            num_classes = linear_weight.shape[0]
-            num_batches = linear_input.shape[:-1]
-            input_shape = (*num_batches, num_classes)
-            if len(input_shape) <= 2:
-                if probabilities_target:
-                    target_shape = input_shape
-                else:
-                    target_shape = num_batches
-            else:
-                # cross_entropy supports only one-dimensional
-                # batches. However, linear_cross_entropy supports
-                # multidimensional weights that sample_inputs_linear
-                # would not generate. So, we'll swap linear input and
-                # weights to generate samples with 2-D inputs and N-D
-                # linear weights for linear_cross_entropy:
-                linear_input, linear_weight = linear_weight, linear_input
-                num_classes = linear_weight.shape[0]
-                out_features = linear_weight.shape[1:-1]
-                num_batches = linear_input.shape[:-1]
-                if probabilities_target:
-                    target_shape = (*num_batches, num_classes, *out_features)
-                else:
-                    target_shape = (*num_batches, *out_features)
-
-            if 0 in target_shape:
-                # skip degenerate samples
-                continue
+                target_shape = (*num_batches, *out_features)
 
             if "weight" in kwargs:
                 # Strictly positive class weights only. Real-world
@@ -7470,9 +7441,6 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                     device=device, dtype=dtype, requires_grad=requires_grad,
                 )
             if probabilities_target:
-                # ignore_index is not supported for probabilities target
-                if "ignore_index" in kwargs:
-                    continue
                 target = make_tensor(
                     target_shape,
                     low=0,
