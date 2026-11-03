@@ -118,11 +118,11 @@ def _check_vector_norm_args(
     shape = x.shape
     if dim is not None and not isinstance(dim, IntLike):
         for d in dim:
-            d_wrapped = utils.canonicalize_dim(len(shape), d)
+            d_wrapped = utils.canonicalize_dim(x.ndim, d)
+            # canonicalize_dim(0, d) wraps 0/-1 to 0 for a 0-d tensor,
+            # and shape[0] would then raise if unchecked.
             torch._check(
-                # Guard 0-D scalars: canonicalize_dim(0, d) returns 0 while
-                # shape is empty, and sym_or eagerly evaluates both arguments.
-                sym_or(x.numel() != 0, x.ndim == 0 or shape[d_wrapped] != 0),
+                sym_or(x.numel() != 0, d_wrapped < x.ndim and shape[d_wrapped] != 0),
                 lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
