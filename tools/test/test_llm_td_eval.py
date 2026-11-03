@@ -6,6 +6,7 @@ import datetime as dt
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -135,6 +136,24 @@ class TestRunEval(unittest.TestCase):
         self.assertTrue(r["transient"])
         self.assertEqual((query.call_count, sleep.call_count), (4, 3))
 
+    def test_main_refuses_other_settings(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d)
+            (data / "results/t").mkdir(parents=True)
+            (data / "results/t/a.json").write_text(json.dumps({"model": "m", "effort": "high", "agentic": False}))  # fmt: skip
+            (data / "test-times.json").write_text("{}")
+            (data / "ids.txt").write_text("a b")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("sys.stderr", io.StringIO()) as err,
+                self.assertRaises(SystemExit),
+            ):
+                run_eval.main()
+        self.assertIn("1 results in", err.getvalue())
+
 
 class TestScore(unittest.TestCase):
     def test_config_of(self) -> None:
@@ -199,6 +218,12 @@ class TestScore(unittest.TestCase):
                       build-environment: linux-jammy-py3-clang12-onnx
                       test-matrix: |
                         { include: [{ config: "default", shard: 1 }] }
+                  dynamo-cpython-test:
+                    name: dynamo-cpython-test
+                    uses: ./.github/workflows/_linux-test.yml
+                    with:
+                      test-matrix: |
+                        { include: [{ config: "dynamo_cpython", shard: 1 }] }
             """,
             "inductor.yml": """
                 name: inductor
@@ -318,6 +343,8 @@ class TestScore(unittest.TestCase):
                 ("trunk", "macos-py3-arm64", "mps"),
                 ("pull", "linux-noble-xpu-n-py3.10", "default"),
                 ("pull", "linux-jammy-py3-clang12-onnx", "default"),
+                # test.sh exports NO_TD=1 for this config.
+                ("pull", "dynamo-cpython-test", "dynamo_cpython"),
                 (
                     "trunk",
                     "linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100",
@@ -350,6 +377,8 @@ class TestScore(unittest.TestCase):
             # A recorded TD workflow with an unknown job falls back to its config; a non-TD one never counts.
             "test_h": [["trunk", "linux-old / test (default, 1, 1, linux.2xlarge)"], ["inductor", "linux-old / test (slow, 1, 1, linux.2xlarge)"]],
             "test_i": [["rocm-rx7900", "linux-noble-rocm-py3.12-rx7900 / test (default, 1, 1, linux.rocm.gpu)"]],
+            # An unknown macOS, xpu or onnx job does not fall back to its config.
+            "test_j": [["trunk", "macos-old / test (default, 1, 1, macos-m1)"], "linux-xpu-old / test (default, 1, 1, linux.idc.xpu)"],
         }  # fmt: skip
         sample = {**SAMPLE, "kind": "revert", "truth": list(truth_jobs), "candidates": list(truth_jobs), "truth_jobs": truth_jobs}  # fmt: skip
         with patch_ci_jobs(jobs):
@@ -370,14 +399,53 @@ class TestScore(unittest.TestCase):
             ],
         )
 
+    def test_no_td_configs_match_test_sh(self) -> None:
+        text = (REPO_ROOT / ".ci/pytorch/test.sh").read_text()
+        funcs = re.findall(r"^(\w+)\(\) \{\n(?:(?!^\}).*\n)*?\s*export NO_TD=1", text, re.MULTILINE)  # fmt: skip
+        dispatch = dict(re.findall(r'"\$\{TEST_CONFIG\}" == \*(\w+)\* \]\]; then\n\s*(\w+)', text))  # fmt: skip
+        self.assertEqual(funcs, ["test_dynamo_cpython"])
+        self.assertEqual({c for c, f in dispatch.items() if f in funcs}, score.NO_TD_CONFIGS)  # fmt: skip
+
+    def test_unasked(self) -> None:
+        td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"]}}  # fmt: skip
+        r = {"out": {"tests": [{"file": "test_b"}]}}
+        huge = {**SAMPLE, "changed_files": [f"torch/f{i}.py" for i in range(select_tests.MAX_CHANGED_FILES + 1)]}  # fmt: skip
+        empty = {**SAMPLE, "changed_files": []}
+        for name in ("model", "final", "final-hm", "final+td45"):
+            self.assertTrue(pick(name, r, td, huge).sel.run_all, name)
+            choice = pick(name, r, td, empty)
+            self.assertEqual(choice.sel.run_all, name != "final+td45", name)
+        # With no changed files select_tests records an error, so TD's cut is kept.
+        self.assertEqual(pick("final+td45", r, td, empty).per_config, {"default": {"test_a"}})  # fmt: skip
+        files = {
+            "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
+            "samples/a.json": huge,
+            "td/a.json": td,
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = Path(d)
+            for name, obj in files.items():
+                (data / name).parent.mkdir(parents=True, exist_ok=True)
+                (data / name).write_text(json.dumps(obj))
+            rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td")  # fmt: skip
+        self.assertEqual([(x["run_all"], x["cost_usd"], x["error"]) for x in rows], [(True, 0.0, False)])  # fmt: skip
+
     def test_hedge(self) -> None:
         # test_e has no recorded time and test_d no positive score, so neither is ever added.
-        td = {"scored": ["test_e", "test_a", "test_b", "test_c"]}
+        td = {"scored": ["test_e", "test_a", "test_b", "test_c"], "top25": [], "top25_cfg": {}}  # fmt: skip
         # default: 5% of 250s fits only test_c; slow: test_a (200s) does not fit 5% of 200s.
         choice = pick("final+td5", NOTHING, td)
         self.assertEqual(choice.per_config, {"default": {"test_c"}, "slow": set()})
+        # A config in which nothing runs keeps TD's cut, as Selection.split does.
+        cut = {**td, "top25_cfg": {"slow": ["test_a"]}}
+        self.assertEqual(pick("final+td5", NOTHING, cut).per_config["slow"], {"test_a"})
+        r = {"out": {"tests": [{"file": "test_c"}]}}
+        self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
         # The default share is 20%: 50s of default fits test_d (40s) and test_c, not test_b after them.
-        ranked = {"scored": ["test_d", "test_c", "test_b"]}
+        ranked = {"scored": ["test_d", "test_c", "test_b"], "top25": [], "top25_cfg": {}}  # fmt: skip
         self.assertEqual(pick("final+td", NOTHING, ranked).per_config, {"default": {"test_d", "test_c"}, "slow": set()})  # fmt: skip
         with mock.patch.object(score, "LLM_TD_HEDGE", 0.45):
             self.assertEqual(pick("final+td", NOTHING, td).per_config, pick("final+td45", NOTHING, td).per_config)  # fmt: skip
@@ -520,6 +588,22 @@ class TestScore(unittest.TestCase):
             self.assertEqual([x["files"] for x in rows], [len(files_a)] * 2)
             self.assertEqual(err.getvalue(), msg)
             self.assertEqual(grep.call_args.args[1], "abc")
+        # An edited failure list whose classes git grep cannot look up forces a run-all or a sweep.
+        for entry, why in (("inductor_skips", "run everything"), ("dynamo_skips", "add the dynamo_wrapped sweep")):  # fmt: skip
+            sample = {**SAMPLE, "sha": "abc", "changed_files": [f"test/{entry}/TestA.test_x"]}  # fmt: skip
+            with (
+                tempfile.TemporaryDirectory() as d,
+                patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+                mock.patch.object(score, "grep_at", mock.Mock(side_effect=RuntimeError)),
+            ):  # fmt: skip
+                data = Path(d)
+                for name, obj in {**files, "samples/a.json": sample}.items():
+                    (data / name).parent.mkdir(parents=True, exist_ok=True)
+                    (data / name).write_text(json.dumps(obj))
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    score.score(data, ["a"], ["m"], ["final"], True, data / "samples", data / "td")  # fmt: skip
+            self.assertIn(f"\n  1 of them {why} under the final policies only because an edited failure list could not be looked up\n", err.getvalue())  # fmt: skip
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
@@ -639,7 +723,10 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_before", "2026-09-30 23:59:59", "a"),
             # A fork's main is a PR branch.
             fail("test_fork_main", "2026-10-05 00:00:00", "a"),
-            fail("test_fork_main", "2026-10-06 00:00:00", "f", br="f/pytorch:main"),
+            fail("test_fork_main", "2026-10-06 00:00:00", "g", br="f/pytorch:main"),
+            # The same author's other PR (a ghstack sibling) does not excuse it.
+            fail("test_same_author", "2026-10-05 00:00:00", "a"),
+            fail("test_same_author", "2026-10-06 00:00:00", "c"),
             fail("test_unstable", "2026-10-05 00:00:00", "a", job=unstable),
             # After PR 1 landed, main and other PRs cannot excuse its failures, so they are dropped.
             fail("test_after_landing", "2026-10-08 00:00:00", "a"),
@@ -660,13 +747,47 @@ class TestBuildDataset(unittest.TestCase):
         landed = {1: dt.datetime(2026, 10, 7, 12, tzinfo=dt.timezone.utc)}
         with (
             patch_ci_jobs({True: {("pull", "pull", "default")}, False: {("rocm-rx7900", "pull", "default")}}),
-            mock.patch.object(bd, "pr_of_shas", return_value={"a": 1, "b": 2, "f": 3}),
-            mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x", 3: "y"}),
+            mock.patch.object(bd, "pr_of_shas", return_value={"a": 1, "b": 2, "c": 4}),
+            mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x", 4: "me"}),
         ):  # fmt: skip
             keep, main = bd.pr_caused_failures(rows, dt.date(2026, 10, 1), dt.date(2026, 10, 26), landed)  # fmt: skip
-        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_far", 1), ("test_main_out", 1), ("test_other_out", 1), ("test_other_out", 2), ("test_real", 1)])  # fmt: skip
+        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_far", 1), ("test_main_out", 1), ("test_other_out", 1), ("test_other_out", 2), ("test_real", 1), ("test_same_author", 1), ("test_same_author", 4)])  # fmt: skip
         self.assertEqual(len(main[("test_a", "TestA", "test_main")]), 1)
         self.assertNotIn(("test_a", "TestA", "test_unmapped"), main)
+        self.assertNotIn(("test_a", "TestA", "test_fork_main"), main)
+
+    def test_landed_times_takes_the_last_trailer(self) -> None:
+        log = "\n100 Reland\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/1\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/2\n\0\n200 x\n\0"  # fmt: skip
+        with mock.patch.object(bd, "git", return_value=log):
+            got = bd.landed_times(dt.date(2026, 10, 1))
+        self.assertEqual(got, {2: dt.datetime.fromtimestamp(100, tz=dt.timezone.utc)})
+
+    def test_revert_truth_jobs_commits(self) -> None:
+        def run(*args: str, cwd: str, date: str = "2026-10-05T00:00:00+00:00") -> str:
+            env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date, "GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@a", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@a"}  # fmt: skip
+            return subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True).stdout  # fmt: skip
+
+        with tempfile.TemporaryDirectory() as d:
+            run("init", "-q", cwd=d)
+            commits = {}
+            for name, hour in (("base", 0), ("change", 1), ("after", 2), ("revert", 3), ("late", 5)):  # fmt: skip
+                msg = f"This reverts commit {commits['change']}." if name == "revert" else name  # fmt: skip
+                run("commit", "-q", "--allow-empty", "-m", msg, cwd=d, date=f"2026-10-05T0{hour}:00:00+00:00")  # fmt: skip
+                commits[name] = run("rev-parse", "HEAD", cwd=d).strip()
+            run("update-ref", "refs/remotes/origin/main", "HEAD", cwd=d)
+            queries: list[str] = []
+            landed = dt.datetime(2026, 10, 5, 1, tzinfo=dt.timezone.utc)
+            with (
+                mock.patch.object(bd, "git", lambda *a, check=True: run(*a, cwd=d)),
+                mock.patch.object(bd, "query", lambda sql: queries.append(sql) or [{"tf": "test_a", "wf": "trunk", "job": "j"}]),
+            ):  # fmt: skip
+                got = bd.revert_truth_jobs({"test_a"}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
+                # Decided before the change landed: no commit qualifies, so only the change itself.
+                bd.revert_truth_jobs({"test_a"}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
+        self.assertEqual(got, {"test_a": [("trunk", "j")]})
+        # The change and the commit after it, not the revert or what landed after the decision.
+        self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[0])  # fmt: skip
+        self.assertIn(f"head_sha IN ('{commits['change']}')", queries[1])
 
     def test_head_failures_skip_holdout_workflow(self) -> None:
         name = "linux / test (default, 1, 1)"
