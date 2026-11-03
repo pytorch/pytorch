@@ -5576,6 +5576,14 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(torch._C._is_fake_tensor(meta))
         self.assertTrue(meta.is_meta)
 
+    def test_maybe_get_fake_mode(self):
+        mode, wrapper = self._make_mode()
+        meta = torch.empty(2, device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
+        self.assertIsNone(torch._C._maybe_get_fake_mode(meta))
+        self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+
     def test_unsafe_data_ptr_access(self):
         def make_fake(mode):
             meta = torch.empty(2, device="meta")
