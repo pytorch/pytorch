@@ -463,9 +463,12 @@ class TestTorchDlPack(TestCase):
         class DLPackBuffer(TensorDLPackWrapper, bytearray):
             pass
 
-        # The empty buffer would raise; the device must come from the producer.
+        # The empty buffer would raise; the result must be the producer's tensor.
         tensor = make_tensor((2, 3), dtype=torch.float32, device=device)
-        self.assertEqual(torch.asarray(DLPackBuffer(tensor)), tensor)
+        result = torch.asarray(DLPackBuffer(tensor))
+        self.assertEqual(result, tensor)
+        self.assertEqual(result.device, tensor.device)
+        self.assertEqual(result.data_ptr(), tensor.data_ptr())
 
     @skipMeta
     @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
