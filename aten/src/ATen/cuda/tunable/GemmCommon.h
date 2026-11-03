@@ -763,7 +763,7 @@ struct ScaledGemmParams : OpParams {
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
     // Preserve existing CUDA NO_SWIZZLE/SWIZZLE_32_4_4 tuning-file keys.
     // Add any new CUDA swizzle here to distinguish its scale layout.
-    if (a_swizzle_type == SwizzleType::SWIZZLE_MNxK4 || b_swizzle_type == SwizzleType::SWIZZLE_MNxK4) {
+    if (a_swizzle_type == SwizzleType::SWIZZLE_MN_K4 || b_swizzle_type == SwizzleType::SWIZZLE_MN_K4) {
       sig += fmt::sprintf("_swz_%d_%d", static_cast<int>(a_swizzle_type), static_cast<int>(b_swizzle_type));
     }
     return sig;
