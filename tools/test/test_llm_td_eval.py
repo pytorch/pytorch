@@ -493,8 +493,12 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             pick("final-hm", {"out": {"tests": tests}}, None).sel.files, {"test_b"}
         )
-        # Filtering never makes a well-formed answer malformed: only unmatched names are left at high confidence.
+        # An unmatched name makes the answer malformed under both.
         tests = [{"file": "test_a", "confidence": "low"}, {"file": "bogus", "confidence": "high"}]  # fmt: skip
+        for name in ("final", "final-hm"):
+            self.assertTrue(pick(name, {"out": {"tests": tests}}, None).sel.run_all)
+        # Filtering out every name leaves a well-formed empty answer.
+        tests = [{"file": "test_a", "confidence": "low"}]
         self.assertEqual(pick("final", {"out": {"tests": tests}}, None).sel.files, {"test_a"})  # fmt: skip
         empty = pick("final-hm", {"out": {"tests": tests}}, None).sel
         self.assertEqual((empty.run_all, empty.files), (False, set()))
@@ -1040,6 +1044,32 @@ class TestBuildDataset(unittest.TestCase):
         log = next(c for c in calls if "--first-parent" in c)
         self.assertIn("--since=2026-10-01 00:00 +0000", log)
         self.assertIn("--until=2026-10-26 00:00 +0000", log)
+
+    def test_neutral_draw_survives_a_later_revert(self) -> None:
+        shas = [f"{i:02d}" + "a" * 38 for i in range(30)]
+
+        def draw(revert_body: str, bot: list[dict]) -> list[str]:
+            def git(*args: str) -> str:
+                if args[:2] == ("log", "-1"):
+                    return "Add x\n\nbody"
+                if "--first-parent" in args:
+                    return "".join(f"{sha} Add x\n" for sha in shas)
+                return revert_body
+
+            with (
+                tempfile.TemporaryDirectory() as out,
+                mock.patch.object(bd, "git", git),
+                mock.patch.object(bd, "query", return_value=bot) as query,
+                mock.patch.object(bd, "write_sample") as write,
+            ):
+                bd.neutral_samples(Path(out), dt.date(2026, 10, 1), dt.date(2026, 10, 26), 10)  # fmt: skip
+            self.assertIn("dry_run = 0", query.call_args.args[0])
+            return [c.args[3] for c in write.call_args_list]
+
+        before = draw("", [])
+        by_msg, by_bot = before[:2]
+        later = draw(f"This reverts commit {by_msg}.", [{"commit_sha": by_bot}])
+        self.assertEqual(later, before[2:])
 
     def test_checked_in_ids(self) -> None:
         ids = {n: set((REPO_ROOT / "tools/testing/llm_td/eval/ids" / f"{n}.txt").read_text().split()) for n in ("eval", "dev", "agentic", "neutral", "head")}  # fmt: skip
