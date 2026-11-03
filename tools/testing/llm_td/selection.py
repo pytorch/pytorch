@@ -13,8 +13,24 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tools.testing.target_determination.heuristics.edited_by_pr import (
+    ADDITIONAL_MAPPINGS,
+)
+
+
+# Directories that discover_tests.py blocklists because a driver runs their files.
+DRIVER_MAPPINGS = {
+    **ADDITIONAL_MAPPINGS,
+    "test_ao_sparsity": [r"^test/ao/"],
+    "test_autograd": [r"^test/autograd/"],
+    "test_fx": [r"^test/fx/"],
+    "test_jit": [r"^test/jit/"],
+    "test_package": [r"^test/package/"],
+    "test_quantization": [r"^test/quantization/"],
+}
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -33,9 +49,11 @@ RUN_ALL_PATTERNS = [
     r"^torch/testing/_internal/common_utils\.py$",
     r"^torch/testing/_internal/common_device_type\.py$",
     r"^tools/testing/",
-    r"^\.ci/pytorch/(test|win-test|macos-test|common_utils)\.sh$",
-    r"^\.github/workflows/_(linux|win|mac)-test\.yml$",
-    r"^\.github/actions/(linux-test|setup-linux|download-td-artifacts)/",
+    r"^tools/stats/import_test_stats\.py$",
+    r"^\.ci/pytorch/(test|win-test|macos-test|common|common-build|common_utils|torch_trace)\.sh$",
+    r"^\.github/workflows/_(linux|win|mac|rocm|xpu)-test(-no-dind)?\.yml$",
+    r"^\.github/actions/(setup-linux|setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
+    r"^\.github/scripts/filter_test_configs\.py$",
     # The CI test images: a new package version or toolchain can break any test.
     r"^\.ci/docker/(build\.sh|requirements-ci\.txt|common/|ci_commit_pins/|ubuntu)",
 ]
@@ -52,15 +70,60 @@ def normalize_test_name(name: str, candidates: set[str]) -> str | None:
 
 
 def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
-    return {
+    """The candidates the change edits, and those that run an edited file, such as test_jit for test/jit/*."""
+    edited = {
         n
         for f in changed_files
         if f.startswith("test/") and (n := normalize_test_name(f, candidates))
     }
+    for test, regexes in DRIVER_MAPPINGS.items():
+        if test in candidates and any(re.search(r, f) for r in regexes for f in changed_files):  # fmt: skip
+            edited.add(test)
+    return edited
+
+
+def importers(
+    changed_files: list[str], candidates: set[str], grep: Callable[[str], list[str]]
+) -> set[str]:
+    """Candidates that import a test module the change edits, such as the
+    *_dynamic_shapes copies of inductor/test_torchinductor. `grep` lists the
+    paths under test/ that match a `git grep -E` pattern at the change's head."""
+    mods = [f[5:-3] for f in changed_files if f.startswith("test/") and f.endswith(".py")]  # fmt: skip
+    names = sorted({n for m in mods for n in (m.replace("/", "."), m.rsplit("/", 1)[-1])})  # fmt: skip
+    if not names:
+        return set()
+    alt = "|".join(map(re.escape, names))
+    pattern = rf"^[[:space:]]*(from|import)[[:space:]]+({alt})([^[:alnum:]_]|$)"
+    return {n for f in grep(pattern) if (n := normalize_test_name(f, candidates))}
 
 
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
+
+
+def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set[str]]:
+    """The files and sweeps a model answer names; ValueError if it is malformed.
+
+    A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
+    candidate is malformed, so a misspelled directory cannot select nothing."""
+    if not isinstance(out, dict):
+        raise ValueError("not an object")
+    tests, dirs, sweeps = out.get("tests"), out.get("dirs", []), out.get("sweeps", [])
+    if not isinstance(tests, list) or not all(isinstance(t, dict) and isinstance(t.get("file"), str) for t in tests):  # fmt: skip
+        raise ValueError("tests is not a list of objects with a string file")
+    for key, value in (("dirs", dirs), ("sweeps", sweeps)):
+        if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+            raise ValueError(f"{key} is not a list of strings")
+    if not isinstance(out.get("run_all", False), bool):
+        raise ValueError("run_all is not a boolean")
+    files = {n for t in tests if (n := normalize_test_name(t["file"], candidates))}
+    for d in dirs:
+        prefix = re.sub(r"(/\*\*?)?/*$", "", d.strip()).removeprefix("./").removeprefix("test/")  # fmt: skip
+        in_dir = {c for c in candidates if c.startswith(prefix + "/")}
+        if not in_dir:
+            raise ValueError(f"dirs entry {d!r} matches no test file")
+        files |= in_dir
+    return files, {s for s in sweeps if s in SWEEPS}
 
 
 @dataclass
@@ -75,30 +138,30 @@ class Selection:
 
     @classmethod
     def from_model_output(
-        cls, out: dict | None, candidates: set[str], changed_files: list[str]
+        cls,
+        out: dict | None,
+        candidates: set[str],
+        changed_files: list[str],
+        grep: Callable[[str], list[str]] | None = None,
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
-        A missing output (the model call failed) and a change to test
-        infrastructure both fall back to running everything. Test files the
-        change edits are always selected."""
+        A missing or malformed output and a change to test infrastructure
+        all fall back to running everything. Test files the
+        change edits are always selected, and with `grep` (see importers) so
+        are the test files that import them."""
         if out is None:
             return cls(run_all=True, reason="no model output; running everything")
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
-        files = {
-            n
-            for t in out.get("tests") or []
-            if isinstance(t, dict)
-            and isinstance(f := t.get("file"), str)
-            and (n := normalize_test_name(f, candidates))
-        }
-        for d in out.get("dirs") or []:
-            prefix = d.strip().removeprefix("test/").strip("/") + "/"
-            files |= {c for c in candidates if c.startswith(prefix)}
+        try:
+            files, sweeps = parse_model_output(out, candidates)
+        except ValueError as e:
+            return cls(run_all=True, reason=f"malformed model output ({e}); running everything")  # fmt: skip
         files |= edited_tests(changed_files, candidates)
-        sweeps = {s for s in out.get("sweeps") or [] if s in SWEEPS}
-        return cls(files, sweeps, bool(out.get("run_all")), out.get("reason", ""))
+        if grep is not None:
+            files |= importers(changed_files, candidates, grep)
+        return cls(files, sweeps, out.get("run_all", False), str(out.get("reason", "")))  # fmt: skip
 
     def covers(self, test_file: str, test_config: str) -> bool:
         return self.run_all or test_config in self.sweeps or test_file in self.files
