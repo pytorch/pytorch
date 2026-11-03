@@ -59,7 +59,8 @@ def get_test_config(job_name: str) -> str:
 
 def get_td_exclusions(
     workflow_run_id: int, workflow_run_attempt: int
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
+    """The excluded test files per source ("td" or "llm_selection"), build and test config."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -71,20 +72,26 @@ def get_td_exclusions(
         for path in s3_paths:
             unzip(path)
 
-        grouped_tests: dict[str, Any] = defaultdict(lambda: defaultdict(set))
+        grouped_tests: dict[str, Any] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(set))
+        )
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
+                source = exclusions.get("source", "td")
                 for exclusion in exclusions["excluded"]:
                     job_id = get_job_id(td_exclusions)
                     job_name = get_job_name(job_id)
                     build_name = get_build_name(job_name)
                     test_config = get_test_config(job_name)
-                    grouped_tests[build_name][test_config].add(exclusion["test_file"])
+                    grouped_tests[source][build_name][test_config].add(
+                        exclusion["test_file"]
+                    )
 
-        for build_name, build in grouped_tests.items():
-            for test_config, test_files in build.items():
-                grouped_tests[build_name][test_config] = sorted(test_files)
+        for by_build in grouped_tests.values():
+            for build in by_build.values():
+                for test_config, test_files in build.items():
+                    build[test_config] = sorted(test_files)
         return grouped_tests
 
 
@@ -112,5 +119,12 @@ def upload_additional_info(workflow_run_id: int, workflow_run_attempt: int) -> N
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/td_exclusions",
-        [exclusions],
+        [exclusions["td"]],
     )
+    if "llm_selection" in exclusions:
+        upload_workflow_stats_to_s3(
+            workflow_run_id,
+            workflow_run_attempt,
+            "additional_info/llm_td_exclusions",
+            [exclusions["llm_selection"]],
+        )
