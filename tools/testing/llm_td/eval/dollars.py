@@ -22,16 +22,18 @@ from pathlib import Path
 
 from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.eval.score import (
+    ci_jobs,
     cost_fraction,
-    is_inductor,
     load,
     policy,
+    runs_td,
     test_seconds,
 )
 
 
 # 30-day runner cost of test jobs ($k), the PR share of test hours, and whether
-# TD runs in that workflow today. Inductor is the run_test part only.
+# TD runs in that workflow today. Inductor is the run_test part only. Only the
+# TD workflows enforce the selection in this stack; the rest are follow-ups.
 WORKFLOWS = [
     ("pull", "cpu", 463.6, 0.81, True),
     ("trunk", "cpu", 157.0, 0.63, True),
@@ -65,6 +67,9 @@ def fractions(
 ) -> dict[str, float]:
     seconds = test_seconds(data / "test-times.json")
     globs = inductor_globs()
+    # The configs of inductor.yml's unit-test job (inductor-unittest.yml) that TD never runs.
+    unit = {c for n, c in ci_jobs()[False] if n.startswith("unit-test / ")}
+    inductor = {c for c in unit if not runs_td(c)}
     gen, ind = [], []
     for sid in ids:
         s, r, td = load(data, tag, sid, samples, td_dir)
@@ -72,9 +77,9 @@ def fractions(
         if choice is None:
             continue
         cands = set(s["candidates"])
-        gen.append(cost_fraction(choice, cands, seconds, lambda c: not is_inductor(c)))
+        gen.append(cost_fraction(choice, cands, seconds, runs_td))
         if any(fnmatch.fnmatch(f, g) for f in s["changed_files"] for g in globs):
-            ind.append(cost_fraction(choice, cands, seconds, is_inductor))
+            ind.append(cost_fraction(choice, cands, seconds, inductor.__contains__))
     if not gen:
         raise SystemExit(f"no {tag} results for the given ids")
     if not ind:
@@ -108,6 +113,7 @@ def model(
     f = fractions(data, ids, tag, pol, samples, td_dir)
     ftd = fractions(data, ids, "td", "td25", samples, td_dir)
     total = {"cpu": 0.0, "gpu": 0.0}
+    stack = 0.0
     rows = []
     for wf, k, cost, share, has_td in WORKFLOWS:
         if isnan(f[k]):
@@ -118,6 +124,7 @@ def model(
         save = pr * (1 - new_rel / old_rel)
         hw = "gpu" if "gpu" in k else "cpu"
         total[hw] += save
+        stack += save if has_td else 0.0
         rows.append(
             {
                 "workflow": wf,
@@ -131,7 +138,7 @@ def model(
         )
     llm_k = PR_PUSHES_PER_MONTH_K * mean_call_usd(data, tag, cost_ids)
     return {"tag": tag, "policy": pol, "overhead": overhead, "fractions": f, "td_fractions": ftd, "rows": rows,
-            "total_k_per_month": total, "llm_k_per_month": llm_k}  # fmt: skip
+            "total_k_per_month": total, "stack_k_per_month": stack, "llm_k_per_month": llm_k}  # fmt: skip
 
 
 def main() -> None:
@@ -164,7 +171,7 @@ def main() -> None:
     print(
         f"{d['tag']} {d['policy']} overhead={d['overhead']} n={f['n']} n_ind={f['n_ind']} "
         f"run cpu={f['cpu']:.3f} gpu={f['gpu']:.3f} ind_cpu={f['ind_cpu']:.3f} ind_gpu={f['ind_gpu']:.3f} "
-        f"save cpu=${t['cpu']:.0f}k gpu=${t['gpu']:.0f}k llm=${d['llm_k_per_month']:.1f}k/month"
+        f"save cpu=${t['cpu']:.0f}k gpu=${t['gpu']:.0f}k (this stack ${d['stack_k_per_month']:.0f}k) llm=${d['llm_k_per_month']:.1f}k/month"
     )
     if args.json:
         args.json.write_text(json.dumps(d, indent=1))

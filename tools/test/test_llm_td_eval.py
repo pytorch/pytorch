@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+from tools.testing.llm_td.eval import score
 from tools.testing.llm_td.eval.build_dataset import strip_trailers
 from tools.testing.llm_td.eval.score import (
     Choice,
+    ci_jobs,
     config_of,
     cost_fraction,
     policy,
-    runs_everything,
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
@@ -71,16 +75,86 @@ class TestScore(unittest.TestCase):
             [("test_a", "slow"), ("test_b", "default")],
         )
 
-    def test_runs_everything(self) -> None:
-        jobs = {
-            "test_a": [
-                "unit-test / linux-jammy-cpu-py3.12-gcc11-inductor / test (inductor, 1, 2, linux.2xlarge)",
-                "linux / test (inductor, 1, 2, linux.2xlarge)",
-            ],
-            "test_b": ["linux / test (default, 1, 2, linux.2xlarge)"],
-        }
+    def test_ci_jobs(self) -> None:
+        workflows = {
+            "pull.yml": """
+                name: pull
+                on: pull_request
+                jobs:
+                  build:
+                    name: linux-jammy-py3.10-gcc11
+                    uses: ./.github/workflows/_linux-build.yml
+                    with:
+                      test-matrix: |
+                        { include: [{ config: "default", shard: 1 }] }
+                  test:
+                    name: linux-jammy-py3.10-gcc11
+                    uses: ./.github/workflows/_linux-test.yml
+                    with:
+                      test-matrix: ${{ needs.build.outputs.test-matrix }}
+            """,
+            "inductor.yml": """
+                name: inductor
+                on: pull_request
+                jobs:
+                  unit-test:
+                    name: unit-test
+                    uses: ./.github/workflows/inductor-unittest.yml
+            """,
+            "inductor-unittest.yml": """
+                name: inductor-unittest
+                on:
+                  workflow_call:
+                jobs:
+                  inductor-test:
+                    uses: ./.github/workflows/_linux-test.yml
+                    with:
+                      test-matrix: |
+                        { include: [{ config: "inductor_core", shard: 1 }] }
+            """,
+            "periodic.yml": """
+                name: periodic
+                on: schedule
+                jobs:
+                  test:
+                    name: linux-jammy-cuda13.2-py3-gcc11-slow-gradcheck
+                    uses: ./.github/workflows/_linux-test.yml
+                    with:
+                      test-matrix: |
+                        { include: [{ config: "default", shard: 1 }] }
+            """,
+        }  # fmt: skip
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in workflows.items():
+                (Path(d) / name).write_text(textwrap.dedent(text))
+            jobs = ci_jobs(Path(d))
+        self.assertEqual(jobs[True], {("linux-jammy-py3.10-gcc11", "default")})
         self.assertEqual(
-            runs_everything({**SAMPLE, "truth_jobs": jobs}), {("test_a", "inductor")}
+            jobs[False],
+            {
+                ("unit-test / inductor-test", "inductor_core"),
+                ("linux-jammy-cuda13.2-py3-gcc11-slow-gradcheck", "default"),
+            },
+        )
+        truth_jobs = {
+            "test_a": ["unit-test / inductor-test / test (inductor_core, 1, 2, linux.2xlarge)"],
+            # An older CUDA version of the periodic job.
+            "test_b": ["linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck / test (default, 1, 2, linux.2xlarge)"],
+            "test_c": ["linux-jammy-py3.10-gcc11 / test (default, 1, 2, linux.2xlarge)"],
+            # Unknown jobs fall back to their config.
+            "test_d": ["linux-old / test (default, 1, 1, linux.2xlarge)", "linux-old / test (slow, 1, 1, linux.2xlarge)"],
+        }  # fmt: skip
+        with mock.patch.object(score, "ci_jobs", lambda: jobs):
+            score.job_runs_td.cache_clear()
+            score.runs_td.cache_clear()
+            try:
+                got = score.runs_everything({**SAMPLE, "truth_jobs": truth_jobs})
+            finally:
+                score.job_runs_td.cache_clear()
+                score.runs_td.cache_clear()
+        self.assertEqual(
+            got,
+            {("test_a", "inductor_core"), ("test_b", "default"), ("test_d", "slow")},
         )
 
     def test_hedge(self) -> None:
