@@ -35,6 +35,8 @@ WORKFLOWS = [
     ("slow", "cpu", 6.3, 0.07, False),
 ]
 PR_PUSHES_PER_MONTH_K = 11.4
+# The samples the report is scored on (eval) and the prompt was developed on (dev).
+IDS = Path(__file__).parent / "ids"
 
 
 def inductor_globs() -> list[str]:
@@ -74,9 +76,11 @@ def fractions(
                     choice, cands, seconds, lambda c: c.startswith("inductor")
                 )
             )
+    if not gen:
+        raise SystemExit(f"no {tag} results for the given ids")
     return {
         "cpu": st.mean(x[0] for x in gen), "gpu": st.mean(x[1] for x in gen),
-        "ind_cpu": st.mean(x[0] for x in ind), "ind_gpu": st.mean(x[1] for x in ind),
+        "ind_cpu": st.mean(x[0] for x in ind) if ind else 0.0, "ind_gpu": st.mean(x[1] for x in ind) if ind else 0.0,
         "n": len(gen), "n_ind": len(ind),
     }  # fmt: skip
 
@@ -133,12 +137,12 @@ def main() -> None:
     p.add_argument(
         "--ids",
         type=Path,
-        help="samples the fractions come from; default: DATA/ids_neutral_clean.txt",
+        help="samples the fractions come from; default: the report's neutral samples",
     )
     p.add_argument(
         "--cost-ids",
         type=Path,
-        help="samples $/call is averaged over; default: DATA/ids_eval_clean.txt",
+        help="samples $/call is averaged over; default: the report's eval samples",
     )
     p.add_argument("--samples-dir", type=Path)
     p.add_argument("--td-dir", type=Path)
@@ -147,8 +151,8 @@ def main() -> None:
     p.add_argument("tag")
     p.add_argument("policy")
     args = p.parse_args()
-    ids = (args.ids or args.data / "ids_neutral_clean.txt").read_text().split()
-    cost_ids = (args.cost_ids or args.data / "ids_eval_clean.txt").read_text().split()
+    ids = (args.ids or IDS / "neutral.txt").read_text().split()
+    cost_ids = (args.cost_ids or IDS / "eval.txt").read_text().split()
     d = model(args.data, args.tag, args.policy, args.overhead, ids, cost_ids,
               args.samples_dir or args.data / "samples", args.td_dir or args.data / "td")  # fmt: skip
     f, t = d["fractions"], d["total_k_per_month"]

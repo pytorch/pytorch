@@ -73,6 +73,8 @@ def main() -> None:
     p.add_argument("--ids", type=Path, help="only these samples")
     p.add_argument("--shard", type=int, nargs=2, default=[0, 1])
     args = p.parse_args()
+    if args.stats.name != ".additional_ci_files":
+        raise SystemExit("--stats must be a directory named .additional_ci_files")
     missing = [a for a in ARTIFACTS if not (args.stats / a).exists()]
     if missing:
         raise SystemExit(
