@@ -3600,6 +3600,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
+    broadcast_scalar_loads = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
     block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
     tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
@@ -5515,7 +5516,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self._host_tma_non_materializable.add(var)
                 self._discard_host_tma_descriptor(var)
                 line = f"tl.load({var} + ({original_index}))"
-                append_broadcast = indexing.expand_str
+                if self.broadcast_scalar_loads:
+                    append_broadcast = indexing.expand_str
                 shape = ()
             else:
                 self._reject_if_template_host_tma(var)
