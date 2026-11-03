@@ -692,7 +692,9 @@ void validate_scaled_grouped_mm_v2_inputs(
     const Tensor& mat_a,
     const Tensor& mat_b,
     ArrayRef<int64_t> recipe_a,
+    ArrayRef<int64_t> swizzle_a,
     ArrayRef<int64_t> recipe_b,
+    ArrayRef<int64_t> swizzle_b,
     at::OptionalTensorRef offs,
     at::OptionalTensorRef bias,
     ArrayRef<int64_t> contraction_dim,
@@ -740,9 +742,29 @@ void validate_scaled_grouped_mm_v2_inputs(
       "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm");
   const bool same_recipe = recipe_a.size() == 1 && recipe_b.size() == 1 && recipe_a[0] == recipe_b[0];
   const bool rowwise = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::RowWise);
-  const bool mxfp4 = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::BlockWise1x32) &&
-      mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2;
-  const bool bf16_only = rowwise || mxfp4;
+  const bool tensorwise = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::TensorWise);
+  const auto vec32 = static_cast<int64_t>(ScalingType::BlockWise1x32);
+  const auto vec128 = static_cast<int64_t>(ScalingType::BlockWise1x128);
+  const auto block128 = static_cast<int64_t>(ScalingType::BlockWise128x128);
+  const auto mnk4 = static_cast<int64_t>(SwizzleType::SWIZZLE_MNxK4);
+  const bool has_mnk4 = std::find(swizzle_a.begin(), swizzle_a.end(), mnk4) != swizzle_a.end() ||
+      std::find(swizzle_b.begin(), swizzle_b.end(), mnk4) != swizzle_b.end();
+  TORCH_CHECK_VALUE(
+      !has_mnk4 || (same_recipe && (recipe_a[0] == vec32 || recipe_a[0] == vec128) &&
+          swizzle_a.size() == 1 && swizzle_b.size() == 1 && swizzle_a[0] == mnk4 && swizzle_b[0] == mnk4 &&
+          is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type())),
+      "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
+      "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MNxK4 on both inputs, and a valid float8 input pair");
+  const bool hopper = recipe_a.size() == 1 && recipe_b.size() == 1 &&
+      (recipe_a[0] == vec128 || recipe_a[0] == block128) &&
+      (recipe_b[0] == vec128 || recipe_b[0] == block128) &&
+      (recipe_a[0] == vec128 || recipe_b[0] == vec128);
+  const auto vec16 = static_cast<int64_t>(ScalingType::BlockWise1x16);
+  const bool nvfp4 = mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2 &&
+      mat_b.scalar_type() == ScalarType::Float4_e2m1fn_x2 && recipe_a.equals(recipe_b) &&
+      ((recipe_a.size() == 1 && recipe_a[0] == vec16) ||
+       (recipe_a.size() == 2 && recipe_a[0] == vec16 && recipe_a[1] == static_cast<int64_t>(ScalingType::TensorWise)));
+  const bool bf16_only = !tensorwise && !hopper && !has_mnk4 && !nvfp4;
   TORCH_CHECK_VALUE(
       !bf16_only || out_dtype_ == ScalarType::BFloat16,
       rowwise ? "Rowwise grouped GEMM requires BFloat16 output"
