@@ -50,6 +50,10 @@ class _FakeNode:
     def get_stride(self):
         return self._stride
 
+    def get_layout(self):
+        # gates read strides through the layout (ir.fixed_layout_snapshot)
+        return SimpleNamespace(stride=self.get_stride(), offset=0)
+
     def get_dtype(self):
         return self._dtype
 
