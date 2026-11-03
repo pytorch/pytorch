@@ -54,7 +54,7 @@ We took historical changes, asked each policy offline which test files it would 
 
 Of 20,094 failing tests in TD jobs on these PRs' pushes, 25.6% are flaky by these signals. The signals overlap: 24.9% failed on another author's PR, 19.4% on main, 13.3% were disabled, 0.9% passed on a rerun and 0.1% were in unstable jobs. The 74.4% that remain are what the push metric scores. Reverts need no such filter: the autorevert bot already requires the failure to start at the reverted commit and persist.
 
-**Test time run** is the mean, over 190 random main commits from 2026-10-01 to 2026-10-25 with no known breakage, of the share of a full CI pass's test-seconds a policy runs, with CPU and GPU counted separately, over the configs that some TD job runs (the inductor unit-test configs are priced separately below). The dollars come from this number.
+**Test time run** is the mean, over 190 random main commits from 2026-10-01 to 2026-10-25 (one was later reverted, see below), of the share of a full CI pass's test-seconds a policy runs, with CPU and GPU counted separately, over the configs that some TD job runs (the inductor unit-test configs are priced separately below). The dollars come from this number.
 
 ## Accuracy and test time
 
@@ -91,7 +91,7 @@ Of 20,094 failing tests in TD jobs on these PRs' pushes, 25.6% are flaky by thes
 | model calls | 0 | 2.2 |
 
 - **Saved:** $233k a month, $191k CPU and $43k GPU. The first three rows, which this stack covers, are $190k.
-- **Follow-ups.** run_test.py enables TD only when `GITHUB_WORKFLOW` is pull, trunk or ROCm (`--enable-td`'s default), and the selection is only enforced where TD is on. So jobs of the inductor unit-test workflow (run on PRs by `ciflow/inductor`), periodic and slow run every test, under old and new alike. Their test jobs already download the selection through the shared `_linux-test.yml` step, so each follow-up is a one-line change that adds the workflow to that check, made once the shadow data shows the selection is safe there. The rows above assume it is: inductor $40k, periodic and slow $4k.
+- **Follow-ups.** run_test.py enables TD only when `GITHUB_WORKFLOW` is pull, trunk or ROCm (`--enable-td`'s default), and the selection is only enforced where TD is on. So jobs of the inductor unit-test workflow (run on PRs by `ciflow/inductor`), periodic and slow run every test, under old and new alike. Their test jobs already download the selection through the shared `_linux-test.yml` step, so each follow-up adds the workflow to that check and to the matching condition on the wait step in `target_determination.yml`, made once the shadow data shows the selection is safe there. The rows above assume it is: inductor $40k, periodic and slow $4k.
 - **Why 25% and not 50%.** New runs about half the PR test time old does, but three things dilute that. Main and scheduled runs keep running everything. The inductor model benchmarks, which PRs trigger, are not test files. And the 20% fixed job overhead is not saved (see Dollar model).
 - In inductor only the run_test.py unit-test configs are selectable. The model benchmarks (huggingface, timm, torchbench) are most of its GPU spend.
 - **Not in the table:** rocm-mi300 and the other ROCm workflows also download the selection, but their runners are carried at $0 in `misc.runner_cost`, so they show up only under Time to land and Capacity. The remaining callers (win, mac, s390x, xpu) cost under $1k a month together or are also carried at $0.
@@ -232,17 +232,15 @@ Saved per month at the 0.2 overhead, for Opus medium: $368k with no hedge, $334k
 | Opus 5.5 low | 81.8% | 83.9% | 23.9% | $0.179 | 8s |
 | Opus 5.5 high | 82.4% | 85.0% | 24.0% | $0.201 | 18s |
 | Sonnet 5 medium | 75.7% | 83.2% | 25.0% | $0.110 | 11s |
-| Sonnet 5 high | 77.7% | (running) | 26.2% | $0.127 | 23s |
-| Haiku 4.5 low | 67.6% | (running) | 23.2% | $0.064 | 32s |
-
-The Sonnet 5 high and Haiku 4.5 low runs over the 783 failing pushes were still in progress when this was written; they are absent from the chart's right panel.
+| Sonnet 5 high | 77.7% | 84.0% | 26.2% | $0.127 | 23s |
+| Haiku 4.5 low | 67.6% | 73.9% | 23.2% | $0.064 | 32s |
 
 **What the sweep shows.**
 - **Why the 20% hedge.** Without a hedge, every Opus effort ties TD on reverts (70.9-73.0% vs 70.3%) at a sixth of its test time, but selects every real failure on only 75-77% of failing pushes against TD's 84.3%. The hedge closes that gap: TD's heuristics rank tests that failed recently high, and many PR failures are in those. 20% is the smallest budget at which Opus medium is at or above TD on both metrics. At 5% it is ahead on reverts (79.1%) but 4.6 points behind on pushes, which is why the earlier 5% proposal was dropped.
 - **Why medium effort.** At the 20% hedge, low, medium and high are within 1.3 points of each other on both metrics, which is within run-to-run noise (below). Medium is at or above TD on both; low is 0.4 points under TD on pushes. Medium costs 7% more per call than low and is 6s slower at p50, both negligible next to the test jobs.
-- **Model size matters more than effort.** Opus at any effort beats Sonnet on reverts by 5-7 points at the 20% hedge, and by 9-15 points without one.
-  - Haiku 4.5 does not support the effort setting. It is not good enough on reverts.
-  - Sonnet sometimes fails to produce schema-valid output after retries (12 of 783 pushes at medium effort). Those fall back to run-all, which is safe but costs.
+- **Model size matters more than effort.** Opus at any effort beats Sonnet on reverts by 4-7 points at the 20% hedge.
+  - Haiku 4.5 does not support the effort setting. It is well behind on both metrics.
+  - Sonnet sometimes fails to produce schema-valid output after retries (12 of 783 pushes at medium effort, 3 at high). Those fall back to run-all, which is safe but costs.
 - **Spend goes on run-all and the hedge.**
   - Without the safety rules, Opus low alone runs about 3.2% of test time on a typical change.
   - The run-all rules fire on 10 of 190 typical changes, mostly edits to `.ci/pytorch/test.sh` and the test docker images, and account for most of the no-hedge 7.6%. The hedge adds the rest.
@@ -295,7 +293,7 @@ The Sonnet 5 high and Haiku 4.5 low runs over the 783 failing pushes were still 
    - Gate the next step on a few weeks of it matching the numbers above.
 2. **Opt-in enforcement.** `ci-llm-td` enforces the selection, with the 20% hedge, on that PR.
 3. **Default enforcement.** Enforce on every internal PR, keeping the label as an opt-out (or `ci-no-td`). This unlocks about $190k a month and the merge-wait drop above.
-4. **Inductor, periodic and slow.** Have `inductor.yml` download the selection, and let run_test.py enforce it in periodic and slow, where TD is off today. Inductor's unit tests are the largest relative saving, about $40k a month; periodic and slow are about $4k.
+4. **Inductor, periodic and slow.** Their test jobs already download the selection through `_linux-test.yml`; add those workflows to the `GITHUB_WORKFLOW` check in run_test.py that enables TD, which is off for them today, and to the matching condition on the wait step in `target_determination.yml`. Inductor's unit tests are the largest relative saving, about $40k a month; periodic and slow are about $4k.
 5. **Benchmarks and shards.** Gate the inductor model benchmarks on a yes/no model answer, and skip shards with nothing selected.
 
 **Future work: a persistent per-test summary.** Each call re-reads the candidate list with nothing but file names and CI minutes. A summary per test file, of what it exercises and which source areas have broken it before, generated once and refreshed as tests change, would give the model the knowledge TD's heuristics encode, and could let the hedge shrink.

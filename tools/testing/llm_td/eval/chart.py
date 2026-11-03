@@ -56,6 +56,8 @@ def main() -> None:
     def caught(tag: str, pol: str, kind: str) -> tuple[float, int]:
         """Reverts with any failure selected; PR heads with every failure selected."""
         fail = [x for x in g[(tag, pol, kind)] if x["pairs"]]
+        if not fail:
+            raise ValueError(f"no failing {kind} rows for {tag} {pol} in {sys.argv[1]}")
         full = kind != "revert"
         ok = [x["hit"] == x["pairs"] if full else x["hit"] > 0 for x in fail]
         return 100 * sum(ok) / len(fail), len(fail)
