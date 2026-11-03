@@ -16,6 +16,7 @@
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -373,11 +374,11 @@ __global__ void cunn_SpatialSoftMaxBackward(
         }
       } else {
         accscalar_t sum = 0;
-        for (index_t d = 0; d < dim_size; d++)
+        for (const auto d : c10::irange(dim_size))
           sum += gradOutput[data_offset + d * dim_stride];
 
         Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum);
-        for (index_t d = 0; d < dim_size; d++) {
+        for (const auto d : c10::irange(dim_size)) {
           gradInput[data_offset + d * dim_stride] =
             epilogue(gradOutput[data_offset + d * dim_stride],
                     output[data_offset + d * dim_stride]);
@@ -456,7 +457,7 @@ blockReduce(AccumT* smem, AccumT val,
     int lane = threadIdx.x % C10_WARP_SIZE;
     if (lane < blockDim.x / C10_WARP_SIZE) {
 #pragma unroll
-      for (int i = 0; i < C10_WARP_SIZE; ++i) {
+      for (const auto i : c10::irange(C10_WARP_SIZE)) {
         warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
       }
 #if !defined(USE_ROCM)
@@ -541,7 +542,7 @@ ilpReduce(index_t shift,
     *value = reinterpret_cast<const LoadT*>(data)[offset];
 
     #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (const auto j : c10::irange(ILP)) {
       threadVal = r(threadVal, v[j]);
     }
   }
@@ -602,7 +603,7 @@ WriteFpropResultsVectorized(
     *in_value = reinterpret_cast<const LoadT*>(input)[offset];
 
     #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (const auto j : c10::irange(ILP)) {
       out_v[j] = epilogue(in_v[j]);
     }
 
@@ -662,7 +663,7 @@ WriteBpropResultsVectorized(
     *dY_v = reinterpret_cast<const outputT*>(gradOutput)[offset];
 
     #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (const auto j : c10::irange(ILP)) {
       dX[j] = epilogue(dY[j], Y[j]);
     }
 
@@ -708,13 +709,13 @@ WriteBpropResults(
     outscalar_t tmpGradOutput[ILP];
 
     #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (const auto j : c10::irange(ILP)) {
       tmpOutput[j] = output[offset + j * blockDim.x];
       tmpGradOutput[j] = gradOutput[offset + j * blockDim.x];
     }
 
     #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
+    for (const auto j : c10::irange(ILP)) {
       gradInput[offset + j * blockDim.x] = epilogue(tmpGradOutput[j], tmpOutput[j]);
     }
   }
@@ -812,7 +813,7 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
   MaxFloat<scalar_t, accscalar_t> maxFunc;
 
   #pragma unroll
-  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+  for(const auto reg_idx : c10::irange(reg_cnt)){
     int offset = threadIdx.x + reg_idx * blockDim.x;
     if(offset < classes) {
       reg[reg_idx] = input[offset];
@@ -827,7 +828,7 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
   SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
   // reduce all values
   #pragma unroll
-  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+  for(const auto reg_idx : c10::irange(reg_cnt)){
     int offset = threadIdx.x + reg_idx * blockDim.x;
     if(offset < classes) {
       threadExp = sumExpFunc(threadExp, reg[reg_idx]);
@@ -840,7 +841,7 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
 
   // Write back the value
   #pragma unroll
-  for(int reg_idx = 0; reg_idx < reg_cnt; reg_idx ++){
+  for(const auto reg_idx : c10::irange(reg_cnt)){
     int offset = threadIdx.x + reg_idx * blockDim.x;
     if(offset < classes) {
       output[offset] = epilogue(reg[reg_idx]);
@@ -941,7 +942,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
     smem_input_cache_vec_ptr[offset] = crnt_vec;
 
     #pragma unroll
-    for (int i = 0; i < ILP; ++i) {
+    for (const auto i : c10::irange(ILP)) {
       threadMax = maxFunc(threadMax, crnt_vec.val[i]);
     }
   }
@@ -956,7 +957,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
     LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
 
     #pragma unroll
-    for (int i = 0; i < ILP; ++i) {
+    for (const auto i : c10::irange(ILP)) {
       threadExp = sumExpFunc(threadExp, crnt_vec.val[i]);
     }
   }
@@ -974,7 +975,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
     StoreT out_vec;
 
     #pragma unroll
-    for (int i = 0; i < ILP; ++i) {
+    for (const auto i : c10::irange(ILP)) {
       out_vec.val[i] = epilogue(crnt_vec.val[i]);
     }
 
@@ -1060,7 +1061,7 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
     smem_gradOutput_cache_vec_ptr[offset] = crnt_vec;
 
     #pragma unroll
-    for (int i = 0; i < ILP; ++i) {
+    for (const auto i : c10::irange(ILP)) {
       threadSum = threadSum + crnt_vec.val[i];
     }
   }
@@ -1082,7 +1083,7 @@ cunn_SoftMaxBackwardSmem(scalar_t *gradInput, const outscalar_t *output, const o
     StoreT out_vec;
 
     #pragma unroll
-    for (int i = 0; i < ILP; ++i) {
+    for (const auto i : c10::irange(ILP)) {
       out_vec.val[i] = epilogue(crnt_vec.val[i], crnt_out.val[i]);
     }
 
@@ -1108,9 +1109,9 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
   if (input.numel() > 0) {
     int64_t inner_size = 1;
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    for (int64_t i = 0; i < dim; ++i)
+    for (const auto i : c10::irange(dim))
       outer_size *= input.size(i);
-    for (int64_t i = dim + 1; i < input.dim(); ++i)
+    for (const auto i : c10::irange(dim + 1, input.dim()))
       inner_size *= input.size(i);
     // This kernel spawns a block per each element in the batch.
     // XXX: it assumes that inner_size == 1
@@ -1345,9 +1346,9 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
   int64_t outer_size = 1;
   int64_t dim_size = output.size(dim);
   int64_t inner_size = 1;
-  for (int64_t i = 0; i < dim; ++i)
+  for (const auto i : c10::irange(dim))
     outer_size *= output.size(i);
-  for (int64_t i = dim + 1; i < output.dim(); ++i)
+  for (const auto i : c10::irange(dim + 1, output.dim()))
     inner_size *= output.size(i);
 // See descriptions of kernels above.
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();

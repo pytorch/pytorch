@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <utility>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -332,7 +333,7 @@ void batch_norm_mean_var(const Tensor& self, Tensor& save_mean, Tensor& save_var
     const int64_t ndim = self.dim();
     DimVector reduce_dims(ndim - 1);
     reduce_dims[0] = 0;
-    for (int64_t i = 2; i < ndim; ++i) {
+    for (const auto i : c10::irange(2, ndim)) {
       reduce_dims[i - 1] = i;
     }
 

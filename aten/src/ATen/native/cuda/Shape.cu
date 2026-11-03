@@ -11,6 +11,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -293,7 +294,7 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
     T reg_data[kILP];
 
     while (inputOffset + kILP <= nElements) {
-      for (int i = 0; i < kILP; ++i) {
+      for (const auto i : c10::irange(kILP)) {
         v_elementOffset[i] = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
           os.tensorStride, dimSize, concatDim, inputOffset + i);
       }
@@ -302,7 +303,7 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
       ((LT*)reg_data)[0] = ((LT*)(data + inputOffset))[0];
 
       #pragma unroll
-      for (int i = 0; i < kILP; ++i) {
+      for (const auto i : c10::irange(kILP)) {
         output[dataOffset + v_elementOffset[i]] = reg_data[i];
       }
 
@@ -358,7 +359,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     // tensor is now contiguous
     outputParam.tensorSize[0] = out.size(0);
     outputParam.tensorStride[0] = out.stride(0);
-    for (int i = 1; i < nDims - 1; ++i) {
+    for (const auto i : c10::irange(1, nDims - 1)) {
       outputParam.tensorSize[i] = out.size(i + 1);
       outputParam.tensorStride[i] = out.stride(i + 1);
     }
@@ -425,7 +426,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
         auto sizes = inputs[i+batchCounter].get().sizes();
-        for(int j = 0; j < nDims; j++){
+        for(const auto j : c10::irange(nDims)){
           catMetaData.tensorStride[batchCounter].tensorSize[j] = sizes[j];
           catMetaData.tensorStride[batchCounter].tensorStride[j] = strides[j];
         }

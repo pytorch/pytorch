@@ -17,6 +17,7 @@
 #include <ATen/cuda/cub.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <c10/util/irange.h>
 
 #if defined(USE_ROCM)
 #include <rocprim/block/block_scan.hpp>
@@ -951,7 +952,7 @@ __global__ void computeBlockDigitCounts(
       : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
 
   // collect digit counts and store in shared memory
-  for (int i = 0; i < items_per_thread; ++i) {
+  for (const auto i : c10::irange(items_per_thread)) {
     // Find the start offset for this slice
     IndexType idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx;
     if (idx < slice_size) {
@@ -1001,7 +1002,7 @@ __global__ void computeDigitCumSum(
     for (int iter = 0; iter < rounds; iter++)  {
       int base = HISTO_ACCUM_TILE * iter;
       #pragma unroll
-      for (int j = 0; j < HISTO_ACCUM_TILE; j++) {
+      for (const auto j : c10::irange(HISTO_ACCUM_TILE)) {
         int blk = base + j;
         digit_count += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + digit_idx];
       }

@@ -2,6 +2,7 @@
 
 #include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #include <ATen/native/sparse/cuda/StaticSort.h>
+#include <c10/util/irange.h>
 #include <cutlass/bfloat16.h>
 #include <cutlass/half.h>
 #include <cutlass/platform/platform.h>
@@ -71,9 +72,9 @@ struct LargestValuesGreedy {
     Indices4x4 indices;
     TileValuesFragment values_ordered;
     CUTLASS_PRAGMA_UNROLL
-    for (int i = 0; i < 4; ++i) {
+    for (const auto i : c10::irange(4)) {
       CUTLASS_PRAGMA_UNROLL
-      for (int j = 0; j < 4; ++j) {
+      for (const auto j : c10::irange(4)) {
         TileValueOrdered& v = values_ordered[i * 4 + j];
         v.parts.value = values.at(i, j).get();
         v.parts.col = uint2b_t(j);
@@ -134,7 +135,7 @@ struct Causal1122 {
     uint32_t numPerCol = 0; // <- see doc in `LargestValuesGreedy`
 
     CUTLASS_PRAGMA_UNROLL
-    for (int row = 0; row < 4; ++row) {
+    for (const auto row : c10::irange(4)) {
       int row_count = 0;
       TileValuesFragment values_ordered;
       CUTLASS_PRAGMA_UNROLL

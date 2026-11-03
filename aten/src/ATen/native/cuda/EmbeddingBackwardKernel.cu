@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -102,7 +103,7 @@ __global__ void compute_grad_weight_bags(
   const int idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
 
   acc_type<scalar_t, true> weight = 0;
-  for (int idx=idx_begin; idx < idx_end; ++idx) {
+  for (const auto idx : c10::irange(idx_begin, idx_end)) {
     const int origRow = indices[idx];
     const int seq_number = offset2bag[origRow];
     const int gradOutputRow = seq_number * stride;
@@ -148,7 +149,7 @@ __global__ void compute_grad_weight(
   const int idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
 
   accscalar_t weight = 0;
-  for (int idx=idx_begin; idx < idx_end; ++idx) {
+  for (const auto idx : c10::irange(idx_begin, idx_end)) {
     const index_t target_row = indices[idx];
     const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
     weight += gradOutput[target_row * stride + startFeature] * scale;
@@ -197,7 +198,7 @@ __global__ void compute_grad_weight_atomic_accumulate(
       : partial_segment_offsets[partial_id + 1];
 
   accscalar_t weight = 0;
-  for (index_t idx = idx_begin; idx < idx_end; ++idx) {
+  for (const auto idx : c10::irange(idx_begin, idx_end)) {
     const index_t target_row = orig_indices[idx];
     const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
     weight += gradOutput[target_row * stride + startFeature] * scale;
@@ -226,7 +227,7 @@ __global__ void krn_partial_to_segment_idx(
   if (id < num_of_segments) {
     index_t idx = partials_per_segment_offset[id];
     const index_t num_partials = partials_per_segment[id];
-    for (index_t i = 0; i < num_partials; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(num_partials)) {
       partial_to_segment_idx[idx++] = id;
     }
   }
@@ -257,7 +258,7 @@ __global__ void sum_and_scatter(
   const int idx_begin = segment_sizes_offsets[id];
   const int idx_end = (id == num_of_segments-1)?num_of_partial_segments:segment_sizes_offsets[id+1];
   acc_type<scalar_t, true> weight = 0;
-  for (int idx=idx_begin; idx < idx_end; ++idx) {
+  for (const auto idx : c10::irange(idx_begin, idx_end)) {
     weight += grad_weight_per_segment[idx*stride + startFeature];
   }
   int64_t target_row = input[segment_offsets[id]];

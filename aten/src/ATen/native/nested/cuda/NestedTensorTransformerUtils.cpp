@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerUtils.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 namespace at::native::preprocessing {
@@ -115,13 +116,13 @@ int64_t get_nnz(const Tensor& nestedtensor) {
         return false;
       }
     } else {
-      for (int i{1}; i < n_dims; i++) {
+      for (const auto i : c10::irange(1, n_dims)) {
         if (previous_tensor_stride[i - 1] <= previous_tensor_stride[i]) {
           return false;
         }
       }
       // Check that each tensor i in the nested tensor has the same strides
-      for (int64_t i{1}; i < n_tensors; i++) {
+      for (const auto i : c10::irange(1, n_tensors)) {
         for (const int64_t j : c10::irange(n_dims)) {
           if (previous_tensor_stride[j] !=
               previous_tensor_stride[i * tensor_stride_0 + j]) {
@@ -139,7 +140,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
 
     int64_t offset_constant =
         (tensor_offsets_ptr[1] - tensor_offsets_ptr[0]) / numel_0;
-    for (int64_t i = 2; i < n_tensors; i++) {
+    for (const auto i : c10::irange(2, n_tensors)) {
       // TODO: When 0 seq_len nested tensors are allowed we need to guard
       // against this
       int64_t previous_numel = tensor_size_ptr[(i - 1) * tensor_stride_0] *
