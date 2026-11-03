@@ -4879,13 +4879,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.arange(5, dtype=torch.float32)
         a = x[:3]
         b = x
-        compiled = torch.compile(fn, backend="aot_eager")
+        compiled = torch.compile(fn, backend="aot_eager", dynamic=False)
         self.assertEqual(compiled(a, b), torch.tensor(10.0))
 
         a.set_(torch.full((3,), 7.0))
-        # With no live base left, the fallback takes input 0's new storage;
-        # input 1 is the member that no longer aliases that synthetic base.
-        with self.assertRaisesRegex(RuntimeError, r"input indices \[1\]"):
+        # Static-shape AOT has no storage-identity guard that can recompile here.
+        # Report the whole alias group without attributing the change to one member.
+        with self.assertRaisesRegex(RuntimeError, r"flat input indices \[0, 1\]"):
             compiled(a, b)
 
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):

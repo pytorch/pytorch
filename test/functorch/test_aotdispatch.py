@@ -9904,7 +9904,9 @@ def forward(self, primals_1, tangents_1):
         compiled_f = aot_function(f, nop)
         compiled_f(a, b)
 
-        with self.assertRaisesRegex(RuntimeError, r"input indices \[1\]") as ctx:
+        with self.assertRaisesRegex(
+            RuntimeError, r"flat input indices \[0, 1\]"
+        ) as ctx:
             compiled_f(a, torch.randn(6))
         self.assertNotIn("set_()", str(ctx.exception))
 
