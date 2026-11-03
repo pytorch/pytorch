@@ -106,12 +106,12 @@ def sequence_fast(iterable: Iterable[T], message: str) -> list[T]:
     # __iter__ a third time.
     # CPython replaces the TypeError instead of chaining to it, so raise
     # outside the handler.
-    failed = False
+    it: Iterator[T] | None = None
     try:
         it = iter(iterable)
     except TypeError:
-        failed = True
-    if failed:
+        pass
+    if it is None:
         raise TypeError(message)
     inner = iter(it)
     length_hint(it, 8)

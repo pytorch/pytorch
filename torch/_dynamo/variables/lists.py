@@ -2132,10 +2132,10 @@ class ByteArrayVariable(VariableTracker):
 
     # Note [bytearray copy on write]
     #
-    # Mutators build a new bytearray and assign it to self.data instead of
-    # changing it in place, so a sourced object is not mutated during tracing.
-    # bytearray_join relies on this to detect a separator mutated during
-    # iteration.
+    # Every mutator must build a new bytearray and assign it to self.data,
+    # never change it in place: a sourced object must not be mutated during
+    # tracing, and bytearray_join detects a separator mutated during iteration
+    # by checking whether self.data was replaced.
     _nonvar_fields = {
         "data",
         *VariableTracker._nonvar_fields,
@@ -2668,10 +2668,15 @@ class ByteArrayVariable(VariableTracker):
                 unimplemented(
                     gb_type="bytearray.join with an unsupported item",
                     context=f"item: {item}",
-                    explanation="Dynamo only traces bytearray.join over items that "
-                    "are plain constants or bytearrays. Other items run in eager, "
-                    "which raises TypeError for items without the buffer protocol.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
+                    explanation="Dynamo only traces bytearray.join when every item "
+                    "is a bytearray or a plain constant: bytes and bytearray items "
+                    "are joined, and other constants raise TypeError. Other items "
+                    "run in eager, which raises TypeError for items without the "
+                    "buffer protocol.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
         try:
             return VariableTracker.build(tx, self.data.join(parts))
@@ -3326,6 +3331,20 @@ class ByteArrayIteratorVariable(IteratorVariable):
         self.index += 1
         return value
 
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # bytearrayiter_length_hint: bytes left, floored at 0.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -3512,6 +3531,22 @@ class ListReverseIteratorVariable(IteratorVariable):
         self.index += len(remaining)
         self.it_index = -1
         return remaining
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # listreviter_len: it_index + 1 items left, or 0 once exhausted or
+        # once the list has shrunk below that.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
+        remaining = self.it_index + 1
+        if self.is_exhausted or len(self.source_seq.items) < remaining:  # type: ignore[attr-defined]
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(remaining)
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]

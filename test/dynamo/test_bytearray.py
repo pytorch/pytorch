@@ -465,11 +465,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(dot_join([b"ab", bytearray(b"cd")]), b"ab.:cd")
         self.assertEqual(dot_join(x for x in (b"a", b"b")), b"a.:b")
 
-        # The result is a new bytearray, not the separator.
-        out = dot_join([b"ab", b"cd"])
-        self.assertIsInstance(out, self.type2test)
-        out += b"ef"
-        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+        # The result is a new bytearray, also for a single item.
+        self.assertIsInstance(dot_join([b"ab", b"cd"]), self.type2test)
+        ba = self.type2test(b"ab")
+        self.assertIsNot(self.type2test(b"").join([ba]), ba)
 
     @make_dynamo_test
     def test_join_errors(self):
@@ -853,21 +852,50 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 sep.join({b"a": 1, b"b": 2}),
                 sep.join({b"a"}),
                 sep.join(Sequence()),
+                sep.join(reversed([b"a", b"b"])),
+                sep.join(iter(bytearray())),
                 x + 1,
             )
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
 
-    def test_input_bytearray_join(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(sep, ba, items):
-            return sep.join([ba, b"x"]), sep.join(items)
+    def test_iterator_length_hint(self):
+        def f(x):
+            ba = bytearray(b"abc")
+            it = iter(ba)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            ba.pop()
+            ba.pop()
+            hints.append(operator.length_hint(it))
+            list(it)
+            hints.append(operator.length_hint(it))
+            return hints, x + 1
 
-        results = fn(bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")])
-        self.assertEqual(results, (bytearray(b"ab-x"), bytearray(b"ab-cd")))
-        for r in results:
-            self.assertIs(type(r), bytearray)
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_input_bytearray_join(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(sep, ba, items, x):
+            return sep.join([ba, b"x"]), sep.join(items), sep.join([ba]), x + 1
+
+        # Changed contents fail the guards on the inputs and recompile.
+        for sep, ba, items, expected in (
+            (b"-", b"ab", [b"ab", bytearray(b"cd")], (b"ab-x", b"ab-cd")),
+            (b"+", b"yz", [b"ef", bytearray(b"gh")], (b"yz+x", b"ef+gh")),
+        ):
+            ba = bytearray(ba)
+            *results, _ = fn(bytearray(sep), ba, items, torch.ones(1))
+            self.assertEqual(results, [*expected, ba])
+            self.assertIsNot(results[2], ba)
+            for r in results:
+                self.assertIs(type(r), bytearray)
+        self.assertEqual(cnt.frame_count, 2)
 
     @make_dynamo_test
     def test_hex(self):
