@@ -164,10 +164,16 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   };
   using namespace std::string_view_literals;
   const auto type_str = scalarToMetalTypeString(dtype);
-  const bool few_rows = m <= scaled_mm_few_rows_max && mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
+  const bool k_contiguous = mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
+  const bool few_rows = m <= scaled_mm_few_rows_max && k_contiguous;
+  // MPP tensors take int32 strides
+  const bool native =
+      !few_rows && k_contiguous && has_metal_4_1() && mat_a.stride(0) <= INT32_MAX && mat_b.stride(1) <= INT32_MAX;
   const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}", m, type_str)
+      : native                      ? fmt::format("scaled_mm_native_{}", type_str)
                                     : fmt::format("scaled_mm_{}{}", has_mpp() ? "mpp_"sv : ""sv, type_str);
-  const auto cols_per_group = few_rows ? scaled_mm_simdgroups : scaled_mm_tile;
+  const auto tile = native ? scaled_mm_native_tile : scaled_mm_tile;
+  const auto cols_per_group = few_rows ? scaled_mm_simdgroups : tile;
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -177,7 +183,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, mat_a, mat_b, out, scale_a, scale_b, bias_vec, params);
       [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(n, cols_per_group),
-                                                few_rows ? 1 : c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
+                                                few_rows ? 1 : c10::metal::ceil_div<int64_t>(m, tile),
                                                 1)
               threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
