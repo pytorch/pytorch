@@ -29,9 +29,12 @@ GitHub draft PR feature.
 *Stacks of pull requests must have fewer than 10 PRs.* We expect all
 contributors and their agents to follow this. Large stacks use up shared CI
 resources and block other contributors. Land the bottom of a stack before
-adding more on top, and use `[no-ci]` on PRs that don't need CI yet (see the
+adding more on top, and add the `[no-ci]` prefix to the titles of PRs that
+don't need CI yet (see
+[Skip CI while iterating](CONTRIBUTING.md#skip-ci-while-iterating); with
+ghstack, put it in the commit subject, see the
 [ghstack-ci skill](.agents/skills/ghstack-ci/SKILL.md)). CI already skips PRs
-with more than 10 PRs underneath them
+with 10 or more PRs underneath them
 ([#185290](https://github.com/pytorch/pytorch/pull/185290)), and we may stop
 running CI and request changes on stacks that break this rule.
 

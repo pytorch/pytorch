@@ -74,7 +74,7 @@ MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before par
 STACK_POSITION_LIMIT = 10
 # One ghstack stack-list entry, "* #12345" or "* __->__ #12345" for the current
 # PR. The same pattern .github/scripts/filter_test_configs.py skips CI with.
-_GHSTACK_ENTRY = re.compile(r"^\* (?:__->__ )?#\d+\s*$", re.MULTILINE)
+_GHSTACK_ENTRY = re.compile(r"\* (?:__->__ )?#\d+\s*")
 _GHSTACK_CURRENT = "__->__"
 
 # Printable ASCII plus tab and newline. Everything else — control characters,
@@ -990,14 +990,21 @@ def ghstack_position(body: str) -> int:
     """The PR's 1-based position from the bottom of its ghstack, 0 outside one.
 
     ghstack lists the stack newest-first, so the PRs below this one are the
-    entries after its `__->__` line.
+    entries right after its `__->__` line. Counting stops at the first line
+    that is not an entry: a `* #N` bullet elsewhere in the body is not a PR in
+    the stack, and counting it could request changes on the bottom PR.
     """
     if not body or _GHSTACK_CURRENT not in body:
         return 0
-    entries = [m.group(0) for m in _GHSTACK_ENTRY.finditer(body)]
-    for i, entry in enumerate(entries):
-        if _GHSTACK_CURRENT in entry:
-            return len(entries) - i
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if _GHSTACK_CURRENT in line and _GHSTACK_ENTRY.fullmatch(line):
+            below = 0
+            for after in lines[i + 1 :]:
+                if not _GHSTACK_ENTRY.fullmatch(after):
+                    break
+                below += 1
+            return below + 1
     return 0
 
 

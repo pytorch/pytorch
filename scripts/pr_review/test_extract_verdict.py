@@ -1470,7 +1470,9 @@ class TestBuildHoldsItsOutputToThePublishCheck(unittest.TestCase):
 
 def stack_body(position: int, size: int, newline: str = "\n") -> str:
     """A ghstack PR body for the PR `position` from the bottom of a `size` stack."""
-    lines = ["Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):"]
+    lines = [
+        "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):"
+    ]
     for pos in range(size, 0, -1):
         marker = "__->__ " if pos == position else ""
         lines.append(f"* {marker}#{1000 + pos}")
@@ -1492,6 +1494,12 @@ class TestGhstackPosition(unittest.TestCase):
 
     def test_crlf_line_endings_are_read(self):
         self.assertEqual(ghstack_position(stack_body(10, 12, "\r\n")), 10)
+
+    def test_bullets_outside_the_stack_list_do_not_count(self):
+        follow_ups = "".join(f"\n* #{2000 + i}" for i in range(10))
+        body = stack_body(2, 3) + "\n\nFollow-ups:" + follow_ups
+        self.assertEqual(ghstack_position(body), 2)
+        self.assertEqual(ghstack_position("Related:" + follow_ups + "\n\n" + body), 2)
 
 
 class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
@@ -1549,7 +1557,12 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
     def test_a_major_finding_anchors_to_the_first_touched_line(self):
         # A major finding keeps the model's minor ones non-blocking: with no
         # major, post_review makes every finding of an objection blocking.
-        minor = {"path": "src/app.py", "line": 12, "severity": "minor", "message": "Nit."}
+        minor = {
+            "path": "src/app.py",
+            "line": 12,
+            "severity": "minor",
+            "message": "Nit.",
+        }
         result = apply_stack_policy(
             self.clean_result(findings=[minor]), stack_body(10, 12), self.TOUCHED
         )
@@ -1562,7 +1575,12 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
 
     def test_the_findings_cap_still_holds(self):
         findings = [
-            {"path": "src/app.py", "line": 12, "severity": "minor", "message": f"Nit {i}."}
+            {
+                "path": "src/app.py",
+                "line": 12,
+                "severity": "minor",
+                "message": f"Nit {i}.",
+            }
             for i in range(MAX_FINDINGS)
         ]
         result = apply_stack_policy(
