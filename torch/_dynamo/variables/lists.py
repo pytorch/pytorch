@@ -2199,7 +2199,11 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker:
         # bytearray_ass_subscript: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if not self.is_mutable():
-            return super().mp_ass_subscript_impl(tx, key, value)
+            raise AssertionError(
+                f"mp_ass_subscript_impl reached an immutable "
+                f"{type(self).__name__}; every construction site should set "
+                "mutation_type."
+            )
         self._decline_store_to_existing()
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(maybe_get_python_type(key)):
@@ -2260,7 +2264,11 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker:
         # bytearray_setitem: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if not self.is_mutable():
-            return super().sq_ass_item_impl(tx, key, value)
+            raise AssertionError(
+                f"sq_ass_item_impl reached an immutable "
+                f"{type(self).__name__}; every construction site should set "
+                "mutation_type."
+            )
         self._decline_store_to_existing()
         # value=None signals delete (CPython NULL sentinel).
         index = key.nb_index_impl(tx).as_python_constant()
@@ -2300,11 +2308,14 @@ class ByteArrayVariable(VariableTracker):
                 gb_type="bytearray store to an existing bytearray",
                 context=f"bytearray: {self}",
                 explanation="Dynamo traces bytearray item and slice stores only on "
-                "bytearrays created in the compiled region. An existing bytearray "
+                "bytearrays created in the current graph. An existing bytearray "
                 "may share its buffer with a memoryview, tensor or array that "
-                "Dynamo cannot see, so the store is left to eager.",
+                "Dynamo cannot see, so the store is left to eager. After a graph "
+                "break, a bytearray created earlier in the function is existing.",
                 hints=[
-                    "Store into a bytearray created inside the compiled function.",
+                    "Store into a bytearray created in the compiled region, before "
+                    "any graph break.",
+                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -2332,8 +2343,9 @@ class ByteArrayVariable(VariableTracker):
         unimplemented(
             gb_type="bytearray store with an unsupported value",
             context=f"value: {value}",
-            explanation="Dynamo only traces bytearray item and slice stores whose "
-            "value is a constant, a bytearray, or a constant plain list or tuple.",
+            explanation="Dynamo only traces bytearray stores of constant values: "
+            "an integer for an item, and bytes, a bytearray, or a constant plain "
+            "list or tuple for a slice.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
