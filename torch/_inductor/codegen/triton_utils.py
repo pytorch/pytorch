@@ -15,6 +15,7 @@ from ..utils import (
     _type_of,
     device_supports_fp64,
     expr_fits_within_32bit,
+    GPU_ALIGN_BYTES,
     triton_version_uses_attrs_dict,
 )
 from ..virtualized import V
@@ -321,8 +322,12 @@ def is_unaligned_buffer_name(buf_name: str) -> bool:
         return False
 
     if buf_name in V.graph.constants:
-        # all constants are assumed to be aligned
-        return False
+        # Frozen constants can be views; AOT preserves their storage offsets.
+        constant = V.graph.constants[buf_name]
+        byte_offset = constant.storage_offset() * constant.element_size()
+        return not V.graph.sizevars.statically_known_multiple_of(
+            byte_offset, GPU_ALIGN_BYTES
+        )
 
     layout = _get_buffer_layout(buf_name)
     if isinstance(layout, torch._inductor.ir.NonOwningLayout):
