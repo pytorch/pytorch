@@ -20761,6 +20761,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = torch.compile(fn)(x_base.clone()[:, 2:, :], index, source)
         self.assertEqual(result, expected)
 
+    def test_index_reduce_scalar_self_preserves_eager_error(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202938
+        def fn(inp, index, source):
+            return inp.index_reduce(0, index, source, "mean", include_self=True)
+
+        inp = torch.tensor(2.0, device=self.device)
+        index = torch.tensor([0], dtype=torch.int64, device=self.device)
+        source = torch.tensor([5.0], device=self.device)
+        msg = r"source tensor shape must match self tensor shape, excluding the specified dimension"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(inp, index, source)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn, fullgraph=True)(inp, index, source)
+
+        torch._dynamo.reset()
+        valid = torch.tensor([2.0], device=self.device)
+        expected = fn(valid, index, source)
+        actual = torch.compile(fn, fullgraph=True)(valid, index, source)
+        self.assertEqual(actual, expected)
+
     def test_pad_after_gelu(self):
         # Regression test for Voxtral compilation on MPS
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
