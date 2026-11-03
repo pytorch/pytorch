@@ -2560,6 +2560,22 @@ def prod(
     )
 
 
+def _zero_numel_check_dims(a: TensorLikeType, dim: DimsType, fn_name: str) -> None:
+    # Mirrors zero_numel_check_dims in aten/src/ATen/native/ReduceOpsUtils.h.
+    # _reduction's generic has_identity=False guard raises a RuntimeError, but
+    # eager validates the explicitly requested dims here and raises IndexError,
+    # so without this the ref diverges from eager under meta/fake tensors.
+    # The scalar branch of the eager helper is unreachable for amax/amin (it is
+    # guarded by numel() == 0) and is therefore not mirrored.
+    if a.ndim == 0:
+        return
+    for d in (dim,) if isinstance(dim, Dim) else dim:
+        torch._check_index(
+            a.shape[utils.canonicalize_dim(a.ndim, d)] != 0,
+            lambda d=d: f"{fn_name}: Expected reduction dim {d} to have non-zero size.",
+        )
+
+
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
@@ -2574,6 +2590,9 @@ def amin(
             lambda: f"Expected the dtype for input and out to match, but got "
             f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
         )
+
+    if dim is not None:
+        _zero_numel_check_dims(a, dim, "amin()")
 
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
@@ -2605,6 +2624,9 @@ def amax(
             lambda: f"Expected the dtype for input and out to match, but got "
             f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
         )
+
+    if dim is not None:
+        _zero_numel_check_dims(a, dim, "amax()")
 
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
