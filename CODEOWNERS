@@ -646,6 +646,7 @@
 # /test/test_view_ops.py
 # /test/test_weak.py
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
+/test/REVIEW.md @fffrog
 #
 # [backend_device_runtime]
 # /test/custom_backend/
@@ -1395,6 +1396,7 @@
 # /AI_POLICY.md
 # /CLAUDE.md
 # /torch/_dynamo/CLAUDE.md
+/torch/REVIEW.md @albanD
 #
 # [docs_general]
 # /CITATION.cff
