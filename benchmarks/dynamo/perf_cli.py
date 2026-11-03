@@ -309,12 +309,19 @@ def get_run_jobs(run_id: int) -> list[dict]:
 
 def get_perf_jobs(jobs: list[dict]) -> list[dict]:
     perf_jobs = []
+    separate_tp_perf = any(
+        (match := JOB_RE.search(job["name"]))
+        and match["config"] == "inductor_huggingface_tp_perf"
+        for job in jobs
+    )
     for job in jobs:
         m = JOB_RE.search(job["name"])
         if not m:
             continue
         config = m.group("config")
         if not PERF_CONFIGS.match(config):
+            continue
+        if separate_tp_perf and config == "inductor_huggingface_tp":
             continue
         if job.get("conclusion") != "success":
             continue
@@ -900,7 +907,7 @@ def resolve_runs(branch: str, devices: list[str]) -> dict[str, int]:
 
 
 def resolve_baseline(head_run_id: int) -> int:
-    """Find the latest successful nightly on main, skipping the head run itself."""
+    """Find a main run with successful matching perf jobs, skipping the head."""
     run_data = gh(
         "run",
         "view",
@@ -914,12 +921,13 @@ def resolve_baseline(head_run_id: int) -> int:
     wf_name = run_data.get("workflowName", "")
     nightly_id = WORKFLOW_NAME_TO_NIGHTLY_ID.get(wf_name)
     tp_jobs = set()
-    if wf_name == "inductor-periodic":
+    periodic = wf_name == "inductor-periodic"
+    if periodic:
         nightly_id = run_data["workflowDatabaseId"]
         tp_jobs = {
             (job["config"], job["runner"])
             for job in get_perf_jobs(get_run_jobs(head_run_id))
-            if job["config"] == "inductor_huggingface_tp"
+            if job["config"].startswith("inductor_huggingface_tp")
         }
     if nightly_id is None:
         print(
@@ -938,9 +946,9 @@ def resolve_baseline(head_run_id: int) -> int:
         "--branch",
         "main",
         "--status",
-        "success",
+        "completed" if periodic else "success",
         "--limit",
-        "5",
+        "50" if periodic else "5",
         "--json",
         "databaseId,createdAt,headBranch",
         json_output=True,
@@ -960,7 +968,10 @@ def resolve_baseline(head_run_id: int) -> int:
             print(f"Baseline: run {baseline_id} (main, {created})")
             return baseline_id
 
-    print("No suitable baseline nightly found on main.", file=sys.stderr)
+    print(
+        "No suitable baseline run found on main; use --baseline RUN_ID.",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -1050,7 +1061,9 @@ def fetch_run_perf(
     jobs_by_device = defaultdict(list)
     for job in perf_jobs:
         identity = (
-            job["runner"] if job["config"] == "inductor_huggingface_tp" else device
+            job["runner"]
+            if job["config"].startswith("inductor_huggingface_tp")
+            else device
         )
         jobs_by_device[identity].append(job)
     results = []
