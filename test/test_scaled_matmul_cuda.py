@@ -4276,18 +4276,20 @@ torch.cuda.synchronize()
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
     @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
-    @parametrize("out_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
     def test_scaled_grouped_gemm_cublaslt_mnk4_jagged_n_alignment(self, device, recipe, out_dtype):
+        offs = [2, 8, 16] if out_dtype == torch.float32 else [4, 8, 16]
+        scale_b_elems = 80 if out_dtype == torch.float32 else 64
         _, stderr = self.run_process_no_exception(f"""
 import torch
 from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
 a = torch.ones(3, 16, 128, device={device!r}, dtype=torch.float8_e4m3fn)
 b = torch.ones(16, 128, device={device!r}, dtype=torch.float8_e4m3fn)
 sa = torch.ones(3, 64, device={device!r}, dtype=torch.float8_e8m0fnu)
-sb = torch.ones(80, device={device!r}, dtype=torch.float8_e8m0fnu)
+sb = torch.ones({scale_b_elems}, device={device!r}, dtype=torch.float8_e8m0fnu)
 recipe = ScalingType({recipe.value})
 scaled_grouped_mm(a, b.t(), sa, recipe, sb, recipe,
-                  offs=torch.tensor([3, 8, 16], device={device!r}, dtype=torch.int32),
+                  offs=torch.tensor({offs}, device={device!r}, dtype=torch.int32),
                   swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
                   output_dtype={out_dtype})
 torch.cuda.synchronize()
