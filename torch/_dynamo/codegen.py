@@ -49,11 +49,12 @@ from .source import (
 )
 from .utils import is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.constant import ConstantVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.lazy import ComputedLazyConstantVariable
+from .variables.lazy import ComputedLazyConstantVariable, LazyVariableTracker
 from .variables.lists import BaseListVariable, SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
@@ -136,7 +137,21 @@ class PyCodegen:
 
     def _constant_requires_reconstruction(self, value: VariableTracker) -> bool:
         if value.source is not None:
-            return True
+            if isinstance(value, LazyVariableTracker) and not value.is_realized():
+                # Inspect singleton identity without specializing lazy values.
+                constant = value.peek_value()
+            elif isinstance(value, ConstantVariable):
+                constant = value.value
+            else:
+                return True
+            # Only guaranteed singletons may discard their source identity.
+            return not (
+                any(
+                    constant is item
+                    for item in (None, True, False, Ellipsis, NotImplemented)
+                )
+                or type(constant) is torch.dtype
+            )
         if value in self._constant_reconstruction_cache:
             return self._constant_reconstruction_cache[value]
         if isinstance(value, (TupleVariable, SliceVariable)):

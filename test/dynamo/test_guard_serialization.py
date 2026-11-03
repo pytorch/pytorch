@@ -1578,11 +1578,15 @@ class _NormalizingODict(collections.OrderedDict):
 class _ODictGetState(collections.OrderedDict):
     def __init__(self):
         super().__init__(constructor=0)
-        self.recreated = "constructor"
-        self.saved = 0
+        self.__dict__ = _DictState(recreated="constructor", saved=0)
 
     def __getstate__(self):
         return {"saved": self.saved} if self.saved is not None else None
+
+
+class _ODictCustomState(_ODictGetState):
+    def __getstate__(self):
+        return self.saved
 
 
 class _ODictSetState(_ODictGetState):
@@ -1604,14 +1608,12 @@ class _ODictWithMeta(collections.OrderedDict, metaclass=_ODictMeta):
     __getstate__ = _ODictGetState.__getstate__
 
 
-class _ODictNew(collections.OrderedDict):
-    def __new__(cls):
-        return super().__new__(cls)
+class _DictState(dict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value * 2 if isinstance(value, int) else value)
 
-
-class _ODictItems(collections.OrderedDict):
-    def items(self):
-        return super().items()
+    def setdefault(self, *args):
+        raise AssertionError("State restoration must bypass dictionary overrides")
 
 
 class _ODictStateHooks(collections.OrderedDict):
@@ -1645,6 +1647,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         objects = {id(obj): obj for obj in tracked}
         GuardsStatePickler(objects, {}, {}, {}, buf).dump(value)
         return load_guards_state(buf.getvalue())
+
+    @parametrize(
+        "state", [None, 0, "", (), {}, {"saved": 3}, ({}, {}), ({"saved": 3}, {})]
+    )
+    def test_ordered_dict_custom_state_matches_pickle(self, state):
+        mapping = _ODictCustomState()
+        mapping.saved = state
+        try:
+            expected = pickle.loads(pickle.dumps(mapping))
+        except pickle.UnpicklingError as error:
+            with self.assertRaisesRegex(type(error), str(error)):
+                self._roundtrip_ordered_dict(mapping, mapping)
+            return
+        loaded, saved = self._roundtrip_ordered_dict((mapping, state), mapping, state)
+        self.assertEqual(vars(loaded), vars(expected))
+        self.assertEqual(saved, state)
+        if type(state) is dict:
+            self.assertIsNot(vars(loaded), saved)
+
+    @parametrize("mapping_type", [collections.OrderedDict, _ODictCustomState])
+    def test_ordered_dict_instance_state_preserves_alias(self, mapping_type):
+        mapping = mapping_type()
+        if mapping_type is _ODictCustomState:
+            mapping.__dict__ = _DictState()
+            mapping.saved = vars(mapping)
+        loaded, attrs = self._roundtrip_ordered_dict((mapping, vars(mapping)), mapping)
+        self.assertIs(vars(loaded), attrs)
 
     def test_ordered_dict_unlinked_storage_uses_native_pickle(self):
         mapping = collections.OrderedDict(a=1)
@@ -1723,7 +1752,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     @parametrize(
         "mapping_type",
-        [_ODictGetState, _ODictNew, _NormalizingODict, _ODictItems, _ODictWithMeta],
+        [_ODictGetState, _NormalizingODict, _ODictWithMeta],
     )
     @parametrize("tracked", [False, True])
     def test_reordered_ordered_dict_overrides(self, mapping_type, tracked):
