@@ -17,10 +17,17 @@ import argparse
 import fnmatch
 import json
 import statistics as st
+from math import isnan, nan
 from pathlib import Path
 
 from tools.testing.llm_td.eval import REPO
-from tools.testing.llm_td.eval.score import cost_fraction, load, policy, test_seconds
+from tools.testing.llm_td.eval.score import (
+    cost_fraction,
+    is_inductor,
+    load,
+    policy,
+    test_seconds,
+)
 
 
 # 30-day runner cost of test jobs ($k), the PR share of test hours, and whether
@@ -65,31 +72,27 @@ def fractions(
         if choice is None:
             continue
         cands = set(s["candidates"])
-        gen.append(
-            cost_fraction(
-                choice, cands, seconds, lambda c: not c.startswith("inductor")
-            )
-        )
+        gen.append(cost_fraction(choice, cands, seconds, lambda c: not is_inductor(c)))
         if any(fnmatch.fnmatch(f, g) for f in s["changed_files"] for g in globs):
-            ind.append(
-                cost_fraction(
-                    choice, cands, seconds, lambda c: c.startswith("inductor")
-                )
-            )
+            ind.append(cost_fraction(choice, cands, seconds, is_inductor))
     if not gen:
         raise SystemExit(f"no {tag} results for the given ids")
+    if not ind:
+        print(
+            f"warning: no {tag} sample matches the ciflow/inductor globs, so the inductor rows are skipped"
+        )
     return {
         "cpu": st.mean(x[0] for x in gen), "gpu": st.mean(x[1] for x in gen),
-        "ind_cpu": st.mean(x[0] for x in ind) if ind else 0.0, "ind_gpu": st.mean(x[1] for x in ind) if ind else 0.0,
+        "ind_cpu": st.mean(x[0] for x in ind) if ind else nan, "ind_gpu": st.mean(x[1] for x in ind) if ind else nan,
         "n": len(gen), "n_ind": len(ind),
     }  # fmt: skip
 
 
 def mean_call_usd(data: Path, tag: str, ids: list[str]) -> float:
-    paths = [data / "results" / tag / f"{i}.json" for i in ids]
-    return st.mean(
-        json.loads(p.read_text()).get("cost_usd") or 0.0 for p in paths if p.exists()
-    )
+    paths = [p for i in ids if (p := data / "results" / tag / f"{i}.json").exists()]
+    if not paths:
+        raise SystemExit(f"no {tag} results for the cost ids")
+    return st.mean(json.loads(p.read_text()).get("cost_usd") or 0.0 for p in paths)
 
 
 def model(
@@ -107,6 +110,8 @@ def model(
     total = {"cpu": 0.0, "gpu": 0.0}
     rows = []
     for wf, k, cost, share, has_td in WORKFLOWS:
+        if isnan(f[k]):
+            continue
         pr = cost * share
         new_rel = overhead + (1 - overhead) * f[k]
         old_rel = overhead + (1 - overhead) * ftd[k] if has_td else 1.0
