@@ -1,6 +1,6 @@
 # Source of truth for CODEOWNERS. After editing, regenerate CODEOWNERS with
 #   python scripts/codeowners/generate_codeowners.py
-# or `lintrunner -a`; the CODEOWNERS_GENERATED lint fails until they match.
+# or `spin fixlint`; the CODEOWNERS_GENERATED lint fails until they match.
 #
 # Each entry under `ownership` is a label group: a `name`, its labels, its owners,
 # and every path it owns, listed once. The name is a stable identifier that

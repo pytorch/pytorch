@@ -189,7 +189,7 @@ def render_header(ownership: OwnershipFile) -> list[str]:
     return [
         "# DO NOT MODIFY THIS FILE DIRECTLY!! This file is generated from OWNERSHIP.yaml by",
         "# scripts/codeowners/generate_codeowners.py. Edit OWNERSHIP.yaml and rerun",
-        "# the script (or `lintrunner -a`) instead of editing this file.",
+        "# the script (or `spin fixlint`) instead of editing this file.",
         "",
         "# IMPORTANT:",
         "# This file is ONLY used to subscribe for notifications for PRs",
@@ -378,7 +378,7 @@ def main() -> int:
                 description=(
                     "CODEOWNERS is generated from OWNERSHIP.yaml, so direct edits to "
                     "CODEOWNERS are discarded. Make the change in OWNERSHIP.yaml, then "
-                    "run `lintrunner -a` or "
+                    "run `spin fixlint` or "
                     "`python scripts/codeowners/generate_codeowners.py` to regenerate it."
                 ),
                 original=current,
