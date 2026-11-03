@@ -863,6 +863,66 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         with self.assertRaisesRegex(ValueError, "expects a 2-D tensor"):
             to_blocked(torch.ones(4))
 
+    @parametrize("lengths", ((0, 173, 0, 83, 256, 0), (0, 0, 0), (129, 1)))
+    @parametrize("cols", (3, 9))
+    def test_to_blocked_grouped_layout(self, lengths, cols):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        rows = sum(lengths)
+        values = torch.arange(rows * cols).to(torch.uint8).reshape(rows, cols)
+        offs = torch.tensor(lengths, dtype=torch.int32).cumsum(0, dtype=torch.int32)
+        actual = to_blocked(values, offs=offs)
+        expected = torch.zeros_like(actual)
+        start = offset = 0
+        for length in lengths:
+            blocked = to_blocked_reference(values[start : start + length])
+            expected.flatten()[offset : offset + blocked.numel()] = blocked
+            offset += blocked.numel()
+            start += length
+        self.assertEqual(actual, expected)
+        with FakeTensorMode() as mode:
+            fake = to_blocked(mode.from_tensor(values), offs=mode.from_tensor(offs))
+            self.assertEqual(fake.shape, actual.shape)
+            self.assertEqual(fake.dtype, actual.dtype)
+
+    @parametrize(
+        "case",
+        ("dtype", "rank", "stride", "empty", "negative", "decreasing", "out_of_range"),
+    )
+    def test_to_blocked_rejects_invalid_group_offsets(self, case):
+        offs = torch.tensor([32, 128], dtype=torch.int32)
+        if case == "dtype":
+            offs = offs.long()
+        elif case == "rank":
+            offs = offs.unsqueeze(0)
+        elif case == "stride":
+            offs = torch.tensor([32, 0, 128, 0], dtype=torch.int32)[::2]
+        elif case == "empty":
+            offs = offs[:0]
+        elif case == "negative":
+            offs[0] = -1
+        elif case == "decreasing":
+            offs[1] = 16
+        else:
+            offs[1] = 129
+        error = (
+            RuntimeError
+            if case in ("negative", "decreasing", "out_of_range")
+            else ValueError
+        )
+        with self.assertRaisesRegex(error, "to_blocked offs"):
+            to_blocked(torch.ones(128, 3), offs=offs)
+
+    @parametrize("grouped", (False, True))
+    def test_to_blocked_opcheck(self, grouped):
+        values = torch.randn(129, 5)
+        args = (
+            (values, torch.tensor([0, 64, 129], dtype=torch.int32))
+            if grouped
+            else (values,)
+        )
+        torch.library.opcheck(to_blocked, args)
+
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_quack_feed_main_host_guards_match_runtime_contract(self):
         _skip_unless_quack_deps(self, block_copy=True)
@@ -874,6 +934,26 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
         self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    def test_grouped_output_layout_preserves_tensorless_validation(self):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.output_layout import GROUPED_BLOCKED_128X4
+        from torch._inductor.kernel.flex_gemm.quack_ops import grouped_reduce
+
+        class TensorlessReduce(grouped_reduce.GroupedReduceBase):
+            keep_tensorless = True
+
+        layout = GROUPED_BLOCKED_128X4.quack_layout(grouped_reduce)
+        problem = dict(m=128, n=128, tile_M=128, tile_N=128, batch=2, varlen_m=True)
+        TensorlessReduce("stats", axis=1, group=32, output_layout=layout).host_validate(
+            None, **problem
+        )
+        required = grouped_reduce.GroupedReduceBase(
+            "stats", axis=1, group=32, output_layout=layout
+        )
+        with self.assertRaisesRegex(ValueError, "output-layout carrier is required"):
+            required.host_validate(None, **problem)
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_grouped_n_reduce_rejects_sm120_config(self):
@@ -8812,7 +8892,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
             else torch.empty(0, device=device, dtype=scale_dtype)
         )
         scale_a = (
-            a_scales.reshape(-1, ((k // block_size + 3) // 4) * 4)
+            to_blocked(torch.cat(dense_a_scales), offs=offs)
             if axis == "m"
             else a_scales.reshape(((m + 127) // 128) * 128, -1)
         )
@@ -9275,6 +9355,157 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
 
+    @parametrize(
+        "case",
+        (
+            (96, False, False, False, "mxfp8_e4m3"),
+            (288, True, False, False, "mxfp8_e4m3"),
+            (96, False, True, False, "mxfp8_e4m3"),
+            (128, False, False, True, "mxfp8_e4m3"),
+            (96, False, False, False, "nvfp4"),
+        ),
+        name_fn=lambda case: f"n{case[0]}_tuned{case[1]}_empty{case[2]}_unused{case[3]}_{case[4]}",
+    )
+    def test_scaled_grouped_mm_quantized_output(self, device, case):
+        n, autotune, empty, unused_rows, format_name = case
+        lengths = (
+            (0, 0, 0) if empty else (64,) if unused_rows else (0, 173, 0, 83, 256, 0)
+        )
+        a, b, sa, sb, offs, reference = self.makeScaledGroupedMm(
+            "m", lengths, device, n=n, format_name=format_name
+        )
+        if unused_rows:
+            a = torch.cat((a, torch.zeros_like(a)))
+        _, weight, _, weight_scale, _, _ = self.makeScaledGroupedMm(
+            "m", lengths, device, k=n, n=128
+        )
+        recipes = {
+            "scale_recipe_a": F.ScalingType.BlockWise1x32,
+            "scale_recipe_b": F.ScalingType.BlockWise1x32,
+            "swizzle_a": F.SwizzleType.SWIZZLE_32_4_4,
+            "swizzle_b": F.SwizzleType.SWIZZLE_32_4_4,
+        }
+
+        input_recipes = dict(recipes)
+        if format_name == "nvfp4":
+            input_recipes.update(
+                scale_recipe_a=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+                scale_recipe_b=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+                swizzle_a=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+                swizzle_b=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            )
+
+        def fn(a, b, sa, sb, offs, weight, weight_scale):
+            def quantize(acc):
+                grouped = acc.float().view(acc.shape[0], n // 32, 32)
+                scale = mx_e8m0_scale(grouped.abs().amax(-1, keepdim=True))
+                payload = (
+                    (grouped * scale.float().reciprocal())
+                    .view_as(acc)
+                    .clamp(-448.0, 448.0)
+                    .to(torch.float8_e4m3fn)
+                )
+                return payload, to_blocked(scale.squeeze(-1), offs=offs), acc.float()
+
+            payload, scales, raw = flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                quantize,
+                gemm_kwargs={**input_recipes, "offs": offs},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
+            )
+            consumed = flex_gemm(
+                F.scaled_grouped_mm,
+                (payload, weight, scales, weight_scale),
+                lambda acc: acc,
+                gemm_kwargs={**recipes, "offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+            return payload, scales, raw, consumed
+
+        compiled = torch.compile(fn, fullgraph=True)
+        inputs = (a, b, sa, sb, offs, weight, weight_scale)
+        with self.limitEpiModAutotune() if autotune else contextlib.nullcontext():
+            actual, (code,) = run_and_get_code(compiled, *inputs)
+        self.assertIn("flex_gemm_output_layout.GROUPED_BLOCKED_128X4", code)
+        self.assertIn("fragment_reduced=True", code)
+        self.assertNotIn("prepass_combine=", code)
+        self.assertMxScaleCode(code)
+        self.assertNotIn("flex_gemm.to_blocked", code)
+        self.assertNotIn("aten._scaled_grouped_mm", code)
+
+        def check(result):
+            payload, scales, raw, consumed = result
+            valid_rows = int(offs[-1].item())
+            raw = raw[:valid_rows]
+            expected_scale = mx_e8m0_scale(
+                raw.view(valid_rows, n // 32, 32).abs().amax(-1)
+            )
+            expected_payload = (
+                (
+                    raw.view(valid_rows, n // 32, 32)
+                    * expected_scale.float().reciprocal().unsqueeze(-1)
+                )
+                .view_as(raw)
+                .clamp(-448.0, 448.0)
+                .to(torch.float8_e4m3fn)
+            )
+            self.assertEqual(
+                payload[:valid_rows].view(torch.uint8),
+                expected_payload.view(torch.uint8),
+            )
+            expected_blocked = torch.zeros_like(scales.view(torch.uint8)).cpu()
+            offset = start = 0
+            dense_scales = expected_scale.cpu()
+            values = payload[
+                :valid_rows
+            ].cpu().double() * dense_scales.double().repeat_interleave(32, -1)
+            for group, end in enumerate(offs.tolist()):
+                blocked = to_blocked_reference(dense_scales[start:end]).view(
+                    torch.uint8
+                )
+                expected_blocked.flatten()[offset : offset + blocked.numel()] = blocked
+                offset += blocked.numel()
+                weight_data = weight[group].mT.cpu()
+                weight_dense_scale = from_blocked(
+                    weight_data, weight_scale[group].cpu(), 32
+                )
+                weight_dequant = (
+                    weight_data.double()
+                    * weight_dense_scale.double().repeat_interleave(32, -1)
+                )
+                expected = values[start:end] @ weight_dequant.t()
+                self.assertEqual(
+                    consumed[start:end].cpu(),
+                    expected.bfloat16(),
+                    rtol=0.02,
+                    atol=0.002,
+                )
+                start = end
+            self.assertEqual(scales.view(torch.uint8).cpu(), expected_blocked)
+
+        check(actual)
+        self.assertEqual(
+            actual[2][: sum(lengths)], reference.float(), rtol=0.02, atol=0.002
+        )
+        if not empty and not unused_rows:
+            torch.cuda.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = compiled(*inputs)
+            for changed_lengths in ((128, 0, 129, 0, 255, 0), (0, 128, 0, 128, 256, 0)):
+                new_a, new_b, new_sa, new_sb, new_offs, reference = (
+                    self.makeScaledGroupedMm(
+                        "m", changed_lengths, device, n=n, format_name=format_name
+                    )
+                )
+                self.copyScaledGroupedMmInputs(
+                    (a, b, sa, sb, offs), (new_a, new_b, new_sa, new_sb, new_offs)
+                )
+                graph.replay()
+                check(captured)
+                self.assertEqual(captured[2], reference.float(), rtol=0.02, atol=0.002)
+
     def test_scaled_grouped_mm_dynamic_m(self, device):
         def fn(a, b, sa, sb, offs):
             return flex_gemm(
@@ -9430,6 +9661,132 @@ torch.cuda.synchronize()
             rtol=0.02,
             atol=0.002,
         )
+
+    def test_to_blocked_grouped_cuda_graph(self, device):
+        values = self.makeTensor(256, 3, device=device)
+        offs = torch.tensor([64, 256], dtype=torch.int32, device=device)
+        to_blocked(values, offs=offs)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            actual = to_blocked(values, offs=offs)
+        offs.copy_(torch.tensor([128, 256], dtype=torch.int32, device=device))
+        graph.replay()
+        expected = to_blocked(values, offs=offs)
+        self.assertEqual(actual, expected)
+        torch.library.opcheck(to_blocked, (values, offs))
+
+    @parametrize("group", (16, 32))
+    def test_scaled_grouped_mm_rejects_paired_plain_scale_output(self, device, group):
+        a, b, sa, sb, offs, _ = self.makeScaledGroupedMm("m", (128, 128), device, n=256)
+
+        def fn(a, b, sa, sb, offs):
+            def epilogue(acc):
+                pairs = acc.float().view(acc.shape[0], 128, 2)
+                value = F.silu(pairs[..., 0]) * pairs[..., 1]
+                grouped = value.view(value.shape[0], -1, group)
+                scale = grouped.abs().amax(-1, keepdim=True)
+                return (grouped / scale).view_as(value).to(
+                    torch.float8_e4m3fn
+                ), scale.squeeze(-1)
+
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                epilogue,
+                gemm_kwargs=dict(
+                    offs=offs,
+                    scale_recipe_a=F.ScalingType.BlockWise1x32,
+                    scale_recipe_b=F.ScalingType.BlockWise1x32,
+                    swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                ),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(
+            InductorError, "MXFP8 quantization with grouped blocked scales"
+        ):
+            torch.compile(fn, fullgraph=True)(a, b, sa, sb, offs)
+
+    @parametrize("kind", ("mm", "scaled_mm", "grouped_k", "grouped_k_zero"))
+    def test_grouped_to_blocked_rejects_other_gemms(self, device, kind):
+        if kind == "mm":
+            a = self.makeTensor(128, 128, device=device)
+            b = self.makeTensor(128, 128, device=device)
+            sa = sb = torch.ones(1, device=device)
+            options = {}
+            op = torch.mm
+        elif kind == "scaled_mm":
+            a, b, sa, sb, options, _ = self.makeBlockScaledMm(
+                "mxfp8_e4m3", 128, 128, 128, device=device
+            )
+            op = F.scaled_mm
+        else:
+            lengths = (0, 0) if kind == "grouped_k_zero" else (128, 128)
+            a, b, sa, sb, _, _ = self.makeScaledGroupedMm("k", lengths, device, n=128)
+            options = dict(
+                scale_recipe_a=F.ScalingType.BlockWise1x32,
+                scale_recipe_b=F.ScalingType.BlockWise1x32,
+                swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+            )
+            op = F.scaled_grouped_mm
+        offs = torch.tensor(
+            [0, 0] if kind == "grouped_k_zero" else [128, 256],
+            device=device,
+            dtype=torch.int32,
+        )
+
+        def fn(a, b, sa, sb, offs):
+            def epilogue(acc):
+                dense = acc.float().reshape(-1, 4, 32).amax(-1)
+                return acc, to_blocked(dense, offs=offs)
+
+            return flex_gemm(
+                op,
+                (a, b) if kind == "mm" else (a, b, sa, sb),
+                epilogue,
+                gemm_kwargs={
+                    **options,
+                    **({"offs": offs} if kind.startswith("grouped") else {}),
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "grouped to_blocked must use the grouped-M GEMM.s offs tensor",
+        ):
+            torch.compile(fn, fullgraph=True)(a, b, sa, sb, offs)
+
+    def test_scaled_grouped_mm_quantized_output_requires_same_offsets(self, device):
+        a, b, sa, sb, offs, _ = self.makeScaledGroupedMm("m", (173, 83), device, n=96)
+
+        def fn(a, b, sa, sb, offs, other_offs):
+            def epilogue(acc):
+                grouped = acc.float().view(acc.shape[0], 3, 32)
+                scale = mx_e8m0_scale(grouped.abs().amax(-1, keepdim=True))
+                return acc, to_blocked(scale.squeeze(-1), offs=other_offs)
+
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                epilogue,
+                gemm_kwargs={
+                    "offs": offs,
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": F.SwizzleType.SWIZZLE_32_4_4,
+                    "swizzle_b": F.SwizzleType.SWIZZLE_32_4_4,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "grouped to_blocked must use the grouped-M GEMM.s offs tensor",
+        ):
+            torch.compile(fn, fullgraph=True)(a, b, sa, sb, offs, offs.clone())
 
     def test_scaled_mm_dynamic_m(self, device):
         n = k = 256

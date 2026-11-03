@@ -52,6 +52,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     binary_store_finalize: bool = False
     prepass_combine: str | None = None
     prepass_finalize: str | None = None
+    row_offsets_index: int | None = None
 
     @classmethod
     def from_plan(
@@ -295,6 +296,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             plan += f", stores=True, out={input_args[local_reduce.out_index]}"
         if local_reduce.output_layout is not None:
             plan += f", output_layout={local_reduce.output_layout.codegen_reference()}"
+        if local_reduce.row_offsets_index is not None:
+            plan += f", row_offsets={input_args[local_reduce.row_offsets_index]}"
         if local_reduce.feeds_main:
             plan += ", feeds_main=True"
         plan += f", combine={local_reduce.combine!r}"

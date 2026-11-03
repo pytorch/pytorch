@@ -32,6 +32,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.kernel.flex_gemm.output_layout import (
     BLOCKED_128X4,
     FlexGemmOutputStorageLayout,
+    GROUPED_BLOCKED_128X4,
     TRANSPOSED,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
@@ -149,6 +150,11 @@ class FlexGemmLocalReduceOutputStorage:
     nodes: tuple[torch.fx.Node, ...]
 
 
+def flex_gemm_to_blocked_offsets(node: torch.fx.Node) -> Any:
+    """Read the optional positional or keyword group partition of a blocked marker."""
+    return node.args[1] if len(node.args) > 1 else node.kwargs.get("offs")
+
+
 def match_flex_gemm_local_reduce_output_storage(
     node: torch.fx.Node,
 ) -> FlexGemmLocalReduceOutputStorage | None:
@@ -159,7 +165,9 @@ def match_flex_gemm_local_reduce_output_storage(
             raise AssertionError(
                 f"malformed FlexGEMM output transform: {node.format_node()}"
             )
-        return FlexGemmLocalReduceOutputStorage(source, BLOCKED_128X4, (node,))
+        offs = flex_gemm_to_blocked_offsets(node)
+        layout = BLOCKED_128X4 if offs is None else GROUPED_BLOCKED_128X4
+        return FlexGemmLocalReduceOutputStorage(source, layout, (node,))
 
     if node.target is torch.ops.aten.clone.default:
         if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
@@ -253,6 +261,22 @@ class GemmOutputLocalReducePlan:
             self.store is None and not self.feeds_main
         ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
+
+    @property
+    def grouped_fragment_reduction(self) -> bool:
+        """Whether a grouped-M reduction supports fragment-local quantization."""
+        return (
+            self.store is not None
+            and self.store.output_layout is not None
+            and self.store.output_layout.varlen_m
+            and self.match.geometry.axis == 1
+            and self.match.geometry.group == LOCAL_REDUCE_FRAGMENT_WIDTH
+        )
+
+    @property
+    def fragment_reduction(self) -> bool:
+        """Whether the reduction can stay within the generated register fragment."""
+        return self.match.physical_span > 1 or self.grouped_fragment_reduction
 
 
 @dataclasses.dataclass(frozen=True)
