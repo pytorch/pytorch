@@ -1815,8 +1815,6 @@ class TestForeachDevice(TestCase):
             )
             self.assertEqual(dst, ref)
 
-    @onlyAccelerator
-    @skipXPU
     @dtypes(torch.float16, torch.bfloat16, torch.float8_e5m2)
     def test_foreach_copy_preserves_nan_bits(self, device, dtype):
         # Same-dtype lists, which the fused kernel copies, keep NaN signs and payloads.
