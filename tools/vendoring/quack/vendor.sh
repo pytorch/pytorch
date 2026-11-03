@@ -81,7 +81,6 @@ FILES=(
     dsl/__init__.py
     dsl/cute_tensor.py
     dsl/cute_tensor_indexing.py
-    dsl/mixed_constexpr_if.py
     dsl/smem_struct.py
     dsl/torch_library_op.py
     epilogue/__init__.py

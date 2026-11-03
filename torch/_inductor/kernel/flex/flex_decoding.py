@@ -47,11 +47,13 @@ def raise_flex_decoding_kernel_options_error(
     sparse_kv_block_size: int,
 ) -> None:
     formated_kernel_options = ", ".join(
-        f"{name}={kernel_options[name]}" for name in ("BLOCK_M", "BLOCK_N")
+        f"{name}={kernel_options[name]}"
+        for name in ("BLOCK_M", "BLOCK_N", "GQA_SHARED_HEADS")
     )
     raise ValueError(
-        "Invalid FlexAttention decode kernel options: Q and KV block sizes must "
-        "be divisible by the selected tile sizes. Got "
+        "Invalid FlexAttention decode kernel options: BLOCK_M must be a multiple "
+        "of GQA_SHARED_HEADS, SPARSE_Q_BLOCK_SIZE a multiple of BLOCK_M // "
+        "GQA_SHARED_HEADS, and SPARSE_KV_BLOCK_SIZE a multiple of BLOCK_N. Got "
         f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
         f"{formated_kernel_options}. "
@@ -59,7 +61,8 @@ def raise_flex_decoding_kernel_options_error(
         f"options are {_flex_kernel_tuning_options('decode')}. For example: "
         f"{_flex_kernel_options_example('decode')}. If you did not pin "
         "these options, compiling with mode='max-autotune-no-cudagraphs' "
-        "can also fix this by trying more FlexAttention configs."
+        "tries more BLOCK_N values, which can fix a SPARSE_KV_BLOCK_SIZE "
+        "mismatch (not a BLOCK_M one)."
     )
 
 
@@ -307,15 +310,27 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
+    # Mark SPARSE_Q_BLOCK_SIZE as static: the default BLOCK_M below depends on it.
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     kernel_options.setdefault(
         "BLOCK_M",
         (
             # m
             # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
             # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
+            # BLOCK_M tiles GQA-folded rows. Cap it at 128 rows (or GQA_SHARED_HEADS if larger):
+            # bigger tiles overflow shared memory in fp32 and run 5-8x slower in bf16. Also cap
+            # its BLOCK_M // GQA_SHARED_HEADS query positions at the largest power of two that
+            # divides SPARSE_Q_BLOCK_SIZE, so every tile reads one sparse Q row. The 16-row floor
+            # wins only when that cap is below 16 rows (e.g. 8-row sparse blocks without GQA);
+            # the check below then rejects every config, as it did before.
             max(
-                next_power_of_2(
-                    V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
+                min(
+                    next_power_of_2(
+                        V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
+                    ),
+                    max(128, gqa_shared_heads),
+                    gqa_shared_heads * (SPARSE_Q_BLOCK_SIZE & -SPARSE_Q_BLOCK_SIZE),
                 ),
                 1 if torch.xpu.is_available() else 16,
             )
@@ -338,14 +353,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
-    kernel_options.setdefault(
-        "SAFE_M_BOUNDARY",
-        Mod(seq_len_q * gqa_shared_heads, kernel_options["BLOCK_M"]) == 0,
-    )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
@@ -371,10 +381,20 @@ def create_flex_decoding_kernel(*args, **kwargs):
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
+        # After the fwd_ overrides: a pinned fwd_BLOCK_M changes which rows are
+        # out of bounds, and the kernel skips its Q_LEN masks when this is True.
+        cur_kernel_options.setdefault(
+            "SAFE_M_BOUNDARY",
+            Mod(seq_len_q * gqa_shared_heads, cur_kernel_options["BLOCK_M"]) == 0,
+        )
 
+        # BLOCK_M tiles GQA-folded rows: each tile covers BLOCK_M // GQA_SHARED_HEADS
+        # query positions, and those must fit inside one sparse Q block.
+        block_m = cur_kernel_options["BLOCK_M"]
+        gqa_heads = cur_kernel_options["GQA_SHARED_HEADS"]
         if (
-            cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
-            != 0
+            block_m % gqa_heads != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % (block_m // gqa_heads) != 0
             or cur_kernel_options["SPARSE_KV_BLOCK_SIZE"]
             % cur_kernel_options["BLOCK_N"]
             != 0

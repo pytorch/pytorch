@@ -120,8 +120,12 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
-  //  CUDA code assumes that dout is contiguous
-  auto contiguous_grad_out = grad_out.contiguous();
+  //  CUDA code assumes that dout is contiguous and 16-byte aligned. Autograd
+  //  may pass a misaligned grad_out view (e.g. from cat backward).
+  auto contiguous_grad_out =
+      reinterpret_cast<uintptr_t>(grad_out.const_data_ptr()) % 16 == 0
+      ? grad_out.contiguous()
+      : grad_out.clone(at::MemoryFormat::Contiguous);
   auto contiguous_out = out.contiguous();
 
 #ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
@@ -550,18 +554,23 @@ _efficient_attention_backward(
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
 
   // See Note [Seed and Offset Device]
+  // Dispatch on where the seed and offset live, not on the current capture
+  // status: a forward captured in a CUDA graph returns device tensors, and
+  // its backward may run outside capture (e.g. after graph replay).
   at::PhiloxCudaState rng_engine_inputs;
   if (use_dropout) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None) {
-      rng_engine_inputs = at::PhiloxCudaState(
-          *philox_seed.data_ptr<int64_t>(),
-          *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
+    TORCH_CHECK(
+        philox_seed.device() == philox_offset.device(),
+        "philox_seed and philox_offset must be on the same device");
+    if (philox_seed.is_cuda()) {
       rng_engine_inputs = at::PhiloxCudaState(
           philox_seed.data_ptr<int64_t>(),
           philox_offset.data_ptr<int64_t>(),
           0);
+    } else {
+      rng_engine_inputs = at::PhiloxCudaState(
+          *philox_seed.data_ptr<int64_t>(),
+          *philox_offset.data_ptr<int64_t>());
     }
   }
 

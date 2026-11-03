@@ -28,7 +28,10 @@ from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
+    LiteralString as _LiteralString,
+    Never as _Never,
     overload as _overload,
+    Self as _Self,
     TYPE_CHECKING,
     TypeAlias as _TypeAlias,
     TypeGuard as _TypeGuard,
@@ -36,10 +39,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
-    LiteralString as _LiteralString,
-    Never as _Never,
     ParamSpec as _ParamSpec,
-    Self as _Self,
     TypeIs as _TypeIs,
 )
 
@@ -287,12 +287,7 @@ if sys.platform == "win32":
         )
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
-        with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
         prev_error_mode = kernel32.SetErrorMode(0x0001)
-
-        kernel32.LoadLibraryW.restype = ctypes.c_void_p
-        if with_load_library_flags:
-            kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
@@ -311,33 +306,6 @@ if sys.platform == "win32":
                     """
                 ).strip()
             )
-
-        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
-        path_patched = False
-        for dll in dlls:
-            is_loaded = False
-            if with_load_library_flags:
-                res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
-                last_error = ctypes.get_last_error()
-                if res is None and last_error != 126:
-                    err = ctypes.WinError(last_error)
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
-                elif res is not None:
-                    is_loaded = True
-            if not is_loaded:
-                if not path_patched:
-                    os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
-                    path_patched = True
-                res = kernel32.LoadLibraryW(dll)
-                if res is None:
-                    err = ctypes.WinError(ctypes.get_last_error())
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
 
         kernel32.SetErrorMode(prev_error_mode)
 
@@ -431,28 +399,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
     if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
-
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
-            )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1836,6 +1791,15 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
+          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
+          an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1870,19 +1834,12 @@ def use_deterministic_algorithms(
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
-        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
-          when called on an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
-          when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
-          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -3012,18 +2969,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -3353,11 +3304,6 @@ def compile(
             backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
-        # Start the one-time source hashing for Inductor's cache keys now, so
-        # it overlaps with whatever runs before the first compile.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 

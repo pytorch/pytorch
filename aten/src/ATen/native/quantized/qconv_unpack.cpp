@@ -11,6 +11,7 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 #include <tuple>
 #include <utility>
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
 #include <ATen/core/ivalue.h>

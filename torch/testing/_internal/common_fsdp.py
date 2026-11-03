@@ -655,8 +655,12 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU or TEST_XPU:
+            if TEST_HPU:
                 time.sleep(self.delay_after_loss_ms / 1000)
+            elif TEST_XPU:
+                torch.xpu._sleep(
+                    int(self.delay_after_loss_ms * get_cycles_per_ms("xpu"))
+                )
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
 
@@ -671,7 +675,11 @@ class ModuleWithDelay(FSDPTestModel):
                     torch.cuda._sleep(
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
-                elif TEST_HPU or TEST_XPU:
+                elif TEST_XPU:
+                    torch.xpu._sleep(
+                        int(self.delay_before_reduction_ms * get_cycles_per_ms("xpu"))
+                    )
+                elif TEST_HPU:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -810,7 +818,11 @@ class MixtureOfExperts(NestedWrappedModule):
                         torch.cuda._sleep(
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
-                    elif TEST_HPU or TEST_XPU:
+                    elif TEST_XPU:
+                        torch.xpu._sleep(
+                            int(self.delay_before_free_ms * get_cycles_per_ms("xpu"))
+                        )
+                    elif TEST_HPU:
                         time.sleep(self.delay_before_free_ms / 1000)
 
                     return orig_reshard(*args, **kwargs)
@@ -1223,7 +1235,9 @@ class FSDPTestMixin:
         # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
-                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
                 dist.init_process_group(
                     backend="fake",
                     world_size=self.world_size,
@@ -1572,7 +1586,9 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
         # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
-                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
                 dist.init_process_group(
                     backend="fake",
                     world_size=self.world_size,

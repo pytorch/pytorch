@@ -200,6 +200,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
         )
+        # Donation indices use the parent graph's placeholder ordering, not ours
+        # (same as SubgraphLowering).
+        bm_graph_lowering.bw_donated_idxs = None
 
         for sym_inp in self.sym_inputs:
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp

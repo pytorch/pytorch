@@ -11,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
@@ -109,17 +110,6 @@ class CompletedWork : public ::c10d::Work {
   std::vector<at::Tensor> outputs_;
 };
 
-c10::intrusive_ptr<WorkNCCL> coalesceWorks(
-    std::vector<c10::intrusive_ptr<WorkNCCL>> works,
-    std::vector<at::Tensor> outputs) {
-  TORCH_INTERNAL_ASSERT(!works.empty());
-  auto work = std::move(works.back());
-  works.pop_back();
-  work->setChildren(std::move(works));
-  work->setOutputs(std::move(outputs));
-  return work;
-}
-
 } // namespace
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -143,6 +133,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
                                             : options_c10d_->group_name;
 
   setGroupUid(options_c10d_->group_name);
+  // Binding a device creates the comm before Python's _set_group_desc.
+  setGroupDesc(options_c10d_->group_desc);
 
   if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
@@ -536,6 +528,28 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_sparse(
       "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
 }
 
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::coalesceWorks(
+    std::vector<c10::intrusive_ptr<WorkNCCL>> works,
+    std::vector<at::Tensor> outputs) {
+  TORCH_INTERNAL_ASSERT(!works.empty());
+  auto work = std::move(works.back());
+  works.pop_back();
+  // The coalesced work stands in for its per-tensor works in the coalescing
+  // window, so a window holding one *_coalesced op returns that op's work.
+  if (coalescing_batch_) {
+    std::unordered_set<const WorkNCCL*> folded;
+    for (const auto& w : works) {
+      folded.insert(w.get());
+    }
+    std::erase_if(coalescing_works_, [&](const auto& w) {
+      return folded.count(w.get());
+    });
+  }
+  work->setChildren(std::move(works));
+  work->setOutputs(std::move(outputs));
+  return work;
+}
+
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceCoalescedOptions& opts) {
@@ -552,11 +566,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
         operationTimeout(opts.timeout),
         config));
   }
-  auto work = coalesceWorks(std::move(works), tensors);
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), tensors);
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
@@ -605,7 +615,10 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   auto timeout = operationTimeout(opts.timeout);
 
   // Fast path: distinct per-rank output buffers -> list-based all_gather.
-  bool aliased = outputList.size() > 1 &&
+  // Note: Two distinct zero-element tensors both return data_ptr() == nullptr,
+  // so null data pointers must not be treated as aliased.
+  bool aliased = outputList.size() > 1 && outputList[0].numel() > 0 &&
+      outputList[1].numel() > 0 && outputList[0].data_ptr() != nullptr &&
       outputList[0].data_ptr() == outputList[1].data_ptr();
   if (!aliased) {
     auto work = all_gather(outputList, input, opts.asyncOp, timeout, config);
@@ -653,11 +666,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
         outputTensorLists.at(i).begin(),
         outputTensorLists.at(i).end());
   }
-  auto work = coalesceWorks(std::move(works), std::move(outputs));
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), std::move(outputs));
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
@@ -680,11 +689,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         operationTimeout(opts.timeout),
         config));
   }
-  auto work = coalesceWorks(std::move(works), outputs);
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), outputs);
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
@@ -863,11 +868,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         operationTimeout(opts.timeout),
         config));
   }
-  auto work = coalesceWorks(std::move(works), outputs);
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), outputs);
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
@@ -989,7 +990,7 @@ void ProcessGroupNCCL::startCoalescing() {
   TORCH_CHECK(
       !coalescing_batch_.has_value(),
       "startCoalescing called while a batch is already active");
-  coalesced_work_.reset();
+  coalescing_works_.clear();
   coalescing_batch_.emplace();
 }
 
@@ -999,15 +1000,49 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
       "endCoalescing called without a matching startCoalescing");
   auto batch = std::move(*coalescing_batch_);
   coalescing_batch_.reset();
-  if (batch.ops.empty()) {
-    if (coalesced_work_) {
-      auto work = std::move(coalesced_work_);
-      coalesced_work_.reset();
-      return work;
-    }
+  auto works = std::move(coalescing_works_);
+  coalescing_works_.clear();
+  if (!batch.ops.empty()) {
+    works.push_back(
+        batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout));
+  }
+  if (works.empty()) {
     return c10::make_intrusive<CompletedWork>();
   }
-  return batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout);
+  if (works.size() == 1) {
+    return works.front();
+  }
+
+  // A fresh work rather than one of the ops' own, whose duration and
+  // completion must stay per op. It runs on internal_stream_ if any op ran
+  // off the current stream (async or on a side stream), so the current stream
+  // is not made to wait, and waits for every op issued on another stream, so
+  // it completes after every op in the window. It is enqueued so the watchdog
+  // completes its future; no flight recorder entry maps to its completion key,
+  // so its completion is not recorded twice.
+  c10::cuda::CUDAGuard device_guard(device_);
+  cudaStream_t current = at::cuda::getCurrentCUDAStream(device_.index());
+  bool off_current =
+      std::any_of(works.begin(), works.end(), [&](const auto& w) {
+        return internal_stream_ && w->state_->stream.stream() != current;
+      });
+  cudaStream_t stream = getOperationStream(off_current);
+  auto timeout = works.front()->getTimeout();
+  for (const auto& w : works) {
+    timeout = std::max(timeout, w->getTimeout());
+  }
+  auto work = c10::make_intrusive<WorkNCCL>(
+      this, stream, timeout, std::vector<at::Tensor>{});
+  work->setSequenceNumber(works.back()->getSequencenumber());
+  work->setDurationStart(*works.front());
+  // Under graph capture nothing else may hold the inputs once the caller drops
+  // the ops' works.
+  work->retainInputs(works);
+  work->recordStart("coalesced");
+  work->waitFor(works);
+  work->recordEnd();
+  enqueueWork(work, stream);
+  return work;
 }
 
 } // namespace c10d::nccl2

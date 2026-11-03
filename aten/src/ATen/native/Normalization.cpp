@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -15,6 +16,7 @@
 #include <ATen/native/Normalization.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/mixed_data_type.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 
