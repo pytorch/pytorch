@@ -533,16 +533,13 @@ def reduce_ordered_col(
         return None
     # The last block's Int32 output index must not wrap past the outputs.
     last = B * C + WARP
-    if x.stride(-1) != 1 or C < WARP or last >= _INT32_LIMIT:
+    if C < WARP or last >= _INT32_LIMIT:
         return None
     plan = trait_itree_plan(
         trait, R, B * C, x.element_size(), stage=False, device=x.device
     )
     # Linear vector folds change the DAG, and this kernel replays tree folds only.
     if plan is None or plan.shape not in ("looped", "split") or plan.vec_linear:
-        return None
-    # Leaves fold plan.vec wide; a plan whose tiles load narrower would move bits.
-    if plan.tms[0].vec != plan.vec:
         return None
     # Single-field traits replay all 32 lanes' leaves statically. Multi-field traits roll
     # lanes but replay a static lane tree per load, which compiles about as slowly (1.3 s
