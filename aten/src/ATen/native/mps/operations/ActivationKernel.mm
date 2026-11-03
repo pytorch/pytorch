@@ -64,11 +64,9 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
 }
 
 static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_mps", [&]() {
-    ELUParams<scalar_t> params{alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()};
-    lib.exec_unary_kernel_with_params(
-        iter, "elu", params, fmt::format("ELUParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
-  });
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()), "elu not implemented for ", iter.common_dtype());
+  ELUParams params{alpha.to<float>(), scale.to<float>(), input_scale.to<float>()};
+  lib.exec_unary_kernel_with_params(iter, "elu", params, "ELUParams");
 }
 
 static void elu_backward_kernel(TensorIteratorBase& iter,
@@ -76,15 +74,10 @@ static void elu_backward_kernel(TensorIteratorBase& iter,
                                 const Scalar& scale,
                                 const Scalar& input_scale,
                                 bool is_result) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_backward_mps", [&]() {
-    ELUBackwardParams<scalar_t> params{
-        alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>(), is_result};
-    lib.exec_binary_kernel_with_params(
-        iter,
-        "elu_backward",
-        params,
-        fmt::format("ELUBackwardParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
-  });
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      isFloatingType(iter.common_dtype()), "elu_backward not implemented for ", iter.common_dtype());
+  ELUBackwardParams params{alpha.to<float>(), scale.to<float>(), input_scale.to<float>(), is_result};
+  lib.exec_binary_kernel_with_params(iter, "elu_backward", params, "ELUBackwardParams");
 }
 
 static void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta, const Scalar& threshold) {
