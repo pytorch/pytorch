@@ -24,6 +24,7 @@ from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.select_tests import build_prompt, query_model, test_minutes
 
 
+TIMED_OUT = "model call timed out after 1800s"
 TRANSIENT = re.compile(
     r"Throttl|rate limit|overloaded|\b(500|529)\b|timed out", re.IGNORECASE
 )
@@ -60,11 +61,14 @@ def run_one(
         minutes,
     )
     t0 = time.time()
+    transient = None
     for attempt in range(4):
         try:
             d = query_model(prompt, args.model, args.effort, checkout=wt, timeout=1800)
         except subprocess.TimeoutExpired:
-            d = {"is_error": True, "result": "timed out"}
+            # Final rather than retried: in CI a hung call runs everything, so score it that way.
+            d = {"is_error": True, "result": TIMED_OUT}
+            break
         transient = not d.get("structured_output") and TRANSIENT.search(
             str(d.get("result"))
         )
@@ -124,7 +128,9 @@ def main() -> None:
                 )
                 continue
             if r.pop("transient") or (
-                r["error"] and r["out"] is None and not r["cost_usd"]
+                r["error"] not in (None, TIMED_OUT)
+                and r["out"] is None
+                and not r["cost_usd"]
             ):
                 print(
                     "transient failure, left for a rerun:",
