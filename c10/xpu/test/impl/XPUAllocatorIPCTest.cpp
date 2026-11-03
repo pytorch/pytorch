@@ -1,10 +1,32 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/test/impl/XPUTest.h>
 
-TEST(XPUAllocatorIPCTest, ShareAndGetRoundTrip) {
-  c10::xpu::XPUCachingAllocator::emptyCache();
+// Param: whether expandable segments are enabled.
+class XPUAllocatorIPCTest : public ::testing::TestWithParam<bool> {
+ protected:
+  void SetUp() override {
+    if (GetParam()) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      c10::CachingAllocator::setAllocatorSettings("expandable_segments:True");
+#else
+      GTEST_SKIP()
+          << "Expandable segment IPC sharing requires SYCL compiler 2026.2 or later.";
+#endif
+    }
+  }
+
+  void TearDown() override {
+    if (GetParam()) {
+      c10::CachingAllocator::setAllocatorSettings("expandable_segments:False");
+    }
+    c10::xpu::XPUCachingAllocator::emptyCache();
+  }
+};
+
+TEST_P(XPUAllocatorIPCTest, ShareAndGetRoundTrip) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   const auto _4mb = 4 * 1024 * 1024;
   auto buf = allocator->allocate(_4mb);
@@ -18,8 +40,7 @@ TEST(XPUAllocatorIPCTest, ShareAndGetRoundTrip) {
   ASSERT_NE(devptr, nullptr);
 }
 
-TEST(XPUAllocatorIPCTest, ShareOffsetSubAllocation) {
-  c10::xpu::XPUCachingAllocator::emptyCache();
+TEST_P(XPUAllocatorIPCTest, ShareOffsetSubAllocation) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   // 20M memory is reserved, can be reused later.
   {
@@ -40,7 +61,7 @@ TEST(XPUAllocatorIPCTest, ShareOffsetSubAllocation) {
   ASSERT_NE(devptr, nullptr);
 }
 
-TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheHit) {
+TEST_P(XPUAllocatorIPCTest, GetIpcDevPtrCacheHit) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   const auto _4mb = 4 * 1024 * 1024;
   auto buf = allocator->allocate(_4mb);
@@ -55,7 +76,7 @@ TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheHit) {
   EXPECT_EQ(sp1.use_count(), 2);
 }
 
-TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheEviction) {
+TEST_P(XPUAllocatorIPCTest, GetIpcDevPtrCacheEviction) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
   const auto _4mb = 4 * 1024 * 1024;
   auto buf = allocator->allocate(_4mb);
@@ -73,7 +94,7 @@ TEST(XPUAllocatorIPCTest, GetIpcDevPtrCacheEviction) {
   EXPECT_EQ(sp2.use_count(), 1);
 }
 
-TEST(XPUAllocatorIPCTest, SameProcessRoundTrip) {
+TEST_P(XPUAllocatorIPCTest, SameProcessRoundTrip) {
   const auto _4mb = 4 * 1024 * 1024;
   const int numel = _4mb / sizeof(int);
 
@@ -100,6 +121,46 @@ TEST(XPUAllocatorIPCTest, SameProcessRoundTrip) {
 
   validateHostData(hostData.data(), numel);
 }
+
+// With expandable segments, the first allocation pins segment 0, so the shared
+// block starts at a non-zero segment index and spans several segments.
+TEST_P(XPUAllocatorIPCTest, SameProcessRoundTripMultiSegment) {
+  auto* allocator = c10::xpu::XPUCachingAllocator::get();
+  const auto seg_size =
+      c10::CachingAllocator::AcceleratorAllocatorConfig::large_segment_size();
+  auto head = allocator->allocate(seg_size);
+  const size_t size = 2 * seg_size + seg_size / 2;
+  const int numel = static_cast<int>(size / sizeof(int));
+  auto buf = allocator->allocate(size);
+  void* dev_ptr = buf.get();
+
+  std::vector<int> hostData(numel);
+  initHostData(hostData.data(), numel);
+
+  auto sh = c10::xpu::XPUCachingAllocator::shareIpcHandle(dev_ptr);
+  auto dev_ptr_ipc = c10::xpu::XPUCachingAllocator::getIpcDevPtr(sh.handle);
+  void* ipc_addr = static_cast<char*>(dev_ptr_ipc.get()) + sh.offset;
+
+  c10::xpu::getCurrentXPUStream()
+      .queue()
+      .memcpy(ipc_addr, hostData.data(), size)
+      .wait();
+  clearHostData(hostData.data(), numel);
+  c10::xpu::getCurrentXPUStream()
+      .queue()
+      .memcpy(hostData.data(), dev_ptr, size)
+      .wait();
+
+  validateHostData(hostData.data(), numel);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllocatorMode,
+    XPUAllocatorIPCTest,
+    ::testing::Bool(),
+    [](const ::testing::TestParamInfo<bool>& info) {
+      return std::string(info.param ? "ExpandableSegment" : "Regular");
+    });
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
