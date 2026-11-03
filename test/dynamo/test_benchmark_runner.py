@@ -9,6 +9,7 @@ import itertools
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from packaging.version import Version
 import torch
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -833,6 +835,35 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
         with self.assertRaisesRegex(ValueError, message):
             runner.validate_args(self._tp_args(extra))
 
+    @parametrize(
+        "flag", ("multiprocess", "warm-start-latency", "compare-backed-unbacked")
+    )
+    def test_main_rejects_other_launch_modes(self, flag):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = [
+            "--performance",
+            "--inference",
+            "--backend=eager",
+            "-dcpu",
+            "--tp-size=2",
+            "--float32",
+            "--disable-cudagraphs",
+            "--hf-inference-mode=decode",
+            "--only=Qwen/Qwen3-0.6B",
+            f"--{flag}",
+        ]
+        with (
+            mock.patch.object(common, "is_torchrun_worker", return_value=False),
+            mock.patch.object(common.mp, "spawn") as spawn,
+            mock.patch.object(subprocess, "check_call") as launch,
+            mock.patch.object(common, "_run_compare_backed_unbacked") as compare,
+            self.assertRaisesRegex(ValueError, f"--tp-size does not support --{flag}"),
+        ):
+            common.main(runner, args=args)
+        spawn.assert_not_called()
+        launch.assert_not_called()
+        compare.assert_not_called()
+
     def test_tp_requires_prefill_or_decode(self):
         runner = self.huggingface.HuggingfaceRunner()
         with self.assertRaisesRegex(ValueError, "requires --hf-inference-mode"):
@@ -1016,6 +1047,43 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             else (layer.keys, layer.values)
             for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
         ]
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_qwen_recurrent_state_matches_native_cache(self, device, dtype):
+        from transformers import StaticCache
+
+        model = self._make_model("Qwen3_5", device, dtype)
+        prompt = torch.randint(0, 32, (2, 4), device=device)
+        tokens = torch.randint(0, 32, (2, 6), device=device)
+        with torch.no_grad():
+            for _ in range(2):
+                model.prepare_for_prefill(prompt)
+                native = StaticCache(
+                    config=model.model.config, max_cache_len=model.cache_capacity
+                )
+                for layer, linear in zip(model.cache.layers, model.cache.is_linear):
+                    if linear:
+                        self.assertEqual(layer.conv_states[0].dtype, dtype)
+                        self.assertEqual(layer.recurrent_states[0].dtype, torch.float32)
+                        self.assertEqual(
+                            layer.recurrent_states[0],
+                            torch.zeros_like(layer.recurrent_states[0]),
+                        )
+                for ids in (prompt, *tokens.split(1, dim=1)):
+                    expected = model.model(
+                        ids, past_key_values=native, use_cache=True, logits_to_keep=1
+                    ).logits[:, -1, :]
+                    self.assertEqual(model(ids), expected, atol=0, rtol=0)
+                    for actual, reference, linear in zip(
+                        model.cache.layers, native.layers, model.cache.is_linear
+                    ):
+                        if linear:
+                            self.assertEqual(
+                                actual.recurrent_states[0],
+                                reference.recurrent_states[0],
+                                atol=0,
+                                rtol=0,
+                            )
 
     @parametrize("model_type", ("Llama", "Gemma2", "Qwen3", "Qwen3_5"))
     def test_prefill_resets_cache(self, device, model_type):
@@ -1744,11 +1812,27 @@ class TestTensorParallelResults(TestCase):
             mock.patch.object(common, "disable_output", False),
             mock.patch.object(common, "current_name", ""),
             mock.patch.object(common, "current_settings", vars(args)),
-            mock.patch.object(common, "output_signpost"),
+            mock.patch.object(common, "output_signpost") as signpost,
             mock.patch.object(common, "run_tp_worker_group", side_effect=worker),
         ):
             expected = case == "pass" or (accuracy and case == "reported_failure")
             self.assertEqual(common.run_tp_model("model", [], args, {}), expected)
+            if expected:
+                signpost.assert_not_called()
+            else:
+                status = {
+                    "crash": "worker_failed",
+                    "late_crash": "worker_failed",
+                    "timeout": "timeout",
+                    "missing": "missing_result",
+                    "duplicate": "invalid_results",
+                    "wrong_model": "invalid_results",
+                    "malformed": "invalid_results"
+                    if accuracy
+                    else "performance_failed",
+                    "reported_failure": "performance_failed",
+                }[case]
+                self.assertEqual(signpost.call_args.kwargs["error"], status)
             with open(common.output_filename) as f:
                 rows = list(csv.DictReader(f))
             self.assertEqual(len(rows), 2 if case == "duplicate" else 1)
@@ -1761,6 +1845,8 @@ class TestTensorParallelResults(TestCase):
                 self.assertEqual(info["device"], "cpu")
                 self.assertEqual(info["phase"], "prefill")
                 self.assertEqual(info["tp_size"], 2)
+                self.assertEqual(info["world_size"], 2)
+                self.assertEqual(info["only"], rows[0]["name"])
                 self.assertEqual(info["batch_size"], int(rows[0]["batch_size"]))
 
 
@@ -1769,6 +1855,20 @@ class TestTensorParallelResults(TestCase):
 @unittest.skipIf(IS_WINDOWS, "relies on POSIX signals and sessions")
 @launches_processes
 class TestTensorParallelLaunch(TestCase):
+    @contextlib.contextmanager
+    def _worker_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                yield tmp
+            finally:
+                for path in Path(tmp).glob("pid[0-9]*"):
+                    pid = path.read_text().strip()
+                    if pid:
+                        try:
+                            os.killpg(int(pid), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
     def _write_script(self, tmp, source):
         path = os.path.join(tmp, "worker.py")
         with open(path, "w") as f:
@@ -1785,7 +1885,7 @@ class TestTensorParallelLaunch(TestCase):
         self.fail(f"worker {pid} outlived its torchrun group")
 
     def test_timeout_stops_workers_that_ignore_sigterm(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with self._worker_directory() as tmp:
             script = self._write_script(
                 tmp,
                 f"""
@@ -1799,16 +1899,15 @@ class TestTensorParallelLaunch(TestCase):
                 """,
             )
             # Long enough for both workers to write their pids on a loaded runner.
+            env = {**os.environ, "TORCH_ELASTIC_SHUTDOWN_TIMEOUT": "90"}
             with self.assertRaises(subprocess.TimeoutExpired):
-                common.run_tp_worker_group(
-                    [sys.executable, script], 2, 30, os.environ.copy()
-                )
+                common.run_tp_worker_group([sys.executable, script], 2, 30, env)
             for rank in range(2):
                 with open(os.path.join(tmp, f"pid{rank}")) as f:
                     self._wait_until_dead(int(f.read()))
 
     def test_worker_failure_stops_live_peer(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with self._worker_directory() as tmp:
             script = self._write_script(
                 tmp,
                 f"""
@@ -1827,7 +1926,7 @@ class TestTensorParallelLaunch(TestCase):
             start = time.monotonic()
             with self.assertRaisesRegex(subprocess.CalledProcessError, "exit status"):
                 common.run_tp_worker_group(
-                    [sys.executable, script], 2, 600, os.environ.copy()
+                    [sys.executable, script], 2, 120, os.environ.copy()
                 )
             # Rank 0 cannot exit on a closed Gloo connection; torchrun must stop it.
             self.assertLess(time.monotonic() - start, 120)
@@ -1839,7 +1938,7 @@ class TestTensorParallelLaunch(TestCase):
         ("load", "fp64", "cast", "eager_first", "eager_second", "compiled", "warmup"),
     )
     def test_rank_local_exception_stops_benchmark(self, stage):
-        with tempfile.TemporaryDirectory() as tmp:
+        with self._worker_directory() as tmp:
             script = self._write_script(
                 tmp,
                 f"""
@@ -2013,7 +2112,8 @@ class TestHuggingFaceTensorParallelLaunch(TestCase):
                 *args,
             ],
             env=env,
-            cwd=tmp,
+            # Exercise the wheel-install launch path from the source checkout.
+            cwd=REPO_ROOT,
             timeout=900,
         )
         with open(output) as f:
