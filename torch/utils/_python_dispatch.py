@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 # - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 
-_is_in_torch_dispatch_mode = False
+_is_in_torch_dispatch_mode: bool = False
 _is_in_non_infra_torch_dispatch_mode = False
 # If inside any mode that has ignore_compile_internals() = False
 _is_in_any_mode_without_ignore_compile_internals = False
