@@ -3,10 +3,12 @@ name: llm-td
 # Shadow LLM test selection (tools/testing/llm_td). pull_request_target runs this
 # file from the default branch and the job checks out main, so the bedrock role is
 # only ever handed to reviewed code. The PR is read through git, never executed.
-# Test jobs fetch the result by PR number and head SHA in download-td-artifacts,
-# waiting up to 10 minutes for a run of this file on the same head to finish;
-# run_test.py only skips tests with it when the PR is labeled ci-llm-td and TD is
+# Test jobs fetch the result by PR number and head SHA in download-td-artifacts;
+# when enforcing, the target-determination job they need first waits for this
+# run (see wait_for_selection.py, which reads the run name below). run_test.py only skips tests with it when the PR is labeled ci-llm-td and TD is
 # enabled.
+
+run-name: llm-td ${{ contains(github.event.pull_request.labels.*.name, 'ci-llm-td') && 'enforce' || 'shadow' }}
 
 on:
   pull_request_target:
