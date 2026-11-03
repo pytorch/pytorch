@@ -330,7 +330,7 @@ class BenchmarkStorageGroup:
     nbytes: int
     device: Any
     dtype: Any
-    inputs: dict[str, tuple[list[int], list[int]]]
+    inputs: dict[str, tuple[list[int], list[int], int]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -4363,15 +4363,22 @@ class PythonWrapperCodegen(CodeGen):
         # Preserve shared non-empty input storages so benchmark code does not
         # explode large aliased views into separate allocations.
         storage_groups: dict[StorageWeakRef, BenchmarkStorageGroup] = {}
-        aliased_input_specs: dict[str, tuple[str, Any, Any]] = {}
+        aliased_input_specs: dict[str, tuple[str, Any, Any, Any]] = {}
         example_inputs = V.graph.example_inputs
+
+        def hint(value):
+            # Example inputs of a dynamic-shape graph carry SymInts; the
+            # harness needs concrete sizes.
+            if isinstance(value, torch.SymInt):
+                return V.graph.sizevars.optimization_hint(value.node.expr, fallback=42)
+            return int(value)
 
         if example_inputs is not None:
             for name, ex in zip(V.graph.graph_inputs.keys(), example_inputs):
                 if not isinstance(ex, torch.Tensor):
                     continue
                 storage = ex.untyped_storage()
-                nbytes = storage.nbytes()
+                nbytes = hint(storage.nbytes())
                 storage_key = StorageWeakRef(storage)
                 group = storage_groups.get(storage_key)
                 if group is None:
@@ -4384,7 +4391,11 @@ class PythonWrapperCodegen(CodeGen):
                     )
                     storage_groups[storage_key] = group
 
-                group.inputs[name] = (list(ex.shape), list(ex.stride()))
+                group.inputs[name] = (
+                    [hint(d) for d in ex.shape],
+                    [hint(d) for d in ex.stride()],
+                    hint(ex.storage_offset()),
+                )
 
         # Generate get_args() to create input tensors separately from benchmarking
         output.writelines(["", "", "def get_args():"])
@@ -4416,12 +4427,28 @@ class PythonWrapperCodegen(CodeGen):
             for group in storage_groups.values():
                 if len(group.inputs) < 2:
                     continue
-                numel = group.nbytes // torch._utils._element_size(group.dtype)
+                # Hints of the storage size and of the views' sizes need not
+                # agree (e.g. for unbacked sizes), so cover every view.
+                numel = max(
+                    [
+                        group.nbytes // torch._utils._element_size(group.dtype),
+                        *(
+                            offset + sum((d - 1) * s for d, s in zip(shape, stride)) + 1
+                            for shape, stride, offset in group.inputs.values()
+                            if all(d > 0 for d in shape)
+                        ),
+                    ]
+                )
                 output.writeline(
                     f"{group.buffer_name} = rand_strided(({numel},), (1,), device='{self._coor_device_type_str(group.device)}', dtype={group.dtype})"
                 )
-                for name, (shape, stride) in group.inputs.items():
-                    aliased_input_specs[name] = (group.buffer_name, shape, stride)
+                for name, (shape, stride, offset) in group.inputs.items():
+                    aliased_input_specs[name] = (
+                        group.buffer_name,
+                        shape,
+                        stride,
+                        offset,
+                    )
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(
@@ -4461,11 +4488,11 @@ class PythonWrapperCodegen(CodeGen):
                 elif isinstance(value, ir.OpaqueObjectState):
                     output.writeline(f"{name} = None")
                 elif name in aliased_input_specs:
-                    buf_name, shape, stride = aliased_input_specs[name]
+                    buf_name, shape, stride, offset = aliased_input_specs[name]
                     output.writeline(
                         f"{name} = torch.as_strided({buf_name}, "
                         f"{self.codegen_python_shape_tuple(shape)}, "
-                        f"{self.codegen_python_shape_tuple(stride)})"
+                        f"{self.codegen_python_shape_tuple(stride)}, {offset})"
                     )
                 else:
                     shape = V.graph.sizevars.optimization_hints(
