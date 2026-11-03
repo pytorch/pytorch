@@ -291,8 +291,9 @@ def _exit_dual_level(*, level: int) -> None:
     return _exit_dual_level_impl(level=level)
 
 
-# The jvp calls, whose results PreDispatchTorchFunctionMode in
-# torch/fx/experimental/proxy_tensor.py tracks with functorch disabled.
+# The forward-mode AD calls, and _unwrap_for_grad, which grad, vjp and jvp
+# use. PreDispatchTorchFunctionMode in torch/fx/experimental/proxy_tensor.py
+# tracks their results with functorch disabled.
 _jvp_predispatch_functions = frozenset(
     {
         _make_dual,
@@ -308,9 +309,11 @@ _jvp_predispatch_functions = frozenset(
 # The functorch wrappers that pre-dispatch tracing keeps in the graph. They
 # change global state (functorch levels, forward-mode AD levels, the registered
 # vmap decompositions), or take as an argument a level that an earlier call
-# entered. So they must stay where they are: dead code elimination must keep
-# them even with no users, and passes that check Node.is_impure() must not fold,
-# reorder or run one on its own. The export verifier allows them.
+# entered. So they must stay where they are: passes that check
+# Node.is_impure() must not fold, reorder or run one on its own. That check is
+# also what dead code elimination reads, so it keeps them even with no users,
+# including the calls that change no state, such as an unused _unwrap_for_grad.
+# The export verifier allows them.
 _functorch_predispatch_functions = _jvp_predispatch_functions | {
     lazy_load_decompositions,
     _vmap_increment_nesting,
