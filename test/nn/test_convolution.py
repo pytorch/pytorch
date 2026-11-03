@@ -4111,6 +4111,37 @@ class TestConvolutionNNCUDA(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("rank", [0, 1, 2])
+    def test_cudnn_convolution_invalid_rank(self, device, transpose, rank):
+        x = torch.rand((4,) * rank, device=device)
+        args = (x, x, [0])
+        if transpose:
+            args += ([0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* to have at least 3 dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1], [1], 1, False, False, False)
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("weight_rank", [0, 1, 2, 3, 5])
+    def test_cudnn_convolution_mismatched_rank(self, device, transpose, weight_rank):
+        x = torch.rand(1, 1, 4, 4, device=device)
+        weight = torch.rand((1,) * weight_rank, device=device)
+        args = (x, weight, [0, 0])
+        if transpose:
+            args += ([0, 0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* and weight to have the same number of dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1, 1], [1, 1], 1, False, False, False)
+
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm
     def test_cudnn_sm120_engine_errata(self, device):
@@ -4585,7 +4616,11 @@ class TestConvolutionNNCUDA(NNTestCase):
         # The MIOpen algorithm cache is per process and not keyed on benchmark,
         # so give each variant its own capture shape to keep it a cache miss.
         size = 9 + 2 * benchmark + 4 * transposed
-        with cudnn.flags(enabled=True, benchmark=benchmark, allow_tf32=False):
+        # deterministic keeps MIOpen off its split-K weight-gradient kernels,
+        # whose results vary from run to run.
+        with cudnn.flags(
+            enabled=True, benchmark=benchmark, deterministic=True, allow_tf32=False
+        ):
             for _ in range(2):
                 step(make_input(2, 7))
             x = make_input(4, size)

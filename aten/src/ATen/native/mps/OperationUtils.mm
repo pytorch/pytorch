@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -957,7 +958,11 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
+      // Listed newest first: a kernel defined by several sections resolves to the first one
       const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
+#ifdef CAN_BUILD_METAL_41
+          {"metal_41", has_metal_4_1},
+#endif
 #ifdef CAN_BUILD_METAL_4
           // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
           // cooperative-tensor ABI); every kernel it defines shadows the
@@ -1617,7 +1622,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
                                              const std::string& name,
                                              std::optional<c10::Scalar> alpha,
-                                             std::optional<c10::ScalarType> scalar_arg_type) {
+                                             std::optional<c10::ScalarType> scalar_arg_type,
+                                             std::optional<c10::Scalar> beta) {
+  TORCH_INTERNAL_ASSERT(!beta || alpha, "beta requires alpha");
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1633,7 +1640,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type, beta);
     }
     return;
   }
@@ -1666,7 +1673,9 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
-  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
+  using namespace std::string_view_literals;
+  const auto alpha_suffix =
+      alpha.has_value() ? fmt::format("_{}{}", scalarToMetalTypeString(alpha_type), beta ? "_pair"sv : ""sv) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto direct_name = fmt::format(
       "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
@@ -1692,7 +1701,16 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
       // everything that follows one slot down, so keep the index runtime
       unsigned idx = 4;
       if (alpha) {
-        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), idx++);
+        const auto a = getMPSScalar(*alpha, alpha_type);
+        if (beta) {
+          const auto b = getMPSScalar(*beta, alpha_type);
+          std::array<uint8_t, 2 * sizeof(a.value)> params;
+          std::memcpy(params.data(), &a.value, a.size);
+          std::memcpy(params.data() + a.size, &b.value, b.size);
+          mtl_setBytes(computeEncoder, c10::ArrayRef<uint8_t>(params.data(), a.size + b.size), idx++);
+        } else {
+          mtl_setBytes(computeEncoder, a, idx++);
+        }
       }
       const std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
                                         static_cast<int>(other1.scalar_type()),
@@ -1729,7 +1747,20 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
         const auto ndim = iter.ndim();
         const auto dim0 = static_cast<NSUInteger>(iter.shape()[0]);
         const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
-        mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1));
+        const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
+        bool transposed = false;
+        for (const auto i : c10::irange(1, iter.ntensors())) {
+          const auto strides = iter.strides(i);
+          transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
+        }
+        if (transposed) {
+          const auto tg_x = std::min<NSUInteger>(32, dim0);
+          const auto tg_y = std::min({8UL, dim1, [binaryPSO maxTotalThreadsPerThreadgroup] / tg_x});
+          [computeEncoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2)
+                    threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
+        } else {
+          mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, dim2);
+        }
       }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }

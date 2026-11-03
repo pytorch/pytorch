@@ -152,14 +152,12 @@ def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_vendored_quack(self):
-        script = (
-            "import importlib, sys\n"
-            "importlib.import_module('torch._inductor.kernel.flex_gemm.runtime')\n"
-            "quack = 'torch._vendor.quack'\n"
-            "if any(n == quack or n.startswith(quack + '.') for n in sys.modules):\n"
-            "    raise AssertionError('runtime imported vendored QuACK')\n"
-        )
-        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
+        for name in list(sys.modules):
+            if name == "torch._vendor.quack" or name.startswith("torch._vendor.quack."):
+                del sys.modules[name]
+        sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
+        importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
+        self.assertNotIn("torch._vendor.quack", sys.modules)
 
     def test_quack_support_probe_requires_cutlass(self):
         with mock.patch.object(lowering.importlib.util, "find_spec", return_value=None):
@@ -170,7 +168,25 @@ class TestFlexGemmRuntimeImport(TestCase):
             self.assertTrue(lowering.has_flex_gemm_quack())
 
 
+@instantiate_parametrized_tests
 class TestFlexGemmOutputLayout(TestCase):
+    @parametrize("capacity", (9, 10, 11, 12))
+    @parametrize("swap_ab", (False, True))
+    def test_blocked_layout_supports_config(self, capacity, swap_ab):
+        from torch._inductor.kernel.flex_gemm.output_layout import BLOCKED_128X4
+
+        config = SimpleNamespace(
+            device_capacity=capacity,
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            swap_ab=swap_ab,
+        )
+        self.assertEqual(
+            BLOCKED_128X4.supports_config_fn(config, 1, 32), capacity in (10, 11)
+        )
+        self.assertFalse(BLOCKED_128X4.supports_config_fn(config, 0, 32))
+
     def test_builtin_layout_contracts(self):
         from torch._inductor.kernel.flex_gemm.output_layout import (
             BLOCKED_128X4,
@@ -264,6 +280,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     @parametrize("capacity", (10, 11))
     def test_quack_config_space_includes_device_default(self, capacity):
+        _skip_unless_quack_deps(self)
         from torch._vendor.quack.gemm_config import (
             _default_config_for_cap,
             get_all_configs,
@@ -820,6 +837,43 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=16))
         self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=32))
         self.assertTrue(grouped_reduce_supports_config(sm120, axis=0, group=32))
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize("capacity", (9, 10, 11, 12))
+    def test_swapped_grouped_n_reduce_supports_config(self, capacity):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+            grouped_reduce_supports_config,
+        )
+
+        config = SimpleNamespace(
+            device_capacity=capacity,
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=1,
+            swap_ab=True,
+        )
+        self.assertEqual(
+            grouped_reduce_supports_config(config, axis=1, group=32),
+            capacity in (10, 11),
+        )
+        self.assertFalse(grouped_reduce_supports_config(config, axis=0, group=32))
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize("capacity", (9, 10, 11, 12))
+    @parametrize("swap_ab", (False, True))
+    def test_interleaved_supports_config(self, capacity, swap_ab):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (
+            InterleavedMainStore,
+            InterleavedTileLoad,
+        )
+
+        config = SimpleNamespace(device_capacity=capacity, swap_ab=swap_ab)
+        expected = capacity in (10, 11) and not swap_ab
+        self.assertEqual(InterleavedMainStore("out").supports_config(config), expected)
+        self.assertEqual(InterleavedTileLoad("h").supports_config(config), expected)
 
     def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
         from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
@@ -1446,15 +1500,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
 
+MISSING_CUTEDSL = SM100OrLater and not lowering.has_flex_gemm_quack()
+
+
+@unittest.skipIf(MISSING_CUTEDSL, "requires CuTeDSL")
 class FlexGemmTestCase(TestCase):
     K, N = 32, 16
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        if SM100OrLater:
-            if not lowering.has_flex_gemm_quack():
-                raise unittest.SkipTest("requires CuTeDSL")
 
     @contextlib.contextmanager
     def limitEpiModAutotune(self):
