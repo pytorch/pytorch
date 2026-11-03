@@ -218,18 +218,24 @@ def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
 
 
 def data_file_readers(
-    changed_files: list[str], candidates: set[str], grep: Callable[[str], list[str]]
-) -> tuple[list[str], list[str]] | None:
+    changed_files: list[str],
+    candidates: set[str],
+    grep: Callable[[str], list[str]],
+    deleted: Collection[str] = (),
+) -> tuple[list[str], dict[str, list[str]]] | None:
     """The paths under test/ that may read an edited file under test/ that is
-    neither a failure list nor a test (see edited_tests), and those edited
-    files, apart from the ones NO_READER_RE matches, that nothing reads. None
-    for more than MAX_DATA_FILES of them. A file is read by the paths naming
-    it, as test_run.py runs bin/test_script.py; a .py file also by its
-    importers; and an expect file (see EXPECT_RE) also by the paths defining a
-    class whose name starts with its test class, as test_tensorboard.py builds
-    the path of TestTensorBoard.*.expect for TestTensorBoardSummary."""
-    data = [f for f in changed_files if f.startswith("test/") and not FAILURE_LIST_DIR_RE.match(f) and not edited_tests([f], candidates)]  # fmt: skip
-    exempt = [f for f in data if NO_READER_RE.search(f)]
+    neither a failure list nor a test file (see edited_tests), split into those
+    reading a file that needs no further reader and, by file, those reading a
+    file only they can read. A file needs no further reader when it is deleted,
+    when NO_READER_RE matches it, when a driver runs its directory (see
+    edited_tests), or when a C++ test reads it. None for more than
+    MAX_DATA_FILES files only their readers can read. A file is read by the paths naming it, as test_run.py
+    runs bin/test_script.py; a .py file also by its importers; and an expect
+    file (see EXPECT_RE) also by the paths defining a class whose name starts
+    with its test class, as test_tensorboard.py builds the path of
+    TestTensorBoard.*.expect for TestTensorBoardSummary."""
+    data = [f for f in changed_files if f.startswith("test/") and not FAILURE_LIST_DIR_RE.match(f) and not (f.endswith(".py") and edited_tests([f], candidates))]  # fmt: skip
+    exempt = [f for f in data if f in deleted or NO_READER_RE.search(f) or edited_tests([f], candidates)]  # fmt: skip
     data = [f for f in data if f not in exempt]
     if len(data) > MAX_DATA_FILES:
         return None
@@ -239,7 +245,7 @@ def data_file_readers(
         return rf"(^|[^[:alnum:]_.-])({names})([^[:alnum:]_.-]|$)"
 
     readers = grep(name_pattern(exempt)) if exempt else []
-    unread = []
+    read_by: dict[str, list[str]] = {}
     for f in data:
         patterns = [name_pattern([f])]
         if m := EXPECT_RE.match(f):
@@ -247,10 +253,11 @@ def data_file_readers(
         if f.endswith(".py"):
             patterns.append(import_pattern([f]))
         found = [r for r in grep("|".join(f"({p})" for p in patterns)) if r != f]
-        readers += found
-        if not found:
-            unread.append(f)
-    return readers, unread
+        if any(r.startswith("test/cpp/") for r in found):
+            readers += found
+        else:
+            read_by[f] = found
+    return readers, read_by
 
 
 def failure_list_sources(
@@ -353,12 +360,13 @@ class Selection:
         candidates: set[str],
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
+        deleted: Collection[str] = (),
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
         A missing or malformed output, a change to test infrastructure, an
         edited inductor failure list naming an unknown class, too many import
-        hops, and with `grep` an edited file under test/ that nothing reads
+        hops, and with `grep` an edited file under test/ that no test reads
         (see data_file_readers) all fall back to running everything. Test files the change
         edits and their drivers are always selected, and with `grep` so are the
         test files that import them (see importers), those defining the tests
@@ -382,16 +390,18 @@ class Selection:
             sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
         if grep is not None:
-            data = data_file_readers(changed_files, candidates, grep)
+            data = data_file_readers(changed_files, candidates, grep, deleted)
             if data is None:
                 return cls(run_all=True, reason=f"more than {MAX_DATA_FILES} edited files under test/ are not tests")  # fmt: skip
-            readers, unread = data
-            if unread:
-                return cls(run_all=True, reason=f"nothing found that reads {unread[0]}")  # fmt: skip
-            found = importers(changed_files + sources + readers, candidates, grep)
-            if found is None:
-                return cls(run_all=True, reason="test modules import the change through too many hops")  # fmt: skip
-            files |= found
+            readers, read_by = data
+            # A file is read only if its readers lead to a test that runs.
+            for f, paths in [(None, changed_files + sources + readers), *read_by.items()]:  # fmt: skip
+                found = importers(paths, candidates, grep)
+                if found is None:
+                    return cls(run_all=True, reason="test modules import the change through too many hops")  # fmt: skip
+                if f is not None and not found:
+                    return cls(run_all=True, reason=f"nothing found that reads {f}")
+                files |= found
         run_all, reason = out.get("run_all", False), str(out.get("reason", ""))
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
@@ -652,14 +662,11 @@ class TestSplit:
         """The source gen_ci_artifact records."""
         return LLM_SELECTION_SOURCE if self.enforced else "td"
 
-    def report_failure(self, test: TestRun, selected_tests: list[str], test_stats: dict[str, object]) -> None:  # fmt: skip
-        if self.emit is None:
-            return
-        self.emit("td_test_failure_stats_v2", {"selected_tests": selected_tests, "failure": str(test), "llm_enforced": self.enforced, **test_stats})  # fmt: skip
+    def report_failure(self, test: TestRun) -> None:
         # Only tests that ran can fail, so with TD on these are failures in
         # TD's include (shadow) or in the selection, the previous failures
         # in TD's include and the hedge (enforced).
-        if self.llm is not None:
+        if self.emit is not None and self.llm is not None:
             self.emit("llm_td_shadow_failure", self.llm.failure_metric(test))
 
 
