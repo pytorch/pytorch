@@ -16,6 +16,14 @@ runs:
       with:
         name: td_results
 
+    - name: Download LLM test selection from S3
+      if: inputs.use-gha == '' || inputs.use-gha == 'false'
+      # Only internal PRs have one; see llm-test-selection in target_determination.yml.
+      continue-on-error: true
+      uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+      with:
+        name: llm_td_selection
+
     - name: Download TD Artifacts from GHA
       if: inputs.use-gha != '' && inputs.use-gha != 'false'
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -27,3 +35,4 @@ runs:
       run: |
         mkdir -p .additional_ci_files
         mv td_results.json .additional_ci_files/td_results.json || true
+        mv llm_td_selection.json .additional_ci_files/llm_td_selection.json || true

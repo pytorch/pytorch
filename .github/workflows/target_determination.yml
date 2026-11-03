@@ -109,3 +109,52 @@ jobs:
           retention-days: 1
           if-no-files-found: error
           path: td_results.json
+
+  # Shadow LLM test selection (tools/testing/llm_td). The scripts and the prompt
+  # come from main; the PR is only read through git, never executed, and fork
+  # PRs are skipped. run_test.py reports what the selection would have skipped,
+  # and only skips it on PRs labeled ci-llm-td.
+  llm-test-selection:
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    environment: bedrock
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch PR head
+        run: git fetch --no-tags origin ${{ github.event.pull_request.head.sha }}
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.280
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Select tests
+        env:
+          CLAUDE_CODE_USE_BEDROCK: "1"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ENFORCE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-llm-td') && '--enforce' || '' }}
+        run: |
+          python3 -m tools.testing.llm_td.select_tests --base origin/main --head "$HEAD_SHA" \
+            --output llm_td_selection.json $ENFORCE
+
+      - name: Upload selection to s3
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: llm_td_selection
+          retention-days: 1
+          if-no-files-found: error
+          path: llm_td_selection.json
