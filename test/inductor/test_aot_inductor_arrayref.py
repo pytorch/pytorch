@@ -10,6 +10,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, xfailIf
+from torch.testing._internal.inductor_utils import RUN_CPU
 
 
 # TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
@@ -24,6 +25,12 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+if not RUN_CPU:
+    # Every test in this file is a CPU test.
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires RUN_CPU")
 
 try:
     try:

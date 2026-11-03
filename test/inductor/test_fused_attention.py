@@ -33,9 +33,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
+    RUN_CPU,
 )
 
 
@@ -2423,7 +2423,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         use_static_shapes = False
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
         device = "cpu"

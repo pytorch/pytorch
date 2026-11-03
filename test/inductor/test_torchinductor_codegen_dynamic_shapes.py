@@ -22,6 +22,7 @@ from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     HAS_CPU,
     HAS_GPU,
+    RUN_CPU,
 )
 
 
@@ -559,7 +560,7 @@ class DynamicShapesCodegenTestCase(TestCase):
         return self.device_type
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
         hw_classification = HardwareClassification.CPU

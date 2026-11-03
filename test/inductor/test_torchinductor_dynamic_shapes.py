@@ -44,6 +44,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MPS,
     patch_inductor_backend,
+    RUN_CPU,
 )
 
 
@@ -169,7 +170,7 @@ class DynamicShapesOpTests:
         )
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
         common = check_model
