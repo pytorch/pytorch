@@ -2226,7 +2226,7 @@ class ByteArrayVariable(VariableTracker):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             # PySlice_Unpack checks the step before start and stop.
-            step = key.items[2]
+            step = key.items[2].realize()
             if (
                 istype(step, ConstantVariable)
                 and istype(step.value, (int, bool))
@@ -2242,11 +2242,17 @@ class ByteArrayVariable(VariableTracker):
                 src = None
             elif isinstance(value, ByteArrayVariable):
                 src = value.data
-            elif (
-                isinstance(value, ConstantVariable)
-                or istype(value, (ListVariable, TupleVariable))
-            ) and value.is_python_constant():
+            elif isinstance(value, ConstantVariable):
                 src = value.as_python_constant()
+            elif istype(value, (ListVariable, TupleVariable)):
+                # As in bytearray_extend, __index__ specializes SymInt items.
+                src = []
+                for item in value.items:
+                    if not istype(item, ConstantVariable):
+                        item = pynumber_index(tx, item)
+                        if not item.is_python_constant():
+                            self._unsupported_store_value(value)
+                    src.append(item.as_python_constant())
             else:
                 self._unsupported_store_value(value)
             new_data = bytearray(self.data)
@@ -2328,7 +2334,7 @@ class ByteArrayVariable(VariableTracker):
                 "before a graph break is treated as existing in the resume "
                 "function, so each later store breaks the graph again.",
                 hints=[
-                    "Store into a bytearray created in the compiled region.",
+                    "Store into a bytearray created in the same frame.",
                     *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                 ],
             )

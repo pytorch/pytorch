@@ -1074,7 +1074,7 @@
       "Context": "bytearray: {self.debug_repr()}",
       "Explanation": "Dynamo traces bytearray item and slice stores only on bytearrays created in the same frame. An existing bytearray may share its buffer with a memoryview, tensor or array that Dynamo cannot see, so the store is left to eager. A bytearray created before a graph break is treated as existing in the resume function, so each later store breaks the graph again.",
       "Hints": [
-        "Store into a bytearray created in the compiled region.",
+        "Store into a bytearray created in the same frame.",
         "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
       ]
     }

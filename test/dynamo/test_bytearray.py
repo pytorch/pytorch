@@ -869,7 +869,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b[1:] = b
         self.assertEqual(b, b"AA2BZC")
         self.assertRaises(ValueError, setitem, b, slice(None, None, 2), b"x")
-        self.assertRaises(ValueError, setitem, b, slice(None, None, 0), b"")
+        self.assertRaisesRegex(
+            ValueError,
+            "slice step cannot be zero",
+            setitem,
+            b,
+            slice(None, None, 0),
+            b"",
+        )
         self.assertRaises(ValueError, setitem, b, slice(0, 1), [256])
         self.assertRaises(TypeError, setitem, b, slice(0, 1), 1)
         self.assertRaises(TypeError, setitem, b, slice(0, 1), "a")
@@ -884,7 +891,9 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, b"df")
         del b[10:]
         self.assertEqual(b, b"df")
-        self.assertRaises(ValueError, delitem, b, slice(None, None, 0))
+        self.assertRaisesRegex(
+            ValueError, "slice step cannot be zero", delitem, b, slice(None, None, 0)
+        )
 
     @make_dynamo_test
     def test_setslice_delslice_zero_step_first(self):
@@ -894,6 +903,31 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertRaisesRegex(ValueError, zero_step, setitem, b, slice("a", 1, 0), b"")
         self.assertRaisesRegex(ValueError, zero_step, delitem, b, slice(1.5, None, 0))
         self.assertEqual(b, b"abc")
+
+    def test_setslice_zero_step_from_input(self):
+        def store_key(key, x):
+            ba = bytearray(b"abc")
+            try:
+                ba[key] = b""
+            except ValueError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        def store_step(step, x):
+            ba = bytearray(b"abc")
+            try:
+                ba["a":1:step] = b""
+            except ValueError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        for fn, arg in ((store_key, slice("a", 1, 0)), (store_step, 0)):
+            with self.subTest(fn=fn.__name__):
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(
+                    compiled(arg, torch.ones(1)),
+                    ("slice step cannot be zero", torch.ones(1) + 1),
+                )
 
     def test_store_to_existing_bytearray(self):
         cases = [
@@ -1011,8 +1045,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                     run(torch.compile(fn, backend="eager", fullgraph=True), *args)
 
     def test_setslice_input_values(self):
-        # Static, so each input gets its own guarded graph.
-        @torch.compile(backend="eager", fullgraph=True, dynamic=False)
+        @torch.compile(backend="eager", fullgraph=True)
         def f(values, x):
             ba = bytearray(b"xyz")
             ba[0:2] = values
@@ -1020,9 +1053,11 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
 
         for values, expected in (
             ([65, 66], b"ABz"),
+            ([69, 70], b"EFz"),
             ((67, 68), b"CDz"),
-            (b"EF", b"EFz"),
-            (bytearray(b"GH"), b"GHz"),
+            ((71, 72), b"GHz"),
+            (b"IJ", b"IJz"),
+            (bytearray(b"KL"), b"KLz"),
         ):
             with self.subTest(values=values):
                 self.assertEqual(f(values, torch.ones(1))[0], bytearray(expected))
