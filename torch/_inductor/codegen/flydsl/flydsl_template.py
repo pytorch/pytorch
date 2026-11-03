@@ -168,6 +168,8 @@ class FlyDSLTemplateCaller(ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
+        # template kwargs (orientation, strides) were derived from these layouts
+        self.snapshot_input_layouts()
 
     @staticmethod
     def _build_description(name: str, template_kwargs: dict[str, Any] | None) -> str:
@@ -183,6 +185,7 @@ class FlyDSLTemplateCaller(ChoiceCaller):
         return self.bmreq.benchmark(*args, out=out)
 
     def output_node(self) -> TensorBox:
+        self.freeze_inputs_to_snapshot()
         buffer = FlyDSLTemplateBuffer(
             layout=self.layout,
             inputs=self.input_nodes,

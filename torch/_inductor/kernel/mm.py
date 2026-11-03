@@ -34,6 +34,7 @@ from ..ir import (
     ChoiceCaller,
     ExternKernel,
     FallbackKernel,
+    fixed_layout_snapshot,
     FlexibleLayout,
     IRNode,
     is_triton,
@@ -349,8 +350,9 @@ def get_flydsl_mm_template_kwargs(
         return []
 
     sizevars = V.graph.sizevars
-    mat1_stride = mat1.get_stride()
-    mat2_stride = mat2.get_stride()
+    # FlyDSLTemplateCaller freezes the inputs to these layouts if selected
+    mat1_stride = fixed_layout_snapshot(mat1).stride
+    mat2_stride = fixed_layout_snapshot(mat2).stride
     out_stride = layout.stride
 
     if sizevars.statically_known_equals(mat1_stride[1], 1):

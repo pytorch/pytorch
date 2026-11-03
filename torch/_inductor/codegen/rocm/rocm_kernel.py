@@ -8,15 +8,7 @@ import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.utils import do_bench_using_profiling
 
-from ...ir import (
-    Buffer,
-    ChoiceCaller,
-    FlexibleLayout,
-    IRNode,
-    Layout,
-    PrimitiveInfoType,
-    TensorBox,
-)
+from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
 from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
@@ -256,6 +248,10 @@ class ROCmTemplateCaller(ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.info_kwargs = info_kwargs
+        # the template renders against snapshots of the input layouts
+        self.input_layout_snapshot = [
+            node.get_layout() for node in template.input_nodes
+        ]
 
     def precompile(self) -> None:
         if self.bmreq is None:
@@ -291,14 +287,6 @@ class ROCmTemplateCaller(ChoiceCaller):
             return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*benchmark_inputs, out=out)
 
-    def is_layout_compatible(self) -> bool:
-        snapshots = self.template.input_nodes
-        return all(
-            isinstance(node.get_layout(), FlexibleLayout)
-            or node.get_layout() == snapshot.get_layout()
-            for node, snapshot in zip(self.input_nodes, snapshots, strict=True)
-        )
-
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
 
@@ -322,12 +310,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         }
 
     def output_node(self) -> TensorBox:
-        if not self.is_layout_compatible():
-            raise AssertionError("ROCm choice input layouts changed after selection")
-        snapshots = self.template.input_nodes
-        for node, snapshot in zip(self.input_nodes, snapshots, strict=True):
-            if isinstance(node.get_layout(), FlexibleLayout):
-                node.freeze_layout_with_exact_strides(snapshot.get_stride())
+        self.freeze_inputs_to_snapshot()
         self.bmreq.update_workspace_size()
         buffer = ROCmTemplateBuffer(
             layout=self.layout,
