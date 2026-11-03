@@ -94,10 +94,12 @@ def wrap_cutedsl(
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
     of the returned wrapper do not pass it, because the kernel is launched on the
-    current CUDA stream. Tensor arguments are ``torch.Tensor`` (they are converted
-    with ``cutlass.cute.runtime.from_dlpack``). ``mutates_args`` names the tensor
-    parameters the kernel writes, or is ``"unknown"`` to treat every tensor argument
-    as written; PT2 uses it to functionalize the launch.
+    current CUDA stream, so positional arguments bind to the parameters before it
+    and a parameter after it is passed by keyword. Tensor arguments are
+    ``torch.Tensor`` (they are converted with ``cutlass.cute.runtime.from_dlpack``).
+    ``mutates_args`` names the tensor parameters the kernel writes, or is
+    ``"unknown"`` to treat every tensor argument as written; PT2 uses it to
+    functionalize the launch.
 
     Dynamo captures a raw call as the call of ``wrap_cutedsl(host_fn,
     mutates_args="unknown")``: every tensor argument counts as written, read-only

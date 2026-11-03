@@ -27,6 +27,7 @@ from typing_extensions import Never, TypeIs
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     _may_overlap,
+    CUTEDSL_CONSTANT_RULES,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHOPifier,
@@ -286,7 +287,8 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         length or keys, an object (see _object_state) on its type and, for a plain
         object, its attribute names, then each item, dict key or attribute in turn;
         a Python literal, a frozenset, a range or a slice on its value (constant_key
-        keys these by equality); anything else (a function, a class, a cutlass
+        keys these by equality), and a cutlass Numeric, such as cutlass.Float32(2.0),
+        on its type and value; anything else (a function, a class, another cutlass
         value) on its identity. A change made to the object between calls then
         recompiles, as eager recompiles the kernel for it, instead of launching
         with the old snapshot.
@@ -325,7 +327,13 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 f"{type(value).__name__} ({source.name}, in {key!r}); PT2 converts "
                 "tensors and supplies the stream"
             )
-        if ConstantVariable.is_base_literal(value):
+        if CUTEDSL_CONSTANT_RULES.scalar_value(value) is not None:
+            # A cutlass Numeric, which constant_key keys by its type and its value.
+            install_guard(
+                source.make_guard(GuardBuilder.TYPE_MATCH),
+                AttrSource(source, "value").make_guard(GuardBuilder.CONSTANT_MATCH),
+            )
+        elif ConstantVariable.is_base_literal(value):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         elif isinstance(value, (frozenset, range, slice)):
             install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
@@ -347,7 +355,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 self.guard_contents(key_source, item_key, tx, name, key, path)
                 item_source = DictGetItemSource(source, key_source)
                 self.guard_contents(item_source, item, tx, name, key, path)
-        elif (state := _object_state(value)) is not None:
+        elif (state := _object_state(value, CUTEDSL_CONSTANT_RULES)) is not None:
             install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
             if dataclasses.is_dataclass(value):
                 for attr, item in state.items():
@@ -416,7 +424,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             else:
                 constant_args[key] = self.constant_object(variable, key, val, tx)
         try:
-            constant_key(constant_args)
+            constant_key(constant_args, CUTEDSL_CONSTANT_RULES)
         except TypeError as e:
             self.raise_unsupported(f"{name}(): {e}")
         constant_args_idx = cutedsl_kernel_side_table.add_constant_args(constant_args)

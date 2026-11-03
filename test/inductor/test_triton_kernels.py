@@ -358,8 +358,7 @@ scale_kernel_hop_info = UserKernelHOPInfo(
     get_mutated_tensors=lambda hop_kwargs, kwargs: ["out"],
     get_kernel_name=lambda hop_kwargs: "scale_kernel",
     get_layout_constraint=lambda: "needs_fixed_stride_order",
-    # Not Triton's trigger, so that the reinplacing counters tell the DSLs apart.
-    reinplace_trigger=ReInplaceTrigger.AUTO_FUNC_V1,
+    reinplace_trigger=ReInplaceTrigger.USER_KERNEL_OPS,
     serializable=False,
 )
 
@@ -1004,36 +1003,57 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
-    @requires_gpu
     @parametrize(
         "case",
         ["e8m0", "complex", "meta", "sparse", "fp8", "fp8_uint8", "cpu_output"],
     )
-    def test_triton_kernel_functional_decomposition_before_type_fallback(self, case):
+    @parametrize(
+        "dsl", [common_utils.subtest("triton", decorators=[requires_gpu]), "scale"]
+    )
+    @mock.patch.dict(_user_kernel_hops)
+    def test_triton_kernel_functional_decomposition_before_type_fallback(
+        self, dsl, case
+    ):
         import torch._inductor.codegen.triton_utils as triton_utils
         import torch._inductor.lowering as lowering
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor.fx_passes.post_grad import (
-            decompose_triton_kernel_wrapper_functional,
+            decompose_user_kernel_wrapper_functional,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        kernel_side_table.reset_table()
-        kernel_idx = kernel_side_table.add_kernel(add_kernel_with_optional_param)
-        constant_args_idx = kernel_side_table.add_constant_args(
-            {"n_elements": 16, "ARGS_PASSED": "one", "BLOCK_SIZE": 16}
-        )
-
-        def f(src, output):
-            out = triton_kernel_wrapper_functional(
-                kernel_idx=kernel_idx,
-                constant_args_idx=constant_args_idx,
-                grid=[(1,)],
-                tma_descriptor_metadata={},
-                kwargs={"in_ptr0": src, "in_ptr1": src, "out_ptr": output},
-                tensors_to_clone=["out_ptr"],
+        if dsl == "triton":
+            kernel_side_table.reset_table()
+            kernel_idx = kernel_side_table.add_kernel(add_kernel_with_optional_param)
+            constant_args_idx = kernel_side_table.add_constant_args(
+                {"n_elements": 16, "ARGS_PASSED": "one", "BLOCK_SIZE": 16}
             )
-            return out["out_ptr"]
+            info = get_user_kernel_hop_info(triton_kernel_wrapper_functional)
+
+            def f(src, output):
+                out = triton_kernel_wrapper_functional(
+                    kernel_idx=kernel_idx,
+                    constant_args_idx=constant_args_idx,
+                    grid=[(1,)],
+                    tma_descriptor_metadata={},
+                    kwargs={"in_ptr0": src, "in_ptr1": src, "out_ptr": output},
+                    tensors_to_clone=["out_ptr"],
+                )
+                return out["out_ptr"]
+
+            device = {"meta": "meta", "sparse": "cpu", "cpu_output": "cpu"}.get(
+                case, GPU_TYPE
+            )
+        else:
+            info = scale_kernel_hop_info
+            register_user_kernel_hop(info)
+
+            def f(src, output):
+                return scale_kernel_wrapper_functional(
+                    scale=2, kwargs={"x": src, "out": output}, tensors_to_clone=["out"]
+                )["out"]
+
+            device = "meta" if case == "meta" else "cpu"
 
         dtype = {
             "e8m0": torch.float8_e8m0fnu,
@@ -1041,9 +1061,6 @@ class KernelTests(torch._inductor.test_case.TestCase):
             "fp8": torch.float8_e4m3fn,
             "fp8_uint8": torch.float8_e4m3fn,
         }.get(case, torch.float32)
-        device = {"meta": "meta", "sparse": "cpu", "cpu_output": "cpu"}.get(
-            case, GPU_TYPE
-        )
         src = torch.empty(16, dtype=dtype, device=device)
         output = torch.empty(16, device=device)
         if case == "sparse":
@@ -1072,12 +1089,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
             gm = make_fx(f, tracing_mode="fake")(src, output)
             functional_nodes = gm.graph.find_nodes(
-                op="call_function", target=triton_kernel_wrapper_functional
+                op="call_function", target=info.functional
             )
             self.assertEqual(len(functional_nodes), 1)
-            decompose_triton_kernel_wrapper_functional(gm.graph)
+            decompose_user_kernel_wrapper_functional(gm.graph)
             mutation_nodes = gm.graph.find_nodes(
-                op="call_function", target=triton_kernel_wrapper_mutation
+                op="call_function", target=info.mutation
             )
             self.assertEqual(len(mutation_nodes), 1)
 
@@ -1135,13 +1152,16 @@ def forward(self, x_1, output_1):
     return getitem_1""",
         )
 
-    @requires_gpu
+    @common_utils.parametrize(
+        "dsl", [common_utils.subtest("triton", decorators=[requires_gpu]), "scale"]
+    )
     @common_utils.parametrize("folder", ["export", "inductor"])
-    def test_constant_folding_skips_every_user_kernel(self, folder):
+    @mock.patch.dict(_user_kernel_hops)
+    def test_constant_folding_skips_every_user_kernel(self, folder, dsl):
         # Folding a user kernel is wrong (see the TODO in both folders), so every
-        # functional HOP stays unknown to the folder, not only the first one: the
-        # first node is named triton_kernel_wrapper_functional_proxy, the next ones
-        # triton_kernel_wrapper_functional_proxy_1, ...
+        # functional HOP of every DSL stays unknown to the folder. Two kernels,
+        # because a match on the node name finds only the first: the others are
+        # named <hop>_proxy_1, ...
         from torch._export.passes import constant_folding as export_folding
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor import constant_folding as inductor_folding
@@ -1151,47 +1171,53 @@ def forward(self, x_1, output_1):
             "export": export_folding.constant_fold,
             "inductor": inductor_folding.constant_fold,
         }[folder]
-        # Each kernel gets its own constants, each used once, so folding the second
-        # kernel (the old behavior) also leaves its constants unused and removed.
-        x1, y1, o1, x2, y2, o2 = (torch.randn(16, device=GPU_TYPE) for _ in range(6))
-        kernel_idx = kernel_side_table.add_kernel(add_kernel)
-        constant_args_idx = kernel_side_table.add_constant_args(
-            {"n_elements": 16, "BLOCK_SIZE": 16}
-        )
+        if dsl == "triton":
+            device = GPU_TYPE
+            hop = triton_kernel_wrapper_functional
+            kernel_idx = kernel_side_table.add_kernel(add_kernel)
+            constant_args_idx = kernel_side_table.add_constant_args(
+                {"n_elements": 16, "BLOCK_SIZE": 16}
+            )
 
-        def add(a, b, out):
-            return triton_kernel_wrapper_functional(
-                kernel_idx=kernel_idx,
-                constant_args_idx=constant_args_idx,
-                grid=[(1,)],
-                tma_descriptor_metadata={},
-                kwargs={"in_ptr0": a, "in_ptr1": b, "out_ptr": out},
-                tensors_to_clone=["out_ptr"],
-            )["out_ptr"]
+            def double(x, out):
+                return hop(
+                    kernel_idx=kernel_idx,
+                    constant_args_idx=constant_args_idx,
+                    grid=[(1,)],
+                    tma_descriptor_metadata={},
+                    kwargs={"in_ptr0": x, "in_ptr1": x, "out_ptr": out},
+                    tensors_to_clone=["out_ptr"],
+                )["out_ptr"]
+
+        else:
+            device = "cpu"
+            hop = scale_kernel_wrapper_functional
+            register_user_kernel_hop(scale_kernel_hop_info)
+
+            def double(x, out):
+                kwargs = {"x": x, "out": out}
+                return hop(scale=2, kwargs=kwargs, tensors_to_clone=["out"])["out"]
+
+        # Each kernel gets its own constants, each used once, so folding a kernel
+        # also leaves its constants unused and removed.
+        x1, o1, x2, o2 = (torch.randn(16, device=device) for _ in range(4))
 
         def f(z):
             # The tensors are closed over, so make_fx stores them as graph constants
             # and both kernels see only constant inputs.
-            return add(x1, y1, o1) + z, add(x2, y2, o2) + z
+            return double(x1, o1) + z, double(x2, o2) + z
 
-        gm = make_fx(f)(torch.zeros(16, device=GPU_TYPE))
+        gm = make_fx(f)(torch.zeros(16, device=device))
 
         def kernel_nodes():
-            return gm.graph.find_nodes(
-                op="call_function", target=triton_kernel_wrapper_functional
-            )
+            return gm.graph.find_nodes(op="call_function", target=hop)
 
-        self.assertEqual(
-            [n.name for n in kernel_nodes()],
-            [
-                "triton_kernel_wrapper_functional_proxy",
-                "triton_kernel_wrapper_functional_proxy_1",
-            ],
-        )
+        name = f"{hop.__name__}_proxy"
+        self.assertEqual([n.name for n in kernel_nodes()], [name, f"{name}_1"])
         constant_fold(gm)
         self.assertEqual(len(kernel_nodes()), 2)
-        z = torch.randn(16, device=GPU_TYPE)
-        self.assertEqual(gm(z), (x1 + y1 + z, x2 + y2 + z))
+        z = torch.randn(16, device=device)
+        self.assertEqual(gm(z), (2 * x1 + z, 2 * x2 + z))
 
     @requires_gpu
     @inductor_config.patch(freezing=True, cpp_wrapper=False)
@@ -1240,7 +1266,7 @@ def forward(self, x_1, output_1):
             ("functional", triton_kernel_wrapper_functional, RuntimeError),
             ("functional", torch.ops.higher_order.cond, TypeError),
             ("functional", scale_kernel_wrapper_no_dense, TypeError),
-            ("reinplace_trigger", "AUTO_FUNC_V1", TypeError),
+            ("reinplace_trigger", "USER_KERNEL_OPS", TypeError),
         ],
         name_fn=lambda field, value, error: f"{field}_{value}",
     )
@@ -1250,6 +1276,21 @@ def forward(self, x_1, output_1):
         registry = dict(_user_kernel_hops)
         info = dataclasses.replace(scale_kernel_hop_info, **{field: value})
         with self.assertRaises(error):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, registry)
+
+    @common_utils.parametrize("trigger", ["AUTO_FUNC_V1", "AUTO_FUNC_V2"])
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_auto_functionalize_trigger_refused(self, trigger):
+        # auto_functionalize's triggers would merge a DSL's reinplacing counters into
+        # auto_functionalize's, and AUTO_FUNC_V2 would also keep reinplacing from
+        # rewriting the getitem users of the DSL's functional HOP.
+        registry = dict(_user_kernel_hops)
+        info = dataclasses.replace(
+            scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger[trigger]
+        )
+        msg = "register the scale DSL with ReInplaceTrigger.USER_KERNEL_OPS"
+        with self.assertRaisesRegex(ValueError, msg):
             register_user_kernel_hop(info)
         self.assertEqual(_user_kernel_hops, registry)
 
@@ -1409,17 +1450,41 @@ def forward(self, x_1, output_1):
         self.assertTrue(contains(trace(mutation)))
         self.assertTrue(contains(trace(functional)))
 
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_mutation_storages_and_padding(self):
+        # Inductor counts every tensor that any DSL's mutation HOP receives as written
+        # (V.graph.mutated_storages, so ConcatKernel does not compute a buffer over
+        # such storage straight into its output) and the HOP as disliking padding.
+        from torch._inductor.fx_utils import get_mutated_storages, get_node_storage
+        from torch._inductor.graph import mark_nodes_dislike_padding
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            scale_kernel_wrapper_mutation(scale=2, kwargs={"x": x, "out": out})
+            return out + y
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(4), torch.randn(4))
+        hop = scale_kernel_wrapper_mutation
+        (node,) = gm.graph.find_nodes(op="call_function", target=hop)
+        written = {get_node_storage(n) for n in node.kwargs["kwargs"].values()}
+        self.assertEqual(len(written), 2)
+        self.assertEqual(set(get_mutated_storages(gm)), written)
+        with inductor_config.patch(comprehensive_padding=True):
+            mark_nodes_dislike_padding(gm.graph, {})
+        self.assertIs(node.meta.get("dislike_padding"), True)
+
     @requires_gpu
     @inductor_config.patch(use_post_grad_passes=False)
     @mock.patch.dict(_user_kernel_hops)
     def test_lite_mode_decomposes_every_user_kernel_hop(self):
-        # Lite mode's post-grad step reinplaces and decomposes the functional HOP of
-        # every registered DSL, each into its own DSL's mutation HOP.
+        # Lite mode's post-grad step decomposes the functional HOP of every registered
+        # DSL, each into its own DSL's mutation HOP. The rest of that step is checked
+        # on CPU by test_lite_mode_decomposes_user_kernel_hop.
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor.compile_fx import _recursive_post_grad_passes
-        from torch._inductor.fx_passes.post_grad import (
-            decompose_user_kernel_wrapper_functional,
-        )
         from torch.fx.experimental.proxy_tensor import make_fx
 
         register_user_kernel_hop(scale_kernel_hop_info)
@@ -1428,29 +1493,22 @@ def forward(self, x_1, output_1):
             {"n_elements": 16, "BLOCK_SIZE": 16}
         )
 
-        def scale(x, out, factor):
-            return scale_kernel_wrapper_functional(
-                scale=factor, kwargs={"x": x, "out": out}, tensors_to_clone=["out"]
+        def f(x):
+            kwargs = {"x": x, "out": torch.empty_like(x)}
+            a = scale_kernel_wrapper_functional(
+                scale=2, kwargs=kwargs, tensors_to_clone=["out"]
             )["out"]
-
-        def f(x, out):
-            # out is a graph input, so it keeps its clone; the empty_like buffers are
-            # written in place.
-            a = scale(x, torch.empty_like(x), 2)
-            b = scale(x, out, 3)
             return triton_kernel_wrapper_functional(
                 kernel_idx=kernel_idx,
                 constant_args_idx=constant_args_idx,
                 grid=[(1,)],
                 tma_descriptor_metadata={},
-                kwargs={"in_ptr0": a, "in_ptr1": b, "out_ptr": torch.empty_like(x)},
+                kwargs={"in_ptr0": a, "in_ptr1": x, "out_ptr": torch.empty_like(x)},
                 tensors_to_clone=["out_ptr"],
             )["out_ptr"]
 
         x = torch.randn(16, device=GPU_TYPE)
-        out = torch.zeros(16, device=GPU_TYPE)
-        gm = make_fx(f, tracing_mode="fake")(x, out)
-        ReinplaceCounters.clear()
+        gm = make_fx(f, tracing_mode="fake")(x)
         _recursive_post_grad_passes(gm)
 
         def nodes(target):
@@ -1458,28 +1516,74 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(nodes(scale_kernel_wrapper_functional), [])
         self.assertEqual(nodes(triton_kernel_wrapper_functional), [])
-        self.assertEqual(len(nodes(triton_kernel_wrapper_mutation)), 1)
-        scale_nodes = nodes(scale_kernel_wrapper_mutation)
-        self.assertEqual(len(scale_nodes), 2)
-        for node in scale_nodes:
-            self.assertEqual(set(node.meta["eager_input_vals"][1]), {"scale", "kwargs"})
-        self.assertEqual(len(nodes(torch.ops.aten.clone.default)), 1)
-        missed = {"missed_tensors_AUTO_FUNC_V1": 1, "missed_bytes_AUTO_FUNC_V1": 64}
-        self.assertEqual(dict(ReinplaceCounters._values), missed)
-        self.assertEqual(gm(x, out), 5 * x)
-        self.assertEqual(out, torch.zeros_like(out))
-
-        def scale_only(x):
-            return scale(x, torch.empty_like(x), 2)
-
-        # Also without a Triton kernel in the graph.
-        gm = make_fx(scale_only, tracing_mode="fake")(x)
-        _recursive_post_grad_passes(gm)
-        self.assertEqual(nodes(scale_kernel_wrapper_functional), [])
         self.assertEqual(len(nodes(scale_kernel_wrapper_mutation)), 1)
+        self.assertEqual(len(nodes(triton_kernel_wrapper_mutation)), 1)
+        self.assertEqual(gm(x), 3 * x)
+
+    @inductor_config.patch(use_post_grad_passes=False)
+    @mock.patch.dict(_user_kernel_hops)
+    def test_lite_mode_decomposes_user_kernel_hop(self):
+        # Lite mode's post-grad step reinplaces a registered DSL's functional HOPs,
+        # counting what it misses under the DSL's trigger, and decomposes each into
+        # the DSL's mutation HOP, which gets the functional HOP's eager input values.
+        from torch._inductor.compile_fx import _recursive_post_grad_passes
+        from torch._inductor.fx_passes.post_grad import (
+            decompose_user_kernel_wrapper_functional,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        aten = torch.ops.aten
+        register_user_kernel_hop(scale_kernel_hop_info)
+
+        def scale(x, out, factor):
+            return scale_kernel_wrapper_functional(
+                scale=factor, kwargs={"x": x, "out": out}, tensors_to_clone=["out"]
+            )["out"]
+
+        def f(x, out, acc):
+            # The kernel writes the empty_like buffer in place, and acc too, whose new
+            # value is copied back into it (the copy_ epilogue that functionalization
+            # adds for a mutated input). out is a graph input that nothing copies
+            # back into, so it keeps its clone.
+            a = scale(x, torch.empty_like(x), 2)
+            b = scale(x, out, 3)
+            acc.copy_(scale(x, acc, 4))
+            return a + b
+
+        x, out, acc = torch.randn(16), torch.zeros(16), torch.zeros(16)
+        gm = make_fx(f, tracing_mode="fake")(x, out, acc)
+
+        def nodes(target):
+            return gm.graph.find_nodes(op="call_function", target=target)
+
+        functional_nodes = nodes(scale_kernel_wrapper_functional)
+        eager_kwargs = [n.meta["eager_input_vals"][1] for n in functional_nodes]
+        ReinplaceCounters.clear()
+        _recursive_post_grad_passes(gm)
+
+        self.assertEqual(nodes(scale_kernel_wrapper_functional), [])
+        mutation_nodes = nodes(scale_kernel_wrapper_mutation)
+        self.assertEqual(len(mutation_nodes), 3)
+        for node, functional_kwargs in zip(mutation_nodes, eager_kwargs):
+            args, kwargs = node.meta["eager_input_vals"]
+            self.assertEqual((args, set(kwargs)), ((), {"scale", "kwargs"}))
+            for name, val in kwargs["kwargs"].items():
+                self.assertIs(val, functional_kwargs["kwargs"][name])
+        self.assertEqual(len(nodes(aten.clone.default)), 1)
+        self.assertEqual(nodes(aten.copy_.default), [])
+        # Reinplacing replaced a's getitem with the buffer the kernel now writes.
+        (add,) = nodes(aten.add.Tensor)
+        self.assertEqual(add.args[0].target, aten.empty_like.default)
+        self.assertEqual(
+            dict(ReinplaceCounters._values),
+            {"missed_tensors_USER_KERNEL_OPS": 1, "missed_bytes_USER_KERNEL_OPS": 64},
+        )
+        self.assertEqual(gm(x, out, acc), 5 * x)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(acc, 4 * x)
 
         # A functional HOP that is left behind is reported by name.
-        gm = make_fx(scale_only, tracing_mode="fake")(x)
+        gm = make_fx(f, tracing_mode="fake")(x, out, acc)
         msg = "scale_kernel_wrapper_functional was not removed"
         with (
             mock.patch.object(PatternMatcherPass, "apply"),
@@ -1596,7 +1700,6 @@ def forward(self, x_1, output_1):
         self.assertIsInstance(hop_kwargs["kwargs"]["in_ptr0"], IRNode)
         self.assertIsInstance(kernel_kwargs["in_ptr0"], FakeTensor)
 
-    @requires_gpu
     @common_utils.parametrize(
         "scale_layout", ["needs_fixed_stride_order", "flexible_layout"]
     )
@@ -1605,8 +1708,68 @@ def forward(self, x_1, output_1):
     )
     @mock.patch.dict(_user_kernel_hops)
     def test_user_kernel_hop_dsl_layout_constraint(self, triton_layout, scale_layout):
-        # Each DSL's mutation HOP gets the layout constraint its own getter returns:
-        # Triton's config does not change the second DSL's, nor the other way around.
+        # A DSL's mutation HOP gets the layout constraint its own getter returns,
+        # whatever Triton's config says.
+        from torch._inductor import ir
+        from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.lowering import lowerings
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        aten = torch.ops.aten
+        info = dataclasses.replace(
+            scale_kernel_hop_info, get_layout_constraint=lambda: scale_layout
+        )
+        register_user_kernel_hop(info)
+
+        def f(inp):
+            x = inp.permute(1, 0) * 2
+            kwargs = {"x": x, "out": torch.empty_like(x)}
+            out = scale_kernel_wrapper_functional(
+                scale=3, kwargs=kwargs, tensors_to_clone=["out"]
+            )["out"]
+            return (out,)
+
+        # The strides of x that the lowering receives.
+        strides = []
+
+        def lower_scale(*, scale, kwargs):
+            x = ir.ExternKernel.realize_input(kwargs["x"])
+            strides.append(tuple(x.get_stride()))
+            value = lowerings[aten.mul.Tensor](kwargs["x"], scale)
+            lowerings[aten.copy_.default](kwargs["out"], value)
+            return {}
+
+        inp = torch.randn(4, 8)
+        gm = make_fx(f, tracing_mode="fake")(inp)
+        with (
+            mock.patch.dict(lowerings, {scale_kernel_wrapper_mutation: lower_scale}),
+            inductor_config.patch(
+                force_disable_caches=True,
+                triton_kernel_default_layout_constraint=triton_layout,
+            ),
+        ):
+            compiled = compile_fx_inner(gm, [inp])
+        # x is traced with strides (1, 8). The kernel gets those when its DSL asks for
+        # them, and Inductor's contiguous (4, 1) otherwise.
+        layout_strides = {"needs_fixed_stride_order": (1, 8), "flexible_layout": (4, 1)}
+        self.assertEqual(strides, [layout_strides[scale_layout]])
+        (out,) = compiled([inp])
+        self.assertEqual(out, inp.T * 6)
+
+    @requires_gpu
+    @common_utils.parametrize(
+        "scale_layout", ["needs_fixed_stride_order", "flexible_layout"]
+    )
+    @common_utils.parametrize(
+        "triton_layout", ["needs_fixed_stride_order", "flexible_layout"]
+    )
+    @mock.patch.dict(_user_kernel_hops)
+    def test_triton_kernel_layout_constraint_with_user_kernel_hop(
+        self, triton_layout, scale_layout
+    ):
+        # A Triton kernel gets the layout constraint of Triton's config, whatever the
+        # constraint of another DSL's kernel in the same graph (which
+        # test_user_kernel_hop_dsl_layout_constraint checks on CPU).
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor import ir
         from torch._inductor.compile_fx import compile_fx_inner
@@ -1640,18 +1803,16 @@ def forward(self, x_1, output_1):
             )["out_ptr"]
             return scaled, added
 
-        # The strides of x that each DSL's lowering receives.
-        strides = {}
+        # The strides of x that the Triton lowering receives.
+        strides = []
         triton_lowering = lowerings[triton_kernel_wrapper_mutation]
 
         def lower_triton(**hop_kwargs):
             x = ir.ExternKernel.realize_input(hop_kwargs["kwargs"]["in_ptr0"])
-            strides["triton"] = tuple(x.get_stride())
+            strides.append(tuple(x.get_stride()))
             return triton_lowering(**hop_kwargs)
 
         def lower_scale(*, scale, kwargs):
-            x = ir.ExternKernel.realize_input(kwargs["x"])
-            strides["scale"] = tuple(x.get_stride())
             value = lowerings[aten.mul.Tensor](kwargs["x"], scale)
             lowerings[aten.copy_.default](kwargs["out"], value)
             return {}
@@ -1670,11 +1831,9 @@ def forward(self, x_1, output_1):
             ),
         ):
             compiled = compile_fx_inner(gm, [inp])
-        # x is traced with strides (1, 8). A kernel gets those when its DSL asks for
-        # them, and Inductor's contiguous (4, 1) otherwise.
+        # x is traced with strides (1, 8); Inductor's contiguous strides are (4, 1).
         layout_strides = {"needs_fixed_stride_order": (1, 8), "flexible_layout": (4, 1)}
-        self.assertEqual(strides["triton"], layout_strides[triton_layout])
-        self.assertEqual(strides["scale"], layout_strides[scale_layout])
+        self.assertEqual(strides, [layout_strides[triton_layout]])
         scaled, added = compiled([inp])
         self.assertEqual(scaled, inp.T * 6)
         self.assertEqual(added, inp.T * 4)
