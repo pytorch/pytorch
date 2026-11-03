@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
+from torch._inductor import config
 from torch._inductor.utils import Placeholder, unique
 from torch._inductor.virtualized import V
 
@@ -77,11 +78,25 @@ class CuteDSLTemplate(KernelTemplate):
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
         """Generate the CuteDSL kernel caller for template autotuning."""
+        if (
+            getattr(V.graph, "aot_mode", False)
+            and config.aot_inductor.emit_multi_arch_kernel
+        ):
+            raise NotImplementedError(
+                "CuteDSL external AOT does not support multi-architecture packages"
+            )
+        if getattr(V.graph, "aot_mode", False) and "AOT_ARG_NAMES" not in kwargs:
+            raise NotImplementedError(
+                "CuteDSL AOT requires an explicit AOT_ARG_NAMES contract"
+            )
+        aot_arg_names = kwargs.pop("AOT_ARG_NAMES", None)
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         subgraphs = kwargs.pop("subgraphs", None)
         template_kwargs = dict(kwargs)
+        if aot_arg_names is not None:
+            template_kwargs["AOT_ARG_NAMES"] = tuple(aot_arg_names)
 
         kernel_name = f"cutedsl_{self.name}_{next(self.index_counter)}"
 
@@ -162,6 +177,7 @@ class CuteDSLTemplate(KernelTemplate):
                     output_node=out_node,
                     subgraphs=subgraphs,
                 )
+                render_kernel._external_aot_arg_names = aot_arg_names
                 render_kernel.set_capture_input_nodes(capture_nodes_by_name)
 
                 def render():

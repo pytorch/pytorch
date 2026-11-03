@@ -2342,8 +2342,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -2568,8 +2569,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -3513,7 +3515,12 @@ end
             }.get("rocm" if torch.version.hip else device_type, CUDACodeCache)
 
             gpu_codecache = cache_cls()
-            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+            gpu_kernels_o = list(graph.wrapper_code.aot_kernel_objects)
+            gpu_kernels_o.extend(
+                path
+                for path in gpu_codecache.aot_kernels_o
+                if path not in graph.wrapper_code.aot_kernel_objects
+            )
             # clear the list of aot kernels after each linking
             gpu_codecache.aot_kernels_o.clear()
 
@@ -3652,6 +3659,10 @@ end
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
+                extra_flags=(
+                    *graph.wrapper_code.external_kernel_libs,
+                    *graph.wrapper_code.aot_link_args,
+                ),
             )
 
             if gpu_kernels_o and device_type == "xpu":
@@ -4094,6 +4105,7 @@ class CppCodeCache:
         device_type: str = "cpu",
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
+        extra_link_flags: Sequence[str] = (),
         optimized_code: str | None = None,
         needs_vec_isa: bool | None = None,
         kernel_needs_vec_isa: bool | None = None,
@@ -4118,8 +4130,16 @@ class CppCodeCache:
             "extra_flags": extra_flags,
             "use_relative_path": config.is_fbcode(),
         }
+        all_link_flags = (*extra_flags, *extra_link_flags)
+        link_command = {
+            **shared_compile_command,
+            "extra_flags": all_link_flags,
+        }
         main_compile_command = {
             **shared_compile_command,
+            "extra_flags": extra_flags
+            if optimized_code is not None
+            else all_link_flags,
             "vec_isa": picked_vec_isa if main_needs_vec_isa else invalid_vec_isa,
         }
         optimized_compile_command = {
@@ -4159,6 +4179,12 @@ class CppCodeCache:
 
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
+        link_cmd_line = get_hashable_command_line(
+            CppTorchDeviceOptions(
+                # pyrefly: ignore [bad-argument-type]
+                **link_command,
+            )
+        )
 
         from torch.compiler._runtime_cache import (
             capturing,
@@ -4172,7 +4198,12 @@ class CppCodeCache:
         def kernel_key(cmd_line: str) -> str:
             return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
 
-        key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
+        combined_cmd_line = f"{main_cmd_line} {link_cmd_line}"
+        key, main_path = write(
+            main_code,
+            "main.cpp",
+            key=kernel_key(combined_cmd_line),
+        )
 
         # The key a capture freezes this kernel's binary under, and a replay finds it
         # by, on a host that may put torch elsewhere. The source and any cache-dir
@@ -4180,7 +4211,7 @@ class CppCodeCache:
         # itself stays under key, which this host's paths tell apart.
         def relocatable_key() -> str:
             if key not in cls._relocatable_keys:
-                relocated = _relocatable_command_line(main_cmd_line)
+                relocated = _relocatable_command_line(combined_cmd_line)
                 cls._relocatable_keys[key] = kernel_key(relocated)
             return cls._relocatable_keys[key]
 
@@ -4253,7 +4284,7 @@ class CppCodeCache:
                         optimized_builder.get_target_file_path(),
                     ],
                     # pyrefly: ignore [bad-argument-type]
-                    BuildOption=CppTorchDeviceOptions(**shared_compile_command),
+                    BuildOption=CppTorchDeviceOptions(**link_command),
                     output_dir=output_dir,
                 )
 
@@ -4391,8 +4422,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     entry_function = "kernel"
     call_entry_function = "kernel({}); Py_RETURN_NONE;"
     extra_parse_arg = ""
-    suffix_template = textwrap.dedent(
-        """
+    suffix_template = textwrap.dedent("""
         // Python bindings to call {entry_func}():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
@@ -4480,8 +4510,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             #endif
             return module;
         }}
-        """
-    )
+        """)
 
     @classmethod
     # pyrefly: ignore [bad-override]
@@ -4522,6 +4551,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         num_outputs: int = -1,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
+        extra_link_flags: Sequence[str] = (),
         kernel_code: str | None = None,
     ) -> Any:
         """
@@ -4540,6 +4570,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 kernel_code is provided.
             kernel_code: If present, C++ source code that will be built at -O3 and
                 linked to main_code.
+            extra_link_flags: Objects and options passed only to the final link.
 
         Returns:
             A python version of ENTRY_FUNCTION()
@@ -4559,6 +4590,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             device_type,
             submit_fn=submit_fn,
             extra_flags=extra_flags,
+            extra_link_flags=extra_link_flags,
             optimized_code=kernel_code,
             needs_vec_isa=needs_vec_isa,
             kernel_needs_vec_isa=kernel_needs_vec_isa,
@@ -4605,8 +4637,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     }
     entry_function = "inductor_entry_cpp"
     call_entry_function = "return inductor_entry_cpp({});"
-    extra_parse_arg = textwrap.dedent(
-        """
+    extra_parse_arg = textwrap.dedent("""
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
         static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {{
@@ -4668,8 +4699,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
                 return nullptr;
             }}
         }}
-        """
-    )
+        """)
 
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:
@@ -4681,8 +4711,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: dict[str, Callable[[], ModuleType | CDLL]] = {}
     cache_clear = staticmethod(cache.clear)
     _standalone_runtime_path: str | None = None
-    prefix = textwrap.dedent(
-        """
+    prefix = textwrap.dedent("""
         #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
@@ -4698,19 +4727,15 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 return a / b;
             }}
         }}
-        """
-    )
-    glue_template_cpp = prefix + textwrap.dedent(
-        """
+        """)
+    glue_template_cpp = prefix + textwrap.dedent("""
         void kernel({argdefs}) {{
             {buffers}
             int err = halide_kernel({buffer_names});
             if(err != 0) throw std::runtime_error("halide_kernel failed");
         }}
-        """
-    )
-    glue_template_cuda = prefix + textwrap.dedent(
-        """
+        """)
+    glue_template_cuda = prefix + textwrap.dedent("""
         #include <cuda.h>
         static const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
 
@@ -4719,10 +4744,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             int err = halide_kernel(reinterpret_cast<void*>(stream), {buffer_names});
             if(err != 0) throw std::runtime_error("halide_kernel failed");
         }}
-        """
-    )
-    standalone_runtime_cuda_init = textwrap.dedent(
-        """
+        """)
+    standalone_runtime_cuda_init = textwrap.dedent("""
         #include "{}"
         #include <cuda.h>
 
@@ -4751,8 +4774,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         }}
 
         int inductor_register_halide_hooks_result = register_halide_hooks();
-        """
-    )
+        """)
 
     @classmethod
     def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> list[str]:
@@ -4783,9 +4805,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
-            if len(dims) > 0
-            else f"halide_dimension_t * {name}_dims = nullptr;",
+            (
+                f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+                if len(dims) > 0
+                else f"halide_dimension_t * {name}_dims = nullptr;"
+            ),
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
@@ -5086,14 +5110,12 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
                 # pyrefly: ignore [unsupported-operation]
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
-                    textwrap.dedent(
-                        f"""\
+                    textwrap.dedent(f"""\
                         import sys, tempfile
                         with tempfile.TemporaryDirectory() as out:
                             sys.argv = {["repro.py", *cmd]!r}
                             hl.main()
-                        """
-                    ),
+                        """),
                     "    ",
                 )
                 code = code.replace(main, repl)

@@ -409,8 +409,9 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_wrapper: bool = False,
         aot_mode: bool = False,
         layout_opt: bool | None = None,
-        extern_node_serializer: Callable[[list[ir.ExternKernelNode]], Any]
-        | None = None,
+        extern_node_serializer: (
+            Callable[[list[ir.ExternKernelNode]], Any] | None
+        ) = None,
         is_inference: bool = False,
         is_backward: bool = False,
         is_const_graph: bool = False,
@@ -712,11 +713,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_allocation_size(
         self,
-        node: ir.TensorBox
-        | ir.StorageBox
-        | ir.Buffer
-        | WorkspaceArg
-        | ir.TorchBindObject,
+        node: (
+            ir.TensorBox | ir.StorageBox | ir.Buffer | WorkspaceArg | ir.TorchBindObject
+        ),
     ) -> Sequence[Expr]:
         if isinstance(node, ir.TensorBox):
             node = node.data  # type: ignore[assignment]
@@ -1736,9 +1735,11 @@ class GraphLowering(torch.fx.Interpreter):
         if not isinstance(result, (tuple, list)):
             raise AssertionError(f"Expected tuple or list, got {type(result)}")
         result = [
-            ir.OpaqueValueTypeConstant(value=x)
-            if is_opaque_constant_type(type(x))
-            else x
+            (
+                ir.OpaqueValueTypeConstant(value=x)
+                if is_opaque_constant_type(type(x))
+                else x
+            )
             for x in result
         ]
         _allowed_output_types = (
@@ -2738,9 +2739,9 @@ class GraphLowering(torch.fx.Interpreter):
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
-                        materialize(x)  # type:ignore[arg-type]
+                        materialize(x)  # type: ignore[arg-type]
                         for x in (
-                            self.example_inputs  # type:ignore[union-attr]
+                            self.example_inputs  # type: ignore[union-attr]
                             if isinstance(V.real_inputs, NullHandler)
                             else V.real_inputs
                         )
@@ -2880,8 +2881,7 @@ class GraphLowering(torch.fx.Interpreter):
         input_lines = "".join(f"        {expr},\n" for expr in input_exprs)
         log_name = "JIT wrapper code for AOT lazy autotuning"
         source = (
-            textwrap.dedent(
-                """
+            textwrap.dedent("""
             import torch
             from torch._inductor import config
             from torch._inductor.codecache import (
@@ -2941,8 +2941,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             if __name__ == '__main__':
                 main()
-            """
-            )
+            """)
             .lstrip()
             .format(
                 cpp_wrapper_src=cls._python_source_literal(
@@ -3049,6 +3048,11 @@ class GraphLowering(torch.fx.Interpreter):
                 device_type=device_type,
                 num_outputs=len(self.graph_outputs),
                 kernel_code=kernel_source,
+                extra_link_flags=(
+                    *self.wrapper_code.aot_kernel_objects,
+                    *self.wrapper_code.external_kernel_libs,
+                    *self.wrapper_code.aot_link_args,
+                ),
             )
 
         input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
