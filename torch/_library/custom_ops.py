@@ -2,12 +2,12 @@
 import collections
 import inspect
 import logging
-import types
+import operator
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, overload, TypeAlias, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -247,15 +247,7 @@ def custom_op(
             schema_str = schema
 
         namespace, opname = name.split("::")
-        # An explicit schema need not match fn's signature, and Dynamo can't
-        # trace the class creation in _custom_op_def_class. (torch.compiler
-        # doesn't exist yet for custom ops defined while torch is imported.)
-        compiler = getattr(torch, "compiler", None)
-        if schema is not None or (compiler is not None and compiler.is_compiling()):
-            opdef_cls = CustomOpDef
-        else:
-            opdef_cls = _custom_op_def_class(fn)
-        result = opdef_cls(namespace, opname, schema_str, fn, normalized_tags)
+        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -270,42 +262,17 @@ def custom_op(
                     f"Please make these consistent."
                 )
         result.register_kernel(device_types)(fn)
+        # The op's own kernel, not one the module running custom_op overrides it with.
+        if isinstance(module := getattr(fn, "__module__", None), str):
+            result._backend_fn_callers = dict.fromkeys(
+                result._backend_fn_callers, module
+            )
         result._opoverload._enable_pyobj_dispatch(True)
         return result
 
     if fn is None:
         return inner
     return inner(fn)
-
-
-def _custom_op_def_class(fn: Callable[..., object]) -> type["CustomOpDef"]:
-    """Returns a CustomOpDef subclass whose __call__ has fn's signature.
-
-    The generic CustomOpDef.__call__ forwards ``*args, **kwargs``, which costs a
-    tuple and a dict per call, and passes kwargs through to the OpOverload,
-    which knocks the call off the PyObject dispatch fast path (see [NOTE:
-    PyObject Dispatcher aka pyobj_dispatcher] in torch/_ops.py). The generated
-    __call__ passes positional parameters positionally, filling in fn's
-    defaults. Python looks up __call__ on the type, so each op needs its own
-    subclass. Like the generic one, it calls the OpOverload's _op, skipping
-    OpOverload.__call__, which only does that.
-    """
-    code = utils.signature_forwarding_code(inspect.signature(fn), "_opdef_")
-    if code is None:
-        return CustomOpDef
-    params, call_args, env = code
-    src = (
-        f"def __call__(_opdef_self, {params}):\n"
-        f"    return _opdef_self._opoverload._op({call_args})\n"
-    )
-    # Attribute the generated code to CustomOpDef.__call__ in this file, so
-    # tracebacks point there and Dynamo applies this file's trace rules to it
-    # (code from "<string>" is treated as user code and compiled as its own frame).
-    exec(compile(src, __file__, "exec"), env)
-    call = cast(types.FunctionType, env["__call__"])
-    lineno = CustomOpDef.__call__.__code__.co_firstlineno
-    call.__code__ = call.__code__.replace(co_firstlineno=lineno)
-    return type("CustomOpDef", (CustomOpDef,), {"__call__": call})
 
 
 class CustomOpDef:
@@ -340,6 +307,9 @@ class CustomOpDef:
         )
 
         self._backend_fns: dict[str | None, Callable] = {}
+        # The utils.caller_module() of each register_kernel call, by dispatch key,
+        # as the dispatcher records only this file.
+        self._backend_fn_callers: dict[str, str] = {}
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -433,11 +403,11 @@ class CustomOpDef:
             else:
                 self._disabled_kernel.discard(device_type)
 
-    def _kernel_stub(
+    def _make_backend_fn(
         self, device_type: str | None, fn: Callable[..., object]
     ) -> Callable[..., object]:
-        """Stands in for fn in _backend_fns until its first call, which replaces
-        it with fn wrapped to disable Dynamo. Building that wrapper needs
+        """Makes a stand-in for fn in _backend_fns. Its first call replaces it
+        with fn wrapped to disable Dynamo. Building that wrapper needs
         torch._dynamo, which can't be imported while torch is being imported,
         and some custom ops are defined then.
         """
@@ -551,20 +521,15 @@ class CustomOpDef:
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
+                key = "CompositeExplicitAutograd"
+                if device_type is not None:
+                    key = _C._dispatch_key_for_device(device_type)
                 if device_type not in self._backend_fns:
                     backend_impl = self._make_backend_impl(device_type)
-                    if device_type is None:
-                        self._lib.impl(
-                            self._name, backend_impl, "CompositeExplicitAutograd"
-                        )
-                    else:
-                        self._lib.impl(
-                            self._name,
-                            backend_impl,
-                            _C._dispatch_key_for_device(device_type),
-                        )
+                    self._lib.impl(self._name, backend_impl, key)
 
-                self._backend_fns[device_type] = self._kernel_stub(device_type, fn)
+                self._backend_fns[device_type] = self._make_backend_fn(device_type, fn)
+                self._backend_fn_callers[key] = utils.caller_module()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -945,8 +910,17 @@ class CustomOpDef:
 
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
-    def __call__(self, *args, **kwargs):
-        return self._opoverload._op(*args, **kwargs)
+    if TYPE_CHECKING:
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    else:
+        # Python looks up __call__ on the type. With a C getter, calling a
+        # CustomOpDef calls the OpOverload's _op (the PyObject dispatch fast
+        # path) with the caller's arguments, without a Python frame.
+        # OpOverload.__call__ only calls _op. Dynamo traces the call as a call
+        # to the OpOverload (see UserDefinedObjectVariable.call_function).
+        __call__ = property(operator.attrgetter("_opoverload._op"))
 
     def register_vmap(
         self,

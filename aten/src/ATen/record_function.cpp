@@ -178,7 +178,6 @@ class LocalCallbackManager {
   LocalCallbackManager(LocalCallbackManager&&) = delete;
   LocalCallbackManager& operator=(LocalCallbackManager&&) = delete;
 
- public:
   const RecordFunctionTLS& getTLS() const;
   StepCallbacks getActiveCallbacks(const RecordScope scope);
   std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(
