@@ -12651,6 +12651,18 @@ class Scheduler:
                 )
             )
 
+        def is_known_nonempty(node: BaseSchedulerNode) -> bool:
+            for n in node.get_nodes():
+                if not isinstance(n, SchedulerNode):
+                    return False
+                sizes, reduction_sizes = n.get_ranges()
+                # Reduction sizes count too, since a split scan takes its grid
+                # from the scan length; for other kernels a zero reduction size
+                # alone does not skip the launch.
+                if not all(map(is_known_nonzero, (*sizes, *reduction_sizes))):
+                    return False
+            return True
+
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.write_get_raw_stream_header()
@@ -12846,20 +12858,10 @@ class Scheduler:
                 from .codegen.triton import TritonKernel
 
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
-                known_nonempty = all(
-                    isinstance(n, SchedulerNode)
-                    and all(
-                        map(
-                            is_known_nonzero,
-                            itertools.chain.from_iterable(n.get_ranges()),
-                        )
-                    )
-                    for n in node.get_nodes()
-                )
                 if (
                     launched
-                    and known_nonempty
                     and (self.previous_nodes is None or waited)
+                    and is_known_nonempty(node)
                 ):
                     previous_nodes_by_stream[stream_key] = []
                 if stream_key in previous_nodes_by_stream:
