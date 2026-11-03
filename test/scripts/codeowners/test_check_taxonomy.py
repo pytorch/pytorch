@@ -90,7 +90,7 @@ class TestFindOwnershipErrors(TestCase):
 # /torch/_dynamo/backends/tvm.py
 #
 # [core_tests]
-# label: module: dynamo
+# label: module: dynamo, module: testing
 # owner: @Bob @alice
 /test/dynamo/ @bob
 """
@@ -116,6 +116,12 @@ class TestFindOwnershipErrors(TestCase):
 # label: module: inductor
 # owner: @dave
 # /test/inductor/
+# label: module: cuda, module: cudnn
+# owner: @erin
+# /test/test_cudnn.py
+# label: module: cudnn, module: cuda
+# owner: @erin
+# /test/test_cudnn_api.py
 """
         self.assertEqual(
             ownership_errors(codeowners),
@@ -125,6 +131,11 @@ class TestFindOwnershipErrors(TestCase):
                 ],
                 "Misplaced owner lines": ["CODEOWNERS:9 # owner: @carol"],
                 "Invalid owner handles": ["CODEOWNERS:12 # owner: not-a-handle"],
+                # Label lists are compared as sets, so the reordered cuda list repeats.
+                "Label lists written more than once": [
+                    "module: inductor: CODEOWNERS:6, CODEOWNERS:16",
+                    "module: cuda, module: cudnn: CODEOWNERS:19, CODEOWNERS:22",
+                ],
                 # The misplaced @carol line is reported above, and is neither compared
                 # nor used as the block's owners: @carol is still missing below.
                 "Label lists with several owner lists": [
@@ -160,10 +171,14 @@ class TestFindOwnershipErrors(TestCase):
         self.assertEqual(
             ownership_errors(codeowners),
             {
+                "Label lists written more than once": [
+                    "module: dynamo: CODEOWNERS:4, CODEOWNERS:11",
+                    "module: fx: CODEOWNERS:7, CODEOWNERS:14",
+                ],
                 "Label lists with several owner lists": [
                     "module: dynamo: none | @alice",
                     "module: fx: @alice | @bob",
-                ]
+                ],
             },
         )
 
