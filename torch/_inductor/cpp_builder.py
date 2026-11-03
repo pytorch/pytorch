@@ -3105,7 +3105,10 @@ class CppBuilder:
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options({self._target_name} PRIVATE {self._ldflags_args})
+            target_link_options(
+                {self._target_name}
+                PRIVATE {self._ldflags_args} {self._passthrough_parameters_args}
+            )
 
             # Add libraries
             target_link_libraries({self._target_name} PRIVATE {libs})
