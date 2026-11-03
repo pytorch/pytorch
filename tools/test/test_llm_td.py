@@ -152,30 +152,35 @@ class TestSelection(unittest.TestCase):
             "cpython/v3_13/test_set.py": "    class TestSet(unittest.TestCase):\n",
             "inductor/test_torchinductor.py": "class TestSetCopy:\n",
         }
-        candidates = CANDIDATES | {"inductor/test_compiled_autograd"}
         for changed, files, sweeps in [
             ("test/dynamo_expected_failures/TestNNCPU.test_x", {"test_nn"}, set()),
             ("test/dynamo_skips/TestNN.test_x_cuda", {"test_nn"}, set()),
             ("test/inductor_skips/TestNNCUDA.test_x", {"test_nn"}, set()),
             ("test/dynamo_skips/CPython313-test_set-TestSet.test_x", {"cpython/v3_13/test_set"}, set()),
             ("test/dynamo_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
-            ("test/compiled_autograd_skips/TestNN.test_x", {"inductor/test_compiled_autograd", "test_nn"}, set()),
-            ("test/compiled_autograd_skips/TestGone.test_x", {"inductor/test_compiled_autograd"}, {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/TestNN.test_x", {"test_nn"}, set()),
+            ("test/compiled_autograd_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_skips/.gitkeep", set(), set()),
+            # dynamo_test_failures.py rejects these names at import.
+            ("test/dynamo_skips/TestNN_test_x", set(), {"dynamo_wrapped"}),
+            ("test/dynamo_expected_failures/TestNN.test_x.y", set(), {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/TestNN", set(), {"dynamo_wrapped"}),
         ]:  # fmt: skip
-            sel = self.select_in_tree(sources, candidates, [changed])
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
-        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x"):  # fmt: skip
-            self.assertTrue(self.select_in_tree(sources, candidates, [changed]).run_all)
+        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
+            self.assertTrue(self.select_in_tree(sources, CANDIDATES, [changed]).run_all)
         many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
-        self.assertEqual(self.select_in_tree(sources, candidates, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
+        self.assertEqual(self.select_in_tree(sources, CANDIDATES, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
         # Without a grep, the classes cannot be looked up.
-        sel = Selection.from_model_output({"tests": []}, candidates, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
-        sel = Selection.from_model_output({"tests": []}, candidates, ["test/inductor_skips/TestNN.test_x"])  # fmt: skip
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/inductor_skips/TestNN.test_x"])  # fmt: skip
         self.assertTrue(sel.run_all)
-        sel = Selection.from_model_output({"tests": []}, candidates, ["test/compiled_autograd_skips/TestNN.test_x"])  # fmt: skip
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/compiled_autograd_skips/TestNN.test_x"])  # fmt: skip
+        self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/dynamo_skips/TestNN_test_x"])  # fmt: skip
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
 
     def test_fallbacks_run_all(self) -> None:
@@ -271,9 +276,13 @@ class TestSelection(unittest.TestCase):
             ".github/scripts/filter_test_configs.py",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
+            ".github/ci_commit_pins/spmd_types.txt",
             "torch/testing/_internal/torchci/plugin.py",
             "test/run_test.py",
             "test/conftest.py",
+            "test/torch_np/conftest.py",
+            "test/slow_tests.json",
+            "torch/testing/_internal/dynamo_test_failures.py",
             "test/pytest_shard_custom.py",
             "pytest.ini",
             "torch/testing/_internal/common_utils.py",
@@ -364,9 +373,10 @@ class TestSplit(unittest.TestCase):
         scores: dict[TestRun, float],
         times: dict[str, float],
         prev: Collection[str] = (),
+        td: Collection[str] = (),
     ) -> tuple[list[str], list[str], selection.Split]:
         tp = TestPrioritizations(times, scores)
-        split = sel.split(tp.get_all_tests(), tp.get_score, times, "default", previously_failed=prev)  # fmt: skip
+        split = sel.split(tp.get_all_tests(), tp.get_score, times, "default", previously_failed=prev, td_include=td)  # fmt: skip
         return [str(x) for x in split.include], [str(x) for x in split.exclude], split
 
     def test_hedge_is_greedy_in_rank_order(self) -> None:
@@ -395,7 +405,7 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(exclude, ["r"])
         self.assertEqual(include, ["f, A", "g, B", "f, not (A)", "h", "g, not (B)"])
 
-    def test_previous_failures_always_run_and_are_charged_first(self) -> None:
+    def test_previous_failures_in_td_always_run_and_are_charged_first(self) -> None:
         scores = {TestRun("s"): 1, TestRun("p"): 0.5}
         times: dict[str, float] = {"a": 10, "s": 150, "p": 100, "big": 600, "untimed": 0, "rest": 140}  # fmt: skip
         include, exclude, split = self.split(Selection(files={"a"}), scores, times)
@@ -403,19 +413,30 @@ class TestSplit(unittest.TestCase):
         # p takes 100s of the 200s budget before the higher-ranked s, which
         # then does not fit.
         include, exclude, split = self.split(
-            Selection(files={"a"}), scores, times, prev={"p", "a"}
+            Selection(files={"a"}), scores, times, prev={"p", "a"}, td={"s", "p", "a"}
         )
         self.assertEqual((include, split.previously_failed, split.hedged), (["p", "a"], {"p"}, set()))  # fmt: skip
-        # big (over budget, unscored) and untimed still run, and the budget
-        # left for the hedge is 0.
+        # big (over budget, unscored) and untimed still run because TD runs
+        # them, and the budget left for the hedge is 0.
         scores[TestRun("tiny")] = 0.1
         times |= {"tiny": 1, "rest": 139}
         include, exclude, split = self.split(
-            Selection(files={"a"}), scores, times, prev={"p", "big", "untimed", "a", "elsewhere"}
+            Selection(files={"a"}), scores, times, prev={"p", "big", "untimed", "a", "elsewhere"}, td={"p", "big", "untimed"}
         )  # fmt: skip
         self.assertEqual(include, ["p", "a", "big", "untimed"])
         self.assertEqual(exclude, ["s", "tiny", "rest"])
         self.assertEqual((split.covered, split.previously_failed, split.hedged), ({"a"}, {"p", "big", "untimed"}, set()))  # fmt: skip
+
+    def test_previous_failures_outside_td_are_hedged_like_other_files(self) -> None:
+        scores = {TestRun("s"): 1, TestRun("big"): 0.8, TestRun("p"): 0.5}
+        times: dict[str, float] = {"s": 150, "big": 600, "p": 40, "rest": 210}
+        # TD runs only s, so big (over budget) does not run and p is hedged
+        # after s like any other scored file.
+        include, exclude, split = self.split(
+            Selection(), scores, times, prev={"big", "p"}, td={"s"}
+        )
+        self.assertEqual((include, exclude), (["s", "p"], ["big", "rest"]))
+        self.assertEqual((split.previously_failed, split.hedged), (set(), {"s", "p"}))
 
     def test_run_all_and_sweeps_take_everything(self) -> None:
         for sel in (Selection(run_all=True), Selection(sweeps={"default"})):
@@ -520,14 +541,15 @@ class TestApplySelection(unittest.TestCase):
         self.assertEqual(applied.selection_metric["time_total"], 0)
 
     def test_failure_metric(self) -> None:
-        # big failed before, so it runs and uses up the hedge budget.
+        # big failed before but TD does not run it and it does not fit the
+        # budget, so it does not run.
         applied = self.apply(Selection(files={"a"}, enforce=True), prev={"p", "big"})
-        self.assertEqual([str(x) for x in applied.exclude], ["s", "rest"])
+        self.assertEqual([str(x) for x in applied.exclude], ["big", "rest"])
         expected = {
             "a": (True, False, False, False),
             "p": (False, True, False, True),
-            "s": (False, True, False, False),
-            "big": (False, False, False, True),
+            "s": (False, True, True, False),
+            "big": (False, False, False, False),
         }
         for f, (covered, in_td, hedged, prev) in expected.items():
             self.assertEqual(

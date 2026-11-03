@@ -5,8 +5,9 @@ directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file is covered in a given CI
 config when the selection names the file, names that config as a sweep, or is
 run_all, and so is every test file the model was not shown. When run_test.py
-enforces the selection, it runs the covered files plus, within a hedge budget,
-the files that already failed on the PR and TD's top-scored files.
+enforces the selection, it runs the covered files, the files that already
+failed on the PR and that TD runs, and, within a hedge budget, TD's top-scored
+files.
 """
 
 from __future__ import annotations
@@ -41,17 +42,18 @@ LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 MAX_IMPORT_HOPS = 8
 # More edited failure-list classes than this are not looked up one by one.
 MAX_FAILURE_LIST_CLASSES = 50
-# When enforcing, run_test.py also runs, greedily in rank order, the files that
-# already failed on the PR and then TD's positively scored files, as long as
-# they have a known time and fit in this share (20%) of the config's test time
-# (all shards together): TD and the model miss largely different failures.
+# When enforcing, run_test.py also runs the files that already failed on the
+# PR and that TD runs, charged first to this share (20%) of the config's test
+# time (all shards together), and then, greedily in rank order, TD's positively
+# scored files that have a known time and fit what is left: TD and the model
+# miss largely different failures.
 LLM_TD_HEDGE = 0.20
 
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
-# torch_openreg/tests, whose driver test_openreg is never a candidate), TD's
-# ADDITIONAL_MAPPINGS, and the compiled autograd rerun of test_autograd.
+# torch_openreg/tests, whose driver test_openreg is never a candidate), and
+# TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
     **ADDITIONAL_MAPPINGS,
     "test_ao_sparsity": [r"^test/ao/"],
@@ -60,15 +62,15 @@ DRIVER_MAPPINGS = {
     "test_jit": [r"^test/jit/"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
-    "inductor/test_compiled_autograd": [r"^test/compiled_autograd_skips/"],
 }
 
 # common_utils xfails or skips a test named in one of these lists, one file per
 # test such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x, when it
 # runs under dynamo (the dynamo_wrapped config), inductor or compiled autograd.
-FAILURE_LIST_RE = re.compile(
-    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/(?:.*-)?(\w+)\.[^./]+$"
+FAILURE_LIST_DIR_RE = re.compile(
+    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/"
 )
+FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
 # instantiate_device_type_tests names TestFooCPU after TestFoo.
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 
@@ -76,10 +78,14 @@ DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 # subset is safe whatever the model says.
 RUN_ALL_PATTERNS = [
     r"^test/run_test\.py$",
-    r"^test/conftest\.py$",
+    r"^test/(.*/)?conftest\.py$",
+    # Loaded by every test process; it moves tests between configs.
+    r"^test/slow_tests\.json$",
     r"^pytest\.ini$",
     r"^torch/testing/_internal/common_utils\.py$",
     r"^torch/testing/_internal/common_device_type\.py$",
+    # Loads the failure lists for every dynamo and inductor wrapped run.
+    r"^torch/testing/_internal/dynamo_test_failures\.py$",
     r"^tools/testing/",
     r"^test/pytest_shard_custom\.py$",
     r"^tools/stats/(import_test_stats|upload_metrics)\.py$",
@@ -92,7 +98,7 @@ RUN_ALL_PATTERNS = [
     # The pytest plugin every test job loads.
     r"^torch/testing/_internal/torchci/",
     # Installed by .ci/pytorch/common_utils.sh for the test jobs.
-    r"^\.github/ci_commit_pins/(audio|vision)\.txt$",
+    r"^\.github/ci_commit_pins/(audio|vision|spmd_types)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
     r"^\.ci/docker/(build\.sh|requirements-ci\.txt|common/|ci_commit_pins/|ubuntu)",
 ]
@@ -161,15 +167,19 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
     "inductor" or "compiled_autograd") naming a class that `grep` (see
-    importers) does not find."""
+    importers) does not find or holding an entry that FAILURE_LIST_RE cannot
+    parse, which dynamo_test_failures.py rejects at import."""
     classes: dict[str, set[str]] = {}
+    unparsed: set[str] = set()
     for f in changed_files:
         if m := FAILURE_LIST_RE.match(f):
             classes.setdefault(m[2], set()).add(m[1])
+        elif (m := FAILURE_LIST_DIR_RE.match(f)) and not f.endswith("/.gitkeep"):
+            unparsed.add(m[1])
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
-        return [], set().union(*classes.values())
+        return [], unparsed.union(*classes.values())
     sources: list[str] = []
-    missing: set[str] = set()
+    missing = unparsed
     for c, lists in sorted(classes.items()):
         alt = "|".join(sorted({c, DEVICE_SUFFIX_RE.sub("", c)}))
         found = grep(rf"^[[:space:]]*class[[:space:]]+({alt})([^[:alnum:]_]|$)")
@@ -297,19 +307,23 @@ class Selection:
         test_config: str,
         *,
         previously_failed: Collection[str] = (),
+        td_include: Collection[str] = (),
     ) -> Split:
         """Split TD's ranked TestRuns into the covered files, the
-        `previously_failed` files (those that already failed on the PR), which
-        always run whatever their size or TD score, and a hedge. The previous
-        failures are charged first to a budget of LLM_TD_HEDGE (20%) of the
+        `previously_failed` files (those that already failed on the PR) that
+        are in `td_include` (TD's split runs them), which always run whatever
+        their size, and a hedge. The pool of previous failures spans the PR's
+        SHAs and configs, so running only those TD runs keeps their cost within
+        TD's. They are charged first to a budget of LLM_TD_HEDGE (20%) of the
         config's test time; what is left (at least 0) is spent greedily in
-        rank order on the files with a positively scored TestRun. One positive
+        rank order on the files with a positively scored TestRun, including
+        the other previous failures. One positive
         class-level run hedges its whole file at the file's full time. Files
         without a time are never hedged. Partial TestRuns of one file share
         its time, so a file is charged once and lands in one batch."""
         files = dict.fromkeys(x.test_file for x in ranked)
         covered = {f for f in files if self.covers(f, test_config)}
-        prev = {f for f in files if f in previously_failed} - covered
+        prev = {f for f in files if f in previously_failed and f in td_include} - covered  # fmt: skip
         budget = LLM_TD_HEDGE * sum(file_time.get(f, 0) for f in files)
         left = max(0.0, budget - sum(file_time.get(f, 0) for f in prev))
         hedged: set[str] = set()
@@ -373,8 +387,8 @@ class Selection:
 @dataclass
 class Split:
     """Selection.split's result: the TestRuns to run and to skip, and which
-    files run because they are covered, already failed on the PR or are hedged
-    (disjoint sets), and the hedge budget in seconds."""
+    files run because they are covered, already failed on the PR and are in
+    TD's split, or are hedged (disjoint sets), and the hedge budget in seconds."""
 
     include: list[TestRun]
     exclude: list[TestRun]
@@ -441,7 +455,12 @@ def apply_selection(
         enforced = False
         print("LLM selection: no test times, using TD", file=sys.stderr)
     split = selection.split(
-        ranked, score, file_time, test_config, previously_failed=previous_failures()
+        ranked,
+        score,
+        file_time,
+        test_config,
+        previously_failed=previous_failures(),
+        td_include=td_include,
     )
     if enforced:
         include, exclude = split.include, split.exclude
