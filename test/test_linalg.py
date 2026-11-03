@@ -1553,27 +1553,32 @@ class TestLinalg(TestCase):
         test(-1, [0, 0], False, True)
         test(-1, [-3], False, True)
 
-    def test_vector_norm_compile_empty_batch_negative_dim(self, device):
-        for ord_val in (float("inf"), float("-inf"), -1, -2.0):
-            x = torch.empty(0, 5, device=device)
-            compiled_fn = torch.compile(
-                lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=-1),
-                backend="eager",
-            )
-            res = compiled_fn(x)
-            self.assertEqual(res.shape, torch.Size([0]))
-
-        x3d = torch.empty(0, 5, 3, device=device)
-        compiled_tuple = torch.compile(
-            lambda t: torch.linalg.vector_norm(t, ord=float("inf"), dim=(-1,)),
+    @parametrize("ord_val", [float("inf"), float("-inf"), -1, -2.0])
+    def test_vector_norm_compile_empty_batch_negative_dim(self, device, ord_val):
+        x = torch.empty(0, 5, device=device)
+        compiled_fn = torch.compile(
+            lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=-1),
             backend="eager",
+            fullgraph=True,
         )
-        self.assertEqual(compiled_tuple(x3d).shape, torch.Size([0, 5]))
+        self.assertEqual(compiled_fn(x), torch.linalg.vector_norm(x, ord=ord_val, dim=-1))
+
+        x_3d = torch.empty(0, 5, 3, device=device)
+        compiled_3d = torch.compile(
+            lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=(-1,)),
+            backend="eager",
+            fullgraph=True,
+        )
+        self.assertEqual(
+            compiled_3d(x_3d),
+            torch.linalg.vector_norm(x_3d, ord=ord_val, dim=(-1,)),
+        )
 
         x_err = torch.empty(5, 0, device=device)
         compiled_err = torch.compile(
             lambda t: torch.linalg.vector_norm(t, ord=float("inf"), dim=-1),
             backend="eager",
+            fullgraph=True,
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -1583,8 +1588,9 @@ class TestLinalg(TestCase):
 
         x_multi_err = torch.empty(0, 5, device=device)
         compiled_multi_err = torch.compile(
-            lambda t: torch.linalg.vector_norm(t, ord=float("inf"), dim=(0, -1)),
+            lambda t: torch.linalg.vector_norm(t, ord=float("inf"), dim=(-1, 0)),
             backend="eager",
+            fullgraph=True,
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -1596,8 +1602,9 @@ class TestLinalg(TestCase):
         compiled_oob = torch.compile(
             lambda t: torch.linalg.vector_norm(t, ord=float("inf"), dim=-3),
             backend="eager",
+            fullgraph=True,
         )
-        with self.assertRaises(IndexError):
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             compiled_oob(x_oob)
 
     def test_vector_norm_dim_tuple_arg(self, device):

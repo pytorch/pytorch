@@ -120,7 +120,9 @@ def _check_vector_norm_args(
         for d in dim:
             d_wrapped = utils.canonicalize_dim(len(shape), d)
             torch._check(
-                sym_or(x.numel() != 0, d_wrapped < len(shape) and shape[d_wrapped] != 0),
+                # Guard 0-D scalars: canonicalize_dim(0, d) returns 0 while
+                # shape is empty, and sym_or eagerly evaluates both arguments.
+                sym_or(x.numel() != 0, x.ndim == 0 or shape[d_wrapped] != 0),
                 lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
