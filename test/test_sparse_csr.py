@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
+    skipXPUIf,
     tol,
     toleranceOverride,
 )
@@ -61,7 +62,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfTorchDynamo,
-    skipIfXpu,
     subtest,
     suppress_warnings,
     TEST_CUDA_CUDSS,
@@ -3697,7 +3697,7 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
 
         return d
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3165")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3165")
     @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
@@ -3731,7 +3731,7 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
         bsr = input.to_sparse_bsr(1)
         self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5989")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5989")
     @onlyAccelerator
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
