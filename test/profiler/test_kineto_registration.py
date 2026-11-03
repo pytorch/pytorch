@@ -6,10 +6,7 @@ import unittest
 import torch
 from torch._C._profiler import _ExperimentalConfig
 from torch.profiler import DeviceType, kineto_available, profile, ProfilerActivity
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -28,7 +25,6 @@ RUNTIME_ACTIVITY_TYPES = {"cuda_runtime", "cuda_driver", "xpu_runtime", "xpu_dri
 class TestKinetoRegistration(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     def test_device_tracing_decided_per_session(self, device):
         # Runs several profiling sessions, some with the device and some without.
         # Sessions without the device must see no device traces, and sessions
@@ -64,7 +60,9 @@ class TestKinetoRegistration(TestCase):
         self.assertEqual(run(cpu, multi_line), (0, 0))
 
 
-instantiate_device_type_tests(TestKinetoRegistration, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestKinetoRegistration, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

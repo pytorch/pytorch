@@ -312,7 +312,8 @@ void prepareTrace(
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init(
-        /*cpuOnly=*/cpuOnly.value_or(!isDevicePresent()), /*logOnError=*/true);
+        /*cpuOnly=*/cpuOnly.has_value() ? *cpuOnly : !isDevicePresent(),
+        /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 
