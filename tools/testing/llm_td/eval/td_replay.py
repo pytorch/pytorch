@@ -15,7 +15,7 @@ OUT/<id>.json with:
   inputs     a hash of test-times.json, the sample and `stats` (see
              score.replay_inputs); a file with another hash is recomputed,
              and score.py drops one that does not match its inputs
-  stats      a hash of the STATS artifacts
+  stats      a hash of the STATS artifacts and the TD code (see score.replay_stats)
   scored     files TD gives a positive score, best first (what the hedge draws from)
   top25      CI's top-25% cut over all candidates
   top25_cfg  config -> files of that cut per config of test-times.json (see top25_per_config)
@@ -36,21 +36,21 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
-import hashlib
 import io
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-from tools.stats.import_test_stats import (
-    ADDITIONAL_CI_FILES_FOLDER,
-    TD_HEURISTIC_HISTORICAL_EDITED_FILES,
-    TD_HEURISTIC_PROFILING_FILE,
-    TEST_FILE_RATINGS_FILE,
-)
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER
 from tools.testing.llm_td.eval import REPO, write_json
-from tools.testing.llm_td.eval.score import replay_inputs, Seconds, test_seconds
+from tools.testing.llm_td.eval.score import (
+    replay_inputs,
+    replay_stats,
+    Seconds,
+    STATS_ARTIFACTS,
+    test_seconds,
+)
 
 
 if TYPE_CHECKING:
@@ -60,11 +60,6 @@ if TYPE_CHECKING:
 
 
 H = "tools.testing.target_determination.heuristics."
-ARTIFACTS = [
-    TEST_FILE_RATINGS_FILE,
-    TD_HEURISTIC_HISTORICAL_EDITED_FILES,
-    TD_HEURISTIC_PROFILING_FILE,
-]
 
 
 def top25_per_config(
@@ -99,7 +94,7 @@ def main() -> None:
         p.error(f"--shard I N needs 0 <= I < N, got {which} {n}")
     if args.stats.name != ADDITIONAL_CI_FILES_FOLDER.name:
         raise SystemExit(f"--stats must be a directory named {ADDITIONAL_CI_FILES_FOLDER}")  # fmt: skip
-    missing = [a for a in ARTIFACTS if not (args.stats / a).exists()]
+    missing = [a for a in STATS_ARTIFACTS if not (args.stats / a).exists()]
     if missing:
         raise SystemExit(
             f"{args.stats} lacks {missing}; fetch them with get_test_file_ratings(), get_td_heuristic_historial_edited_files_json() and get_td_heuristic_profiling_json() from tools/stats/import_test_stats.py"
@@ -109,7 +104,7 @@ def main() -> None:
 
     seconds = test_seconds(args.data / "test-times.json")
     times = (args.data / "test-times.json").read_bytes()
-    stats = hashlib.sha256(b"".join((args.stats / a).read_bytes() for a in ARTIFACTS)).hexdigest()  # fmt: skip
+    stats = replay_stats(args.stats)
     current: dict = {}
     stats_root = args.stats.absolute().parent
     patches = {

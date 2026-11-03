@@ -4,8 +4,11 @@
         --model us.anthropic.claude-sonnet-5 --effort medium --ids tools/testing/llm_td/eval/ids/eval.txt
 
 Results go to DIR/results/<tag>/<id>.json and are never recomputed; rerun the
-same command to fill in samples whose call failed transiently. A tag's results
-must all come from one --model, --effort and --agentic. Samples that
+same command to fill in samples that crashed. Throttling and 5xx errors, which
+the eval's own concurrency provokes, are retried; a call that still fails after
+ATTEMPTS is written as an error, so it is scored as the failed call it would be
+in CI, which calls the model once. Timeouts are final. A tag's results must all
+come from one --model, --effort and --agentic. Samples that
 select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
 under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
@@ -34,7 +37,7 @@ from tools.testing.llm_td.select_tests import (
 
 TIMED_OUT = f"model call timed out after {QUERY_TIMEOUT}s"
 TRANSIENT = re.compile(
-    r"Throttl|rate limit|overloaded|\b(500|502|503|504|529)\b|timed out", re.IGNORECASE
+    r"Throttl|rate.?limit|overloaded|\b(429|500|502|503|504|529)\b", re.IGNORECASE
 )
 ATTEMPTS = 4
 
@@ -77,8 +80,8 @@ def run_one(
         try:
             d = query_model(prompt, args.model, args.effort, checkout=wt)
         except subprocess.TimeoutExpired:
-            # Final rather than retried, as in CI: scored as a failed call, so as
-            # run-all under final and TD's own split under final+tdN.
+            # Final, like a timeout the CLI reports: scored as a failed call, so
+            # as run-all under final and TD's own split under final+tdN.
             d, out, transient = {"is_error": True, "result": TIMED_OUT}, None, False
             break
         cost += d.get("total_cost_usd") or 0.0
@@ -104,6 +107,7 @@ def run_one(
         "usage": d.get("usage"),
         "num_turns": d.get("num_turns"),
         "error": None if out is not None else str(d.get("result"))[:2000],
+        # The last attempt also failed transiently.
         "transient": transient,
         "out": out,
     }
@@ -121,6 +125,8 @@ def main() -> None:
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--agentic", action="store_true")
     args = p.parse_args()
+    # Agentic checkouts are handed to a CLI that runs in a temp dir.
+    args.data = args.data.resolve()
 
     out = args.data / "results" / args.tag
     out.mkdir(parents=True, exist_ok=True)
@@ -151,14 +157,8 @@ def main() -> None:
                     flush=True,
                 )
                 continue
-            if r.pop("transient"):
-                print(
-                    "transient failure, left for a rerun:",
-                    sid,
-                    r["error"][:200],
-                    flush=True,
-                )
-                continue
+            if r["transient"]:
+                print(f"{sid}: still failing after {ATTEMPTS} attempts, scored as an error:", r["error"][:200], flush=True)  # fmt: skip
             write_json(out / f"{sid}.json", r)
 
     with cf.ThreadPoolExecutor(args.jobs) as ex:
