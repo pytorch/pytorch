@@ -5387,7 +5387,7 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         # parse_diff's KNOWN LIMITS: findings on these files are discarded,
         # and a change request left with none is refused.
         prompt = " ".join(prompt_scalar(self.stage_b).split())
-        for kind in ("deletion", "pure rename", "mode-only change", "binary file"):
+        for kind in ("pure rename", "mode-only change", "binary file"):
             self.assertIn(kind, prompt)
 
     def test_the_findings_file_comes_from_the_structured_output(self):

@@ -993,10 +993,10 @@ jobs:
 
             Every finding must name a file this PR changed (listed in
             /tmp/pr-files.txt) and a line its diff (/tmp/pr-diff.txt) touches;
-            findings that do not are DISCARDED. A file whose diff shows no added
-            or context line (a deletion, a pure rename, a mode-only change, a
-            binary file) has no such line, even though /tmp/pr-files.txt lists
-            it. When a point is not about one changed line (a missing test,
+            findings that do not are DISCARDED. A file whose diff shows no added,
+            removed or context line (a pure rename, a mode-only change, a binary
+            file) has no such line, even though /tmp/pr-files.txt lists it.
+            When a point is not about one changed line (a missing test,
             say), or is about such a file, anchor it to the most relevant
             changed line rather than drop it.
 
