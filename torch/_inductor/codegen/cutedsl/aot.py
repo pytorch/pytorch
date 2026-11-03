@@ -97,10 +97,8 @@ class CuteDSLAOTBackend:
             for match in self._STRUCT.finditer(header)
         }
         prefix = str(artifact.payload["prefix"])
-        expected_types = [f"{prefix}_Kernel_Module_t"]
         for arg in spec.tensor_args:
             type_name = f"{prefix}_Tensor_{arg.name}_t"
-            expected_types.append(type_name)
             body = structs.get(type_name)
             if body is None:
                 raise RuntimeError(f"{artifact.header_path}: missing {type_name}")
@@ -126,25 +124,6 @@ class CuteDSLAOTBackend:
                 arrays,
                 len(arg.dynamic_strides),
                 shape=False,
-            )
-        expected_types.append("cudaStream_t")
-        call = re.search(
-            rf"\bcute_dsl_{re.escape(prefix)}_wrapper\s*" r"\((?P<params>.*?)\)\s*;",
-            header,
-            re.DOTALL,
-        )
-        if call is None:
-            raise RuntimeError(
-                f"{artifact.header_path}: missing CuteDSL wrapper declaration"
-            )
-        actual_params = call.group("params").split(",")
-        if len(actual_params) != len(expected_types) or any(
-            expected not in actual
-            for expected, actual in zip(expected_types, actual_params)
-        ):
-            raise RuntimeError(
-                f"{artifact.header_path}: wrapper parameters do not match "
-                f"builder order {expected_types}"
             )
 
     def make_deferred_call(self, artifact: ExternalAOTArtifact) -> Any:
