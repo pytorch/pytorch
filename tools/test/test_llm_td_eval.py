@@ -5,6 +5,7 @@ import ast
 import collections
 import contextlib
 import datetime as dt
+import importlib.util
 import io
 import json
 import os
@@ -26,10 +27,16 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests
-from tools.testing.llm_td.eval import build_dataset as bd, chart, dollars, score
+from tools.testing.llm_td import select_tests, selection
+from tools.testing.llm_td.eval import (
+    build_dataset as bd,
+    chart,
+    dollars,
+    intervals,
+    score,
+)
 from tools.testing.llm_td.eval.build_dataset import strip_trailers
-from tools.testing.llm_td.eval.run_eval import run_one
+from tools.testing.llm_td.eval.run_eval import run_one, TIMED_OUT
 from tools.testing.llm_td.eval.score import (
     Choice,
     ci_jobs,
@@ -39,7 +46,7 @@ from tools.testing.llm_td.eval.score import (
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import Selection
+from tools.testing.llm_td.selection import apply_selection, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -70,11 +77,13 @@ def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice
 
 
 def write_data(d: str, files: Mapping[str, object]) -> Path:
-    """Write `files` under `d`, stamping each TD replay with its sample's current inputs."""
+    """Write `files` under `d` (str values as is, others as JSON), stamping each TD replay with its sample's current inputs."""
     data = Path(d)
     for name, obj in files.items():
         (data / name).parent.mkdir(parents=True, exist_ok=True)
-        (data / name).write_text(json.dumps(obj))
+        (data / name).write_text(obj if isinstance(obj, str) else json.dumps(obj))
+    if not (data / "test-times.json").exists():
+        return data
     times = (data / "test-times.json").read_bytes()
     for p in (data / "td").glob("*.json"):
         if (sample := data / "samples" / p.name).exists():
@@ -232,6 +241,33 @@ class TestRunEval(unittest.TestCase):
             ):
                 run_eval.main()
         self.assertIn("1 results in", err.getvalue())
+
+    def test_main_refuses_another_prompt(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        sent = run_eval.prompt_sha(run_eval.sample_prompt(sample, {}))
+        result = {"model": "m", "effort": "medium", "agentic": False}
+        for prompt_sha, schema, refused in ((sent, run_eval.SCHEMA, False), (None, run_eval.SCHEMA, True), (sent, {}, True)):  # fmt: skip
+            with tempfile.TemporaryDirectory() as d:
+                data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": prompt_sha}})  # fmt: skip
+                (data / "ids.txt").write_text("a")
+                argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+                with (
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch.object(run_eval, "SCHEMA", schema),
+                    mock.patch("sys.stderr", io.StringIO()) as err,
+                    mock.patch("sys.stdout", io.StringIO()),
+                    mock.patch.object(run_eval, "query_model") as query,
+                ):
+                    try:
+                        run_eval.main()
+                    except SystemExit:
+                        self.assertTrue(refused)
+                        self.assertIn("another prompt", err.getvalue())
+                    else:
+                        self.assertFalse(refused)
+                query.assert_not_called()
 
 
 class TestScore(unittest.TestCase):
@@ -592,9 +628,50 @@ class TestScore(unittest.TestCase):
             job = [*seconds, *untimed]
             sel = Selection(set(rng.sample(files, rng.randint(0, 2))), candidates=set(files))  # fmt: skip
             ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in scored]  # fmt: skip
-            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c")  # fmt: skip
-            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", {"TD"}, untimed)  # fmt: skip
-            self.assertEqual(got, {"TD"} if split.kept_td else split.hedged, (scored, seconds, untimed, sel))  # fmt: skip
+            cut = set(rng.sample(job, min(len(job), 2)))
+            prev = set(rng.sample(files, rng.randint(0, 2)))
+            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
+            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", cut, untimed, prev)  # fmt: skip
+            want = cut if split.kept_td or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
+            self.assertEqual(got, want, (scored, seconds, untimed, sel, cut, prev))
+
+    def test_policy_matches_apply_selection(self) -> None:
+        # What final+td runs in a job is what apply_selection runs there, including a job with no test times.
+        rng = random.Random(0)
+        files = [f"test_{i}" for i in range(8)]
+        for _ in range(300):
+            seconds = {f: float(rng.choice([0, 0, 5, 20, 60])) for f in files if rng.random() < 0.6}  # fmt: skip
+            job = [*seconds, *(f for f in files if f not in seconds and rng.random() < 0.5)]  # fmt: skip
+            rng.shuffle(job)
+            n = rng.randint(0, len(job))
+            include, exclude = [TestRun(f) for f in job[:n]], [TestRun(f) for f in job[n:]]  # fmt: skip
+            scored = [f for f in job if rng.random() < 0.6]
+            picked = rng.sample(job, min(len(job), rng.randint(0, 2)))
+            prev = rng.sample(files, rng.randint(0, 2))
+            s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev}
+            td = {"scored": scored, "top25": [], "top25_cfg": {"c": job[:n]}}
+            r = {"out": {"tests": [{"file": f} for f in picked]}}
+            choice = policy("final+td", s, r, td, {"c": {f: [t, 0.0] for f, t in seconds.items()}})  # fmt: skip
+            if choice is None:
+                raise AssertionError("final+td chose nothing")
+            sel = Selection(set(picked), candidates=set(job), enforce=True)
+            with (
+                mock.patch.object(selection, "get_pr_number", return_value=1),
+                mock.patch("sys.stderr", io.StringIO()),
+            ):
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev)  # fmt: skip
+            ran = {x.test_file for x in applied.include}
+            self.assertEqual({f for f in job if choice.covers(f, "c")}, ran, (seconds, job, n, scored, picked, prev))  # fmt: skip
+
+    def test_hedge_previous_failures(self) -> None:
+        # Previous failures in TD's cut run outside the budget; test_b is not in the cut.
+        td = {"scored": ["test_a", "test_c"], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
+        s = {**SAMPLE, "previous_failures": ["test_a", "test_b"]}
+        choice = pick("final+td5", NOTHING, td, s)
+        self.assertEqual(choice.per_config, {"default": {"test_a", "test_c"}, "slow": set()})  # fmt: skip
+        # Without fallback times other jobs are not enforced and run TD's cut.
+        self.assertEqual(choice.other, {"test_a"})
+        self.assertEqual(pick("final+td5", NOTHING, td).per_config["default"], {"test_c"})  # fmt: skip
 
     def test_hedge_failed_call_keeps_td(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
@@ -745,14 +822,22 @@ class TestScore(unittest.TestCase):
             for p in [*(stats / a for a in score.STATS_ARTIFACTS), code / "heuristics/h.py"]:  # fmt: skip
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text("1")
-            with mock.patch.object(score, "TD_CODE", code):
+            replay = Path(d) / "td_replay.py"
+            replay.write_text("1")
+            with (
+                mock.patch.object(score, "TD_CODE", code),
+                mock.patch.object(score, "REPLAY_CODE", [replay]),
+            ):
                 digests = [score.replay_stats(stats)]
                 (stats / score.STATS_ARTIFACTS[0]).write_text("2")
                 digests.append(score.replay_stats(stats))
                 (code / "heuristics/h.py").write_text("2")
                 digests += [score.replay_stats(stats), score.replay_stats(stats)]
-        self.assertEqual(len(set(digests)), 3)
+                replay.write_text("2")
+                digests.append(score.replay_stats(stats))
+        self.assertEqual(len(set(digests)), 4)
         self.assertEqual(digests[2], digests[3])
+        self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
@@ -767,10 +852,17 @@ class TestScore(unittest.TestCase):
         )
         # The cut is 25% + 1 of each config's own runs plus the files with no
         # recorded time (test_e, as if newly added); test_a's partial run counts.
-        cut = top25_per_config(tp, cands, SECONDS)
+        s = {"candidates": cands, "truth": []}
+        cut = top25_per_config(tp, score.job_files(s, SECONDS))
         self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
-        timed = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
-        self.assertEqual(timed, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
+        timed = {**s, "candidates": ["test_a", "test_b", "test_c", "test_d"]}
+        self.assertEqual(top25_per_config(tp, score.job_files(timed, SECONDS)), {"default": ["test_a", "test_c"], "slow": ["test_a"]})  # fmt: skip
+        # A file that failed in slow was in slow's job, though slow records no time of it.
+        failed = {**timed, "truth": ["test_d"], "truth_jobs": {"test_d": [["pull", "linux / test (slow, 1, 1)"]]}}  # fmt: skip
+        self.assertEqual(score.job_files(failed, SECONDS)["slow"], {"test_a", "test_c", "test_d"})  # fmt: skip
+        tp_d = TestPrioritizations(timed["candidates"], {TestRun("test_d"): 1.0})
+        self.assertNotIn("test_d", top25_per_config(tp_d, score.job_files(timed, SECONDS))["slow"])  # fmt: skip
+        self.assertEqual(top25_per_config(tp_d, score.job_files(failed, SECONDS))["slow"], ["test_d"])  # fmt: skip
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
         self.assertTrue(choice.covers("test_a", "slow"))
@@ -816,102 +908,248 @@ LABELER = """\
 - torch/_inductor/**
 
 - c10/core/Sym*
+- "**/fx/*.py"
+- torch/_dynamo/?.py
 "ciflow/other":
 - torch/foo.py
 """
+# config -> file -> seconds; test_seconds counts linux-cuda as GPU time.
+TIMES = {
+    "linux": {"default": {"test_a": 80.0, "test_b": 20.0}, "inductor_core": {"test_c": 60.0, "test_d": 10.0}, "inductor_extra": {"test_c": 1000.0}},
+    "linux-cuda": {"default": {"test_a": 30.0, "test_b": 70.0}, "inductor_core": {"test_c": 30.0}},
+}  # fmt: skip
+# inductor_extra is no unit-test job's, and the unit-test job's default runs TD.
+DOLLAR_JOBS = {
+    True: {("pull", "linux", "default")},
+    False: {("inductor", "unit-test / inductor", "inductor_core"), ("inductor", "unit-test / inductor", "default"), ("periodic", "test", "inductor_extra")},
+}  # fmt: skip
 
 
 class TestDollars(unittest.TestCase):
-    def write(self, files: dict[str, object]) -> Path:
-        data = Path(self.enterContext(tempfile.TemporaryDirectory[str]()))
-        for name, obj in files.items():
-            (data / name).parent.mkdir(parents=True, exist_ok=True)
-            text = obj if isinstance(obj, str) else json.dumps(obj)
-            (data / name).write_text(text)
-        return data
+    def write(self, files: Mapping[str, object]) -> Path:
+        return write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), {"labeler.yml": LABELER, **files})  # fmt: skip
 
     def test_inductor_globs(self) -> None:
-        data = self.write({"labeler.yml": LABELER, "bad.yml": '"ciflow/x":\n- y\n'})
+        data = self.write({})
         globs = dollars.inductor_globs(data / "labeler.yml")
         for path, match in [
             ("torch/_inductor/codegen/a.py", True),
             ("c10/core/SymInt.h", True),
+            ("c10/core/Sym/x.h", False),
             ("c10/core/impl/SymInt.h", False),
+            ("torch/fx/a.py", True),
+            ("fx/a.py", True),
+            ("torch/fx/sub/a.py", False),
+            ("torch/_dynamo/a.py", True),
+            ("torch/_dynamo/ab.py", False),
             ("torch/foo.py", False),
         ]:
             self.assertEqual(bool(globs.fullmatch(path)), match, path)
-        with self.assertRaises(SystemExit):
-            dollars.inductor_globs(data / "bad.yml")
+        for text, msg in [
+            ('"ciflow/x":\n- y\n', "has no list of ciflow/inductor globs"),
+            ('"ciflow/inductor": torch/**\n', "has no list of ciflow/inductor globs"),
+            (
+                '"ciflow/inductor":\n- torch/{a,b}.py\n',
+                r"unsupported syntax: \['torch/\{a,b\}.py'\]",
+            ),
+        ]:
+            (data / "bad.yml").write_text(text)
+            with self.assertRaisesRegex(SystemExit, msg):
+                dollars.inductor_globs(data / "bad.yml")
+        # The real labeler config parses, and its globs match what they name.
+        real = dollars.inductor_globs(dollars.LABELER)
+        self.assertTrue(real.fullmatch("torch/_inductor/codegen/wrapper.py"))
+        self.assertFalse(real.fullmatch("torch/nn/functional.py"))
 
-    def test_model(self) -> None:
-        sample = {
-            "kind": "neutral",
-            "sha": "x",
-            "candidates": ["test_a", "test_b", "test_c"],
-        }
-        td = {"scored": [], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"]}}
+    def data(self) -> Path:
+        sample = {"kind": "neutral", "sha": "x", "candidates": ["test_a", "test_b", "test_c", "test_d"], "changed_files": ["torch/foo.py"], "truth": []}  # fmt: skip
+        td = {"scored": ["test_d", "test_a"], "top25": ["test_a", "test_c"], "top25_cfg": {"default": ["test_a"], "inductor_core": ["test_c"]}}  # fmt: skip
         result = {"out": {"tests": [{"file": "test_b"}]}, "error": None}
         data = self.write({
-            "labeler.yml": LABELER,
-            "test-times.json": {
-                "linux": {"default": {"test_a": 80.0, "test_b": 20.0}, "inductor_core": {"test_c": 100.0}},
-                "linux-cuda": {"default": {"test_a": 50.0, "test_b": 50.0}},
-            },
+            "test-times.json": TIMES,
             "samples/a.json": {**sample, "changed_files": ["torch/_inductor/x.py"]},
-            "samples/b.json": {**sample, "changed_files": ["torch/foo.py"]},
-            "samples/c.json": {**sample, "changed_files": ["torch/foo.py"]},
-            "td/a.json": td, "td/b.json": td, "td/c.json": td,
-            "results/m/a.json": {**result, "cost_usd": 0.2},
-            "results/m/b.json": {**result, "cost_usd": None},
+            "samples/b.json": sample, "samples/c.json": sample, "samples/d.json": sample, "samples/t.json": sample,
+            "samples/e.json": {**sample, "sha": "gone", "changed_files": ["test/test_b.py"]},
+            # select_tests runs everything on a test-infra change without asking the model.
+            "samples/u.json": {**sample, "changed_files": ["test/run_test.py"]},
+            **{f"td/{i}.json": td for i in "abcdeu"},
+            "results/m/a.json": {**result, "cost_usd": 0.2}, "results/m/b.json": {**result, "cost_usd": 0.4},
+            "results/m/d.json": result, "results/m/e.json": result,
+            "results/m/t.json": {"out": None, "error": TIMED_OUT, "cost_usd": 0.0},
         })  # fmt: skip
-        jobs = {True: {("pull", "linux", "default")}, False: {("inductor", "unit-test / inductor", "inductor_core")}}  # fmt: skip
+        # d's replay is of another sample, and git grep fails at e's head.
+        (data / "td/d.json").write_text(json.dumps({**td, "inputs": "stale"}))
+        self.enterContext(patch_ci_jobs(DOLLAR_JOBS))
+        self.enterContext(mock.patch.object(score, "grep_at", self.grep_at))
+        return data
+
+    @staticmethod
+    def grep_at(pattern: str, sha: str) -> list[str]:
+        if sha == "gone":
+            raise RuntimeError(sha)
+        return []
+
+    def model(self, data: Path, tag: str, pol: str, ids: str, workflows: list[tuple[str, str, float, float, float, bool]] = dollars.WORKFLOWS) -> tuple[dict, str]:  # fmt: skip
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            d = dollars.model(data, tag, pol, overhead=0.2, ids=list(ids), cost_ids=list("abut"), samples=data / "samples", td_dir=data / "td", stats="", labeler=data / "labeler.yml", workflows=workflows)  # fmt: skip
+        return d, err.getvalue()
+
+    def test_model(self) -> None:
+        data = self.data()
         workflows = [
             ("pull", "cpu", 100.0, 0.5, 0.2, True),
+            ("trunk", "gpu", 50.0, 1.0, 0.5, True),
             ("inductor", "ind_cpu", 10.0, 1.0, 0.0, False),
+            ("inductor", "ind_gpu", 20.0, 1.0, 0.0, False),
         ]
-        with (
-            patch_ci_jobs(jobs),
-            mock.patch.object(dollars, "ci_jobs", lambda: jobs),
-            contextlib.redirect_stdout(io.StringIO()),
-        ):
-            d = dollars.model(data, "m", "final", 0.2, ["a", "b", "c"], ["a", "b"], data / "samples", data / "td", data / "labeler.yml", workflows)  # fmt: skip
-            today = dollars.model(data, "td", "td25", 0.2, ["a", "b", "c"], ["a", "b"], data / "samples", data / "td", data / "labeler.yml", workflows)  # fmt: skip
-        self.assertEqual(
-            (today["llm_k_per_month"], today["stack_k_per_month"]), (0.0, 0.0)
+        d, err = self.model(data, "m", "final+td20", "abcdeu", workflows=workflows)
+        # As in score.score: c has no m result, d no current replay, e no git
+        # grep, and u is unasked, so it runs everything at no model cost.
+        self.assertEqual(err, "dropped 1 of 6 ids with no m result\ndropped 1 of 6 ids with no td replay of the current test-times.json, sample, STATS and TD code\ndropped 1 of 6 ids with no working git grep at their head (not in this clone?)\nleft out 1 of 3 m calls that timed out\n")  # fmt: skip
+        # a and b run test_b in default; only a matches the inductor globs, and
+        # the 20% hedge adds test_d (10 of its 100 inductor_core seconds) there.
+        f, ftd = d["fractions"], d["td_fractions"]
+        self.assertEqual({k: round(v, 4) for k, v in f.items()}, {"cpu": round(1.4 / 3, 4), "gpu": 0.8, "ind_cpu": round(1 / 7, 4), "ind_gpu": 0.0, "n": 3, "n_ind": 1})  # fmt: skip
+        self.assertEqual({k: round(v, 4) for k, v in ftd.items()}, {"cpu": 0.8, "gpu": 0.3, "ind_cpu": round(6 / 7, 4), "ind_gpu": 1.0, "n": 3, "n_ind": 1})  # fmt: skip
+        pull, trunk, ind_cpu, ind_gpu = (r["save_k"] for r in d["rows"])
+        # pull: 100 * 0.5 PR * 0.8 same-repo, rescaled by (0.2 + 0.8 * new) / (0.2 + 0.8 * TD).
+        self.assertAlmostEqual(pull, 40 * (1 - (0.2 + 0.8 * 1.4 / 3) / 0.84))
+        self.assertAlmostEqual(trunk, 25 * (1 - 0.84 / 0.44))
+        # Without TD, the inductor jobs run everything today.
+        self.assertAlmostEqual(ind_cpu, 10 * (1 - (0.2 + 0.8 / 7)))
+        self.assertAlmostEqual(ind_gpu, 20 * 0.8)
+        self.assertAlmostEqual(d["stack_k_per_month"], pull + trunk)
+        self.assertAlmostEqual(d["total_k_per_month"]["cpu"], pull + ind_cpu)
+        self.assertAlmostEqual(d["total_k_per_month"]["gpu"], trunk + ind_gpu)
+        # u is never asked and t timed out, so $/call is the mean of a and b.
+        self.assertAlmostEqual(d["usd_per_call"], 0.3)
+        self.assertAlmostEqual(
+            d["llm_k_per_month"], 0.3 * dollars.PR_PUSHES_PER_MONTH_K
         )
-        # c has no m result, so TD is averaged over a and b too.
-        self.assertEqual(d["fractions"], {"cpu": 0.2, "gpu": 0.5, "ind_cpu": 0.0, "ind_gpu": 0.0, "n": 2, "n_ind": 1})  # fmt: skip
-        self.assertEqual(d["td_fractions"], {"cpu": 0.8, "gpu": 0.5, "ind_cpu": 0.0, "ind_gpu": 0.0, "n": 2, "n_ind": 1})  # fmt: skip
-        # pull: 100 * 0.5 PR * 0.8 same-repo, rescaled by (0.2 + 0.8 * 0.2) / (0.2 + 0.8 * 0.8).
-        pull, ind = d["rows"]
-        self.assertAlmostEqual(pull["save_k"], 40 * (1 - 0.36 / 0.84))
-        self.assertAlmostEqual(ind["save_k"], 10 * (1 - 0.2))
-        self.assertAlmostEqual(d["stack_k_per_month"], pull["save_k"])
-        self.assertAlmostEqual(d["total_k_per_month"]["cpu"], pull["save_k"] + 8)
-        # The call without a recorded cost is left out of the mean.
-        llm = d["llm_k_per_month"]
-        self.assertAlmostEqual(llm, 0.2 * dollars.PR_PUSHES_PER_MONTH_K)
+
+        today, _ = self.model(data, "td", "td25", "abcdeu", workflows=workflows)
+        self.assertEqual(today["fractions"], today["td_fractions"])
+        # TD's own cut needs no result or git grep, so only d is dropped.
+        self.assertEqual(today["fractions"]["n"], 5)
+        self.assertEqual((today["llm_k_per_month"], today["rows"][0]["save_k"], today["rows"][1]["save_k"]), (0.0, 0.0, 0.0))  # fmt: skip
+        self.assertAlmostEqual(today["rows"][2]["save_k"], 10 * 0.8 * (1 - 6 / 7))
+
+    def test_model_errors(self) -> None:
+        data = self.data()
+        for ids, msg in [("c", "no scored m final rows"), ("b", "no scored m sample matches the ciflow/inductor globs")]:  # fmt: skip
+            with self.assertRaisesRegex(SystemExit, msg):
+                self.model(data, "m", "final", ids)
+        with patch_ci_jobs({True: DOLLAR_JOBS[True], False: set()}), self.assertRaisesRegex(SystemExit, "no inductor unit-test configs"):  # fmt: skip
+            self.model(data, "m", "final", "a")
+        with self.assertRaisesRegex(SystemExit, "no m results that did not time out"):
+            dollars.mean_call_usd(data, "m", ["t", "u", "c"], data / "samples")
 
     def test_fractions_find_importers(self) -> None:
         # The change edits test_b, which test_a imports, so final runs test_a too, as score.score does.
         data = self.write({
-            "labeler.yml": LABELER,
             "test-times.json": {"linux": {"default": {"test_a": 80.0, "test_b": 20.0}}},
-            "samples/a.json": {"kind": "neutral", "sha": "x", "candidates": ["test_a", "test_b"], "changed_files": ["test/test_b.py", "torch/_inductor/x.py"]},
+            "samples/a.json": {"kind": "neutral", "sha": "x", "candidates": ["test_a", "test_b"], "changed_files": ["test/test_b.py", "torch/_inductor/x.py"], "truth": []},
             "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
             "results/m/a.json": {"out": {"tests": [{"file": "test_b"}]}, "error": None},
         })  # fmt: skip
-        jobs = {True: {("pull", "linux", "default")}, False: {("inductor", "unit-test / inductor", "inductor_core")}}  # fmt: skip
         with (
-            patch_ci_jobs(jobs),
-            mock.patch.object(dollars, "ci_jobs", lambda: jobs),
-            mock.patch.object(
-                score, "grep_at", return_value=["test/test_a.py"]
-            ) as grep,
-        ):
-            f = dollars.fractions(data, ["a"], "m", "final", data / "samples", data / "td", data / "labeler.yml")  # fmt: skip
+            patch_ci_jobs(DOLLAR_JOBS),
+            mock.patch.object(score, "grep_at", return_value=["test/test_a.py"]) as grep,
+        ):  # fmt: skip
+            f, _ = dollars.fractions(data, "m", "final", ["a"], data / "samples", data / "td", "", data / "labeler.yml")  # fmt: skip
         self.assertEqual({c.args[1] for c in grep.call_args_list}, {"x"})
         self.assertEqual(f["cpu"], 1.0)
+
+    def test_main(self) -> None:
+        data = self.data()
+        stats = data / "stats"
+        argv = ["dollars", "--data", str(data), "--ids", str(data / "ids"), "--cost-ids", str(data / "ids"), "--stats", str(stats), "--labeler", str(data / "labeler.yml")]  # fmt: skip
+        with mock.patch.object(sys, "argv", [*argv, "m", "final"]), contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):  # fmt: skip
+            dollars.main()
+        self.assertIn("lacks", err.getvalue())
+        stats.mkdir()
+        for a in score.STATS_ARTIFACTS:
+            (stats / a).write_text("{}")
+        (data / "ids").write_text("a b u\n")
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", [*argv, "--json", str(data / "d.json"), "m", "final"]),
+            mock.patch.object(score, "replay_stats", return_value=""),
+            contextlib.redirect_stdout(out),
+        ):  # fmt: skip
+            dollars.main()
+        self.assertRegex(out.getvalue(), r"^m final overhead=0.2 n=3 n_ind=1 run cpu=0.467 gpu=0.800 .* \$/call=0.300 llm=\$3.8k/month\n$")  # fmt: skip
+        self.assertEqual(json.loads((data / "d.json").read_text())["fractions"]["n"], 3)
+
+
+@unittest.skipUnless(importlib.util.find_spec("matplotlib"), "needs matplotlib")
+class TestChartMain(unittest.TestCase):
+    def run_chart(self, rows: list[dict]) -> str:
+        d = Path(self.enterContext(tempfile.TemporaryDirectory[str]()))
+        (d / "rows.json").write_text(json.dumps(rows))
+        with mock.patch.object(sys, "argv", ["chart", str(d / "rows.json"), str(d / "out.svg")]):  # fmt: skip
+            chart.main()
+        return (d / "out.svg").read_text()
+
+    def test_main(self) -> None:
+        base = {"pairs": 1, "hit": 1, "cpu": 0.1, "gpu": 0.1, "run_all": False, "files": 1, "cost_usd": 0.1, "error": False}  # fmt: skip
+        cells = [("td", "td25"), *((chart.PRODUCTION[0], p) for p in chart.HEDGES)]
+        rows = [{**base, "tag": t, "policy": p, "kind": k, "id": "x"} for t, p in cells for k in ("neutral", "revert")]  # fmt: skip
+        with self.assertRaisesRegex(
+            SystemExit, f"no head rows for {chart.PRODUCTION[0]}$"
+        ):
+            self.run_chart(rows)
+        with self.assertRaisesRegex(SystemExit, r"no name or color for \['v3_opus55_xhigh'\]"):  # fmt: skip
+            self.run_chart([*rows, {**rows[-1], "tag": "v3_opus55_xhigh"}])
+        rows += [{**r, "kind": "head"} for r in rows if r["kind"] == "revert"]
+        svg = self.run_chart(rows)
+        self.assertIn("Reverted commits caught (n=1)", svg)
+        self.assertNotIn("Matplotlib v", svg)
+
+
+class TestIntervals(unittest.TestCase):
+    def test_compare(self) -> None:
+        def row(tag: str, kind: str, sid: str, pairs: int, hit: int) -> dict:
+            return {"tag": tag, "policy": "p", "kind": kind, "id": sid, "pairs": pairs, "hit": hit}  # fmt: skip
+
+        rows = [
+            # A revert is caught by any of its failures, a push only by all of them.
+            row("new", "revert", "r1", 2, 1), row("old", "revert", "r1", 2, 0),
+            row("new", "revert", "r2", 1, 1), row("old", "revert", "r2", 1, 1),
+            row("new", "revert", "r3", 0, 0), row("old", "revert", "r3", 0, 0),
+            row("new", "head", "head_1_a", 2, 1), row("old", "head", "head_1_a", 2, 2),
+            row("new", "head", "head_1_b", 1, 0), row("old", "head", "head_1_b", 1, 1),
+            row("new", "head", "head_2_c", 1, 1),
+        ]  # fmt: skip
+        self.assertEqual(intervals.outcomes(rows, "new", "p", "revert"), {"r1": True, "r2": True})  # fmt: skip
+        revert, head = intervals.compare(rows, ["new", "p"], ["old", "p"], 200, 0)
+        self.assertTrue(revert.startswith("reverts caught: n=2 new=100.0% old=50.0% new-old=+50.0 pts discordant new-only=1 old-only=0 McNemar p=1.000"), revert)  # fmt: skip
+        # head_2_c has no old row, so it is not paired; both pushes are of PR 1.
+        self.assertTrue(head.startswith("failing pushes, every failure: n=2 new=0.0% old=100.0% new-old=-100.0 pts"), head)  # fmt: skip
+        self.assertTrue(head.endswith("| per PR (1 PRs) [-100.0, -100.0]"), head)
+        self.assertEqual(intervals.compare(rows, ["x", "p"], ["old", "p"], 10, 0)[0], "reverts caught: no paired rows")  # fmt: skip
+
+    def test_mcnemar(self) -> None:
+        self.assertEqual(intervals.mcnemar(0, 0), 1.0)
+        self.assertAlmostEqual(intervals.mcnemar(0, 5), 2 / 32)
+        self.assertAlmostEqual(intervals.mcnemar(1, 5), 2 * 7 / 64)
+
+    def test_latency(self) -> None:
+        data = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), {f"results/m/{i}.json": {"wall_s": w} for i, w in zip("abcd", (10, 20, 30, 40))})  # fmt: skip
+        self.assertEqual(intervals.latency(data, "m", list("abcdz")), "m latency: n=4 p50=25s p90=37s")  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "fewer than 2 m results"):
+            intervals.latency(data, "m", ["a"])
+
+
+@contextlib.contextmanager
+def scratch_repo() -> Iterator[None]:
+    """A new git repo as bd.REPO, isolated from the caller's git environment and config."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
+    with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
+        bd.git("init", "-q")
+        yield
 
 
 class TestBuildDataset(unittest.TestCase):
@@ -1006,44 +1244,63 @@ class TestBuildDataset(unittest.TestCase):
         self.assertIsNone(after)
 
     def test_stacked(self) -> None:
-        # ghstack: U (pr 2) sits on L (pr 1), same author; L broke test_x, which U also fails.
-        # W (pr 3) is another PR of the author's that is not below U.
-        rows = [
-            fail("test_x", "2026-10-05 00:00:00", "l"),
-            fail("test_z", "2026-10-05 00:00:00", "l"),
-            fail("test_x", "2026-10-06 00:00:00", "u"),
-            fail("test_y", "2026-10-06 00:00:00", "u"),
-            fail("test_z", "2026-10-06 00:00:00", "w"),
-        ]
-        h = history(rows, {"l": 1, "u": 2, "w": 3}, {1: "me", 2: "me", 3: "me"})
+        # A ghstack stack, built as ghstack builds it: L (pr 1) below U (pr 2), both pushed twice. Each
+        # PR's head has its previous head and a synthetic gh/USER/N/base commit with the tree of
+        # the PR below as parents, so L's heads are neither U's CI base nor its ancestors.
+        # N (pr 4) is a GitHub-native PR on top of L's second head, W (pr 3) another PR of the author's.
+        with scratch_repo():
 
-        def truth(sha: str, base: str) -> tuple[list[str], dict]:
-            dropped: collections.Counter = collections.Counter()
-            kept = h.truth(sha, {"base": base, "merge_base": base, "main_base": "m", "base_source": "ci"}, dropped)  # fmt: skip
-            return sorted(r["test"] for r in kept or []), dict(dropped)
+            def piped(args: list[str], stdin: str) -> str:
+                return subprocess.run(["git", *args], cwd=bd.REPO, input=stdin, capture_output=True, text=True, check=True).stdout.strip()  # fmt: skip
 
-        with (
-            patch_ci_jobs(TD_JOBS),
-            mock.patch.object(bd, "green_jobs", return_value=set()),
-            mock.patch.object(bd, "commit_time", return_value=day(4)),
-            mock.patch.object(bd, "is_ancestor", lambda a, b: (a, b) == ("l", "u")),
-        ):  # fmt: skip
-            h.load_green({"l", "u", "w"})
-            # Diffed against L's head, as CI does, or against main with L's head below it.
-            self.assertEqual(truth("u", "l"), (["test_y"], {"stacked": 1}))
-            self.assertEqual(truth("u", "m"), (["test_y"], {"stacked": 1}))
-            self.assertEqual(truth("w", "m"), (["test_z"], {}))
-            self.assertEqual(truth("l", "m"), (["test_x", "test_z"], {}))
-            # Without the CI base, only ancestry tells.
-            self.assertEqual(truth("u", "b"), (["test_y"], {"stacked": 1}))
-            with mock.patch.object(bd, "is_ancestor", return_value=False):
-                self.assertEqual(truth("u", "b"), (["test_x", "test_y"], {}))
+            def commit(content: str, *parents: str) -> str:
+                """A commit of a tree holding `content`, so commits of equal content have equal trees."""
+                blob = piped(["hash-object", "-w", "--stdin"], content)
+                tree = piped(["mktree"], f"100644 blob {blob}\tf\n")
+                return bd.git("commit-tree", tree, *(a for p in parents for a in ("-p", p)), "-m", content).strip()  # fmt: skip
+
+            m = commit("main")
+            l_base = commit("main", m)
+            l1 = commit("L1", l_base)
+            l2 = commit("L2", l1, l_base)
+            u_base1 = commit("L1", m)
+            u1 = commit("U1", u_base1)
+            u_base2 = commit("L2", u_base1)
+            u2 = commit("U2", u1, u_base2)
+            n = commit("N", l2)
+            w = commit("W", m)
+            # L broke test_x in both versions and test_q only in its second; main broke test_v long ago on m.
+            rows = [
+                fail("test_x", "2026-10-05 00:00:00", l1),
+                fail("test_x", "2026-10-06 00:00:00", l2),
+                fail("test_q", "2026-10-06 00:00:00", l2),
+                fail("test_z", "2026-10-05 00:00:00", w),
+                fail("test_v", "2026-09-20 00:00:00", m, br="main"),
+            ] + [fail(t, "2026-10-07 00:00:00", u) for u in (u1, u2, n) for t in ("test_x", "test_q", "test_z", "test_v", "test_y")]  # fmt: skip
+            h = history(rows, {l1: 1, l2: 1, u1: 2, u2: 2, w: 3, n: 4}, {1: "me", 2: "me", 3: "me", 4: "me"})  # fmt: skip
+
+            def truth(sha: str, base: str) -> tuple[list[str], dict]:
+                dropped: collections.Counter = collections.Counter()
+                kept = h.truth(sha, {"base": base, "merge_base": m, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
+                return sorted(r["test"] for r in kept or []), dict(dropped)
+
+            with (
+                patch_ci_jobs(TD_JOBS),
+                mock.patch.object(bd, "green_jobs", return_value=set()),
+                mock.patch.object(bd, "commit_time", return_value=day(20)),
+            ):  # fmt: skip
+                h.load_green({u1, u2, n, l2})
+                # Each U head drops what the L version below it broke; its own failures, W's and main's stay.
+                self.assertEqual(truth(u1, u_base1), (["test_q", "test_v", "test_y", "test_z"], {"stacked": 1}))  # fmt: skip
+                self.assertEqual(truth(u2, u_base2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                # Diffed against L's head or against main, the native PR finds L below it by ancestry.
+                self.assertEqual(truth(n, l2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                self.assertEqual(truth(n, m), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                self.assertEqual(truth(l2, l_base), (["test_q", "test_x"], {}))
+            self.assertEqual(h.other_heads({u1}), {l1, l2, w, n})
 
     def test_is_ancestor(self) -> None:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
-        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
-            bd.git("init", "-q")
+        with scratch_repo():
             for msg in ("a", "b"):
                 bd.git("commit", "-q", "--allow-empty", "-m", msg)
             a, b = bd.git("rev-list", "HEAD").split()[::-1]
@@ -1121,6 +1378,30 @@ class TestBuildDataset(unittest.TestCase):
             bd.pr_samples(h, Path(out), 1)
         pr_text.assert_called_once_with(1)
         write.assert_not_called()
+
+    def test_unexpected_error_skips_only_its_sample(self) -> None:
+        h = history([fail("test_x", "2026-10-05 00:00:00", "s"), fail("test_x", "2026-10-05 00:00:00", "t", tf="test_b")], {"s": 1, "t": 2}, {1: "me", 2: "you"})  # fmt: skip
+        bad = UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
+        with (
+            tempfile.TemporaryDirectory() as out,
+            patch_ci_jobs(TD_JOBS),
+            mock.patch.object(bd, "green_jobs", return_value=set()),
+            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "has_commit", return_value=True),
+            mock.patch.object(bd, "git", return_value="base\n"),
+            mock.patch.object(bd, "commit_time", return_value=day(4)),
+            mock.patch.object(bd, "ci_bases", return_value={}),
+            mock.patch.object(bd, "pr_text", side_effect=[bad, ("t", "b")]),
+            mock.patch.object(bd, "write_sample") as write,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):  # fmt: skip
+            bd.pr_samples(h, Path(out), 1)
+            # With no pr_ sample written, the head pass reports and returns, so later kinds still run.
+            bd.head_samples(h, Path(out), 1)
+        self.assertEqual([c.args[1] for c in write.call_args_list], ["pr_2"])
+        self.assertIn("1 of 2 PR samples raised and were skipped", stdout.getvalue())
+        self.assertIn("pr truth: dropped by rule over 2 heads", stdout.getvalue())
+        self.assertIn("no head samples", stdout.getvalue())
 
     def test_pr_samples(self) -> None:
         t = "2026-10-05 00:00:00"
@@ -1249,6 +1530,8 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time", return_value=day(4)),
             mock.patch.object(bd, "ci_bases", return_value={"h1": ["b1"], "h2": ["b2"], "h3": ["b3"]}) as ci_bases,
+            # Every failure is at 10-05: h1's CI started before them, h2's after, h4's is unknown.
+            mock.patch.object(bd, "head_created", return_value={"h1": "2026-10-04 00:00:00", "h2": "2026-10-06 00:00:00"}),
             mock.patch.object(bd, "git", lambda *a, check=True: merge_bases[a[1:]] + "\n"),
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
@@ -1258,6 +1541,8 @@ class TestBuildDataset(unittest.TestCase):
         ci_bases.assert_called_once_with({"h1": 1, "h2": 1, "h3": 1, "h4": 1})
         got = {c.args[1]: (c.args[2:], c.kwargs) for c in write.call_args_list}
         self.assertEqual(sorted(got), ["head_1_h1", "head_1_h2", "head_1_h4"])
+        # h2's previous failures are the other heads' (flaky or not, also of h3 and h5, which have no sample).
+        previous = {"head_1_h1": [], "head_1_h2": ["test_a", "test_c", "test_d", "test_e", "test_f"], "head_1_h4": []}  # fmt: skip
         want = {
             "head_1_h1": ("h1", "b1", "b1", "m1", "ci", {"test_c": [("pull", job_b)]}),
             "head_1_h2": ("h2", "b2", "mb2", "m2", "ci", {"test_b": [("pull", job_a)]}),
@@ -1274,7 +1559,7 @@ class TestBuildDataset(unittest.TestCase):
             args, kw = got[sid]
             self.assertEqual(args, ("head", sha))
             bases = {"base": base, "merge_base": merge_base, "main_base": main_base, "base_source": source}  # fmt: skip
-            self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "truth": sorted(truth_jobs), "truth_jobs": truth_jobs})  # fmt: skip
+            self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
 
     def test_revert_truth_is_truth_jobs(self) -> None:
         rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::y"]} for t in ("1", "2")]  # fmt: skip

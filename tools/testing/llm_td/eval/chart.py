@@ -2,6 +2,9 @@
 
     python -m tools.testing.llm_td.eval.chart rows.json out.svg
 
+Needs matplotlib, which no requirements file installs; the SVG's path data
+depends on its version.
+
 Each model and effort level is a line through its hedge budgets (0% to 20%);
 the dashed line is the Pareto frontier over every point. A revert counts when
 any of its failures is selected (its PR would have gone red); a failing PR
@@ -18,14 +21,14 @@ from pathlib import Path
 from tools.testing.llm_td.eval.score import summarize
 
 
-MODELS = {"v2_opus55": "Opus 5.5", "v2_sonnet5": "Sonnet 5", "v2_haiku45": "Haiku 4.5"}
+MODELS = {"v3_opus55": "Opus 5.5", "v3_sonnet5": "Sonnet 5", "v3_haiku45": "Haiku 4.5"}
 COLOR = {
-    "v2_opus55_low": "#9ecae1", "v2_opus55_medium": "#3182bd", "v2_opus55_high": "#08306b",
-    "v2_sonnet5_medium": "#74c476", "v2_sonnet5_high": "#006d2c", "v2_haiku45_low": "#fd8d3c",
+    "v3_opus55_low": "#9ecae1", "v3_opus55_medium": "#3182bd", "v3_opus55_high": "#08306b",
+    "v3_sonnet5_medium": "#74c476", "v3_sonnet5_high": "#006d2c", "v3_haiku45_low": "#fd8d3c",
 }  # fmt: skip
 MARKER = {"low": "o", "medium": "s", "high": "^"}
 HEDGES = {"final": 0, "final+td5": 5, "final+td10": 10, "final+td15": 15, "final+td20": 20}  # fmt: skip
-PRODUCTION = ("v2_opus55_medium", "final+td20")
+PRODUCTION = ("v3_opus55_medium", "final+td20")
 
 
 def frontier(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -58,6 +61,8 @@ def main() -> None:
 
     matplotlib.use("svg")
     matplotlib.rcParams["svg.hashsalt"] = "llm_td"
+    # Labels stay text, so they can be diffed against REPORT.md.
+    matplotlib.rcParams["svg.fonttype"] = "none"
     import matplotlib.pyplot as plt
 
     rows = summarize(json.loads(args.rows.read_text()))
@@ -111,7 +116,7 @@ def main() -> None:
     fig.legend(h, l, loc="lower center", ncol=5, fontsize=8, frameon=False)
     fig.tight_layout(rect=(0, 0.13, 1, 1))
     svg = io.StringIO()
-    fig.savefig(svg, format="svg", metadata={"Date": None})
+    fig.savefig(svg, format="svg", metadata={"Date": None, "Creator": None})
     # matplotlib ends path lines with a space, which the SPACES linter rejects.
     lines = svg.getvalue().splitlines()
     args.out.write_text("".join(line.rstrip() + "\n" for line in lines))

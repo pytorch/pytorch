@@ -1,16 +1,19 @@
 """Monthly runner-dollar model of replacing TD with an LLM selection policy.
 
-    python -m tools.testing.llm_td.eval.dollars --data DIR --td-dir DIR/td v2_opus55_medium final+td20 [--overhead 0.2]
+    python -m tools.testing.llm_td.eval.dollars --data DIR v3_opus55_medium final+td20 [--overhead 0.2]
 
-Selection fractions come from the neutral samples (random landed main
-commits), the closest thing to a typical PR push, scored on the samples that
-have both the policy's result and a TD replay. Each workflow's 30-day
-same-repo PR spend (fork PRs never get a selection) is rescaled by the job
-time the policy runs relative to replayed TD's top-25% cut (or to running
-everything, where TD is off), where a job's time is a fixed `overhead` share
-(setup, build download) plus the rest scaling with the share of test time
-run. Inductor workflows only count changes that the ciflow/inductor labeler
-rule would trigger them on. The constants and the queries behind them are in
+The selection fractions are score.score's rows on the neutral samples (random
+landed main commits), the closest thing to a typical PR push, for the policy
+and for TD's replayed top-25% cut on the same samples, so they are the
+Accuracy table's typical-change shares. Each workflow's 30-day PR spend is cut
+to its same-repo share (fork PRs never get a selection) and rescaled by the
+job time the policy runs relative to TD's cut (or to running everything,
+where TD is off), where a job's time is a fixed `overhead` share (setup,
+build download) plus the rest scaling with the share of test time run.
+Inductor workflows count only the samples whose changes the ciflow/inductor
+labeler rule triggers them on, and only the inductor unit-test configs' time.
+The model-call cost is PR_PUSHES_PER_MONTH_K times the mean cost of a call on
+an asked eval sample. The constants and the queries behind them are in
 REPORT.md's Reproducing section.
 """
 
@@ -20,20 +23,13 @@ import argparse
 import json
 import re
 import statistics as st
+import sys
 from pathlib import Path
 
 import yaml
 
-from tools.testing.llm_td.eval import REPO
-from tools.testing.llm_td.eval.score import (
-    ci_jobs,
-    cost_fraction,
-    grep_head,
-    load,
-    policy,
-    runs_td,
-    test_seconds,
-)
+from tools.testing.llm_td.eval import REPO, score
+from tools.testing.llm_td.eval.run_eval import TIMED_OUT
 
 
 # 30-day runner cost of test jobs ($k), the PR share of test hours, the fork-PR
@@ -56,11 +52,14 @@ LABELER = REPO / ".github/labeler.yml"
 
 
 def inductor_globs(labeler: Path) -> re.Pattern[str]:
-    """The ciflow/inductor labeler globs as one regex, with the labeler's
-    minimatch semantics: `*` stays within a path segment, `**` crosses them."""
+    """The ciflow/inductor labeler globs as one regex: `*` and `?` stay within a
+    path segment and `**` crosses them. Other glob syntax ({}, [], !) is
+    rejected rather than matched literally."""
     globs = (yaml.safe_load(labeler.read_text()) or {}).get("ciflow/inductor")
-    if not globs or not all(isinstance(g, str) for g in globs):
+    if not isinstance(globs, list) or not globs or not all(isinstance(g, str) for g in globs):  # fmt: skip
         raise SystemExit(f"{labeler} has no list of ciflow/inductor globs")
+    if bad := [g for g in globs if set(g) & set("{}[]!")]:
+        raise SystemExit(f"{labeler} has ciflow/inductor globs with unsupported syntax: {bad}")  # fmt: skip
     parts = [
         re.escape(g)
         .replace(r"\*\*/", "(?:.*/)?")
@@ -74,53 +73,63 @@ def inductor_globs(labeler: Path) -> re.Pattern[str]:
 
 def fractions(
     data: Path,
-    ids: list[str],
     tag: str,
     pol: str,
+    ids: list[str],
     samples: Path,
     td_dir: Path,
+    stats: str,
     labeler: Path = LABELER,
-) -> dict[str, float]:
-    """Mean (cpu, gpu) share of test time `pol` runs on `ids`, which must all have its inputs, with importers as in score.score."""
-    seconds = test_seconds(data / "test-times.json")
+) -> tuple[dict, dict]:
+    """The mean (cpu, gpu) shares of test time `pol` of `tag` and TD's cut run, from score.score's rows on `ids`.
+
+    The inductor shares ("ind_cpu", "ind_gpu") are over the rows whose change
+    the ciflow/inductor labeler rule matches, of the time of inductor.yml's
+    unit-test configs (inductor-unittest.yml) that TD never runs."""
+    rows = score.score(data, ids, list(dict.fromkeys([tag, "td"])), [pol], True, samples, td_dir, stats)  # fmt: skip
+    seconds = score.test_seconds(data / "test-times.json")
+    fallback = score.fallback_seconds(data / "test-times.json")
     globs = inductor_globs(labeler)
-    # The configs of inductor.yml's unit-test job (inductor-unittest.yml) that TD never runs.
-    unit = {c for _, n, c in ci_jobs()[False] if n.startswith("unit-test / ")}
-    inductor = {c for c in unit if not runs_td(c)}
+    unit = {c for _, n, c in score.ci_jobs()[False] if n.startswith("unit-test / ")}
+    inductor = {c for c in unit if not score.runs_td(c)}
     if not inductor:
         raise SystemExit("no inductor unit-test configs without TD in workflows")
-    gen, ind, ungrepped = [], [], set()
-    for sid in ids:
-        s, r, td = load(data, tag, sid, samples, td_dir)
-        grep = grep_head(s, sid, ungrepped)
-        choice = None if tag != "td" and r is None else policy(pol, s, r, td, seconds, grep)  # fmt: skip
-        if choice is None:
-            raise SystemExit(f"{sid} has no {tag} result or TD replay")
-        cands = set(s["candidates"])
-        gen.append(cost_fraction(choice, cands, seconds, runs_td))
-        if any(globs.fullmatch(f) for f in s["changed_files"]):
-            ind.append(cost_fraction(choice, cands, seconds, inductor.__contains__))
-    if not gen:
-        raise SystemExit(f"no {tag} samples")
-    if not ind:
-        raise SystemExit(f"no {tag} sample matches the ciflow/inductor globs")
-    if ungrepped:
-        print(f"{len(ungrepped)} of {len(ids)} ids without importers: git grep failed at their head")  # fmt: skip
-    return {
-        "cpu": st.mean(x[0] for x in gen), "gpu": st.mean(x[1] for x in gen),
-        "ind_cpu": st.mean(x[0] for x in ind), "ind_gpu": st.mean(x[1] for x in ind),
-        "n": len(gen), "n_ind": len(ind),
-    }  # fmt: skip
+    out = {}
+    for t, p in dict.fromkeys([(tag, pol), ("td", "td25")]):
+        xs = [x for x in rows if (x["tag"], x["policy"]) == (t, p)]
+        if not xs:
+            raise SystemExit(f"no scored {t} {p} rows")
+        ind = []
+        for x in xs:
+            s, r, td = score.load(data, t, x["id"], samples, td_dir)
+            if any(globs.fullmatch(f) for f in s["changed_files"]):
+                grep = score.grep_head(s, x["id"], set())
+                choice = score.policy(p, s, r, td, seconds, grep, fallback)
+                if choice is None:
+                    raise AssertionError(f"score.score scored {x['id']} without {t} {p}'s inputs")  # fmt: skip
+                ind.append(score.cost_fraction(choice, set(s["candidates"]), seconds, inductor.__contains__))  # fmt: skip
+        if not ind:
+            raise SystemExit(f"no scored {t} sample matches the ciflow/inductor globs")
+        out[t] = {
+            "cpu": st.mean(x["cpu"] for x in xs), "gpu": st.mean(x["gpu"] for x in xs),
+            "ind_cpu": st.mean(x[0] for x in ind), "ind_gpu": st.mean(x[1] for x in ind),
+            "n": len(xs), "n_ind": len(ind),
+        }  # fmt: skip
+    return out[tag], out["td"]
 
 
-def mean_call_usd(data: Path, tag: str, ids: list[str]) -> float:
-    """Mean cost of the calls with a recorded cost; timed-out calls have none and are left out."""
-    paths = [p for i in ids if (p := data / "results" / tag / f"{i}.json").exists()]
-    costs = [c for p in paths if (c := json.loads(p.read_text()).get("cost_usd"))]
+def mean_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> float:
+    """Mean recorded cost of `tag`'s calls on the `ids` select_tests asks the model about.
+
+    A call run_eval timed out records only its earlier attempts' cost, so
+    timed-out calls are left out."""
+    asked = [i for i in ids if not score.unasked(json.loads((samples / f"{i}.json").read_text()))]  # fmt: skip
+    results = [json.loads(p.read_text()) for i in asked if (p := data / "results" / tag / f"{i}.json").exists()]  # fmt: skip
+    costs = [r["cost_usd"] for r in results if r["error"] != TIMED_OUT]
     if not costs:
-        raise SystemExit(f"no {tag} results with a cost for the cost ids")
-    if len(costs) < len(paths):
-        print(f"{len(paths) - len(costs)} of {len(paths)} {tag} results have no cost")
+        raise SystemExit(f"no {tag} results that did not time out for the cost ids")
+    if n := len(results) - len(costs):
+        print(f"left out {n} of {len(results)} {tag} calls that timed out", file=sys.stderr)  # fmt: skip
     return st.mean(costs)
 
 
@@ -128,25 +137,18 @@ def model(
     data: Path,
     tag: str,
     pol: str,
+    *,
     overhead: float,
     ids: list[str],
     cost_ids: list[str],
     samples: Path,
     td_dir: Path,
+    stats: str,
     labeler: Path = LABELER,
     workflows: list[tuple[str, str, float, float, float, bool]] = WORKFLOWS,
 ) -> dict:
-    # New and old are averaged over the same samples.
-    both = [
-        i
-        for i in ids
-        if (td_dir / f"{i}.json").exists()
-        and (tag == "td" or (data / "results" / tag / f"{i}.json").exists())
-    ]
-    if missing := len(ids) - len(both):
-        print(f"{missing} of {len(ids)} ids lack a {tag} result or TD replay")
-    f = fractions(data, both, tag, pol, samples, td_dir, labeler)
-    ftd = fractions(data, both, "td", "td25", samples, td_dir, labeler)
+    """Per-workflow monthly savings ($k) of `pol` of `tag` over TD, with the fractions on `ids` and the model-call cost averaged over `cost_ids`."""
+    f, ftd = fractions(data, tag, pol, ids, samples, td_dir, stats, labeler)
     total = {"cpu": 0.0, "gpu": 0.0}
     stack = 0.0
     rows = []
@@ -158,55 +160,42 @@ def model(
         hw = "gpu" if "gpu" in k else "cpu"
         total[hw] += save
         stack += save if has_td else 0.0
-        rows.append(
-            {
-                "workflow": wf,
-                "hw": hw,
-                "pr_k": pr,
-                "fraction": f[k],
-                "old_rel": old_rel,
-                "new_rel": new_rel,
-                "save_k": save,
-            }
-        )
-    calls = 0.0 if tag == "td" else mean_call_usd(data, tag, cost_ids)
+        rows.append({"workflow": wf, "hw": hw, "pr_k": pr, "fraction": f[k], "old_rel": old_rel, "new_rel": new_rel, "save_k": save})  # fmt: skip
+    calls = 0.0 if tag == "td" else mean_call_usd(data, tag, cost_ids, samples)
     llm_k = PR_PUSHES_PER_MONTH_K * calls
     return {"tag": tag, "policy": pol, "overhead": overhead, "fractions": f, "td_fractions": ftd, "rows": rows,
-            "total_k_per_month": total, "stack_k_per_month": stack, "llm_k_per_month": llm_k}  # fmt: skip
+            "total_k_per_month": total, "stack_k_per_month": stack, "usd_per_call": calls, "llm_k_per_month": llm_k}  # fmt: skip
 
 
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--data", type=Path, required=True)
-    p.add_argument(
-        "--ids",
-        type=Path,
-        help="samples the fractions come from; default: the report's neutral samples",
-    )
-    p.add_argument(
-        "--cost-ids",
-        type=Path,
-        help="samples $/call is averaged over; default: the report's eval samples",
-    )
-    p.add_argument("--samples-dir", type=Path)
-    p.add_argument("--td-dir", type=Path)
-    p.add_argument("--labeler", type=Path, default=LABELER)
-    p.add_argument("--overhead", type=float, default=0.2)
-    p.add_argument("--json", type=Path, help="also write the per-workflow rows here")
-    p.add_argument("tag")
-    p.add_argument("policy")
+    p.add_argument("--data", type=Path, required=True, help="run_eval.py's --data: test-times.json and results/")  # fmt: skip
+    p.add_argument("--ids", type=Path, help="samples the fractions come from; default: the report's neutral samples")  # fmt: skip
+    p.add_argument("--cost-ids", type=Path, help="samples $/call is averaged over; default: the report's eval samples")  # fmt: skip
+    p.add_argument("--samples-dir", type=Path, help="default: DATA/samples")
+    p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
+    p.add_argument("--stats", type=Path, default=REPO / score.ADDITIONAL_CI_FILES_FOLDER, help="td_replay.py's --stats")  # fmt: skip
+    p.add_argument("--labeler", type=Path, default=LABELER, help="the labeler config with the ciflow/inductor globs")  # fmt: skip
+    p.add_argument("--overhead", type=float, default=0.2, help="share of a test job's time that does not scale with the tests run")  # fmt: skip
+    p.add_argument("--json", type=Path, help="also write the whole result (fractions, per-workflow rows, totals) here")  # fmt: skip
+    p.add_argument("tag", help="results/TAG, or td for TD's own cut")
+    p.add_argument("policy", help="a score.py policy, td25 with tag td")
     args = p.parse_args()
+    if missing := [a for a in score.STATS_ARTIFACTS if not (args.stats / a).exists()]:
+        p.error(f"{args.stats} lacks {missing}, which td_replay.py read")
     ids = (args.ids or IDS / "neutral.txt").read_text().split()
     cost_ids = (args.cost_ids or IDS / "eval.txt").read_text().split()
-    d = model(args.data, args.tag, args.policy, args.overhead, ids, cost_ids,
-              args.samples_dir or args.data / "samples", args.td_dir or args.data / "td", args.labeler)  # fmt: skip
+    d = model(args.data, args.tag, args.policy, overhead=args.overhead, ids=ids, cost_ids=cost_ids,
+              samples=args.samples_dir or args.data / "samples", td_dir=args.td_dir or args.data / "td",
+              stats=score.replay_stats(args.stats), labeler=args.labeler)  # fmt: skip
     f, t = d["fractions"], d["total_k_per_month"]
     print(
         f"{d['tag']} {d['policy']} overhead={d['overhead']} n={f['n']} n_ind={f['n_ind']} "
         f"run cpu={f['cpu']:.3f} gpu={f['gpu']:.3f} ind_cpu={f['ind_cpu']:.3f} ind_gpu={f['ind_gpu']:.3f} "
-        f"save cpu=${t['cpu']:.0f}k gpu=${t['gpu']:.0f}k (this stack ${d['stack_k_per_month']:.0f}k) llm=${d['llm_k_per_month']:.1f}k/month"
+        f"save cpu=${t['cpu']:.0f}k gpu=${t['gpu']:.0f}k (this stack ${d['stack_k_per_month']:.0f}k) "
+        f"$/call={d['usd_per_call']:.3f} llm=${d['llm_k_per_month']:.1f}k/month"
     )
     if args.json:
         args.json.write_text(json.dumps(d, indent=1))
