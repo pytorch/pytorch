@@ -45,6 +45,9 @@ class WhisperBenchmark(Benchmark):
     # Roughly the token count of a transcript of DURATION seconds of speech.
     LABEL_LENGTH = 128
     DECODE_LENGTH = 128
+    # Both registered checkpoints have 448 decoder positions. Reserve the final
+    # generation slot and the decoder start token when selecting sweep models.
+    MAX_DECODE_LENGTH = 446
 
     @staticmethod
     def get_model_and_inputs(
@@ -355,7 +358,9 @@ class TextGenerationPrefillModel(torch.nn.Module):
                     config.linear_key_head_dim,
                     config.linear_value_head_dim,
                 )
-                recurrent_states = conv_states.new_empty(recurrent_shape)
+                recurrent_states = conv_states.new_empty(
+                    recurrent_shape, dtype=torch.float32
+                )
                 for layer, is_linear in zip(self.cache.layers, self.cache.is_linear):
                     if is_linear:
                         layer.lazy_initialization(

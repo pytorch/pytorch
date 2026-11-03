@@ -147,8 +147,11 @@ allocates static self- and cross-attention caches. Each request runs the encoder
 and prefills the decoder start token eagerly outside the timed region, which
 fills the cross-attention cache, then times `--decode-length` single-token
 compiled decoder forwards. The self-attention cache holds 447 positions, as in
-`generate` with a static cache, so `--decode-length` is at most 446. Whisper rejects `--prompt-length` with `--only` and ignores it in runs over
-several decode models. Encode rows report `eager_latency` but no throughput.
+`generate` with a static cache, so `--decode-length` is at most 446. Explicit
+Whisper requests reject `--prompt-length` and decode lengths above that limit
+before loading weights. Decode sweeps exclude Whisper when either option is
+incompatible, keeping the selected workloads valid for every child process.
+Encode rows report `eager_latency` but no throughput.
 Default output and profiler trace names get an `_encode` suffix for encode.
 
 #### Tensor-parallel prefill and decode
@@ -194,7 +197,8 @@ torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \
 Each worker uses `LOCAL_RANK` for its GPU and torchrun's rendezvous settings.
 TP requires `--bfloat16`, `--float16`, or `--float32`, which is passed to
 `from_pretrained`, and `N` must divide the model's attention and KV
-heads (Qwen3.5-0.8B has two KV heads, so it supports at most `--tp-size=2`).
+heads (Qwen2.5-0.5B and Qwen3.5-0.8B have two KV heads, so they support at most
+`--tp-size=2`).
 Ranks broadcast the request tokens from rank 0 and allocate their own
 TP-local static caches. Eager, compiled, and accuracy-reference passes share the
 loaded shards rather than deep-copying the model; each pass gets a fresh cache.
@@ -227,16 +231,20 @@ accelerator, `-dcpu` supports TP diagnostics with `--backend=eager` or
 all-gathers can corrupt memory; this was reproduced without a model or
 compilation and is not specific to Qwen3.5.
 
-The periodic `inductor_huggingface_tp` CI job checks accuracy and measures
-performance for both phases with `--tp-size=2` and full-graph compilation on a
-multi-GPU A10G runner. Accuracy checks require exactly one result matching the
-baseline for each supported model. Update both phase baselines with
-`python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <commit-sha>`.
-Its performance CSV names end in `_tp2_<phase>`.
+The periodic `inductor_huggingface_tp` CI job checks accuracy and runs the TP
+tests. A separate `inductor_huggingface_tp_perf` job measures performance, so
+accuracy or test failures do not hide successful performance results. Both use
+`--tp-size=2` and full-graph compilation on multi-GPU A10G runners.
+Accuracy checks require exactly one result matching the baseline for each
+supported model. Update both phase baselines with
+`python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <commit-sha>`,
+using a SHA with completed `inductor-periodic` accuracy artifacts.
+Performance CSV names end in `_tp2_<phase>_performance.csv`.
 Use the numeric periodic run ID with `perf_cli.py summary` or `repro`; branch
 discovery and `launch` still select the nightly workflows. Automatic baseline
-selection requires a successful TP job on the same runner hardware. Comparisons
-pair the same hardware, phase, TP degree, model, batch size, prompt length, and
+selection requires a successful TP performance job on the same runner hardware;
+unrelated failures elsewhere in the periodic workflow do not exclude that run.
+Comparisons pair the same hardware, phase, TP degree, model, batch size, prompt length, and
 decode length. Reproduction commands preserve those workload dimensions.
 
 As an example, the commands to run first line of the dashboard (performance only) would be:

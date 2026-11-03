@@ -457,14 +457,6 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--prompt-length must be positive, got {args.prompt_length}"
             )
-        max_decode_length = TextGenerationBenchmark.OUTPUT_LENGTH - 1
-        if args.decode_length is not None and not (
-            1 <= args.decode_length <= max_decode_length
-        ):
-            raise ValueError(
-                f"--decode-length must be between 1 and {max_decode_length}, "
-                f"got {args.decode_length}"
-            )
         if args.batch_size is not None and args.batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {args.batch_size}")
         if not args.inference:
@@ -482,6 +474,17 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--prompt-length does not apply to {args.only}, whose prompt is audio"
             )
+        if args.decode_length is not None:
+            max_decode_length = (
+                self._download_config(args.only).max_target_positions - 2
+                if whisper
+                else TextGenerationBenchmark.OUTPUT_LENGTH - 1
+            )
+            if not 1 <= args.decode_length <= max_decode_length:
+                raise ValueError(
+                    f"--decode-length must be between 1 and {max_decode_length}, "
+                    f"got {args.decode_length}"
+                )
 
         unsupported = []
         for flag in (
@@ -797,6 +800,18 @@ class HuggingfaceRunner(BenchmarkRunner):
             model_names &= INFERENCE_MODE_MODELS[args.hf_inference_mode]
         if args.tp_size > 1:
             model_names &= TP_MODELS
+        if args.hf_inference_mode == "decode" and (
+            args.prompt_length is not None
+            or (
+                args.decode_length is not None
+                and args.decode_length > WhisperBenchmark.MAX_DECODE_LENGTH
+            )
+        ):
+            model_names -= {
+                name
+                for name, benchmark in HF_LLM_MODELS.items()
+                if benchmark is WhisperBenchmark
+            }
         model_names = sorted(model_names)
 
         start, end = self.get_benchmark_indices(len(model_names))

@@ -404,6 +404,7 @@ def output_json(filename, headers, row):
     model_name = current_name
     is_tp = extra_info.get("tp_size", 1) > 1
     if is_tp:
+        extra_info["world_size"] = extra_info["tp_size"]
         extra_info["device"] = mapping_headers.get("dev", current_device)
         extra_info["batch_size"] = mapping_headers.get("batch_size", current_batch_size)
         extra_info.update(
@@ -414,6 +415,7 @@ def output_json(filename, headers, row):
             }
         )
         model_name = mapping_headers.get("name", current_name)
+        extra_info["only"] = model_name
     else:
         extra_info.pop("tp_size", None)
     with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:
@@ -4278,9 +4280,11 @@ def run_tp_worker_group(cmd, tp_size, timeout, env):
     """Like subprocess.check_call(cmd), but as one torchrun worker per TP rank."""
     cmd = [
         sys.executable,
+        "-P",
         "-m",
         "torch.distributed.run",
         "--standalone",
+        "--shutdown-timeout=30",
         f"--nproc-per-node={tp_size}",
         *cmd[1:],
     ]
@@ -4387,8 +4391,13 @@ def main(runner, original_dir=None, args=None):
             torch._dynamo.config.caching_precompile = True
 
         args.init_distributed = args.only and args.multiprocess
-        if args.tp_size > 1 and is_torchrun_worker():
-            tensor_parallel_entry(runner, original_dir, args)
+        if args.tp_size > 1:
+            if is_torchrun_worker():
+                tensor_parallel_entry(runner, original_dir, args)
+            else:
+                args.init_distributed = False
+                args.world_size = 1
+                process_entry(0, runner, original_dir, args)
         elif args.init_distributed:
             # NB: Do NOT query device count before CUDA initialization; we're
             # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
