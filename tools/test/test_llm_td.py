@@ -148,17 +148,31 @@ class TestSelection(unittest.TestCase):
             "test_ops.py": 'load("cpp_extensions/my_ext.cpp")\n',
             "test_nn.py": "class TestNN(TestCase):\n",
             "dynamo/test_misc.py": "from test_nn import TestNN\n",
-        }
-        candidates = CANDIDATES | {"test_public_bindings"}
+            "test_tensorboard.py": 'class TestTensorBoardSummary(TestCase):\n    path = "TestTensorBoard." + name\n',
+            "distributed/launcher/test_run.py": 'path("bin/test_script.py")\n',
+            "distributed/launcher/bin/test_script.py": "",
+            "distributed/launcher/bin/unused.py": "",
+        }  # fmt: skip
+        candidates = CANDIDATES | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
         for changed, expected in [
             ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
             ("test/cpp_extensions/my_ext.cpp", {"test_ops"}),
-            ("test/cpp_extensions/ext.cpp", set()),
             ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
+            # test_tensorboard.py builds this path for TestTensorBoardSummary.
+            ("test/expect/TestTensorBoard.test_x.expect", {"test_tensorboard"}),
+            # test_run.py runs this file by its path.
+            ("test/distributed/launcher/bin/test_script.py", {"distributed/launcher/test_run"}),
             ("test/cpp/api/any.cpp", set()),
-        ]:
+            ("test/README.md", set()),
+            ("test/cpython/v3_13/test_set.diff", set()),
+        ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
+        for changed in ("test/cpp_extensions/ext.cpp", "test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py"):  # fmt: skip
+            sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
+            self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+        many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
+        self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -225,16 +239,30 @@ class TestSelection(unittest.TestCase):
     def test_load_malformed_file(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "sel.json"
-            self.assertIsNone(Selection.load(p))
-            valid = Selection().to_json()
-            p.write_text(json.dumps(valid))
-            self.assertEqual(Selection.load(p), Selection())
-            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}]  # fmt: skip
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                self.assertIsNone(Selection.load(p))
+            self.assertEqual(stderr.getvalue(), "")
+            for sel in (Selection(candidates={"test_nn"}), Selection(run_all=True)):
+                p.write_text(json.dumps(sel.to_json()))
+                self.assertEqual(Selection.load(p), sel)
+            valid = Selection(candidates={"test_nn"}).to_json()
+            # Without candidates, a selection would skip every file it does not name.
+            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}]  # fmt: skip
             bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce")]  # fmt: skip
-            for text in ("{", '{"sweeps": []}', "[]", *map(json.dumps, bad)):
+            for text in (
+                "{",
+                '{"sweeps": []}',
+                "[]",
+                "[" * 100_000,
+                *map(json.dumps, bad),
+            ):
                 p.write_text(text)
-                self.assertIsNone(Selection.load(p), text)
-            sel = Selection({"test_nn"}, set(), False, candidates={"test_nn"})
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr):
+                    self.assertIsNone(Selection.load(p), text[:100])
+                self.assertTrue(stderr.getvalue().startswith("::warning::"), text[:100])
+            sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
 
@@ -555,7 +583,9 @@ class TestMain(unittest.TestCase):
             git("config", "user.name", "a")
             (Path(repo) / "test" / "nn").mkdir(parents=True)
             (Path(repo) / "test" / "test_foo.py").write_text("x = 1\n" * 50)
-            (Path(repo) / "test" / "test_bar.py").write_text("import test_foo\n")
+            (Path(repo) / "test" / "test_bar.py").write_text(
+                'import test_foo\nrun("test_ select nothing.py")\n'
+            )
             git("add", "-A")
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
