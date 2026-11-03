@@ -927,6 +927,44 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
 
+    @parametrize(
+        "length_case", ["normal", "value_error", "negative", "type_error", "shrinks"]
+    )
+    def test_join_reversed_sequence_length(self, length_case):
+        class Sequence:
+            def __init__(self):
+                self.calls = 0
+                self.log = []
+
+            def __len__(self):
+                self.calls += 1
+                self.log.append("len")
+                if self.calls > 1:
+                    if length_case == "value_error":
+                        raise ValueError("sequence length failed")
+                    if length_case == "type_error":
+                        raise TypeError("sequence length unavailable")
+                    if length_case == "negative":
+                        return -1  # noqa: PLE0303
+                    if length_case == "shrinks":
+                        return 0
+                return 2
+
+            def __getitem__(self, index):
+                self.log.append(index)
+                return (b"a", b"b")[index]
+
+        def f(x):
+            seq = Sequence()
+            try:
+                result = bytearray(b",").join(reversed(seq))
+            except ValueError as exc:
+                result = str(exc)
+            return result, seq.log, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
     @parametrize("metaclass_kind", ["hides", "descriptor"])
     def test_join_sequence_length_ignores_metaclass_lookup(self, metaclass_kind):
         class Meta(type):
@@ -964,6 +1002,104 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.Unsupported, "Custom metaclass with __getattribute__"
         ):
             torch.compile(f, backend="eager", fullgraph=True)(Sequence(), torch.ones(1))
+
+    def test_reversed_sequence_iterator_length_hint(self):
+        class Sequence:
+            def __init__(self):
+                self.items = [b"a", b"b", b"c"]
+                self.calls = 0
+
+            def __len__(self):
+                self.calls += 1
+                return len(self.items)
+
+            def __getitem__(self, index):
+                return self.items[index]
+
+        def f(x):
+            seq = Sequence()
+            it = reversed(seq)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            seq.items.append(b"d")
+            hints.append(operator.length_hint(it))
+            seq.items[1:] = []
+            hints.append(operator.length_hint(it))
+            seq.items.extend([b"b", b"c"])
+            hints.append(operator.length_hint(it))
+            consumed = next(it), next(it)
+            # Before 3.14 the final yield still permits another length query.
+            hints.append(operator.length_hint(it))
+            next(it, None)
+            hints.append(operator.length_hint(it))
+            return hints, consumed, seq.calls, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize("size", [0, 1])
+    def test_reversed_sequence_iterator_length_hint_at_end(self, size):
+        class Sequence:
+            def __init__(self):
+                self.fail = False
+                self.calls = 0
+
+            def __len__(self):
+                self.calls += 1
+                if self.fail:
+                    raise ValueError("length queried")
+                return size
+
+            def __getitem__(self, index):
+                return b"a"
+
+        def f(x):
+            seq = Sequence()
+            it = reversed(seq)
+            if size:
+                next(it)
+            seq.fail = True
+            try:
+                hint = operator.length_hint(it)
+            except ValueError as exc:
+                hint = str(exc)
+            return hint, seq.calls, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize("error", [IndexError, StopIteration, ValueError])
+    def test_reversed_sequence_iterator_length_hint_after_error(self, error):
+        class Sequence:
+            def __init__(self):
+                self.calls = 0
+                self.failed = False
+
+            def __len__(self):
+                self.calls += 1
+                return 2
+
+            def __getitem__(self, index):
+                if not self.failed:
+                    self.failed = True
+                    raise error("getitem failed")
+                return b"a"
+
+        def f(x):
+            seq = Sequence()
+            it = reversed(seq)
+            before = operator.length_hint(it)
+            try:
+                next(it, None)
+            except error:
+                pass
+            after = operator.length_hint(it)
+            result = bytearray(b",").join(it)
+            return before, after, seq.calls, result, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
 
     def test_sequence_iterator_length_hint(self):
         class Sequence:

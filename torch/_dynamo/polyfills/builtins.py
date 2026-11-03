@@ -162,14 +162,25 @@ class _ReversedSequenceIterator:
     def __iter__(self) -> _ReversedSequenceIterator:
         return self
 
+    def __length_hint__(self) -> int:
+        # Python 3.14 also skips the length query after the final yield.
+        if self.seq is None or (sys.version_info >= (3, 14) and self.index < 0):
+            return 0
+        length = len(self.seq)
+        return self.index + 1 if self.index < length else 0
+
     def __next__(self) -> object:
         if self.index < 0:
+            self.seq = None
             raise StopIteration
         try:
             result = self.seq[self.index]
-        except (IndexError, StopIteration):
+        except BaseException as exc:
             self.index = -1
-            raise StopIteration from None
+            self.seq = None
+            if isinstance(exc, (IndexError, StopIteration)):
+                raise StopIteration from None
+            raise
         self.index -= 1
         return result
 

@@ -2154,7 +2154,11 @@ class ByteArrayVariable(VariableTracker):
 
     @staticmethod
     def create(data: bytearray) -> "ByteArrayVariable":
-        """Wrap a bytearray freshly allocated by the operation being traced."""
+        """Wrap a freshly allocated bytearray.
+
+        New bytearrays must use this factory, not VariableTracker.build, which
+        sends raw bytearrays through SourcelessBuilder with unknown provenance.
+        """
         return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
