@@ -279,7 +279,7 @@ def _get_flydsl_flex_attention_forward_config(
             V.graph.sizevars.guard_int(item)
             for item in infer_dense_strides(
                 [b, hq, sq, v_dim],
-                query.get_stride_hint(),
+                fixed_layout_snapshot(query).stride,
             )
         )
     except (AttributeError, TypeError, ValueError):
@@ -557,7 +557,7 @@ def create_flydsl_flex_attention_kernel(
         query.get_device(),
         query.get_dtype(),
         out_size,
-        stride=infer_dense_strides(out_size, query.get_stride_hint()),
+        stride=infer_dense_strides(out_size, fixed_layout_snapshot(query).stride),
     )
     logsumexp = empty_strided(
         [batch, heads, seq_q], None, dtype=torch.float32, device=query.get_device()
