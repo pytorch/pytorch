@@ -219,6 +219,17 @@ static void _syncCurrentWithCarveoutStream(hipStream_t stream, bool presync) {
 
 namespace at::cuda::blas {
 
+bool rowwise_scaled_mm_uses_cublaslt(c10::DeviceIndex device_index, bool scalar_scales) {
+#ifdef USE_ROCM
+  return false;
+#else
+  const auto major = at::cuda::getDeviceProperties(device_index)->major;
+  // Blackwell's rowwise cuBLASLt path accepts scalar scales, not 2D factors.
+  return major >= 9 && CUBLAS_VERSION >= 120900 && cublasLtGetVersion() >= 120900 &&
+      (major < 10 || scalar_scales);
+#endif
+}
+
 using detail::CuBlasLtMatmulDescriptor;
 using detail::CuBlasLtMatrixLayout;
 using detail::CuBlasLtMatmulPreference;
@@ -2025,8 +2036,7 @@ void scaled_gemm(
   TORCH_INTERNAL_ASSERT(c_ptr != nullptr || beta_val == 0.0f);
   TORCH_INTERNAL_ASSERT(c_ptr == nullptr || bias_ptr == nullptr);
 #ifdef USE_ROCM
-  // Cdesc is unused on ROCm (c_ptr is never set, beta is 0), but hipblaslt
-  // needs it set to something reasonable.
+  // hipBLASLt requires Cdesc to use the output dtype even when beta is zero.
   const auto c_desc_dtype = result_dtype;
 #else
   // Without a C operand, Cdesc describes the bias, matching the pre-existing
@@ -2123,8 +2133,7 @@ void scaled_gemm(
         detail::cublasOpFromChar(transb),
         ScalarTypeToCudaDataType(mat1_dtype),
         ScalarTypeToCudaDataType(mat2_dtype),
-        // C is nullptr and beta=0, so set to something reasonable. See above.
-        //ScalarTypeToCudaDataType(bias_dtype),
+        // Match Cdesc's output dtype for residual and bias epilogues.
         ScalarTypeToCudaDataType(result_dtype),
         ScalarTypeToCudaDataType(result_dtype),
         CUBLAS_COMPUTE_32F,
