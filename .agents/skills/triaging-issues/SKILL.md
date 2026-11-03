@@ -59,6 +59,7 @@ The apply step enforces it:
 - `labels` are only added; existing labels are never removed. List only labels from `labels.json`.
 - `templates` are `templates.json` keys whose comments are posted verbatim; free-form comments are not possible. A template the bot already posted on the issue is not posted again.
 - `close_question` (posts `redirect_to_forum`) and `close_expected_behavior` (posts `numerical_accuracy`) close the issue. Umbrella closure requires the catalog policy in Step 3.5.
+- Optional `possible_duplicate` names one ordinary same-repository issue. Use only with `label` or `triage_review`, never with `umbrella` or a close decision. It posts a fixed suggestion and keeps the source open.
 - Optional `umbrella` names one catalog issue with `match: "covered"` or `"uncertain"`. The catalog determines link or close; the model supplies no action, URL, or comment. References are posted only on the source issue.
 - `bot-triaged` is added automatically; do not list it.
 
@@ -106,6 +107,10 @@ of triage. `search_issues` discovers existing reports; `umbrellas.json` defines 
 umbrella policies. Choose queries and the investigation approach to suit the report.
 Read the candidate's body and relevant comments before claiming a duplicate or umbrella
 match; titles, shared operators, and symptoms alone are insufficient.
+
+For an ordinary possible duplicate, explain the shared underlying problem in `reasoning`.
+Do not use `possible_duplicate` for a catalog umbrella or a suspected post-fix regression.
+The reporter decides whether to consolidate; the bot does not close an ordinary duplicate.
 
 ### 1) Question vs Bug/Feature
 
@@ -350,7 +355,7 @@ information/reproduction. Other decisions do not receive automatic completion.
 - Assign issues to users
 - Add `high priority` directly without human confirmation
 - Add module labels when redirecting to oncall
-- Add comments to bug reports or feature requests, except an info/reproduction request or the fixed approved umbrella reference
+- Add comments to bug reports or feature requests, except an info/reproduction request, a fixed possible-duplicate suggestion (Step 0.5), or the fixed approved umbrella reference
 
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
