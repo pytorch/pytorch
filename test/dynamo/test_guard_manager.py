@@ -1296,6 +1296,9 @@ user_stack=None)
     def test_metaclass_dict_hook_not_called(self):
         self._check_metaclass_hook_not_called("__dict__")
 
+    def test_metaclass_mro_hook_not_called(self):
+        self._check_metaclass_hook_not_called("__mro__")
+
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
