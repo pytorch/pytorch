@@ -63,7 +63,9 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
+    freeze_rng_state,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
@@ -1644,20 +1646,48 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.add(dtype)
 
+        claimed_forward = set(op.supported_dtypes(device_type))
+        claimed_backward = set(op.supported_backward_dtypes(device_type))
+
+        # Only dtypes that work on all or none of the samples can fail the checks
+        # below, so further samples cannot change the pass/fail verdict once a
+        # claimed dtype has worked or an unclaimed dtype has failed. Diagnostics
+        # about partial support only describe the samples visited before stopping.
+        def is_settled(dtype):
+            fwd = supported_dtypes if dtype in claimed_forward else unsupported_dtypes
+            if dtype not in allowed_backward_dtypes:
+                return dtype in fwd
+            bwd = (
+                supported_backward_dtypes
+                if dtype in claimed_backward
+                else unsupported_backward_dtypes
+            )
+            return dtype in fwd and dtype in bwd
+
         for dtype in all_types_and_complex_and(
             *((torch.half, torch.bfloat16, torch.bool) + include_complex32)
         ):
-            # tries to acquire samples - failure indicates lack of support
             requires_grad = dtype in allowed_backward_dtypes
             try:
-                samples = tuple(
+                samples = iter(
                     op.sample_inputs(device, dtype, requires_grad=requires_grad)
                 )
             except Exception as e:
                 unsupported(dtype, e)
                 continue
 
-            for sample in samples:
+            # Lazy pulls interleave sample generation and operator execution.
+            # TrackedInputIter reseeds before each pull, so random forward/backward
+            # stimuli can differ from the eager sweep, even with a single sample.
+            while not is_settled(dtype):
+                try:
+                    sample = next(samples)
+                except StopIteration:
+                    break
+                except Exception as e:
+                    unsupported(dtype, e)
+                    break
+
                 # tries to call operator with the sample - failure indicates
                 #   lack of support
                 try:
@@ -1670,8 +1700,12 @@ class TestCommon(TestCase):
                     unsupported(dtype, e)
                     continue
 
+                if dtype not in allowed_backward_dtypes:
+                    continue
+
                 # Checks for backward support in the same dtype, if the input has
-                # one or more tensors requiring grad
+                # one or more tensors requiring grad. Integer and boolean dtypes
+                # do not participate, even if a sample has differentiable arguments.
                 def _tensor_requires_grad(x):
                     if isinstance(x, dict):
                         for v in x.values():
@@ -1730,28 +1764,26 @@ class TestCommon(TestCase):
         )
         unsupported_backward = unsupported_backward_dtypes - supported_backward_dtypes
 
-        device_type = torch.device(device).type
-
-        claimed_forward = set(op.supported_dtypes(device_type))
         supported_but_unclaimed_forward = supported_forward - claimed_forward
         claimed_but_unsupported_forward = claimed_forward & unsupported_forward
 
-        claimed_backward = set(op.supported_backward_dtypes(device_type))
         supported_but_unclaimed_backward = supported_backward - claimed_backward
         claimed_but_unsupported_backward = claimed_backward & unsupported_backward
 
-        # Partially supporting a dtype is not an error, but we print a warning
+        # Partially supporting a dtype is not an error. Early exit makes this
+        # diagnostic best-effort: it only lists mixed outcomes already observed,
+        # not every dtype that would be partial over the full sample sequence.
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = f"Some dtypes for {op.name} on device type {device_type} are only partially supported!\n"
+            msg = f"Observed partial dtype support for {op.name} on device type {device_type} (non-exhaustive):\n"
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + f"The following dtypes only worked on some samples during forward: {partially_supported_forward}.\n"
+                    + f"The following dtypes only worked on some visited samples during forward: {partially_supported_forward}.\n"
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + f"The following dtypes only worked on some samples during backward: {partially_supported_backward}.\n"
+                    + f"The following dtypes only worked on some visited samples during backward: {partially_supported_backward}.\n"
                 )
             print(msg)
 
@@ -3280,6 +3312,147 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
+_check_dtypes = inspect.unwrap(TestCommon.test_dtypes)
+
+
+class TestDtypeChecks(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("dtype", (torch.int64, torch.bool))
+    def test_integral_samples_with_differentiable_args(self, dtype):
+        visited = []
+        process_output = unittest.mock.Mock(side_effect=lambda x: x)
+
+        def samples(op, device, sample_dtype, requires_grad, **kwargs):
+            if sample_dtype != dtype:
+                raise RuntimeError("unsupported dtype")
+            self.assertFalse(requires_grad)
+            for differentiable in (True, False):
+                visited.append(differentiable)
+                yield opinfo.core.SampleInput(
+                    torch.ones((), dtype=dtype),
+                    args=(torch.ones((), requires_grad=True), differentiable),
+                    output_process_fn_grad=process_output,
+                )
+
+        op = opinfo.core.OpInfo(
+            "dtype_check",
+            op=lambda x, arg, differentiable: x
+            * (arg if differentiable else arg.detach()),
+            dtypes=integral_types_and(torch.bool),
+            sample_inputs_func=samples,
+        )
+        with unittest.mock.patch.object(op, "supported_dtypes", return_value={dtype}):
+            _check_dtypes(self, "cpu", op)
+        self.assertEqual(visited, [True])
+        process_output.assert_not_called()
+
+    @parametrize("dtype", (torch.float32, torch.complex64))
+    @parametrize("claimed_backward", (True, False))
+    @parametrize("first_works", (True, False))
+    def test_backward_settlement_uses_claimed_support(
+        self, dtype, claimed_backward, first_works
+    ):
+        visited = []
+
+        def samples(op, device, sample_dtype, requires_grad, **kwargs):
+            if sample_dtype != dtype:
+                raise RuntimeError("unsupported dtype")
+            for works in (first_works, not first_works, first_works):
+                visited.append(works)
+                yield opinfo.core.SampleInput(
+                    torch.ones((), dtype=dtype, requires_grad=requires_grad),
+                    args=(works,),
+                )
+
+        op = opinfo.core.OpInfo(
+            "dtype_check",
+            op=lambda x, works: x.clone() if works else x.detach(),
+            dtypes=floating_and_complex_types_and(),
+            sample_inputs_func=samples,
+        )
+        backward_dtypes = {dtype} if claimed_backward else set()
+        with (
+            unittest.mock.patch.object(op, "supported_dtypes", return_value={dtype}),
+            unittest.mock.patch.object(
+                op, "supported_backward_dtypes", return_value=backward_dtypes
+            ),
+        ):
+            _check_dtypes(self, "cpu", op)
+        expected = (
+            [first_works]
+            if first_works == claimed_backward
+            else [first_works, not first_works]
+        )
+        self.assertEqual(visited, expected)
+
+    def test_lazy_execution_uses_post_generation_rng(self):
+        sample_states = []
+        forward_states = []
+        gradients = []
+
+        def samples(op, device, dtype, requires_grad, **kwargs):
+            if dtype != torch.float32:
+                raise RuntimeError("unsupported dtype")
+            x = torch.rand(4, requires_grad=requires_grad)
+            x.register_hook(lambda grad: gradients.append(grad.clone()))
+            sample_states.append(torch.get_rng_state())
+            yield opinfo.core.SampleInput(x)
+
+        def clone(x):
+            forward_states.append(torch.get_rng_state())
+            return x.clone()
+
+        op = opinfo.core.OpInfo(
+            "dtype_check",
+            op=clone,
+            dtypes=floating_and_complex_types_and(),
+            sample_inputs_func=samples,
+        )
+        with (
+            unittest.mock.patch.object(
+                op, "supported_dtypes", return_value={torch.float32}
+            ),
+            unittest.mock.patch.object(
+                op, "supported_backward_dtypes", return_value={torch.float32}
+            ),
+        ):
+            _check_dtypes(self, "cpu", op)
+        self.assertEqual(len(sample_states), 1)
+        self.assertEqual(forward_states, sample_states)
+        with freeze_rng_state():
+            torch.set_rng_state(sample_states[0])
+            expected_grad = torch.randn(4)
+        self.assertEqual(gradients, [expected_grad])
+
+    @parametrize("tensor_output", (True, False))
+    def test_no_backward_evidence_keeps_full_sweep(self, tensor_output):
+        visited = []
+
+        def samples(op, device, dtype, requires_grad, **kwargs):
+            if dtype != torch.float32:
+                raise RuntimeError("unsupported dtype")
+            for i in range(3):
+                visited.append(i)
+                yield opinfo.core.SampleInput(
+                    torch.ones((), requires_grad=not tensor_output)
+                )
+
+        op = opinfo.core.OpInfo(
+            "dtype_check",
+            op=lambda x: x if tensor_output else {},
+            dtypes=floating_and_complex_types_and(),
+            sample_inputs_func=samples,
+            supports_autograd=False,
+        )
+        with unittest.mock.patch.object(
+            op, "supported_dtypes", return_value={torch.float32}
+        ):
+            _check_dtypes(self, "cpu", op)
+        self.assertEqual(visited, [0, 1, 2])
+
+
+instantiate_parametrized_tests(TestDtypeChecks)
 instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
