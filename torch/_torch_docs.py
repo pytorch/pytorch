@@ -6707,8 +6707,7 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
     .. math::
         \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
 
-If :attr:`dim` is ``None`` (the default), the reduction is performed
-over all dimensions, returning a scalar result.
+Unlike NumPy, an empty :attr:`dim` (``dim=()``) reduces over all dimensions.
 
 {keepdim_details}
 
@@ -6726,7 +6725,7 @@ Example::
     >>> torch.logsumexp(a, 1)
     tensor([1.4907, 1.0593, 1.5696])
     >>> torch.logsumexp(a)
-    tensor(2.1762)
+    tensor(2.4957)
     >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
     tensor(1.6859e-07)
 """.format(**multi_dim_common),

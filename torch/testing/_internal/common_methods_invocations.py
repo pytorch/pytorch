@@ -1676,6 +1676,16 @@ def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
 
     t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(t, 0, False)
+    # 0-dim + empty dim: covers logsumexp_reduction_dims early return
+    yield SampleInput(t, ())
+
+    # Omit dim so OpInfo hits the schema default and the dim is None ref branch.
+    t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t)
+    yield SampleInput(t, keepdim=True)
+
+    t = make_tensor((0, S), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, ())
 
     # tests masking
     # https://github.com/pytorch/pytorch/pull/91860#pullrequestreview-1241344073

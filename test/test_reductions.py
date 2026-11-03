@@ -567,6 +567,9 @@ class TestReductions(TestCase):
         actual_none = torch.logsumexp(a, dim=None)
         self.assertEqual(actual, actual_none)
 
+        actual_empty = torch.logsumexp(a, dim=())
+        self.assertEqual(actual, actual_empty)
+
         actual_explicit = a.logsumexp(list(range(a.ndim)))
         self.assertEqual(actual, actual_explicit)
 
