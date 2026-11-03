@@ -10190,6 +10190,8 @@ class FallbackKernel(ExternKernelAlloc):
             wrapper.generate_fallback_kernel(self)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # After the unbacked symbol defs, which may read an unused output's size.
+        wrapper.codegen_free_unused_outputs(self)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
