@@ -174,7 +174,7 @@ The overhead fraction dominates the uncertainty:
 - A test file the PR edits or adds is always selected.
 - The answer becomes run-all when the change touches anything that decides how tests run. That covers run_test.py, conftest, common_utils, common_device_type, tools/testing, the test shell scripts and actions, and the CI docker images. This run-all is enforced.
 - A missing or malformed answer, or any other selector error, is a selector failure: the selection is marked not enforced and CI keeps TD's own split. The harness's `final+tdN` policies score it the same way, as TD's top 25%; `model`, `final` and `final-hm` score it as run-all.
-- In CI, run_test.py also always runs the files that already failed on the PR and that TD's split runs, charged first to the hedge budget. The other previous failures compete for the hedge like any TD-scored file.
+- In CI, run_test.py also always runs the files that already failed on the PR and that TD's split runs, whatever their size and outside the hedge budget. The other previous failures compete for the hedge like any TD-scored file.
 
 **Hedge.** The hedge adds TD's highest-ranked files with a positive score until they fill 20% of the config's test time, each file charged once. A file that does not fit is skipped and filling continues. The harness applies the same fill rule, per config summed over build environments rather than per job: CI fills 20% of one job's own test list (all its shards together) from that job's test times. The harness also leaves out TD's PR-history heuristic (see Caveats).
 
