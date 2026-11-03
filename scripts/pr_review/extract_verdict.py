@@ -1021,8 +1021,8 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
     policy = (
         f"This PR is number {position} from the bottom of its ghstack. "
         f"PyTorch requires stacks of fewer than {STACK_POSITION_LIMIT} PRs "
-        f"(CONTRIBUTING.md): land the PRs below it and submit the stack again, "
-        f"or split the stack."
+        f"(CONTRIBUTING.md): land the PRs below it, then rebase and submit the "
+        f"stack again, or split the stack."
     )
     # The model's summary is already neutral; the cut can only end it in half
     # an escape or entity, which the drop and the end-of-text rule both allow.
@@ -1038,6 +1038,8 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
         f["severity"] != "major" for f in findings
     ):
         findings = [{**f, "severity": "major"} for f in findings]
+    # Majors first, so making room for the policy finding never drops one.
+    findings.sort(key=lambda f: f["severity"] != "major")
     for path in sorted(p for p, lines in touched.items() if lines):
         finding = {
             "path": neutralize_path(path)[:MAX_PATH],
@@ -1046,7 +1048,7 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
             "message": policy,
         }
         if is_publishable_finding(finding):
-            findings = [finding, *findings][:MAX_FINDINGS]
+            findings = [finding, *findings]
             break
     else:
         # Like build(), never publish an objection with no finding to point at.
@@ -1055,7 +1057,8 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
         **result,
         "verdict": "changes_requested",
         "summary": summary,
-        "findings": findings,
+        "findings": findings[:MAX_FINDINGS],
+        "findings_dropped": result["findings_dropped"] + len(findings[MAX_FINDINGS:]),
     }
 
 

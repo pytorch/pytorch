@@ -1590,13 +1590,15 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
         result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
         self.assertEqual(result["findings"][1:], findings)
 
-    def test_the_findings_cap_still_holds(self):
-        findings = [minor(i) for i in range(MAX_FINDINGS)]
-        result = apply_stack_policy(
-            self.clean_result(findings=findings), stack_body(10, 12), self.TOUCHED
-        )
+    def test_the_findings_cap_keeps_the_model_major_and_counts_the_drop(self):
+        major = ok_payload()["findings"][0]
+        findings = [minor(i) for i in range(MAX_FINDINGS - 1)] + [major]
+        model = build(ok_payload(findings=findings), self.TOUCHED)
+        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
         self.assertEqual(len(result["findings"]), MAX_FINDINGS)
-        self.assertEqual(result["findings"][0]["severity"], "major")
+        self.assertEqual(result["findings"][1], major)
+        self.assertEqual(result["findings"][2:], findings[: MAX_FINDINGS - 2])
+        self.assertEqual(result["findings_dropped"], 1)
 
     def test_with_no_line_to_anchor_on_nothing_changes(self):
         # build() never publishes an objection without a finding to point at.
